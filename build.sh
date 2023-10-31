@@ -11,7 +11,7 @@ echo
 set -e
 
 BL=$PWD/treble_build_aosp
-BD=$HOME/builds
+BD=$BL/out/builds
 
 initRepos() {
     if [ ! -d .repo ]; then
@@ -51,7 +51,8 @@ applyPatches() {
 
 setupEnv() {
     echo "--> Setting up build environment"
-    source build/envsetup.sh &>/dev/null
+    echo $PWD
+    source build/envsetup.sh #&>/dev/null
     mkdir -p $BD
     echo
 }
@@ -83,16 +84,30 @@ buildGappsVariant() {
     echo
 }
 
+# buildVndkliteVariants() {
+#     echo "--> Building treble_arm64_bvN-vndklite"
+#     cd treble_adapter
+#     sudo bash lite-adapter.sh 64 $BD/system-treble_arm64_bvN.img
+#     mv s.img $BD/system-treble_arm64_bvN-vndklite.img
+#     sudo rm -rf d tmp
+#     echo "--> Building treble_arm64_bgN-vndklite"
+#     sudo bash lite-adapter.sh 64 $BD/system-treble_arm64_bgN.img
+#     mv s.img $BD/system-treble_arm64_bgN-vndklite.img
+#     sudo rm -rf d tmp
+#     cd ..
+#     echo
+# }
+
 buildVndkliteVariants() {
     echo "--> Building treble_arm64_bvN-vndklite"
     cd treble_adapter
-    sudo bash lite-adapter.sh 64 $BD/system-treble_arm64_bvN.img
+    bash lite-adapter.sh 64 $BD/system-treble_arm64_bvN.img
     mv s.img $BD/system-treble_arm64_bvN-vndklite.img
-    sudo rm -rf d tmp
+    rm -rf d tmp
     echo "--> Building treble_arm64_bgN-vndklite"
-    sudo bash lite-adapter.sh 64 $BD/system-treble_arm64_bgN.img
+    bash lite-adapter.sh 64 $BD/system-treble_arm64_bgN.img
     mv s.img $BD/system-treble_arm64_bgN-vndklite.img
-    sudo rm -rf d tmp
+    rm -rf d tmp
     cd ..
     echo
 }
@@ -138,16 +153,16 @@ generateOta() {
 
 START=$(date +%s)
 
-initRepos
-syncRepos
-applyPatches
+#initRepos
+#syncRepos
+#applyPatches
 setupEnv
-buildTrebleApp
+#buildTrebleApp
 buildVanillaVariant
-buildGappsVariant
-buildVndkliteVariants
-generatePackages
-generateOta
+#buildGappsVariant
+#buildVndkliteVariants
+#generatePackages
+#generateOta
 
 END=$(date +%s)
 ELAPSEDM=$(($(($END-$START))/60))
