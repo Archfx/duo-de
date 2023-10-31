@@ -88,7 +88,7 @@ buildGappsVariant() {
 buildVndkliteVariants() {
     echo "--> Building treble_arm64_bvN-vndklite"
     cd treble_adapter
-    bash lite-adapter.sh 64 $BD/system-treble_arm64_bvN.img
+    sudo bash lite-adapter.sh 64 $BD/system-treble_arm64_bvN.img
     mv s.img $BD/system-treble_arm64_bvN-vndklite.img
     rm -rf d tmp
     echo "--> Building treble_arm64_bgN-vndklite"
