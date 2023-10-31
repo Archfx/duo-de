@@ -1,7 +1,7 @@
 From 558f46f8ebed766cfa5b137e40b91dd9a4cc3b4a Mon Sep 17 00:00:00 2001
 From: Chris Poultney <poultney@google.com>
 Date: Mon, 14 Aug 2023 20:57:09 +0000
-Subject: [PATCH 2/4] Make ThemePicker override any other AOSP picker
+Subject: [PATCH 2/3] Make ThemePicker override any other AOSP picker
 
 Bug: b/294871815
 Test: manually verified that ThemePicker is chosen

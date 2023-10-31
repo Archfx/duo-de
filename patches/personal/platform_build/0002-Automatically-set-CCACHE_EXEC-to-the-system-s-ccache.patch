@@ -1,7 +1,7 @@
 From 57cb5ea561e40950f346c2f3e26d21ba620f56c3 Mon Sep 17 00:00:00 2001
 From: ganeshi4u <ganeshvarmai4u@gmail.com>
 Date: Fri, 6 Sep 2019 18:31:15 +0200
-Subject: [PATCH 3/3] Automatically set CCACHE_EXEC to the system's ccache
+Subject: [PATCH 2/2] Automatically set CCACHE_EXEC to the system's ccache
 
 * Check for ccache tool and set its path in CCACHE_EXEC if it hasn't been set already
 

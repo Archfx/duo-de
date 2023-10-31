@@ -1,7 +1,7 @@
-From 83da0b6c152bbd3235613b28a49efeacba137735 Mon Sep 17 00:00:00 2001
+From 44409cb178cb56012885c80ee7b4ee5325874a7e Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Fri, 20 Oct 2023 23:36:20 +0000
-Subject: [PATCH] Revert "Aperture: Inherit aapt_version_code_defaults"
+Subject: [PATCH 1/2] Revert "Aperture: Inherit aapt_version_code_defaults"
 
 This reverts commit aca4ae5c172a8ab8f3e0079da3c4d583db12b078.
 ---

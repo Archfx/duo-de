@@ -1,0 +1,24 @@
+From f7729cb1393eec47a4af2b939066a8527cc2a440 Mon Sep 17 00:00:00 2001
+From: Alberto Ponces <ponces26@gmail.com>
+Date: Mon, 30 Oct 2023 22:49:09 +0000
+Subject: [PATCH 2/2] Make Aperture override Camera2
+
+---
+ app/Android.bp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/app/Android.bp b/app/Android.bp
+index f3d9d59..fae6671 100644
+--- a/app/Android.bp
++++ b/app/Android.bp
+@@ -13,6 +13,7 @@ android_app {
+     srcs: ["src/main/java/**/*.kt"],
+     resource_dirs: ["src/main/res"],
+     manifest: "src/main/AndroidManifest.xml",
++    overrides: ["Camera2"],
+ 
+     sdk_version: "33",
+     product_specific: true,
+-- 
+2.34.1
+

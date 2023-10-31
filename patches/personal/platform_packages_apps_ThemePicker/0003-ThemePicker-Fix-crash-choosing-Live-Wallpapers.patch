@@ -1,7 +1,7 @@
 From e9ab5de805fbc71ada8d6915c739050c917c154b Mon Sep 17 00:00:00 2001
 From: Tommy Webb <tommy@calyxinstitute.org>
 Date: Tue, 20 Jun 2023 13:20:57 -0400
-Subject: [PATCH 4/4] ThemePicker: Fix crash choosing Live Wallpapers
+Subject: [PATCH 3/3] ThemePicker: Fix crash choosing Live Wallpapers
 
 LivePreviewFragment expects arguments, too.
 

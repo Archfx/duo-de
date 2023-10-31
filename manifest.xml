@@ -2,6 +2,8 @@
 <manifest>
   <remote name="github" fetch="https://github.com" />
   <remote name="gitlab" fetch="https://gitlab.com" />
+
+  <!-- TrebleDroid -->
   <project name="TrebleDroid/device_phh_treble" path="device/phh/treble" remote="github" revision="android-14.0" />
   <project name="TrebleDroid/vendor_hardware_overlay" path="vendor/hardware_overlay" remote="github" revision="pie" />
   <project name="TrebleDroid/vendor_interfaces" path="vendor/interfaces" remote="github" revision="android-13.0" />
@@ -9,7 +11,12 @@
   <project name="phhusson/vendor_magisk" path="vendor/magisk" remote="github" revision="android-10.0" />
   <project name="AndyCGYan/android_packages_apps_QcRilAm" path="packages/apps/QcRilAm" remote="github" revision="master" />
   <project name="platform/prebuilts/vndk/v28" path="prebuilts/vndk/v28" remote="aosp" revision="204f1bad00aaf480ba33233f7b8c2ddaa03155dd" clone-depth="1" />
-  <project name="ponces/sas-creator" path="sas-creator" remote="github" revision="master" />
+
+  <!-- ponces -->
+  <project name="ponces/vendor_ponces" path="vendor/ponces" remote="github" revision="android-14.0" />
   <project name="ponces/vendor_gapps" path="vendor/gapps" remote="gitlab" revision="android-14.0" clone-depth="1" />
+  <project name="ponces/treble_adapter" path="treble_adapter" remote="github" revision="master" />
+
+  <!-- LineageOS -->
   <project name="LineageOS/android_packages_apps_Aperture" path="packages/apps/Aperture" remote="github" revision="lineage-21.0" />
 </manifest>
