@@ -1,4 +1,6 @@
-# TrebleDroid AOSP GSI
+# Surface Duo: TrebleDroid AOSP GSI
+
+credits to [thai-ng](https://github.com/thai-ng/treble_build_aosp)
 
 ## Build
 To get started with building AOSP GSI, you'll need to get familiar with [Git and Repo](https://source.android.com/source/using-repo.html) as well as [How to build a GSI](https://github.com/phhusson/treble_experimentations/wiki/How-to-build-a-GSI%3F).
