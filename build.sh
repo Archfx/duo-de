@@ -144,7 +144,7 @@ START=$(date +%s)
 #syncRepos
 #applyPatches
 setupEnv
-buildTrebleApp
+#buildTrebleApp
 #buildVanillaVariant
 buildGappsVariant
 #buildVndkliteVariants
