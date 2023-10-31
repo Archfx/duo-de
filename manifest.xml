@@ -19,4 +19,9 @@
 
   <!-- LineageOS -->
   <project name="LineageOS/android_packages_apps_Aperture" path="packages/apps/Aperture" remote="github" revision="lineage-21.0" />
+
+  <!-- Duo -->
+  <project name="Archfx/epsilon_OVERLAYS" path="packages/thain/rro_overlays" remote="github" revision="main" />
+  <project name="archfx/epsilonHAL" path="vendor/surface" remote="github" revision="main" />
+  <project name="Archfx/epsilon_Posture" path="packages/thain/services/PostureProcessor" remote="github" revision="main"/>
 </manifest>
