@@ -1,7 +1,7 @@
 From 67460d4704d5d0cc353e34470e77c6922ebb05d2 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Wed, 25 Oct 2023 07:30:10 -0400
-Subject: [PATCH 46/47] UDFPS: Don't crash if we can't compute a dim. Just
+Subject: [PATCH 46/49] UDFPS: Don't crash if we can't compute a dim. Just
  don't dim.
 
 ---

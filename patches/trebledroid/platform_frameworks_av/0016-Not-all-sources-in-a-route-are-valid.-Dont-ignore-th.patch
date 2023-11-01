@@ -1,7 +1,7 @@
 From 0d1eede6fe3c315fb9067fcc8c23ecc98804d275 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sun, 28 Mar 2021 18:54:47 +0200
-Subject: [PATCH 16/21] Not all sources in a route are valid. Dont ignore the
+Subject: [PATCH 16/22] Not all sources in a route are valid. Dont ignore the
  whole route because of one broken source
 
 Change-Id: If8a51740e71bef3a4738262ad7b43a337b0ec36d

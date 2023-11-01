@@ -1,7 +1,7 @@
 From 4c70bc31d36cd686e01c855e853eddf8213baa54 Mon Sep 17 00:00:00 2001
 From: Huy Hoang <38396158+boydaihungst@users.noreply.github.com>
 Date: Sat, 14 Oct 2023 12:44:36 +0700
-Subject: [PATCH 45/47] add: nubia red magic 6 series udfps/fod
+Subject: [PATCH 45/49] add: nubia red magic 6 series udfps/fod
 
 ---
  packages/SystemUI/Android.bp                  |  3 +-

@@ -1,7 +1,7 @@
 From ff8a0ebfcca14acbb4a69efc7bdf724938fce8c5 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Wed, 25 Oct 2023 07:30:45 -0400
-Subject: [PATCH 47/47] UDFPS Don't crash if we can't find UDFPS props
+Subject: [PATCH 47/49] UDFPS Don't crash if we can't find UDFPS props
 
 ---
  .../java/com/android/server/biometrics/AuthService.java   | 8 +++++++-

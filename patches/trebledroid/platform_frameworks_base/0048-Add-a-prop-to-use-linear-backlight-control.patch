@@ -1,0 +1,42 @@
+From 6d70001945d1958e05f97fae010f0b388d0a2fd7 Mon Sep 17 00:00:00 2001
+From: Pierre-Hugues Husson <phh@phh.me>
+Date: Mon, 30 Oct 2023 19:25:27 -0400
+Subject: [PATCH 48/49] Add a prop to use linear backlight control
+
+---
+ .../settings/brightness/BrightnessController.java      | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/packages/SystemUI/src/com/android/systemui/settings/brightness/BrightnessController.java b/packages/SystemUI/src/com/android/systemui/settings/brightness/BrightnessController.java
+index 9594ba374fc3..8f3bd542c876 100644
+--- a/packages/SystemUI/src/com/android/systemui/settings/brightness/BrightnessController.java
++++ b/packages/SystemUI/src/com/android/systemui/settings/brightness/BrightnessController.java
+@@ -326,9 +326,15 @@ public class BrightnessController implements ToggleSlider.Listener, MirroredBrig
+                 : MetricsEvent.ACTION_BRIGHTNESS;
+         minBacklight = mBrightnessMin;
+         maxBacklight = mBrightnessMax;
+-        final float valFloat = MathUtils.min(
++        float valFloat = MathUtils.min(
+                 convertGammaToLinearFloat(value, minBacklight, maxBacklight),
+                 maxBacklight);
++        if (android.os.SystemProperties.getBoolean("persist.sys.phh.linear_brightness", false)) {
++            android.util.Log.e("PHH", "Linear brightness val " + value + " from " + minBacklight + " to " + maxBacklight + " makes " + valFloat);
++            valFloat = value / 65536.0f;
++        }
++        final float finalValFloat = valFloat;
++
+         if (stopTracking) {
+             // TODO(brightnessfloat): change to use float value instead.
+             MetricsLogger.action(mContext, metric,
+@@ -339,7 +345,7 @@ public class BrightnessController implements ToggleSlider.Listener, MirroredBrig
+         if (!tracking) {
+             AsyncTask.execute(new Runnable() {
+                     public void run() {
+-                        mDisplayManager.setBrightness(mDisplayId, valFloat);
++                        mDisplayManager.setBrightness(mDisplayId, finalValFloat);
+                     }
+                 });
+         }
+-- 
+2.34.1
+
