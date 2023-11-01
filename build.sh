@@ -80,6 +80,8 @@ buildGappsVariant() {
     lunch treble_arm64_bgN-userdebug
    # make -j$(nproc --all) installclean
     make -j$(nproc --all) systemimage
+   
+
     mv $OUT/system.img $BD/system-duo-aosp.img
     echo
 }
@@ -141,12 +143,12 @@ generateOta() {
 START=$(date +%s)
 
 #initRepos
-#syncRepos
+syncRepos
 #applyPatches
-setupEnv
+#setupEnv
 #buildTrebleApp
 #buildVanillaVariant
-buildGappsVariant
+#buildGappsVariant
 #buildVndkliteVariants
 #generatePackages
 #generateOta
