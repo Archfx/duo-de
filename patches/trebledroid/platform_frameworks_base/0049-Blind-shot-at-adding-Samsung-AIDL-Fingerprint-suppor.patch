@@ -1,0 +1,92 @@
+From fca6de725d0ef9e051db7c114a8763c2563eb6cf Mon Sep 17 00:00:00 2001
+From: Pierre-Hugues Husson <phh@phh.me>
+Date: Mon, 30 Oct 2023 19:26:10 -0400
+Subject: [PATCH 49/49] Blind shot at adding Samsung AIDL Fingerprint support
+
+---
+ services/core/Android.bp                      |  1 +
+ .../server/biometrics/AuthService.java        | 22 ++++++++++++++++++-
+ 2 files changed, 22 insertions(+), 1 deletion(-)
+
+diff --git a/services/core/Android.bp b/services/core/Android.bp
+index 18a9fe12ecb7..c59993d2766c 100644
+--- a/services/core/Android.bp
++++ b/services/core/Android.bp
+@@ -194,6 +194,7 @@ java_library_static {
+         "vendor.oplus.hardware.biometrics.fingerprint-V2.1-java",
+         "vendor.oppo.hardware.biometrics.fingerprint-V2.1-java",
+         "vendor.xiaomi.hardware.fingerprintextension-V1.0-java",
++        "vendor.samsung.hardware.biometrics.fingerprint-V1-java",
+     ],
+     javac_shard_size: 50,
+     javacflags: [
+diff --git a/services/core/java/com/android/server/biometrics/AuthService.java b/services/core/java/com/android/server/biometrics/AuthService.java
+index 26ca8c9940f5..07c2e63919b2 100644
+--- a/services/core/java/com/android/server/biometrics/AuthService.java
++++ b/services/core/java/com/android/server/biometrics/AuthService.java
+@@ -94,6 +94,8 @@ import vendor.goodix.hardware.biometrics.fingerprint.V2_1.IGoodixFingerprintDaem
+ import vendor.samsung.hardware.sysinput.V1_0.ISehSysInputDev;
+ 
+ import vendor.xiaomi.hardware.fingerprintextension.V1_0.IXiaomiFingerprint;
++import vendor.samsung.hardware.biometrics.fingerprint.ISehFingerprint;
++import vendor.samsung.hardware.biometrics.fingerprint.SehResult;
+ 
+ /**
+  * System service that provides an interface for authenticating with biometrics and
+@@ -115,6 +117,7 @@ public class AuthService extends SystemService {
+ 
+     private FileObserver fodFileObserver = null;
+     private ISehBiometricsFingerprint mSamsungFingerprint = null;
++    private ISehFingerprint mSamsungFingerprintAidl = null;
+ 
+     private IXiaomiFingerprint mXiaomiFingerprint = null;
+ 
+@@ -702,13 +705,22 @@ public class AuthService extends SystemService {
+         } catch(Exception e) {
+             android.util.Log.e("PHH", "Failed getting Samsung fingerprint HAL", e);
+         }
++        try {
++            //mSamsungFingerprintAidl = ISehFingerprint.getService();
++            mSamsungFingerprintAidl = ISehFingerprint.Stub.asInterface(
++                        ServiceManager.waitForDeclaredService(
++                                ISehFingerprint.DESCRIPTOR + "/default"));
++            android.util.Log.e("PHH", "Got samsung fingerprint AIDL HAL");
++        } catch(Exception e) {
++            android.util.Log.e("PHH", "Failed getting Samsung fingerprint AIDL HAL", e);
++        }
+         try {
+             mXiaomiFingerprint = IXiaomiFingerprint.getService();
+             android.util.Log.e("PHH", "Got xiaomi fingerprint HAL");
+         } catch(Exception e) {
+             android.util.Log.e("PHH", "Failed getting xiaomi fingerprint HAL", e);
+         }
+-        if(samsungHasCmd("fod_enable") && mSamsungFingerprint != null) {
++        if(samsungHasCmd("fod_enable") && (mSamsungFingerprint != null || mSamsungFingerprintAidl != null)) {
+             samsungCmd("fod_enable,1,1,0");
+             String actualMaskBrightnessPath = "/sys/class/lcd/panel/actual_mask_brightness";
+             android.util.Log.e("PHH-Enroll", "Reading actual brightness file gives " + readFile(actualMaskBrightnessPath));
+@@ -719,6 +731,11 @@ public class AuthService extends SystemService {
+                     try {
+                         mSamsungFingerprint = ISehBiometricsFingerprint.getService();
+                     } catch(Exception e) {}
++                    try {
++                        mSamsungFingerprintAidl = ISehFingerprint.Stub.asInterface(
++                        ServiceManager.waitForDeclaredService(
++                                ISehFingerprint.DESCRIPTOR + "/default"));
++                    } catch(Exception e) {}
+                     Slog.d("PHH-Enroll", "New actual mask brightness is " + actualMask);
+                     try {
+                         int eventReq = 0;
+@@ -731,6 +748,9 @@ public class AuthService extends SystemService {
+                             mSamsungFingerprint.sehRequest(22 /* SEM_FINGER_STATE */, eventReq, new java.util.ArrayList<Byte>(),
+                                     (int retval, java.util.ArrayList<Byte> out) -> {} );
+                         }
++                        if(mSamsungFingerprintAidl != null) {
++                            SehResult ret = mSamsungFingerprintAidl.sehRequest(0 /*sensorId*/, 22 /* SEM_FINGER_STATE */, eventReq, new byte[0]);
++                        }
+                     } catch(Exception e) {
+                         Slog.d("PHH-Enroll", "Failed setting samsung event for mask observer", e);
+                     }
+-- 
+2.34.1
+

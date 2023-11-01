@@ -1,0 +1,28 @@
+From bca0e110680b0169427281729f4dbbbf077c5b4b Mon Sep 17 00:00:00 2001
+From: Pierre-Hugues Husson <phh@phh.me>
+Date: Mon, 30 Oct 2023 10:30:58 -0400
+Subject: [PATCH 22/22] Add a prop to disable AUDIO_OUTPUT_FLAG_FAST from audio
+ policies, when CPU can't really handle that kind of load
+
+---
+ .../audiopolicy/common/managerdefinitions/src/Serializer.cpp  | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp b/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp
+index 8b3a1f0e4f..913cbc0e90 100644
+--- a/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp
++++ b/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp
+@@ -504,6 +504,10 @@ std::variant<status_t, MixPortTraits::Element> PolicySerializer::deserialize<Mix
+             // use DEEP_BUFFER+FAST flag combo to indicate the spatializer output profile
+             uint32_t intFlags =
+                     OutputFlagConverter::maskFromString(flags, mFlagsSeparator.c_str());
++            bool ignore_fast = property_get_bool("persist.sys.phh.disable_fast_audio", false);
++            if (ignore_fast)
++                intFlags &= ~AUDIO_OUTPUT_FLAG_FAST;
++
+             if (intFlags == (AUDIO_OUTPUT_FLAG_FAST | AUDIO_OUTPUT_FLAG_DEEP_BUFFER)) {
+                 intFlags = AUDIO_OUTPUT_FLAG_SPATIALIZER;
+             }
+-- 
+2.34.1
+

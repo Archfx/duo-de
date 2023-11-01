@@ -1,7 +1,7 @@
 From f8f0e27db4fd44fb2e376e31a2892acd559c8551 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sun, 18 Dec 2022 18:20:40 -0500
-Subject: [PATCH 39/47] FOD support for Asus, Samsung and recent Xiaomi devices
+Subject: [PATCH 39/49] FOD support for Asus, Samsung and recent Xiaomi devices
 
 Thanks Asus for providing a free device to make this support
 And thanks @davigamer987 for donating enough to get a Samsung FOD device
