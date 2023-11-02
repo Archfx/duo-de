@@ -18,13 +18,13 @@ To get started with building AOSP GSI, you'll need to get familiar with [Git and
     git clone https://github.com/archfx/epsilon -b android-14.0 treble_build_aosp
     ```
 - Mount the directory to the docker container
-```
-docker run -t -p 6080:6080 -v "${PWD}/:/treble_build_aosp" -w /treble_build_aosp --name epsilon archfx/android
-```
+    ```
+    docker run -t -p 6080:6080 -v "${PWD}/:/treble_build_aosp" -w /treble_build_aosp --name epsilon archfx/android
+    ```
 - Connect to the container
-```
-docker exec -it epsilon /bin/bash
-```
+    ```
+    docker exec -it epsilon /bin/bash
+    ```
 - Configure git username for repo:
     ```
     git config --global user.name "your username"
