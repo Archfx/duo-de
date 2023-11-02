@@ -29,6 +29,8 @@ To get started with building AOSP GSI, you'll need to get familiar with [Git and
     ```
     git config --global user.name "your username"
     git config --global user.email yourmail@example.com
+    ulimit -n 2048
+    git config --global gc.auto 1024
     ```
 - Finally, start the build script:
     ```
