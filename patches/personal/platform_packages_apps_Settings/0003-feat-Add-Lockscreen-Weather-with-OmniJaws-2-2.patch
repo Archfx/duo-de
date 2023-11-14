@@ -1,0 +1,772 @@
+From cebf558f208b501cc6af61d972a35f10e26c71f8 Mon Sep 17 00:00:00 2001
+From: Alberto Ponces <ponces26@gmail.com>
+Date: Sun, 12 Nov 2023 11:24:17 +0000
+Subject: [PATCH 3/3] feat: Add Lockscreen Weather with OmniJaws (2/2)
+
+Based on OmniROM's implementation, updated by @maxwen and adapted by @neobuddy89.
+
+Change-Id: I138c0dc94f08142f6614659037a501d6ae8909b1
+Co-authored-by: maxwen <max.weninger@gmail.com>
+Co-authored-by: Pranav Vashi <neobuddy89@gmail.com>
+---
+ res/values/attrs.xml                          |  13 +
+ res/values/strings.xml                        |  10 +
+ res/xml/security_lockscreen_settings.xml      |  25 +
+ .../custom/preference/ConstraintsHelper.java  | 430 ++++++++++++++++++
+ .../SelfRemovingSwitchPreference.java         | 104 +++++
+ .../SystemSettingSwitchPreference.java        |  53 +++
+ .../security/LockscreenDashboardFragment.java |  26 ++
+ 7 files changed, 661 insertions(+)
+ create mode 100644 src/com/android/settings/custom/preference/ConstraintsHelper.java
+ create mode 100644 src/com/android/settings/custom/preference/SelfRemovingSwitchPreference.java
+ create mode 100644 src/com/android/settings/custom/preference/SystemSettingSwitchPreference.java
+
+diff --git a/res/values/attrs.xml b/res/values/attrs.xml
+index 6f024a32be..d9f9a1a21d 100644
+--- a/res/values/attrs.xml
++++ b/res/values/attrs.xml
+@@ -202,4 +202,17 @@
+     <attr name="notification_importance_button_background_color_selected" format="color" />
+     <attr name="notification_importance_button_border_color_selected" format="color" />
+     <attr name="notification_importance_button_foreground_color_selected" format="color" />
++
++    <declare-styleable name="lineage_SelfRemovingPreference">
++        <attr name="requiresPackage" format="string" />
++        <attr name="requiresFeature" format="string" />
++        <attr name="requiresConfig" format="string" />
++        <attr name="requiresConfigMask" format="integer" />
++        <attr name="requiresProperty" format="string" />
++        <attr name="requiresOwner" format="boolean" />
++        <attr name="requiresAction" format="string" />
++        <attr name="requiresService" format="string" />
++        <attr name="replacesKey" format="string" />
++        <attr name="minSummaryLines" format="integer" />
++    </declare-styleable>
+ </resources>
+diff --git a/res/values/strings.xml b/res/values/strings.xml
+index 3db6c1c388..d927e6979c 100644
+--- a/res/values/strings.xml
++++ b/res/values/strings.xml
+@@ -11330,6 +11330,16 @@
+         <item quantity="other"><xliff:g id="first">%1$s</xliff:g>, <xliff:g id="second">%2$s</xliff:g></item>
+     </plurals>
+ 
++    <!-- Weather -->
++    <string name="weather_category_title">Weather</string>
++    <string name="weather_settings_title">Weather settings</string>
++    <string name="weather_settings_summary">Setup icon pack and weather service</string>
++    <string name="lockscreen_weather_title">Weather condition</string>
++    <string name="lockscreen_weather_summary">Display current weather condition and temperature</string>
++    <string name="lockscreen_weather_enabled_info">Requires weather service to be enabled</string>
++    <string name="lockscreen_weather_location_title">Weather location</string>
++    <string name="lockscreen_weather_location_summary">Display current weather location</string>
++
+     <!-- Title for RTT setting. [CHAR LIMIT=NONE] -->
+     <string name="rtt_settings_title"></string>
+     <!-- Subtext for showing the option of RTT setting. [CHAR LIMIT=NONE] -->
+diff --git a/res/xml/security_lockscreen_settings.xml b/res/xml/security_lockscreen_settings.xml
+index 80e8fe69d2..331353def7 100644
+--- a/res/xml/security_lockscreen_settings.xml
++++ b/res/xml/security_lockscreen_settings.xml
+@@ -79,6 +79,31 @@
+             android:title="@string/lockscreen_double_line_clock_setting_toggle"
+             android:summary="@string/lockscreen_double_line_clock_summary"
+             settings:controller="com.android.settings.display.LockscreenClockPreferenceController" />
++
++        <PreferenceCategory android:title="@string/weather_category_title"> 
++
++            <com.android.settings.custom.preference.SystemSettingSwitchPreference
++                android:key="lockscreen_weather_enabled"
++                android:title="@string/lockscreen_weather_title"
++                android:summary="@string/lockscreen_weather_summary" />
++
++            <com.android.settings.custom.preference.SystemSettingSwitchPreference
++                android:key="lockscreen_weather_location"
++                android:title="@string/lockscreen_weather_location_title"
++                android:summary="@string/lockscreen_weather_location_summary"
++                android:dependency="lockscreen_weather_enabled" />
++
++            <Preference
++                android:title="@string/weather_settings_title"
++                android:summary="@string/weather_settings_summary">
++                <intent
++                    android:action="android.intent.action.MAIN"
++                    android:targetPackage="org.omnirom.omnijaws"
++                    android:targetClass="org.omnirom.omnijaws.SettingsActivity" />
++            </Preference>
++
++        </PreferenceCategory>
++
+     </PreferenceCategory>
+ 
+     <PreferenceCategory
+diff --git a/src/com/android/settings/custom/preference/ConstraintsHelper.java b/src/com/android/settings/custom/preference/ConstraintsHelper.java
+new file mode 100644
+index 0000000000..9583b6dfd0
+--- /dev/null
++++ b/src/com/android/settings/custom/preference/ConstraintsHelper.java
+@@ -0,0 +1,430 @@
++/*
++ * Copyright (C) 2016 The CyanogenMod Project
++ *               2017,2019-2020 The LineageOS Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package com.android.settings.custom.preference;
++
++import android.content.Context;
++import android.content.Intent;
++import android.content.pm.ApplicationInfo;
++import android.content.pm.PackageInfo;
++import android.content.pm.PackageManager;
++import android.content.pm.ResolveInfo;
++import android.content.res.TypedArray;
++import android.os.IBinder;
++import android.os.ServiceManager;
++import android.os.SystemProperties;
++import android.os.UserHandle;
++import android.telephony.TelephonyManager;
++import android.util.ArraySet;
++import android.util.AttributeSet;
++import android.util.Log;
++import android.util.TypedValue;
++import android.widget.TextView;
++
++import androidx.preference.Preference;
++import androidx.preference.PreferenceGroup;
++import androidx.preference.PreferenceManager;
++import androidx.preference.PreferenceViewHolder;
++
++import java.util.Arrays;
++import java.util.List;
++import java.util.Objects;
++import java.util.Set;
++
++import com.android.settings.R;
++
++/**
++ * Helpers for checking if a device supports various features.
++ *
++ * @hide
++ */
++public class ConstraintsHelper {
++
++    private static final String TAG = "ConstraintsHelper";
++
++    private static final boolean DEBUG = Log.isLoggable(TAG, Log.VERBOSE);
++
++    private final Context mContext;
++
++    private final AttributeSet mAttrs;
++
++    private final Preference mPref;
++
++    private boolean mAvailable = true;
++
++    private boolean mVerifyIntent = true;
++
++    private int mSummaryMinLines = -1;
++
++    private String[] mReplacesKey = null;
++
++    public ConstraintsHelper(Context context, AttributeSet attrs, Preference pref) {
++        mContext = context;
++        mAttrs = attrs;
++        mPref = pref;
++
++        TypedArray a = context.getResources().obtainAttributes(attrs,
++                R.styleable.lineage_SelfRemovingPreference);
++        mSummaryMinLines = a.getInteger(R.styleable.lineage_SelfRemovingPreference_minSummaryLines, -1);
++        String replacesKey = a.getString(R.styleable.lineage_SelfRemovingPreference_replacesKey);
++        if (replacesKey != null) {
++            mReplacesKey = replacesKey.split("\\|");
++        }
++        setAvailable(checkConstraints());
++
++        Log.d(TAG, "construct key=" + mPref.getKey() + " available=" + mAvailable);
++    }
++
++    public void setAvailable(boolean available) {
++        mAvailable = available;
++        if (!available) {
++            Graveyard.get(mContext).addTombstone(mPref.getKey());
++        }
++    }
++
++    public boolean isAvailable() {
++        return mAvailable;
++    }
++
++    public void setVerifyIntent(boolean verifyIntent) {
++        mVerifyIntent = verifyIntent;
++    }
++
++    private PreferenceGroup getParent(Preference preference) {
++        return getParent(mPref.getPreferenceManager().getPreferenceScreen(), preference);
++    }
++
++    private PreferenceGroup getParent(PreferenceGroup root, Preference preference) {
++        for (int i = 0; i < root.getPreferenceCount(); i++) {
++            Preference p = root.getPreference(i);
++            if (p == preference)
++                return root;
++            if (PreferenceGroup.class.isInstance(p)) {
++                PreferenceGroup parent = getParent((PreferenceGroup) p, preference);
++                if (parent != null)
++                    return parent;
++            }
++        }
++        return null;
++    }
++
++    private boolean isNegated(String key) {
++        return key != null && key.startsWith("!");
++    }
++
++    private void checkIntent() {
++        Intent i = mPref.getIntent();
++        if (i != null) {
++            if (!resolveIntent(mContext, i)) {
++                Graveyard.get(mContext).addTombstone(mPref.getKey());
++                mAvailable = false;
++            }
++        }
++    }
++
++    private boolean checkConstraints() {
++        if (mAttrs == null) {
++            return true;
++        }
++
++        TypedArray a = mContext.getResources().obtainAttributes(mAttrs,
++                R.styleable.lineage_SelfRemovingPreference);
++
++        try {
++
++            // Check if the current user is an owner
++            boolean rOwner = a.getBoolean(R.styleable.lineage_SelfRemovingPreference_requiresOwner, false);
++            if (rOwner && UserHandle.myUserId() != UserHandle.USER_SYSTEM) {
++                return false;
++            }
++
++            // Check if a specific package is installed
++            String rPackage = a.getString(R.styleable.lineage_SelfRemovingPreference_requiresPackage);
++            if (rPackage != null) {
++                boolean negated = isNegated(rPackage);
++                if (negated) {
++                    rPackage = rPackage.substring(1);
++                }
++                boolean available = isPackageInstalled(mContext, rPackage, false);
++                if (available == negated) {
++                    return false;
++                }
++            }
++
++            // Check if an intent can be resolved to handle the given action
++            String rAction = a.getString(R.styleable.lineage_SelfRemovingPreference_requiresAction);
++            if (rAction != null) {
++                boolean negated = isNegated(rAction);
++                if (negated) {
++                    rAction = rAction.substring(1);
++                }
++                boolean available = resolveIntent(mContext, rAction);
++                if (available == negated) {
++                    return false;
++                }
++            }
++
++            // Check if a system feature is available
++            String rFeature = a.getString(R.styleable.lineage_SelfRemovingPreference_requiresFeature);
++            if (rFeature != null) {
++                boolean negated = isNegated(rFeature);
++                if (negated) {
++                    rFeature = rFeature.substring(1);
++                }
++                boolean available = hasSystemFeature(mContext, rFeature);
++                if (available == negated) {
++                    return false;
++                }
++            }
++
++            // Check a boolean system property
++            String rProperty = a.getString(R.styleable.lineage_SelfRemovingPreference_requiresProperty);
++            if (rProperty != null) {
++                boolean negated = isNegated(rProperty);
++                if (negated) {
++                    rProperty = rProperty.substring(1);
++                }
++                String value = SystemProperties.get(rProperty);
++                boolean available = value != null && Boolean.parseBoolean(value);
++                if (available == negated) {
++                    return false;
++                }
++            }
++
++            // Check a config resource. This can be a bool, string or integer.
++            // The preference is removed if any of the following are true:
++            // * A bool resource is false.
++            // * A string resource is null.
++            // * An integer resource is zero.
++            // * An integer is non-zero and when bitwise logically ANDed with
++            //   attribute requiresConfigMask, the result is zero.
++            TypedValue tv = a.peekValue(R.styleable.lineage_SelfRemovingPreference_requiresConfig);
++            if (tv != null && tv.resourceId != 0) {
++                if (tv.type == TypedValue.TYPE_STRING &&
++                        mContext.getResources().getString(tv.resourceId) == null) {
++                    return false;
++                } else if (tv.type == TypedValue.TYPE_INT_BOOLEAN && tv.data == 0) {
++                    return false;
++                } else if (tv.type == TypedValue.TYPE_INT_DEC) {
++                    int mask = a.getInt(
++                            R.styleable.lineage_SelfRemovingPreference_requiresConfigMask, -1);
++                    if (tv.data == 0 || (mask >= 0 && (tv.data & mask) == 0)) {
++                        return false;
++                    }
++                }
++            }
++
++            // Check a system service
++            String rService = a.getString(
++                    R.styleable.lineage_SelfRemovingPreference_requiresService);
++            if (rService != null) {
++                boolean negated = isNegated(rService);
++                if (negated) {
++                    rService = rService.substring(1);
++                }
++                IBinder value = ServiceManager.getService(rService);
++                boolean available = value != null;
++                if (available == negated) {
++                    return false;
++                }
++            }
++        } finally {
++            a.recycle();
++        }
++
++        return true;
++    }
++
++    /**
++     * Returns whether the device supports a particular feature
++     */
++    public static boolean hasSystemFeature(Context context, String feature) {
++        return context.getPackageManager().hasSystemFeature(feature);
++    }
++
++    /**
++     * Returns whether the device is voice-capable (meaning, it is also a phone).
++     */
++    public static boolean isVoiceCapable(Context context) {
++        TelephonyManager telephony =
++                (TelephonyManager) context.getSystemService(Context.TELEPHONY_SERVICE);
++        return telephony != null && telephony.isVoiceCapable();
++    }
++
++    /**
++     * Checks if a package is installed. Set the ignoreState argument to true if you don't
++     * care if the package is enabled/disabled.
++     */
++    public static boolean isPackageInstalled(Context context, String pkg, boolean ignoreState) {
++        if (pkg != null) {
++            try {
++                PackageInfo pi = context.getPackageManager().getPackageInfo(pkg, 0);
++                if (!pi.applicationInfo.enabled && !ignoreState) {
++                    return false;
++                }
++            } catch (PackageManager.NameNotFoundException e) {
++                return false;
++            }
++        }
++
++        return true;
++    }
++
++    /**
++     * Checks if a package is available to handle the given action.
++     */
++    public static boolean resolveIntent(Context context, Intent intent) {
++        if (DEBUG) Log.d(TAG, "resolveIntent " + Objects.toString(intent));
++        // check whether the target handler exist in system
++        PackageManager pm = context.getPackageManager();
++        List<ResolveInfo> results = pm.queryIntentActivitiesAsUser(intent,
++                PackageManager.MATCH_SYSTEM_ONLY,
++                UserHandle.myUserId());
++        for (ResolveInfo resolveInfo : results) {
++            // check is it installed in system.img, exclude the application
++            // installed by user
++            if (DEBUG) Log.d(TAG, "resolveInfo: " + Objects.toString(resolveInfo));
++            if ((resolveInfo.activityInfo.applicationInfo.flags &
++                    ApplicationInfo.FLAG_SYSTEM) != 0) {
++                return true;
++            }
++        }
++        return false;
++    }
++
++    public static boolean resolveIntent(Context context, String action) {
++        return resolveIntent(context, new Intent(action));
++    }
++
++    public static int getAttr(Context context, int attr, int fallbackAttr) {
++        TypedValue value = new TypedValue();
++        context.getTheme().resolveAttribute(attr, value, true);
++        if (value.resourceId != 0) {
++            return attr;
++        }
++        return fallbackAttr;
++    }
++
++    public void onAttached() {
++        checkIntent();
++
++        if (isAvailable() && mReplacesKey != null) {
++            Graveyard.get(mContext).addTombstones(mReplacesKey);
++        }
++
++        Graveyard.get(mContext).summonReaper(mPref.getPreferenceManager());
++    }
++
++    public void onBindViewHolder(PreferenceViewHolder holder) {
++        if (!isAvailable()) {
++            return;
++        }
++
++        if (mSummaryMinLines > 0) {
++            TextView textView = (TextView) holder.itemView.findViewById(android.R.id.summary);
++            if (textView != null) {
++                textView.setMinLines(mSummaryMinLines);
++            }
++        }
++    }
++
++    /**
++     * If we want to keep this at the preference level vs the fragment level, we need to
++     * collate all the preferences that need to be removed when attached to the
++     * hierarchy, then purge them all when loading is complete. The Graveyard keeps track
++     * of this, and will reap the dead when onAttached is called.
++     */
++    private static class Graveyard {
++
++        private Set<String> mDeathRow = new ArraySet<>();
++
++        private static Graveyard sInstance;
++
++        private final Context mContext;
++
++        private Graveyard(Context context) {
++            mContext = context;
++        }
++
++        public synchronized static Graveyard get(Context context) {
++            if (sInstance == null) {
++                sInstance = new Graveyard(context);
++            }
++            return sInstance;
++        }
++
++        public void addTombstone(String pref) {
++            synchronized (mDeathRow) {
++                mDeathRow.add(pref);
++            }
++        }
++
++        public void addTombstones(String[] prefs) {
++            synchronized (mDeathRow) {
++                mDeathRow.addAll(Arrays.asList(prefs));
++            }
++        }
++
++        private PreferenceGroup getParent(Preference p1, Preference p2) {
++            return getParent(p1.getPreferenceManager().getPreferenceScreen(), p2);
++        }
++
++        private PreferenceGroup getParent(PreferenceGroup root, Preference preference) {
++            for (int i = 0; i < root.getPreferenceCount(); i++) {
++                Preference p = root.getPreference(i);
++                if (p == preference)
++                    return root;
++                if (PreferenceGroup.class.isInstance(p)) {
++                    PreferenceGroup parent = getParent((PreferenceGroup) p, preference);
++                    if (parent != null)
++                        return parent;
++                }
++            }
++            return null;
++        }
++
++        private void hidePreference(PreferenceManager mgr, Preference pref) {
++            pref.setVisible(false);
++            // Hide the group if nothing is visible
++            final PreferenceGroup group = getParent(pref, pref);
++            boolean allHidden = true;
++            for (int i = 0; i < group.getPreferenceCount(); i++) {
++                if (group.getPreference(i).isVisible()) {
++                    allHidden = false;
++                    break;
++                }
++            }
++            if (allHidden) {
++                group.setVisible(false);
++            }
++        }
++
++        public void summonReaper(PreferenceManager mgr) {
++            synchronized (mDeathRow) {
++                Set<String> notReadyForReap = new ArraySet<>();
++                for (String dead : mDeathRow) {
++                    Preference deadPref = mgr.findPreference(dead);
++                    if (deadPref != null) {
++                        hidePreference(mgr, deadPref);
++                    } else {
++                        notReadyForReap.add(dead);
++                    }
++                }
++                mDeathRow = notReadyForReap;
++            }
++        }
++    }
++}
+diff --git a/src/com/android/settings/custom/preference/SelfRemovingSwitchPreference.java b/src/com/android/settings/custom/preference/SelfRemovingSwitchPreference.java
+new file mode 100644
+index 0000000000..5ba32e55fd
+--- /dev/null
++++ b/src/com/android/settings/custom/preference/SelfRemovingSwitchPreference.java
+@@ -0,0 +1,104 @@
++/*
++ * Copyright (C) 2016 The CyanogenMod Project
++ * Copyright (C) 2018 The LineageOS Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package com.android.settings.custom.preference;
++
++import android.content.Context;
++import android.util.AttributeSet;
++
++import androidx.preference.PreferenceDataStore;
++import androidx.preference.PreferenceViewHolder;
++import androidx.preference.SwitchPreference;
++
++/**
++ * A SwitchPreference which can automatically remove itself from the hierarchy
++ * based on constraints set in XML.
++ */
++public abstract class SelfRemovingSwitchPreference extends SwitchPreference {
++
++    private final ConstraintsHelper mConstraints;
++
++    public SelfRemovingSwitchPreference(Context context, AttributeSet attrs, int defStyle) {
++        super(context, attrs, defStyle);
++        mConstraints = new ConstraintsHelper(context, attrs, this);
++        setPreferenceDataStore(new DataStore());
++    }
++
++    public SelfRemovingSwitchPreference(Context context, AttributeSet attrs) {
++        super(context, attrs);
++        mConstraints = new ConstraintsHelper(context, attrs, this);
++        setPreferenceDataStore(new DataStore());
++    }
++
++    public SelfRemovingSwitchPreference(Context context) {
++        super(context);
++        mConstraints = new ConstraintsHelper(context, null, this);
++        setPreferenceDataStore(new DataStore());
++    }
++
++    @Override
++    public void onAttached() {
++        super.onAttached();
++        mConstraints.onAttached();
++    }
++
++    @Override
++    public void onBindViewHolder(PreferenceViewHolder holder) {
++        super.onBindViewHolder(holder);
++        mConstraints.onBindViewHolder(holder);
++    }
++
++    public void setAvailable(boolean available) {
++        mConstraints.setAvailable(available);
++    }
++
++    public boolean isAvailable() {
++        return mConstraints.isAvailable();
++    }
++
++    protected abstract boolean isPersisted();
++    protected abstract void putBoolean(String key, boolean value);
++    protected abstract boolean getBoolean(String key, boolean defaultValue);
++
++    @Override
++    protected void onSetInitialValue(boolean restorePersistedValue, Object defaultValue) {
++        final boolean checked;
++        if (!restorePersistedValue || !isPersisted()) {
++            boolean defValue = defaultValue == null ? false : (boolean) defaultValue;
++            checked = getBoolean(getKey(), defValue);
++            if (shouldPersist()) {
++                persistBoolean(checked);
++            }
++        } else {
++            // Note: the default is not used because to have got here
++            // isPersisted() must be true.
++            checked = getBoolean(getKey(), false /* not used */);
++        }
++        setChecked(checked);
++    }
++
++    private class DataStore extends PreferenceDataStore {
++        @Override
++        public void putBoolean(String key, boolean value) {
++            SelfRemovingSwitchPreference.this.putBoolean(key, value);
++        }
++
++        @Override
++        public boolean getBoolean(String key, boolean defaultValue) {
++            return SelfRemovingSwitchPreference.this.getBoolean(key, defaultValue);
++        }
++    }
++}
+diff --git a/src/com/android/settings/custom/preference/SystemSettingSwitchPreference.java b/src/com/android/settings/custom/preference/SystemSettingSwitchPreference.java
+new file mode 100644
+index 0000000000..b6a4654f00
+--- /dev/null
++++ b/src/com/android/settings/custom/preference/SystemSettingSwitchPreference.java
+@@ -0,0 +1,53 @@
++/*
++ * Copyright (C) 2013 The CyanogenMod Project
++ * Copyright (C) 2018 The LineageOS Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package com.android.settings.custom.preference;
++
++import android.content.Context;
++import android.provider.Settings;
++import android.os.UserHandle;
++import android.util.AttributeSet;
++
++public class SystemSettingSwitchPreference extends SelfRemovingSwitchPreference {
++
++    public SystemSettingSwitchPreference(Context context, AttributeSet attrs, int defStyle) {
++        super(context, attrs, defStyle);
++    }
++
++    public SystemSettingSwitchPreference(Context context, AttributeSet attrs) {
++        super(context, attrs);
++    }
++
++    public SystemSettingSwitchPreference(Context context) {
++        super(context);
++    }
++
++    @Override
++    protected boolean isPersisted() {
++        return Settings.System.getString(getContext().getContentResolver(), getKey()) != null;
++    }
++
++    @Override
++    protected void putBoolean(String key, boolean value) {
++        Settings.System.putIntForUser(getContext().getContentResolver(), key, value ? 1 : 0, UserHandle.USER_CURRENT);
++    }
++
++    @Override
++    protected boolean getBoolean(String key, boolean defaultValue) {
++        return Settings.System.getIntForUser(getContext().getContentResolver(),
++                key, defaultValue ? 1 : 0, UserHandle.USER_CURRENT) != 0;
++    }
++}
+diff --git a/src/com/android/settings/security/LockscreenDashboardFragment.java b/src/com/android/settings/security/LockscreenDashboardFragment.java
+index 2e4a1f2891..320ce9f247 100644
+--- a/src/com/android/settings/security/LockscreenDashboardFragment.java
++++ b/src/com/android/settings/security/LockscreenDashboardFragment.java
+@@ -30,6 +30,9 @@ import android.os.Looper;
+ import android.provider.Settings;
+ 
+ import androidx.annotation.VisibleForTesting;
++import androidx.preference.Preference;
++
++import com.android.internal.util.crdroid.OmniJawsClient;
+ 
+ import com.android.settings.R;
+ import com.android.settings.dashboard.DashboardFragment;
+@@ -70,12 +73,16 @@ public class LockscreenDashboardFragment extends DashboardFragment
+     static final String KEY_ADD_USER_FROM_LOCK_SCREEN =
+             "security_lockscreen_add_users_when_locked";
+ 
++    private static final String KEY_WEATHER = "lockscreen_weather_enabled";
+ 
+     private AmbientDisplayConfiguration mConfig;
+     private OwnerInfoPreferenceController mOwnerInfoPreferenceController;
+     @VisibleForTesting
+     ContentObserver mControlsContentObserver;
+ 
++    private Preference mWeather;
++    private OmniJawsClient mWeatherClient;
++
+     @Override
+     public int getMetricsCategory() {
+         return SettingsEnums.SETTINGS_LOCK_SCREEN_PREFERENCES;
+@@ -94,6 +101,10 @@ public class LockscreenDashboardFragment extends DashboardFragment
+                 R.string.locked_work_profile_notification_title);
+         replaceEnterpriseStringTitle("security_setting_lock_screen_notif_work_header",
+                 WORK_PROFILE_NOTIFICATIONS_SECTION_HEADER, R.string.profile_section_header);
++
++        mWeather = (Preference) findPreference(KEY_WEATHER);
++        mWeatherClient = new OmniJawsClient(getContext());
++        updateWeatherSettings();
+     }
+ 
+     @Override
+@@ -193,4 +204,19 @@ public class LockscreenDashboardFragment extends DashboardFragment
+                             .isAvailable();
+                 }
+             };
++
++    private void updateWeatherSettings() {
++        if (mWeatherClient == null || mWeather == null) return;
++
++        boolean weatherEnabled = mWeatherClient.isOmniJawsEnabled();
++        mWeather.setEnabled(weatherEnabled);
++        mWeather.setSummary(weatherEnabled ? R.string.lockscreen_weather_summary :
++            R.string.lockscreen_weather_enabled_info);
++    }
++
++    @Override
++    public void onResume() {
++        super.onResume();
++        updateWeatherSettings();
++    }
+ }
+-- 
+2.34.1
+

@@ -1,0 +1,938 @@
+From e0eb0d185313a2b00e6184e218693434bf05b5d3 Mon Sep 17 00:00:00 2001
+From: maxwen <max.weninger@gmail.com>
+Date: Fri, 22 Oct 2021 14:55:26 +0200
+Subject: [PATCH 8/8] feat: Add Lockscreen Weather with OmniJaws (1/2)
+
+Based on OmniROM's implementation, updated by @maxwen and adapted by @neobuddy89.
+
+Change-Id: I138c0dc94f08142f6614659037a501d6ae8909b1
+Co-authored-by: maxwen <max.weninger@gmail.com>
+Co-authored-by: Pranav Vashi <neobuddy89@gmail.com>
+---
+ core/java/android/provider/Settings.java      |  10 +
+ .../internal/util/crdroid/OmniJawsClient.java | 453 ++++++++++++++++++
+ data/etc/com.android.systemui.xml             |   1 +
+ packages/SystemUI/AndroidManifest.xml         |   4 +
+ .../layout/current_weather_view.xml           |  59 +++
+ .../layout/keyguard_clock_switch.xml          |   6 +
+ .../KeyguardClockSwitchController.java        |  52 +-
+ .../KeyguardStatusViewController.java         |   1 +
+ .../systemui/crdroid/CurrentWeatherView.java  | 163 +++++++
+ 9 files changed, 748 insertions(+), 1 deletion(-)
+ create mode 100644 core/java/com/android/internal/util/crdroid/OmniJawsClient.java
+ create mode 100644 packages/SystemUI/res-keyguard/layout/current_weather_view.xml
+ create mode 100644 packages/SystemUI/src/com/android/systemui/crdroid/CurrentWeatherView.java
+
+diff --git a/core/java/android/provider/Settings.java b/core/java/android/provider/Settings.java
+index d695c0cb3760..ac1cb32f852e 100644
+--- a/core/java/android/provider/Settings.java
++++ b/core/java/android/provider/Settings.java
+@@ -5755,6 +5755,16 @@ public final class Settings {
+          * the setting value. See an example above.
+          */
+ 
++        /**
++         * @hide
++         */
++        public static final String LOCKSCREEN_WEATHER_ENABLED = "lockscreen_weather_enabled";
++
++        /**
++         * @hide
++         */
++        public static final String LOCKSCREEN_WEATHER_LOCATION = "lockscreen_weather_location";
++
+         /**
+          * Keys we no longer back up under the current schema, but want to continue to
+          * process when restoring historical backup datasets.
+diff --git a/core/java/com/android/internal/util/crdroid/OmniJawsClient.java b/core/java/com/android/internal/util/crdroid/OmniJawsClient.java
+new file mode 100644
+index 000000000000..74d0876df541
+--- /dev/null
++++ b/core/java/com/android/internal/util/crdroid/OmniJawsClient.java
+@@ -0,0 +1,453 @@
++/*
++* Copyright (C) 2021 The OmniROM Project
++*
++* This program is free software: you can redistribute it and/or modify
++* it under the terms of the GNU General Public License as published by
++* the Free Software Foundation, either version 2 of the License, or
++* (at your option) any later version.
++*
++* This program is distributed in the hope that it will be useful,
++* but WITHOUT ANY WARRANTY; without even the implied warranty of
++* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++* GNU General Public License for more details.
++*
++* You should have received a copy of the GNU General Public License
++* along with this program. If not, see <http://www.gnu.org/licenses/>.
++*
++*/
++package com.android.internal.util.crdroid;
++
++import java.text.DecimalFormat;
++import java.text.SimpleDateFormat;
++import java.util.ArrayList;
++import java.util.Date;
++import java.util.List;
++
++import android.content.BroadcastReceiver;
++import android.content.Context;
++import android.content.Intent;
++import android.content.IntentFilter;
++import android.content.pm.PackageManager;
++import android.content.pm.PackageManager.NameNotFoundException;
++import android.content.res.Resources;
++import android.database.ContentObserver;
++import android.database.Cursor;
++import android.graphics.Color;
++import android.graphics.drawable.ColorDrawable;
++import android.graphics.drawable.Drawable;
++import android.net.Uri;
++import android.os.Handler;
++import android.os.UserHandle;
++import android.provider.Settings;
++import android.text.TextUtils;
++import android.util.Log;
++
++public class OmniJawsClient {
++    private static final String TAG = "OmniJawsClient";
++    private static final boolean DEBUG = false;
++    public static final String SERVICE_PACKAGE = "org.omnirom.omnijaws";
++    public static final Uri WEATHER_URI
++            = Uri.parse("content://org.omnirom.omnijaws.provider/weather");
++    public static final Uri SETTINGS_URI
++            = Uri.parse("content://org.omnirom.omnijaws.provider/settings");
++    public static final Uri CONTROL_URI
++            = Uri.parse("content://org.omnirom.omnijaws.provider/control");
++
++    private static final String ICON_PACKAGE_DEFAULT = "org.omnirom.omnijaws";
++    private static final String ICON_PREFIX_DEFAULT = "google";
++    private static final String EXTRA_ERROR = "error";
++    public static final int EXTRA_ERROR_NETWORK = 0;
++    public static final int EXTRA_ERROR_LOCATION = 1;
++    public static final int EXTRA_ERROR_DISABLED = 2;
++
++    public static final String[] WEATHER_PROJECTION = new String[]{
++            "city",
++            "wind_speed",
++            "wind_direction",
++            "condition_code",
++            "temperature",
++            "humidity",
++            "condition",
++            "forecast_low",
++            "forecast_high",
++            "forecast_condition",
++            "forecast_condition_code",
++            "time_stamp",
++            "forecast_date",
++            "pin_wheel"
++    };
++
++    final String[] SETTINGS_PROJECTION = new String[] {
++            "enabled",
++            "units",
++            "provider",
++            "setup",
++            "icon_pack"
++    };
++
++    private static final String WEATHER_UPDATE = SERVICE_PACKAGE + ".WEATHER_UPDATE";
++    private static final String WEATHER_ERROR = SERVICE_PACKAGE + ".WEATHER_ERROR";
++
++    private static final DecimalFormat sNoDigitsFormat = new DecimalFormat("0");
++
++    public static class WeatherInfo {
++        public String city;
++        public String windSpeed;
++        public String windDirection;
++        public int conditionCode;
++        public String temp;
++        public String humidity;
++        public String condition;
++        public Long timeStamp;
++        public List<DayForecast> forecasts;
++        public String tempUnits;
++        public String windUnits;
++        public String provider;
++        public String pinWheel;
++        public String iconPack;
++
++        public String toString() {
++            return city + ":" + new Date(timeStamp) + ": " + windSpeed + ":" + windDirection + ":" +conditionCode + ":" + temp + ":" + humidity + ":" + condition + ":" + tempUnits + ":" + windUnits + ": " + forecasts + ": " + iconPack;
++        }
++
++        public String getLastUpdateTime() {
++            SimpleDateFormat sdf = new SimpleDateFormat("HH:mm:ss");
++            return sdf.format(new Date(timeStamp));
++        }
++    }
++
++    public static class DayForecast {
++        public String low;
++        public String high;
++        public int conditionCode;
++        public String condition;
++        public String date;
++
++        public String toString() {
++            return "[" + low + ":" + high + ":" +conditionCode + ":" + condition + ":" + date + "]";
++        }
++    }
++
++    public static interface OmniJawsObserver {
++        public void weatherUpdated();
++        public void weatherError(int errorReason);
++        default public void updateSettings() {};
++    }
++
++    private class WeatherUpdateReceiver extends BroadcastReceiver {
++        @Override
++        public void onReceive(final Context context, Intent intent) {
++            String action = intent.getAction();
++            for (OmniJawsObserver observer : mObserver) {
++                if (action.equals(WEATHER_UPDATE)) {
++                    observer.weatherUpdated();
++                }
++                if (action.equals(WEATHER_ERROR)) {
++                    int errorReason = intent.getIntExtra(EXTRA_ERROR, 0);
++                    observer.weatherError(errorReason);
++                }
++            }
++        }
++    }
++
++    private Context mContext;
++    private WeatherInfo mCachedInfo;
++    private Resources mRes;
++    private String mPackageName;
++    private String mIconPrefix;
++    private String mSettingIconPackage;
++    private boolean mMetric;
++    private List<OmniJawsObserver> mObserver;
++    private WeatherUpdateReceiver mReceiver;
++
++    public OmniJawsClient(Context context) {
++        mContext = context;
++        mObserver = new ArrayList<OmniJawsObserver>();
++    }
++
++    public Intent getSettingsIntent() {
++        if (isOmniJawsServiceInstalled()) {
++            Intent settings = new Intent(Intent.ACTION_MAIN)
++                    .setClassName(SERVICE_PACKAGE, SERVICE_PACKAGE + ".SettingsActivity");
++            return settings;
++        }
++        return null;
++    }
++
++    public Intent getWeatherActivityIntent() {
++        if (isOmniJawsServiceInstalled()) {
++            Intent settings = new Intent(Intent.ACTION_MAIN)
++                    .setClassName(SERVICE_PACKAGE, SERVICE_PACKAGE + ".WeatherActivity");
++            return settings;
++        }
++        return null;
++    }
++
++    public WeatherInfo getWeatherInfo() {
++        return mCachedInfo;
++    }
++
++    private static String getFormattedValue(float value) {
++        if (Float.isNaN(value)) {
++            return "-";
++        }
++        String formatted = sNoDigitsFormat.format(value);
++        if (formatted.equals("-0")) {
++            formatted = "0";
++        }
++        return formatted;
++    }
++
++    public void queryWeather() {
++        if (!isOmniJawsEnabled()) {
++            Log.w(TAG, "queryWeather while disabled");
++            mCachedInfo = null;
++            return;
++        }
++        try {
++            mCachedInfo = null;
++            Cursor c = mContext.getContentResolver().query(WEATHER_URI, WEATHER_PROJECTION,
++                    null, null, null);
++            if (c != null) {
++                try {
++                    int count = c.getCount();
++                    if (count > 0) {
++                        mCachedInfo = new WeatherInfo();
++                        List<DayForecast> forecastList = new ArrayList<DayForecast>();
++                        int i = 0;
++                        for (i = 0; i < count; i++) {
++                            c.moveToPosition(i);
++                            if (i == 0) {
++                                mCachedInfo.city = c.getString(0);
++                                mCachedInfo.windSpeed = getFormattedValue(c.getFloat(1));
++                                mCachedInfo.windDirection = String.valueOf(c.getInt(2)) + "\u00b0";
++                                mCachedInfo.conditionCode = c.getInt(3);
++                                mCachedInfo.temp = getFormattedValue(c.getFloat(4));
++                                mCachedInfo.humidity = c.getString(5);
++                                mCachedInfo.condition = c.getString(6);
++                                mCachedInfo.timeStamp = Long.valueOf(c.getString(11));
++                                mCachedInfo.pinWheel = c.getString(13);
++                            } else {
++                                DayForecast day = new DayForecast();
++                                day.low = getFormattedValue(c.getFloat(7));
++                                day.high = getFormattedValue(c.getFloat(8));
++                                day.condition = c.getString(9);
++                                day.conditionCode = c.getInt(10);
++                                day.date = c.getString(12);
++                                forecastList.add(day);
++                            }
++                        }
++                        mCachedInfo.forecasts = forecastList;
++                    }
++                } finally {
++                    c.close();
++                }
++            }
++            c = mContext.getContentResolver().query(SETTINGS_URI, SETTINGS_PROJECTION,
++                        null, null, null);
++            if (c != null) {
++                try {
++                    int count = c.getCount();
++                    if (count == 1) {
++                        c.moveToPosition(0);
++                        mMetric = c.getInt(1) == 0;
++                        if (mCachedInfo != null) {
++                            mCachedInfo.tempUnits = getTemperatureUnit();
++                            mCachedInfo.windUnits = getWindUnit();
++                            mCachedInfo.provider = c.getString(2);
++                            mCachedInfo.iconPack = c.getString(4);
++                        }
++                    }
++                } finally {
++                    c.close();
++                }
++            }
++
++            if (DEBUG) Log.d(TAG, "queryWeather " + mCachedInfo);
++            updateSettings();
++        } catch (Exception e) {
++            Log.e(TAG, "queryWeather", e);
++        }
++    }
++
++    private void loadDefaultIconsPackage() {
++        mPackageName = ICON_PACKAGE_DEFAULT;
++        mIconPrefix = ICON_PREFIX_DEFAULT;
++        mSettingIconPackage = mPackageName + "." + mIconPrefix;
++        if (DEBUG) Log.d(TAG, "Load default icon pack " + mSettingIconPackage + " " + mPackageName + " " + mIconPrefix);
++        try {
++            PackageManager packageManager = mContext.getPackageManager();
++            mRes = packageManager.getResourcesForApplication(mPackageName);
++        } catch (Exception e) {
++            mRes = null;
++        }
++        if (mRes == null) {
++            Log.w(TAG, "No default package found");
++        }
++    }
++
++    private Drawable getDefaultConditionImage() {
++        String packageName = ICON_PACKAGE_DEFAULT;
++        String iconPrefix = ICON_PREFIX_DEFAULT;
++
++        try {
++            PackageManager packageManager = mContext.getPackageManager();
++            Resources res = packageManager.getResourcesForApplication(packageName);
++            if (res != null) {
++                int resId = res.getIdentifier(iconPrefix + "_na", "drawable", packageName);
++                Drawable d = res.getDrawable(resId);
++                if (d != null) {
++                    return d;
++                }
++            }
++        } catch (Exception e) {
++        }
++        // absolute absolute fallback
++        Log.w(TAG, "No default package found");
++        return new ColorDrawable(Color.RED);
++    }
++
++    private void loadCustomIconPackage() {
++        if (DEBUG) Log.d(TAG, "Load custom icon pack " + mSettingIconPackage);
++        int idx = mSettingIconPackage.lastIndexOf(".");
++        mPackageName = mSettingIconPackage.substring(0, idx);
++        mIconPrefix = mSettingIconPackage.substring(idx + 1);
++        if (DEBUG) Log.d(TAG, "Load custom icon pack " + mPackageName + " " + mIconPrefix);
++        try {
++            PackageManager packageManager = mContext.getPackageManager();
++            mRes = packageManager.getResourcesForApplication(mPackageName);
++        } catch (Exception e) {
++            mRes = null;
++        }
++        if (mRes == null) {
++            Log.w(TAG, "Icon pack loading failed - loading default");
++            loadDefaultIconsPackage();
++        }
++    }
++
++    public Drawable getWeatherConditionImage(int conditionCode) {
++        try {
++            int resId = mRes.getIdentifier(mIconPrefix + "_" + conditionCode, "drawable", mPackageName);
++            Drawable d = mRes.getDrawable(resId);
++            if (d != null) {
++                return d;
++            }
++            Log.w(TAG, "Failed to get condition image for " + conditionCode + " use default");
++            resId = mRes.getIdentifier(mIconPrefix + "_na", "drawable", mPackageName);
++            d = mRes.getDrawable(resId);
++            if (d != null) {
++                return d;
++            }
++        } catch(Exception e) {
++            Log.e(TAG, "getWeatherConditionImage", e);
++        }
++        Log.w(TAG, "Failed to get condition image for " + conditionCode);
++        return getDefaultConditionImage();
++    }
++
++    public boolean isOmniJawsServiceInstalled() {
++        return isAvailableApp(SERVICE_PACKAGE);
++    }
++
++    public boolean isOmniJawsEnabled() {
++        if (!isOmniJawsServiceInstalled()) {
++            return false;
++        }
++        try {
++            final Cursor c = mContext.getContentResolver().query(SETTINGS_URI, SETTINGS_PROJECTION,
++                    null, null, null);
++            if (c != null) {
++                int count = c.getCount();
++                if (count == 1) {
++                    c.moveToPosition(0);
++                    boolean enabled = c.getInt(0) == 1;
++                    return enabled;
++                }
++            }
++        } catch (Exception e) {
++            Log.e(TAG, "isOmniJawsEnabled", e);
++        }
++        return false;
++    }
++
++    public boolean isOmniJawsSetupDone() {
++        if (!isOmniJawsServiceInstalled()) {
++            return false;
++        }
++        try {
++            final Cursor c = mContext.getContentResolver().query(SETTINGS_URI, SETTINGS_PROJECTION,
++                    null, null, null);
++            if (c != null) {
++                int count = c.getCount();
++                if (count == 1) {
++                    c.moveToPosition(0);
++                    boolean setupDone = c.getInt(3) == 1;
++                    return setupDone;
++                }
++            }
++        } catch (Exception e) {
++            Log.e(TAG, "isOmniJawsSetupDone", e);
++        }
++        return false;
++    }
++
++    private String getTemperatureUnit() {
++        return "\u00b0" + (mMetric ? "C" : "F");
++    }
++
++    private String getWindUnit() {
++        return mMetric ? "km/h":"mph";
++    }
++
++    private void updateSettings() {
++        final String iconPack = mCachedInfo != null ? mCachedInfo.iconPack : null;
++        if (TextUtils.isEmpty(iconPack)) {
++            loadDefaultIconsPackage();
++        } else if (mSettingIconPackage == null || !iconPack.equals(mSettingIconPackage)) {
++            mSettingIconPackage = iconPack;
++            loadCustomIconPackage();
++        }
++    }
++
++    private boolean isAvailableApp(String packageName) {
++        final PackageManager pm = mContext.getPackageManager();
++        try {
++            pm.getPackageInfo(packageName, PackageManager.GET_ACTIVITIES);
++            int enabled = pm.getApplicationEnabledSetting(packageName);
++            return enabled != PackageManager.COMPONENT_ENABLED_STATE_DISABLED &&
++                    enabled != PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER;
++        } catch (NameNotFoundException e) {
++            return false;
++        }
++    }
++
++    public void addObserver(OmniJawsObserver observer) {
++        if (mObserver.size() == 0) {
++            if (mReceiver != null) {
++                try {
++                    mContext.unregisterReceiver(mReceiver);
++                } catch (Exception e) {
++                }
++            }
++            mReceiver = new WeatherUpdateReceiver();
++            IntentFilter filter = new IntentFilter();
++            filter.addAction(WEATHER_UPDATE);
++            filter.addAction(WEATHER_ERROR);
++            if (DEBUG) Log.d(TAG, "registerReceiver");
++            mContext.registerReceiver(mReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
++        }
++        mObserver.add(observer);
++    }
++
++    public void removeObserver(OmniJawsObserver observer) {
++        mObserver.remove(observer);
++        if (mObserver.size() == 0 && mReceiver != null) {
++            try {
++                if (DEBUG) Log.d(TAG, "unregisterReceiver");
++                mContext.unregisterReceiver(mReceiver);
++            } catch (Exception e) {
++            }
++            mReceiver = null;
++        }
++    }
++}
+diff --git a/data/etc/com.android.systemui.xml b/data/etc/com.android.systemui.xml
+index 43683ffad432..8b660eb08740 100644
+--- a/data/etc/com.android.systemui.xml
++++ b/data/etc/com.android.systemui.xml
+@@ -16,6 +16,7 @@
+   -->
+ <permissions>
+     <privapp-permissions package="com.android.systemui">
++        <permission name="android.permission.ACCESS_FINE_LOCATION"/>
+         <permission name="android.permission.CAPTURE_AUDIO_OUTPUT"/>
+         <permission name="android.permission.ALLOW_SLIPPERY_TOUCHES"/>
+         <permission name="android.permission.BATTERY_STATS"/>
+diff --git a/packages/SystemUI/AndroidManifest.xml b/packages/SystemUI/AndroidManifest.xml
+index 829ce87a4e8c..659abb27b965 100644
+--- a/packages/SystemUI/AndroidManifest.xml
++++ b/packages/SystemUI/AndroidManifest.xml
+@@ -349,6 +349,10 @@
+ 
+     <uses-permission android:name="android.permission.MONITOR_KEYBOARD_BACKLIGHT" />
+ 
++    <!-- OmniJaws -->
++    <uses-permission android:name="org.omnirom.omnijaws.READ_WEATHER" />
++    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
++
+     <protected-broadcast android:name="com.android.settingslib.action.REGISTER_SLICE_RECEIVER" />
+     <protected-broadcast android:name="com.android.settingslib.action.UNREGISTER_SLICE_RECEIVER" />
+     <protected-broadcast android:name="com.android.settings.flashlight.action.FLASHLIGHT_CHANGED" />
+diff --git a/packages/SystemUI/res-keyguard/layout/current_weather_view.xml b/packages/SystemUI/res-keyguard/layout/current_weather_view.xml
+new file mode 100644
+index 000000000000..502df830f9fd
+--- /dev/null
++++ b/packages/SystemUI/res-keyguard/layout/current_weather_view.xml
+@@ -0,0 +1,59 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++     Copyright (C) 2023 crDroid Android Project
++
++     Licensed under the Apache License, Version 2.0 (the "License");
++     you may not use this file except in compliance with the License.
++     You may obtain a copy of the License at
++
++          http://www.apache.org/licenses/LICENSE-2.0
++
++     Unless required by applicable law or agreed to in writing, software
++     distributed under the License is distributed on an "AS IS" BASIS,
++     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++     See the License for the specific language governing permissions and
++     limitations under the License.
++-->
++<com.android.systemui.crdroid.CurrentWeatherView
++    xmlns:android="http://schemas.android.com/apk/res/android"
++    android:layout_width="match_parent"
++    android:layout_height="wrap_content"
++    android:layout_gravity="start"
++    android:gravity="center_vertical"
++    android:clipToPadding="false"
++    android:paddingStart="@dimen/below_clock_padding_start">
++
++    <LinearLayout
++        android:id="@+id/current"
++        android:layout_width="match_parent"
++        android:layout_height="wrap_content"
++        android:gravity="center_vertical"
++        android:orientation="horizontal" >
++
++        <TextView
++            android:id="@+id/left_text"
++            android:layout_width="wrap_content"
++            android:layout_height="wrap_content"
++            android:textColor="?attr/wallpaperTextColor"
++            android:ellipsize="end"
++            android:singleLine="true"
++            android:paddingEnd="8dp"
++            style="@style/TextAppearance.Keyguard.Secondary" />
++
++        <ImageView
++            android:id="@+id/current_image"
++            android:layout_width="@dimen/widget_icon_size"
++            android:layout_height="@dimen/widget_icon_size"
++            android:scaleType="centerInside"/>
++
++        <TextView
++            android:id="@+id/right_text"
++            android:layout_width="wrap_content"
++            android:layout_height="wrap_content"
++            android:textColor="?attr/wallpaperTextColor"
++            android:singleLine="true"
++            android:paddingStart="8dp"
++            style="@style/TextAppearance.Keyguard.Secondary" />
++    </LinearLayout>
++
++</com.android.systemui.crdroid.CurrentWeatherView>
+diff --git a/packages/SystemUI/res-keyguard/layout/keyguard_clock_switch.xml b/packages/SystemUI/res-keyguard/layout/keyguard_clock_switch.xml
+index fc9c917c152b..5b26e3145e13 100644
+--- a/packages/SystemUI/res-keyguard/layout/keyguard_clock_switch.xml
++++ b/packages/SystemUI/res-keyguard/layout/keyguard_clock_switch.xml
+@@ -56,6 +56,12 @@
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+ 
++        <include layout="@layout/current_weather_view"
++            android:id="@+id/weather_container"
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:visibility="gone" />
++
+       <com.android.systemui.statusbar.phone.NotificationIconContainer
+           android:id="@+id/left_aligned_notification_icon_container"
+           android:layout_width="match_parent"
+diff --git a/packages/SystemUI/src/com/android/keyguard/KeyguardClockSwitchController.java b/packages/SystemUI/src/com/android/keyguard/KeyguardClockSwitchController.java
+index 70849b7e2acf..50dd07004f25 100644
+--- a/packages/SystemUI/src/com/android/keyguard/KeyguardClockSwitchController.java
++++ b/packages/SystemUI/src/com/android/keyguard/KeyguardClockSwitchController.java
+@@ -23,6 +23,7 @@ import static com.android.keyguard.KeyguardClockSwitch.LARGE;
+ import static com.android.keyguard.KeyguardClockSwitch.SMALL;
+ 
+ import android.annotation.Nullable;
++import android.content.ContentResolver;
+ import android.database.ContentObserver;
+ import android.os.UserHandle;
+ import android.provider.Settings;
+@@ -34,8 +35,10 @@ import android.widget.LinearLayout;
+ 
+ import androidx.annotation.NonNull;
+ 
++import com.android.systemui.Dependency;
+ import com.android.systemui.Dumpable;
+ import com.android.systemui.R;
++import com.android.systemui.crdroid.CurrentWeatherView;
+ import com.android.systemui.dagger.qualifiers.Main;
+ import com.android.systemui.dump.DumpManager;
+ import com.android.systemui.keyguard.KeyguardUnlockAnimationController;
+@@ -52,6 +55,7 @@ import com.android.systemui.statusbar.notification.PropertyAnimator;
+ import com.android.systemui.statusbar.notification.stack.AnimationProperties;
+ import com.android.systemui.statusbar.phone.NotificationIconAreaController;
+ import com.android.systemui.statusbar.phone.NotificationIconContainer;
++import com.android.systemui.tuner.TunerService;
+ import com.android.systemui.util.ViewController;
+ import com.android.systemui.util.concurrency.DelayableExecutor;
+ import com.android.systemui.util.settings.SecureSettings;
+@@ -65,9 +69,12 @@ import javax.inject.Inject;
+  * Injectable controller for {@link KeyguardClockSwitch}.
+  */
+ public class KeyguardClockSwitchController extends ViewController<KeyguardClockSwitch>
+-        implements Dumpable {
++        implements Dumpable, TunerService.Tunable {
+     private static final String TAG = "KeyguardClockSwitchController";
+ 
++    private static final String LOCKSCREEN_WEATHER_ENABLED =
++            "system:" + Settings.System.LOCKSCREEN_WEATHER_ENABLED;
++
+     private final StatusBarStateController mStatusBarStateController;
+     private final ClockRegistry mClockRegistry;
+     private final KeyguardSliceViewController mKeyguardSliceViewController;
+@@ -77,6 +84,7 @@ public class KeyguardClockSwitchController extends ViewController<KeyguardClockS
+     private final DumpManager mDumpManager;
+     private final ClockEventController mClockEventController;
+     private final LogBuffer mLogBuffer;
++    private final TunerService mTunerService;
+ 
+     private FrameLayout mSmallClockFrame; // top aligned clock
+     private FrameLayout mLargeClockFrame; // centered clock
+@@ -98,6 +106,9 @@ public class KeyguardClockSwitchController extends ViewController<KeyguardClockS
+ 
+     private final KeyguardUnlockAnimationController mKeyguardUnlockAnimationController;
+ 
++    private CurrentWeatherView mCurrentWeatherView;
++    private boolean mShowWeather;
++
+     private boolean mOnlyClock = false;
+     private final DelayableExecutor mUiExecutor;
+     private boolean mCanShowDoubleLineClock = true;
+@@ -160,6 +171,8 @@ public class KeyguardClockSwitchController extends ViewController<KeyguardClockS
+             @Override
+             public void onAvailableClocksChanged() { }
+         };
++
++        mTunerService = Dependency.get(TunerService.class);
+     }
+ 
+     /**
+@@ -188,9 +201,12 @@ public class KeyguardClockSwitchController extends ViewController<KeyguardClockS
+ 
+         mSmallClockFrame = mView.findViewById(R.id.lockscreen_clock_view);
+         mLargeClockFrame = mView.findViewById(R.id.lockscreen_clock_view_large);
++        mCurrentWeatherView = mView.findViewById(R.id.weather_container);
+ 
+         mDumpManager.unregisterDumpable(getClass().toString()); // unregister previous clocks
+         mDumpManager.registerDumpable(getClass().toString(), this);
++
++        mTunerService.addTunable(this, LOCKSCREEN_WEATHER_ENABLED);
+     }
+ 
+     @Override
+@@ -205,6 +221,8 @@ public class KeyguardClockSwitchController extends ViewController<KeyguardClockS
+         mKeyguardDateWeatherViewInvisibility =
+                 mView.getResources().getInteger(R.integer.keyguard_date_weather_view_invisibility);
+ 
++        updateWeatherView();
++
+         if (mOnlyClock) {
+             View ksv = mView.findViewById(R.id.keyguard_slice_view);
+             ksv.setVisibility(View.GONE);
+@@ -261,6 +279,7 @@ public class KeyguardClockSwitchController extends ViewController<KeyguardClockS
+ 
+     @Override
+     protected void onViewDetached() {
++        mTunerService.removeTunable(this);
+         mClockRegistry.unregisterClockChangeListener(mClockChangedListener);
+         mClockEventController.unregisterListeners();
+         setClock(null);
+@@ -272,6 +291,37 @@ public class KeyguardClockSwitchController extends ViewController<KeyguardClockS
+                 mKeyguardUnlockAnimationListener);
+     }
+ 
++    @Override
++    public void onTuningChanged(String key, String newValue) {
++        switch (key) {
++            case LOCKSCREEN_WEATHER_ENABLED:
++                mShowWeather =
++                        TunerService.parseIntegerSwitch(newValue, false);
++                updateWeatherView();
++                break;
++            default:
++                break;
++        }
++    }
++
++    public void updateWeatherView() {
++        mUiExecutor.execute(() -> {
++            final ContentResolver resolver = getContext().getContentResolver();
++            mShowWeather = Settings.System.getIntForUser(resolver,
++                    Settings.System.LOCKSCREEN_WEATHER_ENABLED, 0,
++                    UserHandle.USER_CURRENT) != 0;
++            if (mCurrentWeatherView != null) {
++                if (mShowWeather && !mOnlyClock) {
++                    mCurrentWeatherView.enableUpdates();
++                    mCurrentWeatherView.setVisibility(View.VISIBLE);
++                } else {
++                    mCurrentWeatherView.disableUpdates();
++                    mCurrentWeatherView.setVisibility(View.GONE);
++                }
++            }
++        });
++    }
++
+     void onLocaleListChanged() {
+         if (mSmartspaceController.isEnabled()) {
+             if (mSmartspaceController.isDateWeatherDecoupled()) {
+diff --git a/packages/SystemUI/src/com/android/keyguard/KeyguardStatusViewController.java b/packages/SystemUI/src/com/android/keyguard/KeyguardStatusViewController.java
+index 6854c97c3415..5fc5612d2a12 100644
+--- a/packages/SystemUI/src/com/android/keyguard/KeyguardStatusViewController.java
++++ b/packages/SystemUI/src/com/android/keyguard/KeyguardStatusViewController.java
+@@ -297,6 +297,7 @@ public class KeyguardStatusViewController extends ViewController<KeyguardStatusV
+             if (visible) {
+                 if (DEBUG) Slog.v(TAG, "refresh statusview visible:true");
+                 refreshTime();
++                mKeyguardClockSwitchController.updateWeatherView();
+             }
+         }
+     };
+diff --git a/packages/SystemUI/src/com/android/systemui/crdroid/CurrentWeatherView.java b/packages/SystemUI/src/com/android/systemui/crdroid/CurrentWeatherView.java
+new file mode 100644
+index 000000000000..c567e713bf95
+--- /dev/null
++++ b/packages/SystemUI/src/com/android/systemui/crdroid/CurrentWeatherView.java
+@@ -0,0 +1,163 @@
++/*
++ * Copyright (C) 2023 crDroid Android Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package com.android.systemui.crdroid;
++
++import android.content.Context;
++import android.database.ContentObserver;
++import android.graphics.drawable.Drawable;
++import android.os.Handler;
++import android.os.UserHandle;
++import android.provider.Settings;
++import android.util.AttributeSet;
++import android.view.View;
++import android.widget.ImageView;
++import android.widget.FrameLayout;
++import android.widget.TextView;
++
++import com.android.internal.util.crdroid.OmniJawsClient;
++import com.android.systemui.R;
++
++public class CurrentWeatherView extends FrameLayout implements OmniJawsClient.OmniJawsObserver {
++
++    static final String TAG = "SystemUI:CurrentWeatherView";
++
++    private ImageView mCurrentImage;
++    private OmniJawsClient mWeatherClient;
++    private OmniJawsClient.WeatherInfo mWeatherInfo;
++    private TextView mLeftText;
++    private TextView mRightText;
++
++    private SettingsObserver mSettingsObserver;
++
++    private boolean mShowWeatherLocation;
++
++    public CurrentWeatherView(Context context) {
++        this(context, null);
++    }
++
++    public CurrentWeatherView(Context context, AttributeSet attrs) {
++        this(context, attrs, 0);
++    }
++
++    public CurrentWeatherView(Context context, AttributeSet attrs, int defStyle) {
++        super(context, attrs, defStyle);
++        if (mWeatherClient == null) {
++            mWeatherClient = new OmniJawsClient(context);
++        }
++    }
++
++    public void enableUpdates() {
++        if (mWeatherClient != null) {
++            mWeatherClient.addObserver(this);
++            queryAndUpdateWeather();
++        }
++    }
++
++    public void disableUpdates() {
++        if (mWeatherClient != null) {
++            mWeatherClient.removeObserver(this);
++        }
++    }
++
++    @Override
++    protected void onFinishInflate() {
++        super.onFinishInflate();
++        mCurrentImage  = (ImageView) findViewById(R.id.current_image);
++        mLeftText = (TextView) findViewById(R.id.left_text);
++        mRightText = (TextView) findViewById(R.id.right_text);
++        if (mSettingsObserver == null) {
++            mSettingsObserver = new SettingsObserver(new Handler());
++            mSettingsObserver.observe();
++        }
++    }
++
++    private void setErrorView() {
++        mCurrentImage.setImageDrawable(null);
++        mLeftText.setText("");
++        mRightText.setText("");
++    }
++
++    @Override
++    public void weatherError(int errorReason) {
++        // since this is shown in ambient and lock screen
++        // it would look bad to show every error since the
++        // screen-on revovery of the service had no chance
++        // to run fast enough
++        // so only show the disabled state
++        if (errorReason == OmniJawsClient.EXTRA_ERROR_DISABLED) {
++            mWeatherInfo = null;
++            setErrorView();
++        }
++    }
++
++    @Override
++    public void weatherUpdated() {
++        queryAndUpdateWeather();
++    }
++
++    @Override
++    public void updateSettings() {
++        queryAndUpdateWeather();
++    }
++
++    private void queryAndUpdateWeather() {
++        try {
++            if (mWeatherClient == null || !mWeatherClient.isOmniJawsEnabled()) {
++                return;
++            }
++            mWeatherClient.queryWeather();
++            mWeatherInfo = mWeatherClient.getWeatherInfo();
++            if (mWeatherInfo != null) {
++                Drawable d = mWeatherClient.getWeatherConditionImage(mWeatherInfo.conditionCode);
++                mCurrentImage.setImageDrawable(d);
++                mRightText.setText(mWeatherInfo.temp + " " + mWeatherInfo.tempUnits);
++                mLeftText.setText(mWeatherInfo.city);
++                mLeftText.setVisibility(mShowWeatherLocation ? View.VISIBLE : View.GONE);
++            }
++        } catch(Exception e) {
++            // Do nothing
++        }
++    }
++
++    class SettingsObserver extends ContentObserver {
++        SettingsObserver(Handler handler) {
++            super(handler);
++        }
++
++        void observe() {
++            getContext().getContentResolver().registerContentObserver(Settings.System.getUriFor(
++                    Settings.System.LOCKSCREEN_WEATHER_LOCATION), false, this,
++                    UserHandle.USER_ALL);
++            updateWeatherSettings();
++        }
++
++        void unobserve() {
++            getContext().getContentResolver().unregisterContentObserver(this);
++        }
++
++        void updateWeatherSettings() {
++            mShowWeatherLocation = Settings.System.getIntForUser(getContext().getContentResolver(),
++                    Settings.System.LOCKSCREEN_WEATHER_LOCATION,
++                    0, UserHandle.USER_CURRENT) != 0;
++            mLeftText.setVisibility(mShowWeatherLocation ? View.VISIBLE : View.GONE);
++        }
++
++        @Override
++        public void onChange(boolean selfChange) {
++            updateWeatherSettings();
++        }
++    }
++}
+-- 
+2.34.1
+
