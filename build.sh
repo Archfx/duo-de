@@ -14,17 +14,15 @@ BL=$PWD/treble_aosp
 BD=$HOME/builds
 
 initRepos() {
-    if [ ! -d .repo ]; then
-        echo "--> Initializing workspace"
-        repo init -u https://android.googlesource.com/platform/manifest -b android-14.0.0_r37 --git-lfs
-        echo
+    echo "--> Initializing workspace"
+    repo init -u https://android.googlesource.com/platform/manifest -b android-14.0.0_r37 --git-lfs
+    echo
 
-        echo "--> Preparing local manifest"
-        mkdir -p .repo/local_manifests
-        cp $BL/build/default.xml .repo/local_manifests/default.xml
-        cp $BL/build/remove.xml .repo/local_manifests/remove.xml
-        echo
-    fi
+    echo "--> Preparing local manifest"
+    mkdir -p .repo/local_manifests
+    cp $BL/build/default.xml .repo/local_manifests/default.xml
+    cp $BL/build/remove.xml .repo/local_manifests/remove.xml
+    echo
 }
 
 syncRepos() {

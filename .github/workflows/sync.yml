@@ -1,0 +1,52 @@
+name: Sync
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0'
+
+jobs:
+  sync:
+    runs-on: self-hosted
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Image
+        run: docker build -f build/Dockerfile -t ponces/treble .
+
+      - name: Sync with TrebleDroid
+        run: |
+          docker run --rm \
+                     --name td \
+                     --volume ${{ github.workspace }}/patches:/aosp/treble_aosp/patches \
+                     ponces/treble treblesync
+          cp -r patches/trebledroid patches/patches
+          cd patches
+          zip -rq patches-for-developers.zip patches
+        
+      - name: Commit Patches 
+        run: |
+          git config --global user.name "Alberto Ponces"
+          git config --global user.email "ponces26@gmail.com"
+          git add patches/trebledroid
+          git commit -m "feat: sync with latest sources of TrebleDroid"
+          git push
+
+      - name: Upload Patches
+        uses: actions/upload-artifact@v4
+        with:
+          name: patches
+          path: patches-for-developers.zip
+
+  cleanup:
+    needs: sync
+    runs-on: self-hosted
+    if: ${{ always() }}
+    steps:
+      - name: Cleanup
+        run: |
+          docker stop td || true
+          docker system prune -f
