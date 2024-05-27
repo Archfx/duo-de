@@ -1,7 +1,7 @@
 From 7b5b0b7cf8f587bfa508d328e9c1a109688ca6a1 Mon Sep 17 00:00:00 2001
 From: Michael Bestas <mkbestas@gmail.com>
 Date: Mon, 11 Mar 2024 01:52:21 +0200
-Subject: [PATCH 07/10] netbpfload: Support <4.14 kernels
+Subject: [PATCH 07/11] netbpfload: Support <4.14 kernels
 
 Change-Id: I3d6573c102c1d64a64209bf61ecb8ed0c4ecb64c
 ---

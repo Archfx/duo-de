@@ -1,7 +1,7 @@
 From 4ac6d660bb9172f3584f3893d49a4aff9a3c4b3f Mon Sep 17 00:00:00 2001
 From: Michael Bestas <mkbestas@gmail.com>
 Date: Fri, 15 Mar 2024 14:59:21 +0200
-Subject: [PATCH 08/10] netd: Remove <4.14 kernel restrictions
+Subject: [PATCH 08/11] netd: Remove <4.14 kernel restrictions
 
 Change-Id: I4d4abbacd6b9589260de06663e2143bc37d8ea0f
 ---
