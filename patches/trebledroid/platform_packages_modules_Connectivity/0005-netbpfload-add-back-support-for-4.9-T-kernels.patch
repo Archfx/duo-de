@@ -1,7 +1,7 @@
 From 2303bf88ed1b4c24672b7b1e51aefbcf1becdd38 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Maciej=20=C5=BBenczykowski?= <maze@google.com>
 Date: Mon, 11 Mar 2024 12:40:06 +0000
-Subject: [PATCH 05/10] netbpfload: add back support for 4.9-T kernels
+Subject: [PATCH 05/11] netbpfload: add back support for 4.9-T kernels
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

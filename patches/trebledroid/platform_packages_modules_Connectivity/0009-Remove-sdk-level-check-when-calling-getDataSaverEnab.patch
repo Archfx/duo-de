@@ -1,7 +1,7 @@
 From 428f8a3d1640b5f1a9c74ab5cd18eeaaceb0a1d0 Mon Sep 17 00:00:00 2001
 From: Junyu Lai <junyulai@google.com>
 Date: Mon, 18 Dec 2023 16:13:12 +0800
-Subject: [PATCH 09/10] Remove sdk level check when calling getDataSaverEnabled
+Subject: [PATCH 09/11] Remove sdk level check when calling getDataSaverEnabled
 
 Follow-up from aosp/2856948, the data saver status value is
 filled by ConnectivityService before Android V. Thus, calling

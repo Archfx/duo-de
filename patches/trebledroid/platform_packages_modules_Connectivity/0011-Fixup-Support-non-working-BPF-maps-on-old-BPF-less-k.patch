@@ -1,0 +1,120 @@
+From e47def17699ce64f2ebf0f7a928f3f91ff0cd7f4 Mon Sep 17 00:00:00 2001
+From: Andy CrossGate Yan <GeForce8800Ultra@gmail.com>
+Date: Sun, 26 May 2024 12:15:41 +0800
+Subject: [PATCH 11/11] Fixup! Support non-working BPF maps on old BPF-less
+ kernel
+
+Null-check all other BPF map usages, which could be used by e.g. internet restriction in LOS
+---
+ .../src/com/android/server/BpfNetMaps.java    | 25 +++++++++++++++++++
+ 1 file changed, 25 insertions(+)
+
+diff --git a/service/src/com/android/server/BpfNetMaps.java b/service/src/com/android/server/BpfNetMaps.java
+index 9b2202b295..ec1d1abfbc 100644
+--- a/service/src/com/android/server/BpfNetMaps.java
++++ b/service/src/com/android/server/BpfNetMaps.java
+@@ -381,6 +381,8 @@ public class BpfNetMaps {
+     }
+ 
+     private void removeRule(final int uid, final long match, final String caller) {
++        if (sUidOwnerMap == null) return;
++
+         try {
+             synchronized (sUidOwnerMap) {
+                 final UidOwnerValue oldMatch = sUidOwnerMap.getValue(new S32(uid));
+@@ -408,6 +410,8 @@ public class BpfNetMaps {
+     }
+ 
+     private void addRule(final int uid, final long match, final int iif, final String caller) {
++        if (sUidOwnerMap == null) return;
++
+         if (match != IIF_MATCH && iif != 0) {
+             throw new ServiceSpecificException(EINVAL,
+                     "Non-interface match must have zero interface index");
+@@ -510,6 +514,8 @@ public class BpfNetMaps {
+     public void setChildChain(final int childChain, final boolean enable) {
+         throwIfPreT("setChildChain is not available on pre-T devices");
+ 
++        if (sConfigurationMap == null) return;
++
+         final long match = getMatchByFirewallChain(childChain);
+         try {
+             synchronized (sUidRulesConfigBpfMapLock) {
+@@ -562,6 +568,8 @@ public class BpfNetMaps {
+     public void replaceUidChain(final int chain, final int[] uids) {
+         throwIfPreT("replaceUidChain is not available on pre-T devices");
+ 
++        if (sUidOwnerMap == null) return;
++
+         final long match;
+         try {
+             match = getMatchByFirewallChain(chain);
+@@ -642,6 +650,9 @@ public class BpfNetMaps {
+     private Set<Integer> getUidsMatchEnabled(final int childChain) throws ErrnoException {
+         final long match = getMatchByFirewallChain(childChain);
+         Set<Integer> uids = new ArraySet<>();
++
++        if (sUidOwnerMap == null) return uids;
++
+         synchronized (sUidOwnerMap) {
+             sUidOwnerMap.forEach((uid, val) -> {
+                 if (val == null) {
+@@ -876,6 +887,8 @@ public class BpfNetMaps {
+     public void setDataSaverEnabled(boolean enable) {
+         throwIfPreT("setDataSaverEnabled is not available on pre-T devices");
+ 
++        if (sDataSaverEnabledMap == null) return;
++
+         try {
+             final short config = enable ? DATA_SAVER_ENABLED : DATA_SAVER_DISABLED;
+             sDataSaverEnabledMap.updateEntry(DATA_SAVER_ENABLED_KEY, new U8(config));
+@@ -894,6 +907,9 @@ public class BpfNetMaps {
+     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+     public void setIngressDiscardRule(final InetAddress address, final String iface) {
+         throwIfPreT("setIngressDiscardRule is not available on pre-T devices");
++
++        if (sIngressDiscardMap == null) return;
++
+         final int ifIndex = mDeps.getIfIndex(iface);
+         if (ifIndex == 0) {
+             Log.e(TAG, "Failed to get if index, skip setting ingress discard rule for " + address
+@@ -917,6 +933,9 @@ public class BpfNetMaps {
+     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+     public void removeIngressDiscardRule(final InetAddress address) {
+         throwIfPreT("removeIngressDiscardRule is not available on pre-T devices");
++
++        if (sIngressDiscardMap == null) return;
++
+         try {
+             sIngressDiscardMap.deleteEntry(new IngressDiscardKey(address));
+         } catch (ErrnoException e) {
+@@ -989,6 +1008,8 @@ public class BpfNetMaps {
+     }
+ 
+     private void dumpOwnerMatchConfig(final IndentingPrintWriter pw) {
++        if (sConfigurationMap == null) return;
++
+         try {
+             final long match = sConfigurationMap.getValue(UID_RULES_CONFIGURATION_KEY).val;
+             pw.println("current ownerMatch configuration: " + match + " " + matchToString(match));
+@@ -998,6 +1019,8 @@ public class BpfNetMaps {
+     }
+ 
+     private void dumpCurrentStatsMapConfig(final IndentingPrintWriter pw) {
++        if (sConfigurationMap == null) return;
++
+         try {
+             final long config = sConfigurationMap.getValue(CURRENT_STATS_MAP_CONFIGURATION_KEY).val;
+             final String currentStatsMap =
+@@ -1009,6 +1032,8 @@ public class BpfNetMaps {
+     }
+ 
+     private void dumpDataSaverConfig(final IndentingPrintWriter pw) {
++        if (sDataSaverEnabledMap == null) return;
++
+         try {
+             final short config = sDataSaverEnabledMap.getValue(DATA_SAVER_ENABLED_KEY).val;
+             // Any non-zero value converted from short to boolean is true by convention.
+-- 
+2.34.1
+
