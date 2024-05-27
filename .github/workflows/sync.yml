@@ -1,0 +1,36 @@
+name: Sync
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0'
+
+jobs:
+  setup:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Build Docker image
+        run: |
+            cd build
+            docker build -t td .
+            docker run --name td -it --detach --privileged --env GITHUB_API_TOKEN=${{ secrets.GH_TOKEN }} td /bin/bash
+            docker exec td /bin/sh -c "git clone https://${{ secrets.GH_TOKEN }}@github.com/ponces/treble_aosp"
+
+  sync:
+    needs: setup
+    runs-on: self-hosted
+    steps:
+      - name: Sync with TrebleDroid
+        run: docker exec td /bin/sh -c "bash treble_aosp/sync.sh"
+
+  cleanup:
+    needs: sync
+    runs-on: self-hosted
+    if: ${{ always() }}
+    steps:
+      - name: Cleanup
+        run: |
+          docker stop td || true
+          docker system prune -f
