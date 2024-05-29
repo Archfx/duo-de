@@ -1,6 +1,10 @@
 FROM ubuntu:22.04
 LABEL Alberto Ponces="ponces26@gmail.com"
 
+COPY . /aosp/treble_aosp
+RUN ln -s /aosp/treble_aosp/build.sh /usr/bin/treblebuild && \
+    ln -s /aosp/treble_aosp/sync.sh /usr/bin/treblesync
+
 ARG DEBIAN_FRONTEND=noninteractive
 RUN dpkg --add-architecture i386 && \
     apt update && apt install -y \
@@ -60,8 +64,5 @@ RUN git config --global user.name "Alberto Ponces" && \
     git config --global user.email ponces26@gmail.com && \
     git config --global color.ui auto
 
-RUN mkdir -p /root/aosp && \
-    mkdir -p /root/builds
-
 USER root
-WORKDIR /root/aosp
+WORKDIR /aosp

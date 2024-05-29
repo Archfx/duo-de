@@ -5,44 +5,70 @@ on:
   push:
     branches:
       - android-14.0
+    paths-ignore:
+      - '.github/**'
 
 concurrency: 
   group: ${{ github.workflow }}
   cancel-in-progress: true
 
 jobs:
-  setup:
+  build:
     runs-on: self-hosted
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Build Docker image
-        run: |
-            cd build
-            docker build -t aosp .
-            docker run --name aosp -it --detach --privileged --env GITHUB_API_TOKEN=${{ secrets.GH_TOKEN }} aosp /bin/bash
-            docker exec aosp /bin/sh -c "git clone https://github.com/ponces/treble_aosp"
 
-  build:
-    needs: setup
-    runs-on: self-hosted
-    steps:
+      - name: Setup Environment
+        run: echo "RELEASE_TITLE=$(date +'v%Y.%m.%d')" >> $GITHUB_ENV
+
+      - name: Build Image
+        run: docker build -f build/Dockerfile -t ponces/treble .
+
+      - name: Get Keys
+        uses: actions/checkout@v4
+        with:
+          repository: ponces/vendor_ponces-priv
+          token: ${{ secrets.GH_TOKEN }}
+          path: vendor_ponces-priv
+
       - name: Build ROM
-        run: docker exec aosp /bin/sh -c "bash treble_aosp/build.sh"
+        env:
+          GRADLE_OPTS: '-Dorg.gradle.jvmargs=-Xmx4096M"'
+        run: |
+          mkdir builds
+          docker run --rm \
+                     --privileged \
+                     --name treble \
+                     --volume ${{ github.workspace }}/builds:/root/builds \
+                     --volume ${{ github.workspace }}/vendor_ponces-priv:/aosp/vendor/ponces-priv \
+                     --volume ${{ github.workspace }}/config/ota.json:/aosp/treble_aosp/config/ota.json \
+                     ponces/treble treblebuild
 
-  upload:
-    needs: build
-    runs-on: self-hosted
-    steps:
-      - name: Upload to GitHub
-        run: docker exec aosp /bin/sh -c "bash treble_aosp/upload.sh"
+      - name: Upload OTA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ota
+          path: config/ota.json
+
+      - name: Upload ROM
+        uses: softprops/action-gh-release@v1
+        with:
+          files: builds/*.xz
+          title: ${{ env.RELEASE_TITLE }}
+          tag_name: ${{ env.RELEASE_TITLE }}
+          body: "## Changelog\n- ...\n\n## Notes\n- ..."
+          draft: true
+          prerelease: false
 
   cleanup:
-    needs: upload
+    needs: build
     runs-on: self-hosted
     if: ${{ always() }}
     steps:
       - name: Cleanup
         run: |
-          docker stop aosp || true
+          docker stop treble || true
           docker system prune -f
