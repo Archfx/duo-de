@@ -69,6 +69,9 @@ buildVariant() {
     lunch "$1"-ap1a-userdebug
     make -j$(nproc --all) installclean
     make -j$(nproc --all) systemimage
+    make -j$(nproc --all) target-files-package otatools
+    bash $BL/sign.sh "vendor/ponces-priv/keys" $OUT/signed-target_files.zip
+    unzip -jq $OUT/signed-target_files.zip IMAGES/system.img -d $OUT
     mv $OUT/system.img $BD/system-"$1".img
     echo
 }
