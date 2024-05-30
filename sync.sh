@@ -53,22 +53,12 @@ updatePatches() {
     echo
 }
 
-commitPatches() {
-    echo "--> Committing patches"
-    pushd $BL &>/dev/null
-    git add patches/trebledroid
-    git commit -m "feat: sync with latest sources of TrebleDroid"
-    git push
-    popd &>/dev/null
-}
-
 START=$(date +%s)
 
 initRepos
 syncRepos
 generatePatches
 updatePatches
-commitPatches
 
 END=$(date +%s)
 ELAPSEDM=$(($(($END-$START))/60))
