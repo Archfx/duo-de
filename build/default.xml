@@ -3,6 +3,10 @@
   <remote name="github" fetch="https://github.com" />
   <remote name="gitlab" fetch="https://gitlab.com" />
 
+  <!-- Taskbar -->
+  <project name="farmerbb/Taskbar" path="packages/apps/taskbar" remote="github" revision="master" />
+
+
   <!-- TrebleDroid -->
   <project name="TrebleDroid/device_phh_treble" path="device/phh/treble" remote="github" revision="android-14.0" />
   <project name="TrebleDroid/vendor_hardware_overlay" path="vendor/hardware_overlay" remote="github" revision="pie" />

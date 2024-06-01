@@ -53,10 +53,12 @@ jobs:
           name: ota
           path: config/ota.json
 
+
       - name: Upload ROM
         uses: softprops/action-gh-release@v1
         with:
           files: builds/*.xz
+
           title: ${{ env.RELEASE_TITLE }}
           tag_name: ${{ env.RELEASE_TITLE }}
           body: "## Changelog\n- ...\n\n## Notes\n- ..."

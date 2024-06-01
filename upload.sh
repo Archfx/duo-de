@@ -13,8 +13,8 @@ set -e
 BL=$PWD/treble_aosp
 BD=$HOME/builds
 TAG="$(date +v%Y.%m.%d)"
-GUSER="ponces"
-GREPO="treble_aosp"
+GUSER="archfx"
+GREPO="epsilon"
 
 SKIPOTA=false
 if [ "$1" == "--skip-ota" ]; then
