@@ -43,9 +43,7 @@ jobs:
                      --privileged \
                      --name treble \
                      --volume ${{ github.workspace }}/builds:/root/builds \
-
                      --volume ${{ github.workspace }}/vendor_ponces-priv:/aosp/vendor/ponces-priv \
-
                      --volume ${{ github.workspace }}/config/ota.json:/aosp/treble_aosp/config/ota.json \
                      ponces/treble treblebuild
 
@@ -53,12 +51,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ota
-          path: ${{ github.workspace }}/config/ota.json
+          path: config/ota.json
+
 
       - name: Upload ROM
         uses: softprops/action-gh-release@v1
         with:
-          files: /root/builds/*.xz
+          files: builds/*.xz
+
           title: ${{ env.RELEASE_TITLE }}
           tag_name: ${{ env.RELEASE_TITLE }}
           body: "## Changelog\n- ...\n\n## Notes\n- ..."
