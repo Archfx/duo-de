@@ -43,7 +43,9 @@ jobs:
                      --privileged \
                      --name treble \
                      --volume ${{ github.workspace }}/builds:/root/builds \
+
                      --volume ${{ github.workspace }}/vendor_ponces-priv:/aosp/vendor/ponces-priv \
+
                      --volume ${{ github.workspace }}/config/ota.json:/aosp/treble_aosp/config/ota.json \
                      ponces/treble treblebuild
 
