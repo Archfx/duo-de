@@ -35,13 +35,17 @@ jobs:
           path: vendor_ponces-priv
 
       - name: Build ROM
+        env:
+          GRADLE_OPTS: '-Dorg.gradle.jvmargs=-Xmx4096M"'
         run: |
           mkdir builds
           docker run --rm \
                      --privileged \
                      --name treble \
                      --volume ${{ github.workspace }}/builds:/root/builds \
-                     --volume ${{ github.workspace }}/vendor_ponces-priv:/aosp/treble_aosp/vendor/ponces-priv \
+
+                     --volume ${{ github.workspace }}/vendor_ponces-priv:/aosp/vendor/ponces-priv \
+
                      --volume ${{ github.workspace }}/config/ota.json:/aosp/treble_aosp/config/ota.json \
                      ponces/treble treblebuild
 
