@@ -163,7 +163,7 @@ taskbar_app(){
     cp vendor/hardware_overlay/TrebleApp/Android.mk vendor/hardware_overlay/Smartdock/Android.mk
     wget https://f-droid.org/repo/cu.axel.smartdock_1121.apk -O vendor/hardware_overlay/Smartdock/app.apk
     sed -i 's/LOCAL_MODULE := TrebleApp/LOCAL_MODULE := Smartdock/' vendor/hardware_overlay/Smartdock/Android.mk
-    sed -i 's/LOCAL_OVERRIDES_PACKAGES := Updater/LOCAL_OVERRIDES_PACKAGES := Home Launcher2 Launcher3 Launcher3QuickStep/' vendor/hardware_overlay/Smartdock/Android.mk
+    sed -i 's/LOCAL_OVERRIDES_PACKAGES := Updater/LOCAL_OVERRIDES_PACKAGES := Trebuchet Home Launcher2 Launcher3 Launcher3QuickStep/' vendor/hardware_overlay/Smartdock/Android.mk
 
     echo "Smartdock app included"
 }
