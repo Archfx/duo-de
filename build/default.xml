@@ -4,7 +4,7 @@
   <remote name="gitlab" fetch="https://gitlab.com" />
 
   <!-- Taskbar -->
-  <project name="farmerbb/Taskbar" path="packages/apps/taskbar" remote="github" revision="master" />
+  <!-- <project name="farmerbb/Taskbar" path="packages/apps/taskbar" remote="github" revision="master" /> -->
 
 
   <!-- TrebleDroid -->
