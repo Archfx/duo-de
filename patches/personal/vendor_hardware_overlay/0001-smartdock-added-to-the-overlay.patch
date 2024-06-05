@@ -1,0 +1,22 @@
+From 3413ad5d8257827ba165c304aba98885f08a369d Mon Sep 17 00:00:00 2001
+From: Archfx <cybx@live.com>
+Date: Wed, 5 Jun 2024 14:49:29 -0400
+Subject: [PATCH] smartdock added to the overlay
+
+---
+ overlay.mk | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/overlay.mk b/overlay.mk
+index 7bf0ead..1934072 100644
+--- a/overlay.mk
++++ b/overlay.mk
+@@ -1,4 +1,5 @@
+ PRODUCT_PACKAGES += \
++	Smartdock \
+ 	HardwareOverlayPicker \
+ 	QtiAudio \
+ 	TrebleApp \
+-- 
+2.34.1
+

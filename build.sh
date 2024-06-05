@@ -144,14 +144,27 @@ generateOta() {
 
 add_product_package() {
     local file_path="vendor/hardware_overlay/overlay.mk"
-    local package_line="Smartdock \\"
+    local package_line='Smartdock \\'
+    # Define the line to replace
+    replace_line='PRODUCT_PACKAGES += \'
+    # Define the new line
+    new_line='PRODUCT_PACKAGES += '
+    new_line+='\
+        Smartdock\'
+
+# Use sed to replace the line in the file
+
 
     # Check if the file exists
     if [[ -f "$file_path" ]]; then
         # Check if the line is already present in the file
         if ! grep -Fxq "$package_line" "$file_path"; then
             # Add the line to the end of the file
-            echo "$package_line" >> "$file_path"
+            # echo "$package_line" >> "$file_path"
+            echo "s|$replace_line|$new_line|g" "$file_path"
+            # sed -i "s|$replace_line|$new_line|g" "$file_path"
+
+            sed -i 's|PRODUCT_PACKAGES += \/|PRODUCT_PACKAGES += \\\n        Smartdock\/|g' "$file_path"
             echo "Added '$package_line' to $file_path"
         else
             echo "'$package_line' is already present in $file_path"
@@ -185,12 +198,12 @@ taskbar_app(){
 
 START=$(date +%s)
 
-initRepos
-syncRepos
-applyPatches
-setupEnv
-buildTrebleApp
-taskbar_app
+# initRepos
+# syncRepos
+# applyPatches
+# setupEnv
+# # buildTrebleApp
+# # taskbar_app
 # add_product_package
 # buildVariants
 # generatePackages
