@@ -28,6 +28,7 @@ initRepos() {
 
 syncRepos() {
     echo "--> Syncing repos"
+    # repo forall -c 'git stash'
     repo sync -c --force-sync --no-clone-bundle --no-tags -j$(nproc --all) || repo sync -c --force-sync --no-clone-bundle --no-tags -j$(nproc --all)
     echo
 }
@@ -161,9 +162,21 @@ add_product_package() {
 }
 
 taskbar_app(){
+
+    echo "Building the Smartdock app"
+    cp treble_app/build.sh smartdock/build.sh
+    sed -i 's/TrebleApp.apk/Smartdock.apk/g' smartdock/build.sh
+    sed -i 's/file=app-release-unsigned/file=app-release/g' smartdock/build.sh
+    cd smartdock
+    ln -sf ../treble_app/sdk sdk
+    ln -sf ../treble_app/signapk signapk
+    ln -sf ../treble_app/keys keys
+    bash build.sh release
+    cd ..
     mkdir  -p vendor/hardware_overlay/Smartdock
+    cp smartdock/Smartdock.apk vendor/hardware_overlay/Smartdock/app.apk
     cp vendor/hardware_overlay/TrebleApp/Android.mk vendor/hardware_overlay/Smartdock/Android.mk
-    wget https://f-droid.org/repo/cu.axel.smartdock_1121.apk -O vendor/hardware_overlay/Smartdock/app.apk
+    # wget https://f-droid.org/repo/cu.axel.smartdock_1121.apk -O vendor/hardware_overlay/Smartdock/app.apk
     sed -i 's/LOCAL_MODULE := TrebleApp/LOCAL_MODULE := Smartdock/' vendor/hardware_overlay/Smartdock/Android.mk
     sed -i 's/LOCAL_OVERRIDES_PACKAGES := Updater/LOCAL_OVERRIDES_PACKAGES := Trebuchet Home Launcher2 Launcher3 Launcher3QuickStep/' vendor/hardware_overlay/Smartdock/Android.mk
 
@@ -172,14 +185,14 @@ taskbar_app(){
 
 START=$(date +%s)
 
-# initRepos
-# syncRepos
-# applyPatches
+initRepos
+syncRepos
+applyPatches
 setupEnv
-# buildTrebleApp
-# taskbar_app
+buildTrebleApp
+taskbar_app
 # add_product_package
-buildVariants
+# buildVariants
 # generatePackages
 # generateOta
 

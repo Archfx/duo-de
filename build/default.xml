@@ -4,8 +4,7 @@
   <remote name="gitlab" fetch="https://gitlab.com" />
 
   <!-- Taskbar -->
-  <!-- <project name="farmerbb/Taskbar" path="packages/apps/taskbar" remote="github" revision="master" /> -->
-
+  <project name="axel358/smartdock" path="smartdock" remote="github" revision="main" />
 
   <!-- TrebleDroid -->
   <project name="TrebleDroid/device_phh_treble" path="device/phh/treble" remote="github" revision="android-14.0" />
