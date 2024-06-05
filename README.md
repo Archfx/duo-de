@@ -1,4 +1,4 @@
-# duo-de [surface-duo desktop experience]
+# duo-de <sup><sup>[surface-duo desktop experience]</sup></sup>
 
 This is a GSI variant rom build targetted for Microsoft Surface Duo with the intention of using the Surface Duo as a desktop environment using experimental floating window features. This build combines gapps variant of the GSI rom from [ponces](https://github.com/ponces/treble_aosp) with the [smartdock](https://github.com/axel358/smartdock) with various tweaks to make it nice and smooth. All credits go to respective developers.
 
