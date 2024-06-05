@@ -1,6 +1,6 @@
-# duo-de [surface-duo desktop experiance]
+# duo-de [surface-duo desktop experience]
 
-This is a GSI variant rom build targetted for microsoft surface duo with the intention of using the surface duo as desktop environment using androids experimental floating window features. This build combines gapps variant of GSI rom from [ponces](https://github.com/ponces/treble_aosp) with the [smartdock](https://github.com/axel358/smartdock) with various tweeks to make it nice and smooth. All credits goes to respective developpers.
+This is a GSI variant rom build targetted for Microsoft Surface Duo with the intention of using the Surface Duo as a desktop environment using experimental floating window features. This build combines gapps variant of the GSI rom from [ponces](https://github.com/ponces/treble_aosp) with the [smartdock](https://github.com/axel358/smartdock) with various tweaks to make it nice and smooth. All credits go to respective developers.
 
 
 <p align="center">
@@ -9,14 +9,14 @@ This is a GSI variant rom build targetted for microsoft surface duo with the int
 ## Flashing steps
 **Try this at your own risk and proceed with caution!**
 
-Followings are the steps to flash this image to your surface duo.
+Following are the steps to flash this image to your surface duo.
 
 1. Download the release 
 ```shell
 wget https://github.com/Archfx/duo-de/releases/download/v2-desktop/surface_duo.img.xz
 tar -xf surface_duo.img.xz
 ```
-2. If you are migrating from Android 12L (stock) follow this step. You need to unlock the bootloader before proceed. Please pay attention to commands, do not copy and execute the commands blindly.
+2. If you are migrating from Android 12L (stock) follow this step. You need to unlock the bootloader before proceeding. Please pay attention to commands, do not copy and execute the commands blindly.
 ```shell
 adb reboot fastboot
 fastboot delete-logical-partition system_ext
@@ -32,7 +32,7 @@ fastboot delete-logical-partition system_a
 fastboot flash system system_duo_aosp.img
 fastboot reboot 
 ```
-3. Migrating from 13/14 pixel experiance, follow below steps 
+3. Migrating from 13/14 pixel experience, follow the below steps 
 ```shell
 adb reboot fastboot
 fastboot flash system system_duo_aosp.img
