@@ -68,12 +68,16 @@ buildTrebleApp() {
 buildVariant() {
     echo "--> Building $1"
     lunch "$1"-ap1a-userdebug
-    make -j$(nproc --all) installclean
-    make -j$(nproc --all) systemimage
-    make -j$(nproc --all) target-files-package otatools
-    bash $BL/sign.sh "vendor/ponces-priv/keys" $OUT/signed-target_files.zip
-    unzip -jqo $OUT/signed-target_files.zip IMAGES/system.img -d $OUT
-    mv $OUT/system.img $BD/system-"$1".img
+    # make -j$(nproc --all) installclean
+    # make -j$(nproc --all) systemimage
+    # make -j$(nproc --all) target-files-package otatools
+    make -j2 installclean
+    make -j2 systemimage
+    # make -j2 target-files-package otatools
+    # bash $BL/sign.sh "vendor/ponces-priv/keys" $OUT/signed-target_files.zip
+    # unzip -jq $OUT/signed-target_files.zip IMAGES/system.img -d $OUT
+    # mv $OUT/system.img $BD/system-"$1".img
+
     echo
 }
 
@@ -89,14 +93,14 @@ buildVndkliteVariant() {
 }
 
 buildVariants() {
-    buildVariant treble_a64_bvN
-    buildVariant treble_a64_bgN
-    buildVariant treble_arm64_bvN
+    # buildVariant treble_a64_bvN
+    # buildVariant treble_a64_bgN
+    # buildVariant treble_arm64_bvN
     buildVariant treble_arm64_bgN
-    buildVndkliteVariant treble_a64_bvN
-    buildVndkliteVariant treble_a64_bgN
-    buildVndkliteVariant treble_arm64_bvN
-    buildVndkliteVariant treble_arm64_bgN
+    # buildVndkliteVariant treble_a64_bvN
+    # buildVndkliteVariant treble_a64_bgN
+    # buildVndkliteVariant treble_arm64_bvN
+    # buildVndkliteVariant treble_arm64_bgN
 }
 
 generatePackages() {
@@ -128,7 +132,7 @@ generateOta() {
             [[ "$filename" == *"-vndklite"* ]] && vndk="-vndklite" || vndk=""
             name="treble_${arch}_b${variant}N${vndk}"
             size=$(wc -c $file | awk '{print $1}')
-            url="https://github.com/ponces/treble_aosp/releases/download/$version/$filename"
+            url="https://github.com/archfx/epsilon/releases/download/$version/$filename"
             json="${json} {\"name\": \"$name\",\"size\": \"$size\",\"url\": \"$url\"},"
         done
         json="${json%?}]}"
@@ -137,16 +141,47 @@ generateOta() {
     echo
 }
 
+add_product_package() {
+    local file_path="vendor/hardware_overlay/overlay.mk"
+    local package_line="Smartdock \\"
+
+    # Check if the file exists
+    if [[ -f "$file_path" ]]; then
+        # Check if the line is already present in the file
+        if ! grep -Fxq "$package_line" "$file_path"; then
+            # Add the line to the end of the file
+            echo "$package_line" >> "$file_path"
+            echo "Added '$package_line' to $file_path"
+        else
+            echo "'$package_line' is already present in $file_path"
+        fi
+    else
+        echo "File $file_path does not exist"
+    fi
+}
+
+taskbar_app(){
+    mkdir  -p vendor/hardware_overlay/Smartdock
+    cp vendor/hardware_overlay/TrebleApp/Android.mk vendor/hardware_overlay/Smartdock/Android.mk
+    wget https://f-droid.org/repo/cu.axel.smartdock_1121.apk -O vendor/hardware_overlay/Smartdock/app.apk
+    sed -i 's/LOCAL_MODULE := TrebleApp/LOCAL_MODULE := Smartdock/' vendor/hardware_overlay/Smartdock/Android.mk
+    sed -i 's/LOCAL_OVERRIDES_PACKAGES := Updater/LOCAL_OVERRIDES_PACKAGES := Trebuchet Home Launcher2 Launcher3 Launcher3QuickStep/' vendor/hardware_overlay/Smartdock/Android.mk
+
+    echo "Smartdock app included"
+}
+
 START=$(date +%s)
 
-initRepos
-syncRepos
-applyPatches
+# initRepos
+# syncRepos
+# applyPatches
 setupEnv
-buildTrebleApp
-[ ! -z "$BV" ] && buildVariant "$BV" || buildVariants
-generatePackages
-generateOta
+# buildTrebleApp
+# taskbar_app
+# add_product_package
+buildVariants
+# generatePackages
+# generateOta
 
 END=$(date +%s)
 ELAPSEDM=$(($(($END-$START))/60))
