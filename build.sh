@@ -12,6 +12,7 @@ set -e
 
 BL=$PWD/treble_aosp
 BD=$HOME/builds
+BV=$1
 
 initRepos() {
     echo "--> Initializing workspace"
@@ -76,6 +77,7 @@ buildVariant() {
     # bash $BL/sign.sh "vendor/ponces-priv/keys" $OUT/signed-target_files.zip
     # unzip -jq $OUT/signed-target_files.zip IMAGES/system.img -d $OUT
     # mv $OUT/system.img $BD/system-"$1".img
+
     echo
 }
 

@@ -29,8 +29,8 @@ jobs:
         
       - name: Commit Patches 
         run: |
-          git config --global user.name "Alberto Ponces"
-          git config --global user.email "ponces26@gmail.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add patches/trebledroid
           git commit -m "feat: sync with latest sources of TrebleDroid"
           git push
@@ -38,9 +38,8 @@ jobs:
       - name: Upload Patches
         uses: actions/upload-artifact@v4
         with:
-          name: patches
-          path: patches-for-developers.zip
-
+          name: patches-for-developers
+          path: patches/patches-for-developers.zip
   cleanup:
     needs: sync
     runs-on: self-hosted
