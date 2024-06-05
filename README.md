@@ -54,6 +54,7 @@ These people have helped this project in some way or another, so they should be 
 - [sooti](https://github.com/sooti)
 - [Iceows](https://github.com/Iceows)
 - [ChonDoit](https://github.com/ChonDoit)
+- [ponces](https://github.com/ponces)
 - [Axel](https://github.com/axel358)
 
 
