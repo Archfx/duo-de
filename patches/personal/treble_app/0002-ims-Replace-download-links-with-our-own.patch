@@ -1,0 +1,44 @@
+From 0181b8401d7aac9afc44f9c72ed5467cfcc4efbf Mon Sep 17 00:00:00 2001
+From: Alberto Ponces <ponces26@gmail.com>
+Date: Wed, 5 Jun 2024 15:56:57 +0100
+Subject: [PATCH 2/2] ims: Replace download links with our own
+
+---
+ .../java/me/phh/treble/app/ImsSettings.kt     | 20 +++++++++----------
+ 1 file changed, 10 insertions(+), 10 deletions(-)
+
+diff --git a/app/src/main/java/me/phh/treble/app/ImsSettings.kt b/app/src/main/java/me/phh/treble/app/ImsSettings.kt
+index 16f8ecf..5920a66 100644
+--- a/app/src/main/java/me/phh/treble/app/ImsSettings.kt
++++ b/app/src/main/java/me/phh/treble/app/ImsSettings.kt
+@@ -100,17 +100,17 @@ class ImsSettingsFragment : SettingsFragment() {
+         val (url, message) =
+                 when {
+                     (Ims.gotMtkR || Ims.gotMtkS || Ims.gotMtkAidl) && Build.VERSION.SDK_INT >= 34
+-                        -> Pair("https://treble.phh.me/ims-mtk-u.apk", "MediaTek R+ vendor")
+-                    Ims.gotMtkP -> Pair("https://treble.phh.me/stable/ims-mtk-p.apk", "MediaTek P vendor")
+-                    Ims.gotMtkQ -> Pair("https://treble.phh.me/stable/ims-mtk-q.apk", "MediaTek Q vendor")
+-                    Ims.gotMtkR -> Pair("https://treble.phh.me/stable/ims-mtk-r.apk", "MediaTek R vendor")
+-                    Ims.gotMtkS -> Pair("https://treble.phh.me/stable/ims-mtk-s.apk", "MediaTek S vendor")
++                        -> Pair("https://github.com/ponces/vendor_ponces/raw/android-14.0/prebuilt/ims/ims-mtk-u-signed.apk", "MediaTek R+ vendor")
++                    Ims.gotMtkP -> Pair("https://github.com/ponces/vendor_ponces/raw/android-14.0/prebuilt/ims/ims-mtk-p-signed.apk", "MediaTek P vendor")
++                    Ims.gotMtkQ -> Pair("https://github.com/ponces/vendor_ponces/raw/android-14.0/prebuilt/ims/ims-mtk-q-signed.apk", "MediaTek Q vendor")
++                    Ims.gotMtkR -> Pair("https://github.com/ponces/vendor_ponces/raw/android-14.0/prebuilt/ims/ims-mtk-r-signed.apk", "MediaTek R vendor")
++                    Ims.gotMtkS -> Pair("https://github.com/ponces/vendor_ponces/raw/android-14.0/prebuilt/ims/ims-mtk-s-signed.apk", "MediaTek S vendor")
+                     (Ims.gotQcomHidl || Ims.gotQcomAidl) && Build.VERSION.SDK_INT >= 34
+-                        -> Pair("https://treble.phh.me/ims-caf-u.apk", "Qualcomm vendor")
+-                    Ims.gotQcomHidlMoto -> Pair("https://treble.phh.me/stable/ims-caf-moto.apk", "Qualcomm pre-S vendor (Motorola)")
+-                    Ims.gotQcomHidl -> Pair("https://treble.phh.me/stable/ims-q.64.apk", "Qualcomm pre-S vendor")
+-                    Ims.gotQcomAidl -> Pair("https://treble.phh.me/stable/ims-caf-s.apk", "Qualcomm S+ vendor")
+-                    else -> Pair("", "NOT SUPPORTED")
++                        -> Pair("https://github.com/ponces/vendor_ponces/raw/android-14.0/prebuilt/ims/ims-caf-u-signed.apk", "Qualcomm vendor")
++                    Ims.gotQcomHidlMoto -> Pair("https://github.com/ponces/vendor_ponces/raw/android-14.0/prebuilt/ims/ims-caf-moto-signed.apk", "Qualcomm pre-S vendor (Motorola)")
++                    Ims.gotQcomHidl -> Pair("https://github.com/ponces/vendor_ponces/raw/android-14.0/prebuilt/ims/ims-q.64-signed.apk", "Qualcomm pre-S vendor")
++                    Ims.gotQcomAidl -> Pair("https://github.com/ponces/vendor_ponces/raw/android-14.0/prebuilt/ims/ims-caf-s-signed.apk", "Qualcomm S+ vendor")
++                    else -> Pair("https://github.com/ponces/vendor_ponces/raw/android-14.0/prebuilt/ims/ims-floss-signed.apk", "FLOSS")
+                 }
+ 
+         installIms!!.title = "Install IMS APK for $message"
+-- 
+2.34.1
+
