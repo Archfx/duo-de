@@ -1,0 +1,195 @@
+From 0f7a0d35ad94820f7cc919255433f6c327a7739d Mon Sep 17 00:00:00 2001
+From: Archfx <cybx@live.com>
+Date: Thu, 6 Jun 2024 10:01:49 -0400
+Subject: [PATCH] Surface duo specific configurations from thain
+
+---
+ aosp.mk                                |  4 ++++
+ base.mk                                | 25 +++++++++++++++++++++++++
+ files/com.microsoft.surface.duo_v1.xml |  7 +++++++
+ files/device_state_configuration.xml   | 18 ++++++++++++++++++
+ phh-on-data.sh                         | 14 ++++++++++++++
+ sepolicy/hal.te                        |  2 ++
+ sepolicy/service.te                    |  1 +
+ sepolicy/service_contexts              |  5 +++++
+ sepolicy/surface.te                    |  5 +++++
+ system.prop                            |  8 ++++++++
+ 10 files changed, 89 insertions(+)
+ create mode 100644 aosp.mk
+ create mode 100644 files/com.microsoft.surface.duo_v1.xml
+ create mode 100644 files/device_state_configuration.xml
+ create mode 100644 sepolicy/surface.te
+
+diff --git a/aosp.mk b/aosp.mk
+new file mode 100644
+index 0000000..6493ba4
+--- /dev/null
++++ b/aosp.mk
+@@ -0,0 +1,4 @@
++$(call inherit-product, vendor/ponces/config/common.mk)
++
++PRODUCT_SYSTEM_DEFAULT_PROPERTIES += \
++    ro.system.ota.json_url=https://raw.githubusercontent.com/ponces/treble_aosp/android-14.0/config/ota.json
+diff --git a/base.mk b/base.mk
+index 53c4459..c8e9a33 100644
+--- a/base.mk
++++ b/base.mk
+@@ -266,3 +266,28 @@ PRODUCT_PRODUCT_PROPERTIES += \
+     persist.settings.large_screen_opt.enabled=true
+ 
+ PRODUCT_EXTRA_VNDK_VERSIONS += 28 29
++
++
++PRODUCT_COPY_FILES += \
++	device/phh/treble/files/com.microsoft.surface.duo_v1.xml:system/etc/permissions/com.microsoft.surface.duo_v1.xml
++
++PRODUCT_COPY_FILES += \
++	device/phh/treble/files/device_state_configuration.xml:system/etc/devicestate/device_state_configuration.xml
++
++PRODUCT_PACKAGES += \
++	PostureProcessor \
++	SurfaceDuoGeneralOverlay \
++	SurfaceDuo1DisplayFeaturesWMShellOverlay \
++	SurfaceDuo1NoHingeAndroidOverlay \
++	SurfaceDuo1NoHingeWMShellOverlay \
++	SurfaceDuo1DisplayFeaturesOverlay \
++	SurfaceDuo2DisplayFeaturesOverlay \
++	SurfaceDuo2DisplayFeaturesWMShellOverlay \
++	SurfaceDuo2NoHingeAndroidOverlay \
++	SurfaceDuo2NoHingeWMShellOverlay \
++	SurfaceDuo2PostureProcessorOverlay \
++	SurfaceDuoSettingsOverlay \
++	SurfaceDuoSettingsIconsOverlay \
++	SurfaceDuoAppHintingOverlay
++
++$(call inherit-product-if-exists, vendor/surface/prebuilts/bootanimation/bootanimation.mk)
+\ No newline at end of file
+diff --git a/files/com.microsoft.surface.duo_v1.xml b/files/com.microsoft.surface.duo_v1.xml
+new file mode 100644
+index 0000000..2a3cfcd
+--- /dev/null
++++ b/files/com.microsoft.surface.duo_v1.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="utf-8"?>
++<permissions>
++    <unavailable-feature name="com.microsoft.device.display.displaymask" />
++    <oem-permissions>
++        <permission name="surface.permission.USE_OEM_PRIVATE_SENSORS" />
++    </oem-permissions>
++</permissions>
+\ No newline at end of file
+diff --git a/files/device_state_configuration.xml b/files/device_state_configuration.xml
+new file mode 100644
+index 0000000..1647d08
+--- /dev/null
++++ b/files/device_state_configuration.xml
+@@ -0,0 +1,18 @@
++<device-state-config>
++  <device-state>
++    <identifier>0</identifier>
++    <name>CLOSED</name>
++  </device-state>
++  <device-state>
++    <identifier>1</identifier>
++    <name>HALF_OPENED</name>
++  </device-state>
++  <device-state>
++    <identifier>2</identifier>
++    <name>OPENED</name>
++  </device-state>
++  <device-state>
++    <identifier>3</identifier>
++    <name>FOLDED</name>
++  </device-state>
++</device-state-config>
+\ No newline at end of file
+diff --git a/phh-on-data.sh b/phh-on-data.sh
+index 472d16e..f36b15e 100644
+--- a/phh-on-data.sh
++++ b/phh-on-data.sh
+@@ -29,3 +29,17 @@ if [ "$vndk" = 28 ];then
+     mount $minijailSrc64 /vendor/lib64/libminijail.so
+     mount $minijailSrc /vendor/lib/libminijail.so
+ fi
++
++if [ "$(getprop  persist.sys.phh.duo.disable_hinge)" -eq 1 ]; then
++    setprop vendor.display.bezel_size 0
++    setprop vendor.display.default_bezel_size 0
++    setprop vendor.display.hinge_width_pixels 0
++fi
++
++if [ "$(getprop  persist.sys.thain.duo.enable_settings_icons)" -eq 1 ]; then
++    setprop vendor.thain.settings_icon 1
++fi
++
++if [ "$(getprop  persist.sys.thain.duo.app_hinting)" -eq 1 ]; then
++    setprop vendor.thain.app_hinting 1
++fi
+\ No newline at end of file
+diff --git a/sepolicy/hal.te b/sepolicy/hal.te
+index cb44422..cb4262d 100644
+--- a/sepolicy/hal.te
++++ b/sepolicy/hal.te
+@@ -5,6 +5,8 @@ hal_server_domain(hal_fingerprint_oppo_compat, hal_fingerprint)
+ type hal_fingerprint_oppo_compat_exec, exec_type, vendor_file_type, file_type;
+ init_daemon_domain(hal_fingerprint_oppo_compat)
+ 
++# Surface Display Topology
++type hal_displaytopology_hwservice, hwservice_manager_type;
+ 
+ type hal_fingerprint_oppo, domain;
+ allow hal_fingerprint_oppo vendor_default_prop:property_service { set };
+diff --git a/sepolicy/service.te b/sepolicy/service.te
+index a9120f9..0015290 100644
+--- a/sepolicy/service.te
++++ b/sepolicy/service.te
+@@ -1 +1,2 @@
+ type qcrilam_service,    service_manager_type;
++type duo_service, service_manager_type;
+\ No newline at end of file
+diff --git a/sepolicy/service_contexts b/sepolicy/service_contexts
+index a390e3f..2b42271 100644
+--- a/sepolicy/service_contexts
++++ b/sepolicy/service_contexts
+@@ -14,3 +14,8 @@ android.hardware.bluetooth.audio.IBluetoothAudioProviderFactory/sysbta    u:obje
+ 
+ # QcRilAm
+ me.phh.qcrilam                                                            u:object_r:qcrilam_service:s0
++
++# Surface DisplayTopology HIDL
++vendor.surface.displaytopology::IDisplayTopology                          u:object_r:hal_displaytopology_hwservice:s0
++
++com.thain.duo                                                             u:object_r:duo_service:s0
+\ No newline at end of file
+diff --git a/sepolicy/surface.te b/sepolicy/surface.te
+new file mode 100644
+index 0000000..1e24942
+--- /dev/null
++++ b/sepolicy/surface.te
+@@ -0,0 +1,5 @@
++# add_hwservice(hal_graphics_composer_server, hal_displaytopology_hwservice);
++allow duo_service hal_displaytopology_hwservice:hwservice_manager find;
++allow duo_service hal_graphics_composer_default:binder { call };
++allow system_app hal_displaytopology_hwservice:hwservice_manager find;
++allow system_app hal_graphics_composer_default:binder { call };
+\ No newline at end of file
+diff --git a/system.prop b/system.prop
+index f3c0c45..90afe72 100644
+--- a/system.prop
++++ b/system.prop
+@@ -49,3 +49,11 @@ bluetooth.profile.sap.server.enabled?=true
+ 
+ # Samsung vendors default to a Samsung-specific gadget for MTP. Set this to use AOSP's functionfs MTP
+ vendor.usb.use_ffs_mtp=1
++
++# Override media volume steps
++ro.config.media_vol_steps=25
++ro.config.media_vol_default=8
++
++# surface duo stuff
++persist.sys.thain.duo.enable_settings_icons=1
++persist.sys.thain.duo.app_hinting=0
+\ No newline at end of file
+-- 
+2.34.1
+

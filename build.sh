@@ -199,11 +199,11 @@ taskbar_app(){
 START=$(date +%s)
 
 # initRepos
-# syncRepos
-# applyPatches
+syncRepos
+applyPatches
 # setupEnv
-# # buildTrebleApp
-# # taskbar_app
+# buildTrebleApp
+# taskbar_app
 # add_product_package
 # buildVariants
 # generatePackages
