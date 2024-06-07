@@ -28,7 +28,8 @@ initRepos() {
 
 syncRepos() {
     echo "--> Syncing repos"
-    # repo forall -c 'git stash'
+    repo forall -c 'git checkout -f' 
+    repo forall -c 'git clean -fd'
     repo sync -c --force-sync --no-clone-bundle --no-tags -j$(nproc --all) || repo sync -c --force-sync --no-clone-bundle --no-tags -j$(nproc --all)
     echo
 }
@@ -198,7 +199,7 @@ taskbar_app(){
 
 START=$(date +%s)
 
-# initRepos
+initRepos
 syncRepos
 applyPatches
 # setupEnv

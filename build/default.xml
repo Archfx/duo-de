@@ -29,12 +29,9 @@
   <project name="LineageOS/android_packages_apps_ThemePicker" path="packages/apps/ThemePicker" remote="github" revision="lineage-21.0" />
 
   <!-- duo specifics -->
-  <remove-project name="platform/frameworks/base" />
-  <remove-project name="platform/packages/apps/Settings" />
   <project name="thai-ng/rro_overlays" path="packages/thain/rro_overlays" remote="github" revision="main" />
   <project name="thai-ng/vendor-surface" path="vendor/surface" remote="github" revision="main" />
   <project name="thai-ng/PostureProcessor" path="packages/thain/services/PostureProcessor" remote="github" revision="main"/>
-  <project name="thai-ng/platform_frameworks_base" path="frameworks/base" remote="github" revision="duo"/>
-  <project name="thai-ng/platform_packages_apps_settings" path="packages/apps/Settings" remote="github" revision="duo"/>
+ 
 
 </manifest>
