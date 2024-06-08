@@ -8,7 +8,7 @@ This is a GSI variant rom build targetted for Microsoft Surface Duo with the int
 
 ## Posture Engine
 
-Thanks to [thain](https://github.com/thai-ng) duo reacts to various duo postures and hinge gap can be enabled/disabled.
+Thanks to [thain](https://github.com/thai-ng), duo react to various duo postures and the hinge gaps can be enabled/disabled through the treble app.
 <p align="center">
 <img src="images/duo_1.jpeg" alt="drawing" style="width:300px;" /> 
 <img src="images/duo_2.jpeg" alt="drawing" style="width:300px;"/> </p>
@@ -52,27 +52,17 @@ fastboot reboot
 
 ## Issues
 
-Currenlty known issues : 
+Currently known issues : 
 - No OTA support, expect in the next release
-- Boot image is mispalaced (will be fixed in next release)
+- Boot image is misplaced (will be fixed in next release)
 
-Any other issue, please 
+Any other issues, please 
 [open an issue](https://github.com/Archfx/duo-de/issues/new/choose) with a detailed description.
 
 ## Credits
 These people have helped this project in some way or another, so they should be the ones who receive all the credit:
-- [phhusson](https://github.com/phhusson)
-- [AndyYan](https://github.com/AndyCGYan)
-- [eremitein](https://github.com/eremitein)
-- [kdrag0n](https://github.com/kdrag0n)
-- [Peter Cai](https://github.com/PeterCxy)
-- [haridhayal11](https://github.com/haridhayal11)
-- [sooti](https://github.com/sooti)
-- [Iceows](https://github.com/Iceows)
-- [ChonDoit](https://github.com/ChonDoit)
-- [ponces](https://github.com/ponces)
-- [thai-ng](https://github.com/thai-ng)
-- [Axel](https://github.com/axel358)
+
+[phhusson](https://github.com/phhusson) [AndyYan](https://github.com/AndyCGYan) [eremitein](https://github.com/eremitein) [kdrag0n](https://github.com/kdrag0n) [Peter Cai](https://github.com/PeterCxy) [haridhayal11](https://github.com/haridhayal11) [sooti](https://github.com/sooti) [Iceows](https://github.com/Iceows) [ChonDoit](https://github.com/ChonDoit) [ponces](https://github.com/ponces) [thai-ng](https://github.com/thai-ng) [Axel](https://github.com/axel358)
 
 
 ## Disclaimer
