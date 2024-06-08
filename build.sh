@@ -73,8 +73,8 @@ buildVariant() {
     # make -j$(nproc --all) installclean
     # make -j$(nproc --all) systemimage
     # make -j$(nproc --all) target-files-package otatools
-    make -j2 installclean
-    make -j2 systemimage
+    make -j4 installclean
+    make -j4 systemimage
     # make -j2 target-files-package otatools
     # bash $BL/sign.sh "vendor/ponces-priv/keys" $OUT/signed-target_files.zip
     # unzip -jq $OUT/signed-target_files.zip IMAGES/system.img -d $OUT
@@ -143,37 +143,34 @@ generateOta() {
     echo
 }
 
-add_product_package() {
-    local file_path="vendor/hardware_overlay/overlay.mk"
-    local package_line='Smartdock \\'
-    # Define the line to replace
-    replace_line='PRODUCT_PACKAGES += \'
-    # Define the new line
-    new_line='PRODUCT_PACKAGES += '
-    new_line+='\
-        Smartdock\'
+# add_product_package() {
+#     local file_path="vendor/hardware_overlay/overlay.mk"
+#     local package_line='Smartdock \\'
+#     # Define the line to replace
+#     replace_line='PRODUCT_PACKAGES += \'
+#     # Define the new line
+#     new_line='PRODUCT_PACKAGES += '
+#     new_line+='\
+#         Smartdock\'
 
-# Use sed to replace the line in the file
+#     # Check if the file exists
+#     if [[ -f "$file_path" ]]; then
+#         # Check if the line is already present in the file
+#         if ! grep -Fxq "$package_line" "$file_path"; then
+#             # Add the line to the end of the file
+#             # echo "$package_line" >> "$file_path"
+#             echo "s|$replace_line|$new_line|g" "$file_path"
+#             # sed -i "s|$replace_line|$new_line|g" "$file_path"
 
-
-    # Check if the file exists
-    if [[ -f "$file_path" ]]; then
-        # Check if the line is already present in the file
-        if ! grep -Fxq "$package_line" "$file_path"; then
-            # Add the line to the end of the file
-            # echo "$package_line" >> "$file_path"
-            echo "s|$replace_line|$new_line|g" "$file_path"
-            # sed -i "s|$replace_line|$new_line|g" "$file_path"
-
-            sed -i 's|PRODUCT_PACKAGES += \/|PRODUCT_PACKAGES += \\\n        Smartdock\/|g' "$file_path"
-            echo "Added '$package_line' to $file_path"
-        else
-            echo "'$package_line' is already present in $file_path"
-        fi
-    else
-        echo "File $file_path does not exist"
-    fi
-}
+#             sed -i 's|PRODUCT_PACKAGES += \/|PRODUCT_PACKAGES += \\\n        Smartdock\/|g' "$file_path"
+#             echo "Added '$package_line' to $file_path"
+#         else
+#             echo "'$package_line' is already present in $file_path"
+#         fi
+#     else
+#         echo "File $file_path does not exist"
+#     fi
+# }
 
 taskbar_app(){
 
@@ -199,14 +196,13 @@ taskbar_app(){
 
 START=$(date +%s)
 
-initRepos
-syncRepos
-applyPatches
-# setupEnv
+# initRepos
+# syncRepos
+# applyPatches
+setupEnv
 # buildTrebleApp
 # taskbar_app
-# add_product_package
-# buildVariants
+buildVariants
 # generatePackages
 # generateOta
 
