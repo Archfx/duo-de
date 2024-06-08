@@ -6,6 +6,14 @@ This is a GSI variant rom build targetted for Microsoft Surface Duo with the int
 <p align="center">
 <img src="images/src-duo.png" alt="drawing" style="width:600px;"/> </p>
 
+## Posture Engine
+
+Thanks to [thain](https://github.com/thai-ng) duo reacts to various duo postures and hinge gap can be enabled/disabled.
+<p align="center">
+<img src="images/duo_1.jpeg" alt="drawing" style="width:300px;" /> 
+<img src="images/duo_2.jpeg" alt="drawing" style="width:300px;"/> </p>
+
+
 ## Flashing steps
 **Try this at your own risk and proceed with caution!**
 
@@ -13,8 +21,10 @@ Following are the steps to flash this image to your surface duo.
 
 1. Download the release 
 ```shell
-wget https://github.com/Archfx/duo-de/releases/download/v2-desktop/surface_duo.img.xz
+wget https://github.com/Archfx/duo-de/releashttps://github.com/Archfx/duo-de/releases/download/v2.1-de/system_duo.img.xz
 tar -xf surface_duo.img.xz
+# or
+gunzip surface_duo.img.xz
 ```
 2. If you are migrating from Android 12L (stock) follow this step. You need to unlock the bootloader before proceeding. Please pay attention to commands, do not copy and execute the commands blindly.
 ```shell
@@ -29,7 +39,7 @@ fastboot delete-logical-partition system_b
 # if current slot is b, delete the system_a
 fastboot delete-logical-partition system_a
 
-fastboot flash system system_duo_aosp.img
+fastboot flash system system_duo.img
 fastboot reboot 
 ```
 3. Migrating from 13/14 pixel experience, follow the below steps 
@@ -41,7 +51,13 @@ fastboot reboot
 
 
 ## Issues
-[Open issue](https://github.com/archfx/duo-de/issues/new/choose)
+
+Currenlty known issues : 
+- No OTA support, expect in the next release
+- Boot image is mispalaced (will be fixed in next release)
+
+Any other issue, please 
+[open an issue](https://github.com/Archfx/duo-de/issues/new/choose) with a detailed description.
 
 ## Credits
 These people have helped this project in some way or another, so they should be the ones who receive all the credit:
