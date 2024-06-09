@@ -48,7 +48,7 @@ adb reboot fastboot
 fastboot flash system aosp-arm64-ab-gapps-14.0-<<version>>.img
 fastboot reboot 
 ```
-
+4. Once you flash a **duo-de** version using the above steps, subsequent updates will be received using OTA. You can check updates using ``settings -> system -> system updates``.
 
 ## Issues
 
