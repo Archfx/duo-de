@@ -21,10 +21,10 @@ Following are the steps to flash this image to your surface duo.
 
 1. Download the release 
 ```shell
-wget https://github.com/Archfx/duo-de/releashttps://github.com/Archfx/duo-de/releases/download/v2.1-de/system_duo.img.xz
-tar -xf surface_duo.img.xz
+wget https://github.com/Archfx/duo-de/releases/download/<<version>>/aosp-arm64-ab-gapps-14.0-<<version>>.img.xz
+tar -xf aosp-arm64-ab-gapps-14.0-<<version>>.img.xz
 # or
-gunzip surface_duo.img.xz
+gunzip aosp-arm64-ab-gapps-14.0-<<version>>.img.xz
 ```
 2. If you are migrating from Android 12L (stock) follow this step. You need to unlock the bootloader before proceeding. Please pay attention to commands, do not copy and execute the commands blindly.
 ```shell
@@ -39,13 +39,13 @@ fastboot delete-logical-partition system_b
 # if current slot is b, delete the system_a
 fastboot delete-logical-partition system_a
 
-fastboot flash system system_duo.img
+fastboot flash system aosp-arm64-ab-gapps-14.0-<<version>>.img
 fastboot reboot 
 ```
 3. Migrating from 13/14 pixel experience, follow the below steps 
 ```shell
 adb reboot fastboot
-fastboot flash system system_duo_aosp.img
+fastboot flash system aosp-arm64-ab-gapps-14.0-<<version>>.img
 fastboot reboot 
 ```
 
@@ -53,8 +53,7 @@ fastboot reboot
 ## Issues
 
 Currently known issues : 
-- No OTA support, expect in the next release
-- Boot image is misplaced (will be fixed in next release)
+- None
 
 Any other issues, please 
 [open an issue](https://github.com/Archfx/duo-de/issues/new/choose) with a detailed description.
