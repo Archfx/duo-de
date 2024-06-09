@@ -11,7 +11,7 @@ echo
 set -e
 
 BL=$PWD/treble_aosp
-BD=$HOME/builds
+BD=$PWD/duo-de/builds
 BV=$1
 
 initRepos() {
@@ -73,10 +73,9 @@ buildVariant() {
     # make -j$(nproc --all) installclean
     # make -j$(nproc --all) systemimage
     # make -j$(nproc --all) target-files-package otatools
-    # make -j4 installclean
-    # make -j4 systemimage
-    # make -j4 target-files-package otatools
-    # bash $BL/sign.sh "vendor/ponces-priv/keys" $OUT/signed-target_files.zip
+    make -j4 installclean
+    make -j4 systemimage
+    make -j4 target-files-package otatools
     bash $BL/sign.sh "vendor/archfx-priv/keys" $OUT/signed-target_files.zip
     unzip -jq $OUT/signed-target_files.zip IMAGES/system.img -d $OUT
     mv $OUT/system.img $BD/system-"$1".img

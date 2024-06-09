@@ -11,7 +11,7 @@ echo
 set -e
 
 BL=$PWD/treble_aosp
-BD=$HOME/builds
+BD=$PWD/duo-de/builds
 TAG="$(date +v%Y.%m.%d)"
 GUSER="archfx"
 GREPO="duo-de"
