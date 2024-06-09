@@ -73,13 +73,15 @@ buildVariant() {
     # make -j$(nproc --all) installclean
     # make -j$(nproc --all) systemimage
     # make -j$(nproc --all) target-files-package otatools
-    make -j4 installclean
-    make -j4 systemimage
-    # make -j2 target-files-package otatools
+    # make -j4 installclean
+    # make -j4 systemimage
+    # make -j4 target-files-package otatools
     # bash $BL/sign.sh "vendor/ponces-priv/keys" $OUT/signed-target_files.zip
-    # unzip -jq $OUT/signed-target_files.zip IMAGES/system.img -d $OUT
-    # mv $OUT/system.img $BD/system-"$1".img
+    bash $BL/sign.sh "vendor/archfx-priv/keys" $OUT/signed-target_files.zip
+    unzip -jq $OUT/signed-target_files.zip IMAGES/system.img -d $OUT
+    mv $OUT/system.img $BD/system-"$1".img
 
+    echo "image copied to $BD/system-"$1".img"
     echo
 }
 
@@ -134,7 +136,7 @@ generateOta() {
             [[ "$filename" == *"-vndklite"* ]] && vndk="-vndklite" || vndk=""
             name="treble_${arch}_b${variant}N${vndk}"
             size=$(wc -c $file | awk '{print $1}')
-            url="https://github.com/archfx/epsilon/releases/download/$version/$filename"
+            url="https://github.com/archfx/duo-de/releases/download/$version/$filename"
             json="${json} {\"name\": \"$name\",\"size\": \"$size\",\"url\": \"$url\"},"
         done
         json="${json%?}]}"
@@ -143,34 +145,6 @@ generateOta() {
     echo
 }
 
-# add_product_package() {
-#     local file_path="vendor/hardware_overlay/overlay.mk"
-#     local package_line='Smartdock \\'
-#     # Define the line to replace
-#     replace_line='PRODUCT_PACKAGES += \'
-#     # Define the new line
-#     new_line='PRODUCT_PACKAGES += '
-#     new_line+='\
-#         Smartdock\'
-
-#     # Check if the file exists
-#     if [[ -f "$file_path" ]]; then
-#         # Check if the line is already present in the file
-#         if ! grep -Fxq "$package_line" "$file_path"; then
-#             # Add the line to the end of the file
-#             # echo "$package_line" >> "$file_path"
-#             echo "s|$replace_line|$new_line|g" "$file_path"
-#             # sed -i "s|$replace_line|$new_line|g" "$file_path"
-
-#             sed -i 's|PRODUCT_PACKAGES += \/|PRODUCT_PACKAGES += \\\n        Smartdock\/|g' "$file_path"
-#             echo "Added '$package_line' to $file_path"
-#         else
-#             echo "'$package_line' is already present in $file_path"
-#         fi
-#     else
-#         echo "File $file_path does not exist"
-#     fi
-# }
 
 taskbar_app(){
 
@@ -187,7 +161,6 @@ taskbar_app(){
     mkdir  -p vendor/hardware_overlay/Smartdock
     cp smartdock/Smartdock.apk vendor/hardware_overlay/Smartdock/app.apk
     cp vendor/hardware_overlay/TrebleApp/Android.mk vendor/hardware_overlay/Smartdock/Android.mk
-    # wget https://f-droid.org/repo/cu.axel.smartdock_1121.apk -O vendor/hardware_overlay/Smartdock/app.apk
     sed -i 's/LOCAL_MODULE := TrebleApp/LOCAL_MODULE := Smartdock/' vendor/hardware_overlay/Smartdock/Android.mk
     sed -i 's/LOCAL_OVERRIDES_PACKAGES := Updater/LOCAL_OVERRIDES_PACKAGES := Trebuchet Home Launcher2 Launcher3 Launcher3QuickStep/' vendor/hardware_overlay/Smartdock/Android.mk
 
@@ -203,8 +176,8 @@ setupEnv
 # buildTrebleApp
 # taskbar_app
 buildVariants
-# generatePackages
-# generateOta
+generatePackages
+generateOta
 
 END=$(date +%s)
 ELAPSEDM=$(($(($END-$START))/60))

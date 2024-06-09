@@ -51,7 +51,8 @@ updateOta() {
     pushd "$BL"
     git add config/ota.json
     git commit -m "build: Bump OTA to $TAG"
-    git push
+    # git push
+    git push --set-upstream origin main-14
     popd
     echo
 }
