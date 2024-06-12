@@ -168,15 +168,15 @@ taskbar_app(){
 
 START=$(date +%s)
 
-# initRepos
-# syncRepos
-# applyPatches
-setupEnv
+initRepos
+syncRepos
+applyPatches
+# setupEnv
 # buildTrebleApp
 # taskbar_app
-buildVariants
-generatePackages
-generateOta
+# buildVariants
+# generatePackages
+# generateOta
 
 END=$(date +%s)
 ELAPSEDM=$(($(($END-$START))/60))
