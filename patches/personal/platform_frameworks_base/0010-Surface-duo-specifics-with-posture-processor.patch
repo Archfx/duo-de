@@ -125,7 +125,7 @@ index 3644054e3b78..71335da742dc 100644
 +                VENDOR_CONFIG_FILE_PATH, CONFIG_FILE_NAME);
 +        if (configFileFromSystemDir .exists()) {
 +            return configFileFromSystemDir;
-+        }                
++        }
 +
          final File configFileFromVendorDir = Environment.buildPath(Environment.getVendorDirectory(),
                  VENDOR_CONFIG_FILE_PATH, CONFIG_FILE_NAME);

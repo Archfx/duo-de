@@ -102,7 +102,7 @@ index 547c579..703d66d 100644
          if (!QualcommSettings.enabled())
              target.removeIf { it.fragment == QualcommSettingsFragment::class.java.name }
 +        if (!DuoSettings.enabled())
-+            target.removeIf { it.fragment == DuoSettingsFragment::class.java.name }   
++            target.removeIf { it.fragment == DuoSettingsFragment::class.java.name }
          if (!VsmartSettings.enabled())
              target.removeIf { it.fragment == VsmartSettingsFragment::class.java.name }
          if (!MyDeviceSettings.enabled())
