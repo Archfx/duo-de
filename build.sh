@@ -148,9 +148,6 @@ generateOta() {
 taskbar_app(){
 
     echo "Building the Smartdock app"
-    cp treble_app/build.sh smartdock/build.sh
-    sed -i 's/TrebleApp.apk/Smartdock.apk/g' smartdock/build.sh
-    sed -i 's/file=app-release-unsigned/file=app-release/g' smartdock/build.sh
     cd smartdock
     ln -sf ../treble_app/sdk sdk
     ln -sf ../treble_app/signapk signapk
@@ -159,10 +156,6 @@ taskbar_app(){
     cd ..
     mkdir  -p vendor/hardware_overlay/Smartdock
     cp smartdock/Smartdock.apk vendor/hardware_overlay/Smartdock/app.apk
-    cp vendor/hardware_overlay/TrebleApp/Android.mk vendor/hardware_overlay/Smartdock/Android.mk
-    sed -i 's/LOCAL_MODULE := TrebleApp/LOCAL_MODULE := Smartdock/' vendor/hardware_overlay/Smartdock/Android.mk
-    sed -i 's/LOCAL_OVERRIDES_PACKAGES := Updater/LOCAL_OVERRIDES_PACKAGES := Trebuchet Home Launcher2 Launcher3 Launcher3QuickStep/' vendor/hardware_overlay/Smartdock/Android.mk
-
     echo "Smartdock app included"
 }
 
@@ -171,9 +164,9 @@ START=$(date +%s)
 initRepos
 syncRepos
 applyPatches
-# setupEnv
-# buildTrebleApp
-# taskbar_app
+setupEnv
+buildTrebleApp
+taskbar_app
 # buildVariants
 # generatePackages
 # generateOta
