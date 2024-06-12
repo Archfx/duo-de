@@ -53,7 +53,7 @@ fastboot reboot
 ## Issues
 
 Currently known issues : 
-- None
+- GAPPS variant has an issue with GBOARD, use an alternate keyboard (e.i. Microsoft swift-key) for the time being until AOSP GSI GAPPS packages are updated.
 
 Any other issues, please 
 [open an issue](https://github.com/Archfx/duo-de/issues/new/choose) with a detailed description.
