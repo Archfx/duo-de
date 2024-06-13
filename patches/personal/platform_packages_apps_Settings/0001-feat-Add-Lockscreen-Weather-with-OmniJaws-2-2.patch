@@ -1,4 +1,4 @@
-From 21f17d92ebf8876469738179ca38da48c6cb3ad0 Mon Sep 17 00:00:00 2001
+From 40d398a214a711e648a10cb7310ce3f17606675b Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Sun, 12 Nov 2023 11:24:17 +0000
 Subject: [PATCH 1/2] feat: Add Lockscreen Weather with OmniJaws (2/2)
@@ -22,13 +22,13 @@ Co-authored-by: Pranav Vashi <neobuddy89@gmail.com>
  create mode 100644 src/com/android/settings/custom/preference/SystemSettingSwitchPreference.java
 
 diff --git a/res/values/attrs.xml b/res/values/attrs.xml
-index 6f024a32be..d9f9a1a21d 100644
+index 200253a..5289822 100644
 --- a/res/values/attrs.xml
 +++ b/res/values/attrs.xml
-@@ -202,4 +202,17 @@
-     <attr name="notification_importance_button_background_color_selected" format="color" />
-     <attr name="notification_importance_button_border_color_selected" format="color" />
-     <attr name="notification_importance_button_foreground_color_selected" format="color" />
+@@ -203,4 +203,17 @@
+     <declare-styleable name="BackgroundPreference">
+         <attr name="background" format="reference" />
+     </declare-styleable>
 +
 +    <declare-styleable name="lineage_SelfRemovingPreference">
 +        <attr name="requiresPackage" format="string" />
@@ -44,10 +44,10 @@ index 6f024a32be..d9f9a1a21d 100644
 +    </declare-styleable>
  </resources>
 diff --git a/res/values/strings.xml b/res/values/strings.xml
-index 3db6c1c388..d927e6979c 100644
+index 0622daa..48d68fc 100644
 --- a/res/values/strings.xml
 +++ b/res/values/strings.xml
-@@ -11330,6 +11330,16 @@
+@@ -12056,6 +12056,16 @@
          <item quantity="other"><xliff:g id="first">%1$s</xliff:g>, <xliff:g id="second">%2$s</xliff:g></item>
      </plurals>
  
@@ -65,7 +65,7 @@ index 3db6c1c388..d927e6979c 100644
      <string name="rtt_settings_title"></string>
      <!-- Subtext for showing the option of RTT setting. [CHAR LIMIT=NONE] -->
 diff --git a/res/xml/security_lockscreen_settings.xml b/res/xml/security_lockscreen_settings.xml
-index 80e8fe69d2..360e58b9c1 100644
+index cb1ce44..b968908 100644
 --- a/res/xml/security_lockscreen_settings.xml
 +++ b/res/xml/security_lockscreen_settings.xml
 @@ -79,6 +79,31 @@
@@ -102,7 +102,7 @@ index 80e8fe69d2..360e58b9c1 100644
      <PreferenceCategory
 diff --git a/src/com/android/settings/custom/preference/ConstraintsHelper.java b/src/com/android/settings/custom/preference/ConstraintsHelper.java
 new file mode 100644
-index 0000000000..9583b6dfd0
+index 0000000..9583b6d
 --- /dev/null
 +++ b/src/com/android/settings/custom/preference/ConstraintsHelper.java
 @@ -0,0 +1,430 @@
@@ -538,7 +538,7 @@ index 0000000000..9583b6dfd0
 +}
 diff --git a/src/com/android/settings/custom/preference/SelfRemovingSwitchPreference.java b/src/com/android/settings/custom/preference/SelfRemovingSwitchPreference.java
 new file mode 100644
-index 0000000000..5ba32e55fd
+index 0000000..5ba32e5
 --- /dev/null
 +++ b/src/com/android/settings/custom/preference/SelfRemovingSwitchPreference.java
 @@ -0,0 +1,104 @@
@@ -648,7 +648,7 @@ index 0000000000..5ba32e55fd
 +}
 diff --git a/src/com/android/settings/custom/preference/SystemSettingSwitchPreference.java b/src/com/android/settings/custom/preference/SystemSettingSwitchPreference.java
 new file mode 100644
-index 0000000000..b6a4654f00
+index 0000000..b6a4654
 --- /dev/null
 +++ b/src/com/android/settings/custom/preference/SystemSettingSwitchPreference.java
 @@ -0,0 +1,53 @@
@@ -706,7 +706,7 @@ index 0000000000..b6a4654f00
 +    }
 +}
 diff --git a/src/com/android/settings/security/LockscreenDashboardFragment.java b/src/com/android/settings/security/LockscreenDashboardFragment.java
-index 2e4a1f2891..320ce9f247 100644
+index 2e4a1f2..320ce9f 100644
 --- a/src/com/android/settings/security/LockscreenDashboardFragment.java
 +++ b/src/com/android/settings/security/LockscreenDashboardFragment.java
 @@ -30,6 +30,9 @@ import android.os.Looper;

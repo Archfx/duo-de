@@ -1,4 +1,4 @@
-From b6f12f7dc86b1ecbdb91a24c4ada69d6820095b1 Mon Sep 17 00:00:00 2001
+From 8048cee6ad85dfe3cc5dcd30005ffbeff4d9c0b4 Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Tue, 26 Mar 2024 16:32:07 +0000
 Subject: [PATCH] Revert "Add support for toggling taskbar"
@@ -12,31 +12,31 @@ This reverts commit 5a0709789f1665a9f3b3c843865c90d5dda53c7f.
  4 files changed, 3 insertions(+), 39 deletions(-)
 
 diff --git a/Android.bp b/Android.bp
-index 34fe2c123c..8fe14a0e02 100644
+index 8c1298c52b..d987f16bea 100644
 --- a/Android.bp
 +++ b/Android.bp
-@@ -185,7 +185,6 @@ android_library {
-         "animationlib",
-         "com_android_launcher3_flags_lib",
+@@ -213,7 +213,6 @@ android_library {
          "com_android_wm_shell_flags_lib",
+         "android.appwidget.flags-aconfig-java",
+         "com.android.window.flags.window-aconfig-java",
 -        "org.lineageos.platform"
      ],
      sdk_version: "current",
      min_sdk_version: min_launcher3_sdk_version,
 diff --git a/quickstep/src/com/android/launcher3/taskbar/TaskbarManager.java b/quickstep/src/com/android/launcher3/taskbar/TaskbarManager.java
-index d696695175..bbac11625d 100644
+index d7baf50cda..ecbc7e7fdc 100644
 --- a/quickstep/src/com/android/launcher3/taskbar/TaskbarManager.java
 +++ b/quickstep/src/com/android/launcher3/taskbar/TaskbarManager.java
-@@ -73,8 +73,6 @@ import com.android.systemui.unfold.UnfoldTransitionProgressProvider;
+@@ -77,8 +77,6 @@ import com.android.systemui.shared.system.QuickStepContract;
+ import com.android.systemui.unfold.UnfoldTransitionProgressProvider;
  import com.android.systemui.unfold.util.ScopedUnfoldTransitionProgressProvider;
- import com.android.wm.shell.Flags;
  
 -import lineageos.providers.LineageSettings;
 -
  import java.io.PrintWriter;
  import java.util.StringJoiner;
  
-@@ -107,9 +105,6 @@ public class TaskbarManager {
+@@ -111,9 +109,6 @@ public class TaskbarManager {
      private static final Uri NAV_BAR_KIDS_MODE = Settings.Secure.getUriFor(
              Settings.Secure.NAV_BAR_KIDS_MODE);
  
@@ -45,16 +45,16 @@ index d696695175..bbac11625d 100644
 -
      private final Context mContext;
      private final @Nullable Context mNavigationBarPanelContext;
-     private WindowManager mWindowManager;
-@@ -142,7 +137,6 @@ public class TaskbarManager {
-      */
-     private final OnIDPChangeListener mIdpChangeListener = c -> recreateTaskbar();
+     private final DeviceStateManager mDeviceStateManager;
+@@ -157,7 +152,6 @@ public class TaskbarManager {
+         }
+     }
      private final SettingsCache.OnChangeListener mOnSettingsChangeListener = c -> recreateTaskbar();
 -    private final SettingsCache.OnChangeListener mEnableTaskBarListener;
  
      private boolean mUserUnlocked = false;
  
-@@ -281,18 +275,6 @@ public class TaskbarManager {
+@@ -330,18 +324,6 @@ public class TaskbarManager {
                  .register(USER_SETUP_COMPLETE_URI, mOnSettingsChangeListener);
          SettingsCache.INSTANCE.get(mContext)
                  .register(NAV_BAR_KIDS_MODE, mOnSettingsChangeListener);
@@ -73,7 +73,7 @@ index d696695175..bbac11625d 100644
          Log.d(TASKBAR_NOT_DESTROYED_TAG, "registering component callbacks from constructor.");
          mContext.registerComponentCallbacks(mComponentCallbacks);
          mShutdownReceiver.register(mContext, Intent.ACTION_SHUTDOWN);
-@@ -450,10 +432,9 @@ public class TaskbarManager {
+@@ -500,10 +482,9 @@ public class TaskbarManager {
                  + " [dp != null (i.e. mUserUnlocked)]=" + (dp != null)
                  + " FLAG_HIDE_NAVBAR_WINDOW=" + ENABLE_TASKBAR_NAVBAR_UNIFICATION
                  + " dp.isTaskbarPresent=" + (dp == null ? "null" : dp.isTaskbarPresent));
@@ -87,10 +87,10 @@ index d696695175..bbac11625d 100644
              }
  
 diff --git a/quickstep/src/com/android/quickstep/SystemUiProxy.java b/quickstep/src/com/android/quickstep/SystemUiProxy.java
-index 0cb04bfb23..a8c680958f 100644
+index 24db2edc78..72f67fc544 100644
 --- a/quickstep/src/com/android/quickstep/SystemUiProxy.java
 +++ b/quickstep/src/com/android/quickstep/SystemUiProxy.java
-@@ -475,18 +475,6 @@ public class SystemUiProxy implements ISystemUiProxy {
+@@ -498,18 +498,6 @@ public class SystemUiProxy implements ISystemUiProxy, NavHandle {
          }
      }
  
@@ -110,7 +110,7 @@ index 0cb04bfb23..a8c680958f 100644
      public void notifyTaskbarStatus(boolean visible, boolean stashed) {
          if (mSystemUiProxy != null) {
 diff --git a/src/com/android/launcher3/DeviceProfile.java b/src/com/android/launcher3/DeviceProfile.java
-index 9943c6e192..1ca7da9d44 100644
+index b666ac1883..f96d59ebba 100644
 --- a/src/com/android/launcher3/DeviceProfile.java
 +++ b/src/com/android/launcher3/DeviceProfile.java
 @@ -70,8 +70,6 @@ import com.android.launcher3.util.IconSizeSteps;
@@ -122,7 +122,7 @@ index 9943c6e192..1ca7da9d44 100644
  import java.io.PrintWriter;
  import java.util.Locale;
  import java.util.function.Consumer;
-@@ -348,9 +346,7 @@ public class DeviceProfile {
+@@ -350,9 +348,7 @@ public class DeviceProfile {
          isTablet = info.isTablet(windowBounds);
          isPhone = !isTablet;
          isTwoPanels = isTablet && isMultiDisplay;
