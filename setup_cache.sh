@@ -1,3 +1,0 @@
-export USE_CCACHE=1
-export CCACHE_COMPRESS=1
-export CCACHE_MAXSIZE=50G
