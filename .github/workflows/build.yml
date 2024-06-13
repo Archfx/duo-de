@@ -35,8 +35,6 @@ jobs:
           path: vendor_ponces-priv
 
       - name: Build ROM
-        env:
-          GRADLE_OPTS: '-Dorg.gradle.jvmargs="-Xmx4096m"'
         run: |
           mkdir builds
           docker run --rm \
@@ -69,5 +67,4 @@ jobs:
     if: ${{ always() }}
     steps:
       - name: Cleanup
-        run: |
-          docker stop treble || true
+        run: docker stop treble || true

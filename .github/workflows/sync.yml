@@ -47,5 +47,4 @@ jobs:
     if: ${{ always() }}
     steps:
       - name: Cleanup
-        run: |
-          docker stop td || true
+        run: docker stop td || true
