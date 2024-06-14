@@ -87,9 +87,9 @@ taskbar_app(){
 buildVariant() {
     echo "--> Building $1"
     lunch "$1"-ap1a-userdebug
-    # make -j$(nproc --all) installclean
-    # make -j$(nproc --all) systemimage
-    # make -j$(nproc --all) target-files-package otatools
+    make -j$(nproc --all) installclean
+    make -j$(nproc --all) systemimage
+    make -j$(nproc --all) target-files-package otatools
     # make -j3 installclean
     # make -j3 systemimage
     # make -j3 target-files-package otatools
@@ -115,7 +115,7 @@ buildVndkliteVariant() {
 buildVariants() {
     # buildVariant treble_a64_bvN
     # buildVariant treble_a64_bgN
-    # buildVariant treble_arm64_bvN
+    buildVariant treble_arm64_bvN
     buildVariant treble_arm64_bgN
     # buildVndkliteVariant treble_a64_bvN
     # buildVndkliteVariant treble_a64_bgN
