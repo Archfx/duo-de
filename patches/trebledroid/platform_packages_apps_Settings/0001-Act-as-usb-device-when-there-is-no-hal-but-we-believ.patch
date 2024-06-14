@@ -1,4 +1,4 @@
-From eba6b3a26ba47987313dcf424f000d963234fcad Mon Sep 17 00:00:00 2001
+From 842c972fd54340f21cf0d1784c56748ddd92f52c Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Tue, 14 Aug 2018 21:48:19 +0200
 Subject: [PATCH 1/4] Act as usb device when there is no hal, but we believe we
@@ -10,7 +10,7 @@ Change-Id: I036090738525fd8cc63534d52d02ab1852950a7d
  1 file changed, 7 insertions(+)
 
 diff --git a/src/com/android/settings/connecteddevice/usb/UsbConnectionBroadcastReceiver.java b/src/com/android/settings/connecteddevice/usb/UsbConnectionBroadcastReceiver.java
-index 16ea602bc4f..262afbcbb31 100644
+index 16ea602..262afbc 100644
 --- a/src/com/android/settings/connecteddevice/usb/UsbConnectionBroadcastReceiver.java
 +++ b/src/com/android/settings/connecteddevice/usb/UsbConnectionBroadcastReceiver.java
 @@ -93,6 +93,13 @@ public class UsbConnectionBroadcastReceiver extends BroadcastReceiver implements

@@ -1,4 +1,4 @@
-From 0c6fbefe5d67a53d083287610bb7b7acf9f7dea2 Mon Sep 17 00:00:00 2001
+From 4db1d331b39de5315545a3e88fc9d7c5ce238557 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sat, 27 May 2023 05:36:21 -0400
 Subject: [PATCH 13/26] watchdogd: Support pinging two watchdogs
@@ -8,7 +8,7 @@ Subject: [PATCH 13/26] watchdogd: Support pinging two watchdogs
  1 file changed, 33 insertions(+)
 
 diff --git a/watchdogd/watchdogd.cpp b/watchdogd/watchdogd.cpp
-index 5dc41e6b8..69abb4e2b 100644
+index 5dc41e6..69abb4e 100644
 --- a/watchdogd/watchdogd.cpp
 +++ b/watchdogd/watchdogd.cpp
 @@ -20,12 +20,15 @@

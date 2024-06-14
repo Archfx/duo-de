@@ -1,4 +1,4 @@
-From b235def6f3f9772248330e0ee97fa6ecb6c60509 Mon Sep 17 00:00:00 2001
+From 57d618b3311a0959888161c98ce2c2ed5d714929 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Thu, 23 Nov 2023 11:05:20 -0500
 Subject: [PATCH 21/26] HACK: Ignore errors when setting fscrypt directory.
@@ -9,7 +9,7 @@ Subject: [PATCH 21/26] HACK: Ignore errors when setting fscrypt directory.
  1 file changed, 6 insertions(+), 2 deletions(-)
 
 diff --git a/init/builtins.cpp b/init/builtins.cpp
-index a95a4a315..7558f4dff 100644
+index 606ea8c..3be6c7c 100644
 --- a/init/builtins.cpp
 +++ b/init/builtins.cpp
 @@ -430,9 +430,13 @@ static Result<void> make_dir_with_options(const MkdirOptions& options) {

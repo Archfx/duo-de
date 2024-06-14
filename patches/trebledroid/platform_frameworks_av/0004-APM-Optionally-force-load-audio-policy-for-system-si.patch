@@ -1,4 +1,4 @@
-From deec1d7231558483ad19a3f4631692c4e9357db3 Mon Sep 17 00:00:00 2001
+From 03a03efb24f6fda0102414d5fcfb975dd1676190 Mon Sep 17 00:00:00 2001
 From: Peter Cai <peter@typeblog.net>
 Date: Wed, 24 Aug 2022 15:42:39 -0400
 Subject: [PATCH 04/24] APM: Optionally force-load audio policy for system-side
@@ -14,7 +14,7 @@ Change-Id: I279fff541a531f922f3fa55b8f14d00237db59ff
  1 file changed, 25 insertions(+)
 
 diff --git a/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp b/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp
-index 1ab472f396..29d36ca00b 100644
+index 1ab472f..29d36ca 100644
 --- a/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp
 +++ b/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp
 @@ -25,6 +25,7 @@

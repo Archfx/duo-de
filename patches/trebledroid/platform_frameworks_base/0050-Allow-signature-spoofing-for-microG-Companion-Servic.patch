@@ -1,4 +1,4 @@
-From 9851d034b5d9d56d146fb07bf6caf91944109259 Mon Sep 17 00:00:00 2001
+From 38a67d5f8702d100a2c977728accb78067ba6dc9 Mon Sep 17 00:00:00 2001
 From: LuK1337 <priv.luk@gmail.com>
 Date: Mon, 19 Feb 2024 16:20:04 +0100
 Subject: [PATCH 50/53] Allow signature spoofing for microG Companion/Services
@@ -17,11 +17,11 @@ phh change: No need to be debuggable
 Change-Id: I8fc82ed266a2cc59636b662c7ea7e29c94f509b5
 ---
  .../com/android/server/pm/AppsFilterImpl.java |  2 +
- .../com/android/server/pm/ComputerEngine.java | 46 +++++++++++++++++++
- 2 files changed, 48 insertions(+)
+ .../com/android/server/pm/ComputerEngine.java | 47 +++++++++++++++++++
+ 2 files changed, 49 insertions(+)
 
 diff --git a/services/core/java/com/android/server/pm/AppsFilterImpl.java b/services/core/java/com/android/server/pm/AppsFilterImpl.java
-index 82622d9a4ea8..277c9abe2e1c 100644
+index cc4c2b5bf893..57263da936d6 100644
 --- a/services/core/java/com/android/server/pm/AppsFilterImpl.java
 +++ b/services/core/java/com/android/server/pm/AppsFilterImpl.java
 @@ -36,6 +36,7 @@ import static com.android.server.pm.AppsFilterUtils.canQueryAsUpdateOwner;
@@ -41,10 +41,10 @@ index 82622d9a4ea8..277c9abe2e1c 100644
                              || newPkg.isForceQueryable()
                              || ArrayUtils.contains(mForceQueryableByDevicePackageNames,
 diff --git a/services/core/java/com/android/server/pm/ComputerEngine.java b/services/core/java/com/android/server/pm/ComputerEngine.java
-index 3cb2420cd223..b0d9be30edc1 100644
+index 9afdde53643c..60979e086a34 100644
 --- a/services/core/java/com/android/server/pm/ComputerEngine.java
 +++ b/services/core/java/com/android/server/pm/ComputerEngine.java
-@@ -100,6 +100,7 @@ import android.content.pm.UserPackage;
+@@ -102,6 +102,7 @@ import android.content.pm.UserPackage;
  import android.content.pm.VersionedPackage;
  import android.os.Binder;
  import android.os.Build;
@@ -52,7 +52,7 @@ index 3cb2420cd223..b0d9be30edc1 100644
  import android.os.IBinder;
  import android.os.ParcelableException;
  import android.os.PatternMatcher;
-@@ -172,6 +173,7 @@ import java.util.Collections;
+@@ -174,6 +175,7 @@ import java.util.Collections;
  import java.util.Comparator;
  import java.util.List;
  import java.util.Objects;
@@ -60,7 +60,7 @@ index 3cb2420cd223..b0d9be30edc1 100644
  import java.util.Set;
  import java.util.UUID;
  
-@@ -421,6 +423,10 @@ public class ComputerEngine implements Computer {
+@@ -423,6 +425,10 @@ public class ComputerEngine implements Computer {
      private final PackageManagerInternal.ExternalSourcesPolicy mExternalSourcesPolicy;
      private final CrossProfileIntentResolverEngine mCrossProfileIntentResolverEngine;
  
@@ -71,7 +71,7 @@ index 3cb2420cd223..b0d9be30edc1 100644
      // PackageManagerService attributes that are primitives are referenced through the
      // pms object directly.  Primitives are the only attributes so referenced.
      protected final PackageManagerService mService;
-@@ -1463,6 +1469,42 @@ public class ComputerEngine implements Computer {
+@@ -1465,6 +1471,42 @@ public class ComputerEngine implements Computer {
          return result;
      }
  
@@ -114,10 +114,11 @@ index 3cb2420cd223..b0d9be30edc1 100644
      public final PackageInfo generatePackageInfo(PackageStateInternal ps,
              @PackageManager.PackageInfoFlagsBits long flags, int userId) {
          if (!mUserManager.exists(userId)) return null;
-@@ -1511,6 +1553,10 @@ public class ComputerEngine implements Computer {
-             packageInfo.packageName = packageInfo.applicationInfo.packageName =
-                     resolveExternalPackageName(p);
- 
+@@ -1520,6 +1562,11 @@ public class ComputerEngine implements Computer {
+                             mApexManager.getActivePackageNameForApexModuleName(apexModuleName));
+                 }
+             }
++
 +            generateFakeSignature(p).ifPresent(fakeSignature -> {
 +                packageInfo.signatures = new Signature[]{fakeSignature};
 +            });

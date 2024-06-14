@@ -1,4 +1,4 @@
-From 40210f1196af168dedaa7e815e00cc19d263265d Mon Sep 17 00:00:00 2001
+From c611b2040aff35ef6a1e4660ec0a9a23e854996a Mon Sep 17 00:00:00 2001
 From: Andy CrossGate Yan <GeForce8800Ultra@gmail.com>
 Date: Sat, 12 Aug 2023 20:11:17 +0800
 Subject: [PATCH 35/53] Add runWithCleanCallingIdentity variant with both
@@ -12,10 +12,10 @@ Change-Id: If444290787025e130dce4bdeaf92372ae32793fe
  1 file changed, 30 insertions(+)
 
 diff --git a/telephony/common/com/android/internal/telephony/util/TelephonyUtils.java b/telephony/common/com/android/internal/telephony/util/TelephonyUtils.java
-index aed8fb8c4503..1467e7f2fc29 100644
+index a63db88cb614..1d5a36885307 100644
 --- a/telephony/common/com/android/internal/telephony/util/TelephonyUtils.java
 +++ b/telephony/common/com/android/internal/telephony/util/TelephonyUtils.java
-@@ -42,7 +42,9 @@ import com.android.internal.telephony.ITelephony;
+@@ -44,7 +44,9 @@ import com.android.internal.telephony.ITelephony;
  import java.io.PrintWriter;
  import java.util.Collections;
  import java.util.List;
@@ -25,7 +25,7 @@ index aed8fb8c4503..1467e7f2fc29 100644
  import java.util.concurrent.Executor;
  import java.util.concurrent.TimeUnit;
  import java.util.function.Supplier;
-@@ -151,6 +153,34 @@ public final class TelephonyUtils {
+@@ -153,6 +155,34 @@ public final class TelephonyUtils {
          }
      }
  

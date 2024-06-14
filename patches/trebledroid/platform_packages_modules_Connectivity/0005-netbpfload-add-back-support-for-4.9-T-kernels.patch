@@ -1,7 +1,7 @@
-From 2303bf88ed1b4c24672b7b1e51aefbcf1becdd38 Mon Sep 17 00:00:00 2001
+From c040b0d879dc8d26a6d45dcbbd64c9e20546f057 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Maciej=20=C5=BBenczykowski?= <maze@google.com>
 Date: Mon, 11 Mar 2024 12:40:06 +0000
-Subject: [PATCH 05/11] netbpfload: add back support for 4.9-T kernels
+Subject: [PATCH 05/10] netbpfload: add back support for 4.9-T kernels
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -16,7 +16,7 @@ Change-Id: I42da5c56fe4b69635b9678ff57ade7788c17f7c8
  1 file changed, 18 insertions(+)
 
 diff --git a/netbpfload/loader.cpp b/netbpfload/loader.cpp
-index c534b2cecc..7754a3ef4f 100644
+index c534b2c..7754a3e 100644
 --- a/netbpfload/loader.cpp
 +++ b/netbpfload/loader.cpp
 @@ -574,6 +574,14 @@ static int getSymNameByIdx(ifstream& elfFile, int index, string& name) {

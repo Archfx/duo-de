@@ -1,4 +1,4 @@
-From d6085eba13430b40a3beec9d580d04aaedffd8b5 Mon Sep 17 00:00:00 2001
+From 588c229bbc845d3583d94abbae02ed241e2bf41f Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Sun, 5 Nov 2023 15:18:03 +0000
 Subject: [PATCH 22/24] Add a prop to fix echo on incoming or outgoing calls
@@ -11,7 +11,7 @@ Change-Id: I3a05608ad7b3f0876160d5f6a12b7c529b8f0961
  1 file changed, 9 insertions(+)
 
 diff --git a/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp b/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp
-index 26edcaa1c4..059e4adfa1 100644
+index 26edcaa..059e4ad 100644
 --- a/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp
 +++ b/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp
 @@ -669,6 +669,9 @@ std::variant<status_t, RouteTraits::Element> PolicySerializer::deserialize<Route
