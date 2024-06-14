@@ -1,4 +1,4 @@
-From e58cce34f1f5620e56c6f087e21b400e99d64b6f Mon Sep 17 00:00:00 2001
+From 84d0cd23c098c746e101b853bb3167400edb329b Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Tue, 5 Oct 2021 17:59:16 -0400
 Subject: [PATCH 02/53] Fallback to stupid autobrightness if brightness values
@@ -14,10 +14,10 @@ Change-Id: Ieb679b34239013a5e31b34cb010b12febd9ef6d9
  1 file changed, 7 insertions(+), 2 deletions(-)
 
 diff --git a/services/core/java/com/android/server/display/DisplayDeviceConfig.java b/services/core/java/com/android/server/display/DisplayDeviceConfig.java
-index d97127c91fbf..3dcb84dad786 100644
+index 9b2dcc53f456..04e06b99d3ee 100644
 --- a/services/core/java/com/android/server/display/DisplayDeviceConfig.java
 +++ b/services/core/java/com/android/server/display/DisplayDeviceConfig.java
-@@ -897,9 +897,14 @@ public class DisplayDeviceConfig {
+@@ -894,9 +894,14 @@ public class DisplayDeviceConfig {
       */
      public static DisplayDeviceConfig create(Context context, boolean useConfigXml,
              DisplayManagerFlags flags) {

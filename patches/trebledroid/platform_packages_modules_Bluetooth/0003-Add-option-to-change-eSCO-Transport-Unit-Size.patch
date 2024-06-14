@@ -1,7 +1,7 @@
-From 2c0a4655e23abb45e406cfb97e13272a0074339e Mon Sep 17 00:00:00 2001
+From 73601aa1e11e7adf0b46277d9a8486843a7faf3d Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Thu, 17 Jun 2021 15:48:53 +0100
-Subject: [PATCH 3/9] Add option to change eSCO Transport Unit Size
+Subject: [PATCH 3/8] Add option to change eSCO Transport Unit Size
 
 Fixes Bluetooth calls on some Samsung devices if set to 16.
 
@@ -15,11 +15,11 @@ Change-Id: I3e5897c2ce983042b9a4bef9def6744ba4253bcb
  1 file changed, 7 insertions(+), 1 deletion(-)
 
 diff --git a/system/device/src/esco_parameters.cc b/system/device/src/esco_parameters.cc
-index 684450a80b..5bf31289bc 100644
+index 15f1397..2159078 100644
 --- a/system/device/src/esco_parameters.cc
 +++ b/system/device/src/esco_parameters.cc
 @@ -25,7 +25,8 @@
- #include "hci/controller.h"
+ #include "hci/controller_interface.h"
  #include "main/shim/entry.h"
  
 -static const enh_esco_params_t default_esco_parameters[ESCO_NUM_CODECS] = {

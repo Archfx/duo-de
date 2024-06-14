@@ -1,4 +1,4 @@
-From 98c2114b1a5faaaacd6bb86eca308c92273f83b4 Mon Sep 17 00:00:00 2001
+From 44307267f0505226af96a2448f21a214727c0060 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Wed, 4 Sep 2019 21:11:48 +0200
 Subject: [PATCH 04/26] Panic into recovery rather than bootloader
@@ -12,7 +12,7 @@ Change-Id: If04bb6572dc66677d7b44f7d302b2d69ce526200
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/init/reboot_utils.cpp b/init/reboot_utils.cpp
-index 547b1869f..dd0fbbfe8 100644
+index 547b186..dd0fbbf 100644
 --- a/init/reboot_utils.cpp
 +++ b/init/reboot_utils.cpp
 @@ -37,7 +37,7 @@

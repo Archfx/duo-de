@@ -1,4 +1,4 @@
-From 9ad3c32417dfe8f440bdbe5c13e72081b6cae87a Mon Sep 17 00:00:00 2001
+From 2f1fe4dfa5002fb4e29f53898b9979ba8532b686 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Mon, 29 Jan 2024 17:15:38 -0500
 Subject: [PATCH 46/53] Bunch of FOD stuff -- commonize refreshing the
@@ -9,10 +9,10 @@ Subject: [PATCH 46/53] Bunch of FOD stuff -- commonize refreshing the
  1 file changed, 138 insertions(+), 19 deletions(-)
 
 diff --git a/services/core/java/com/android/server/biometrics/AuthService.java b/services/core/java/com/android/server/biometrics/AuthService.java
-index 13e7aff02a15..9965050c88a5 100644
+index 16dbbe753cbe..061f66352d3b 100644
 --- a/services/core/java/com/android/server/biometrics/AuthService.java
 +++ b/services/core/java/com/android/server/biometrics/AuthService.java
-@@ -45,6 +45,7 @@ import android.hardware.biometrics.IAuthService;
+@@ -46,6 +46,7 @@ import android.hardware.biometrics.IAuthService;
  import android.hardware.biometrics.IBiometricEnabledOnKeyguardCallback;
  import android.hardware.biometrics.IBiometricService;
  import android.hardware.biometrics.IBiometricServiceReceiver;
@@ -20,7 +20,7 @@ index 13e7aff02a15..9965050c88a5 100644
  import android.hardware.biometrics.IInvalidationCallback;
  import android.hardware.biometrics.ITestSession;
  import android.hardware.biometrics.ITestSessionCallback;
-@@ -94,6 +95,7 @@ import android.os.Build;
+@@ -99,6 +100,7 @@ import android.os.Build;
  import vendor.samsung.hardware.biometrics.fingerprint.V3_0.ISehBiometricsFingerprint;
  import vendor.goodix.hardware.biometrics.fingerprint.V2_1.IGoodixFingerprintDaemon;
  import vendor.samsung.hardware.sysinput.V1_0.ISehSysInputDev;
@@ -28,7 +28,7 @@ index 13e7aff02a15..9965050c88a5 100644
  
  import vendor.xiaomi.hardware.fingerprintextension.V1_0.IXiaomiFingerprint;
  
-@@ -117,6 +119,8 @@ public class AuthService extends SystemService {
+@@ -122,6 +124,8 @@ public class AuthService extends SystemService {
  
      private FileObserver fodFileObserver = null;
      private ISehBiometricsFingerprint mSamsungFingerprint = null;
@@ -37,7 +37,7 @@ index 13e7aff02a15..9965050c88a5 100644
  
      private IXiaomiFingerprint mXiaomiFingerprint = null;
  
-@@ -717,6 +721,101 @@ public class AuthService extends SystemService {
+@@ -778,6 +782,101 @@ public class AuthService extends SystemService {
       *                 └── for (s : p.sensors)
       *                     └── BiometricService.registerAuthenticator(s)
       */
@@ -139,9 +139,9 @@ index 13e7aff02a15..9965050c88a5 100644
      @Override
      public void onStart() {
          mBiometricService = mInjector.getBiometricService();
-@@ -744,20 +843,11 @@ public class AuthService extends SystemService {
-         // Registers HIDL and AIDL authenticators, but only HIDL configs need to be provided.
-         registerAuthenticators(hidlConfigs);
+@@ -809,20 +908,11 @@ public class AuthService extends SystemService {
+             registerAuthenticators(hidlConfigs);
+         }
  
 +        refreshVendorServices();
 +
@@ -164,7 +164,7 @@ index 13e7aff02a15..9965050c88a5 100644
              samsungCmd("fod_enable,1,1,0");
              String actualMaskBrightnessPath = "/sys/class/lcd/panel/actual_mask_brightness";
              android.util.Log.e("PHH-Enroll", "Reading actual brightness file gives " + readFile(actualMaskBrightnessPath));
-@@ -765,9 +855,7 @@ public class AuthService extends SystemService {
+@@ -830,9 +920,7 @@ public class AuthService extends SystemService {
                  @Override
                  public void onEvent(int event, String path) {
                      String actualMask = readFile(actualMaskBrightnessPath);
@@ -175,7 +175,7 @@ index 13e7aff02a15..9965050c88a5 100644
                      Slog.d("PHH-Enroll", "New actual mask brightness is " + actualMask);
                      try {
                          int eventReq = 0;
-@@ -1012,22 +1100,53 @@ public class AuthService extends SystemService {
+@@ -1205,22 +1293,53 @@ public class AuthService extends SystemService {
              udfpsProps[2] = (int)mW;
  
              try {

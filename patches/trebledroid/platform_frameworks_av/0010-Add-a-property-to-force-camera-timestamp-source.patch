@@ -1,4 +1,4 @@
-From 9a9328692e8b9e19a6f8b66b09ec149f72155eaf Mon Sep 17 00:00:00 2001
+From cc12c8ed4e3046b765d7e2985e472c522e5803a8 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Tue, 19 May 2020 14:01:14 +0200
 Subject: [PATCH 10/24] Add a property to force camera timestamp source
@@ -18,10 +18,10 @@ timestamp source.
  1 file changed, 10 insertions(+), 2 deletions(-)
 
 diff --git a/services/camera/libcameraservice/device3/Camera3Device.cpp b/services/camera/libcameraservice/device3/Camera3Device.cpp
-index 107cc192ef..40617ffb64 100644
+index 9792089..abc3f8f 100644
 --- a/services/camera/libcameraservice/device3/Camera3Device.cpp
 +++ b/services/camera/libcameraservice/device3/Camera3Device.cpp
-@@ -218,8 +218,16 @@ status_t Camera3Device::initializeCommonLocked() {
+@@ -209,8 +209,16 @@ status_t Camera3Device::initializeCommonLocked() {
      mTimestampOffset = getMonoToBoottimeOffset();
      camera_metadata_entry timestampSource =
              mDeviceInfo.find(ANDROID_SENSOR_INFO_TIMESTAMP_SOURCE);

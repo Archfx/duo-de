@@ -1,4 +1,4 @@
-From 52dc4bc9575304a26faf29cba9ea580495a49965 Mon Sep 17 00:00:00 2001
+From 5802fa7a74226b89064edd88e8acc83e144f96b1 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Fri, 28 Apr 2023 12:29:05 -0400
 Subject: [PATCH 12/26] Allow apex on > 5.0 kernels. This is needed because on
@@ -6,23 +6,22 @@ Subject: [PATCH 12/26] Allow apex on > 5.0 kernels. This is needed because on
 
 Change-Id: I334cde4c5557b0ff70d550205c5bb727d4b5dbf5
 ---
- init/property_service.cpp | 16 +++++++++++++++-
- 1 file changed, 15 insertions(+), 1 deletion(-)
+ init/property_service.cpp | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
 
 diff --git a/init/property_service.cpp b/init/property_service.cpp
-index da838c631..00a3f5751 100644
+index eedad50..dbd1e61 100644
 --- a/init/property_service.cpp
 +++ b/init/property_service.cpp
-@@ -64,6 +64,8 @@
+@@ -64,6 +64,7 @@
  #include <selinux/android.h>
  #include <selinux/label.h>
  #include <selinux/selinux.h>
 +#include <sys/utsname.h>
-+
+ #include <vendorsupport/api_level.h>
+ 
  #include "debug_ramdisk.h"
- #include "epoll.h"
- #include "init.h"
-@@ -704,6 +706,16 @@ uint32_t InitPropertySet(const std::string& name, const std::string& value) {
+@@ -705,6 +706,16 @@ uint32_t InitPropertySet(const std::string& name, const std::string& value) {
  static Result<void> load_properties_from_file(const char*, const char*,
                                                std::map<std::string, std::string>*);
  
@@ -39,7 +38,7 @@ index da838c631..00a3f5751 100644
  /*
   * Filter is used to decide which properties to load: NULL loads all keys,
   * "ro.foo.*" is a prefix match, and "ro.foo.bar" is an exact match.
-@@ -801,7 +813,9 @@ static void LoadProperties(char* data, const char* filter, const char* filename,
+@@ -802,7 +813,9 @@ static void LoadProperties(char* data, const char* filter, const char* filename,
                  } else if (it->second != value) {
                      LOG(WARNING) << "Overriding previous property '" << key << "':'" << it->second
                                   << "' with new value '" << value << "'";

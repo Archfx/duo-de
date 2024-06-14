@@ -1,4 +1,4 @@
-From aa034804e443cfea15fcd33d47b913455d673458 Mon Sep 17 00:00:00 2001
+From 840c95a8b0c993ab6312fe4a708c385895766904 Mon Sep 17 00:00:00 2001
 From: Andy CrossGate Yan <GeForce8800Ultra@gmail.com>
 Date: Mon, 11 Oct 2021 16:10:42 -0400
 Subject: [PATCH 17/24] Revert "Remove support for audio HAL V2 from the
@@ -18,7 +18,7 @@ Change-Id: Icfd638a91b22ffa6d2cd6d19a624e699a85a850a
  5 files changed, 43 insertions(+), 1 deletion(-)
 
 diff --git a/media/libaudiohal/Android.bp b/media/libaudiohal/Android.bp
-index 3c05b0b472..1426930603 100644
+index b8d0998..e4a11a3 100644
 --- a/media/libaudiohal/Android.bp
 +++ b/media/libaudiohal/Android.bp
 @@ -23,6 +23,7 @@ cc_library_shared {
@@ -26,32 +26,30 @@ index 3c05b0b472..1426930603 100644
  
      required: [
 +        "libaudiohal@2.0",
-         "libaudiohal@4.0",
          "libaudiohal@5.0",
          "libaudiohal@6.0",
+         "libaudiohal@7.0",
 diff --git a/media/libaudiohal/FactoryHal.cpp b/media/libaudiohal/FactoryHal.cpp
-index f88915d7f4..24e5adbae3 100644
+index 15cb297..c922dd1 100644
 --- a/media/libaudiohal/FactoryHal.cpp
 +++ b/media/libaudiohal/FactoryHal.cpp
-@@ -50,7 +50,7 @@ using InterfaceName = std::pair<std::string, std::string>;
+@@ -50,12 +50,13 @@ using InterfaceName = std::pair<std::string, std::string>;
   * This list need to keep sync with AudioHalVersionInfo.VERSIONS in
   * media/java/android/media/AudioHalVersionInfo.java.
   */
 -static const std::array<AudioHalVersionInfo, 5> sAudioHALVersions = {
 +static const std::array<AudioHalVersionInfo, 6> sAudioHALVersions = {
-     // TODO: remove this comment to get AIDL
-     // AudioHalVersionInfo(AudioHalVersionInfo::Type::AIDL, 1, 0),
+     AudioHalVersionInfo(AudioHalVersionInfo::Type::AIDL, 1, 0),
      AudioHalVersionInfo(AudioHalVersionInfo::Type::HIDL, 7, 1),
-@@ -58,6 +58,7 @@ static const std::array<AudioHalVersionInfo, 5> sAudioHALVersions = {
+     AudioHalVersionInfo(AudioHalVersionInfo::Type::HIDL, 7, 0),
      AudioHalVersionInfo(AudioHalVersionInfo::Type::HIDL, 6, 0),
      AudioHalVersionInfo(AudioHalVersionInfo::Type::HIDL, 5, 0),
-     AudioHalVersionInfo(AudioHalVersionInfo::Type::HIDL, 4, 0),
 +    AudioHalVersionInfo(AudioHalVersionInfo::Type::HIDL, 2, 0),
  };
  
  static const std::map<AudioHalVersionInfo::Type, InterfaceName> sDevicesHALInterfaces = {
 diff --git a/media/libaudiohal/impl/Android.bp b/media/libaudiohal/impl/Android.bp
-index fb1cc34932..61611965df 100644
+index 4d81f77..23d7f04 100644
 --- a/media/libaudiohal/impl/Android.bp
 +++ b/media/libaudiohal/impl/Android.bp
 @@ -82,6 +82,32 @@ cc_defaults {
@@ -85,10 +83,10 @@ index fb1cc34932..61611965df 100644
 +}
 +
  cc_library_shared {
-     name: "libaudiohal@4.0",
+     name: "libaudiohal@5.0",
      defaults: [
 diff --git a/media/libaudiohal/impl/DeviceHalHidl.cpp b/media/libaudiohal/impl/DeviceHalHidl.cpp
-index e8e1f46688..6e3c79cb4a 100644
+index 478e0f0..a1b21d7 100644
 --- a/media/libaudiohal/impl/DeviceHalHidl.cpp
 +++ b/media/libaudiohal/impl/DeviceHalHidl.cpp
 @@ -587,6 +587,7 @@ status_t DeviceHalHidl::setConnectedState(const struct audio_port_v7 *port, bool
@@ -128,7 +126,7 @@ index e8e1f46688..6e3c79cb4a 100644
  
  status_t DeviceHalHidl::dump(int fd, const Vector<String16>& args) {
 diff --git a/media/libaudiohal/impl/DevicesFactoryHalHidl.cpp b/media/libaudiohal/impl/DevicesFactoryHalHidl.cpp
-index eef60b506c..e303e54b41 100644
+index 1cac9da..78c0c56 100644
 --- a/media/libaudiohal/impl/DevicesFactoryHalHidl.cpp
 +++ b/media/libaudiohal/impl/DevicesFactoryHalHidl.cpp
 @@ -119,6 +119,7 @@ status_t DevicesFactoryHalHidl::openDevice(const char *name, sp<DeviceHalInterfa
