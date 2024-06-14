@@ -172,7 +172,7 @@ START=$(date +%s)
 setupEnv
 # buildTrebleApp
 # taskbar_app
-# buildVariants
+buildVariants
 generatePackages
 generateOta
 
