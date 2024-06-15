@@ -1,4 +1,4 @@
-From 3eedecf13b716614699d6edd14d292ebd60942ab Mon Sep 17 00:00:00 2001
+From a2ca33b63ccc3eb4eb559fdfaa5fecce412c3eb3 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sat, 3 Dec 2022 17:13:24 -0500
 Subject: [PATCH 29/53] Set old fingerprint sensors to security "strong"
@@ -11,10 +11,10 @@ despite its name, config_biometric_sensors is HIDL-specific
  1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/services/core/java/com/android/server/biometrics/AuthService.java b/services/core/java/com/android/server/biometrics/AuthService.java
-index dafea9a199fd..2fdba410c92d 100644
+index 48bf9f4967bc..2f7cd14f44b2 100644
 --- a/services/core/java/com/android/server/biometrics/AuthService.java
 +++ b/services/core/java/com/android/server/biometrics/AuthService.java
-@@ -702,7 +702,7 @@ public class AuthService extends SystemService {
+@@ -763,7 +763,7 @@ public class AuthService extends SystemService {
              final int firstApiLevel = SystemProperties.getInt(SYSPROP_FIRST_API_LEVEL, 0);
              final int apiLevel = SystemProperties.getInt(SYSPROP_API_LEVEL, firstApiLevel);
              String[] configStrings = mInjector.getConfiguration(getContext());
@@ -23,7 +23,7 @@ index dafea9a199fd..2fdba410c92d 100644
                  // For backwards compatibility with R where biometrics could work without being
                  // configured in config_biometric_sensors. In the absence of a vendor provided
                  // configuration, we assume the weakest biometric strength (i.e. convenience).
-@@ -737,7 +737,7 @@ public class AuthService extends SystemService {
+@@ -925,7 +925,7 @@ public class AuthService extends SystemService {
          if (pm.hasSystemFeature(PackageManager.FEATURE_FACE)) {
              modalities.add(String.valueOf(BiometricAuthenticator.TYPE_FACE));
          }

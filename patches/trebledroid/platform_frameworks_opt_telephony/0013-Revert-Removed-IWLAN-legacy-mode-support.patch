@@ -1,4 +1,4 @@
-From 7c87a8ce4e5043f14135aedf01de8e21ba2cf183 Mon Sep 17 00:00:00 2001
+From f3e7ed100eea2b593dea636ed20aef565df7b28b Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Fri, 20 Oct 2023 09:11:55 +0000
 Subject: [PATCH 13/16] Revert "Removed IWLAN legacy mode support"
@@ -14,7 +14,7 @@ Change-Id: I1fd5a803ea3b01f902ff14e1ee6225312b2d3206
  4 files changed, 189 insertions(+), 36 deletions(-)
 
 diff --git a/src/java/com/android/internal/telephony/ServiceStateTracker.java b/src/java/com/android/internal/telephony/ServiceStateTracker.java
-index d19e4cb359..51530f2680 100644
+index ba6479e..05f28a9 100644
 --- a/src/java/com/android/internal/telephony/ServiceStateTracker.java
 +++ b/src/java/com/android/internal/telephony/ServiceStateTracker.java
 @@ -671,7 +671,7 @@ public class ServiceStateTracker extends Handler {
@@ -145,7 +145,7 @@ index d19e4cb359..51530f2680 100644
  
      private void updateNtnCapability() {
 diff --git a/src/java/com/android/internal/telephony/data/AccessNetworksManager.java b/src/java/com/android/internal/telephony/data/AccessNetworksManager.java
-index a657ecd8cf..f9a35b6c94 100644
+index 3d3fbe9..8ba5581 100644
 --- a/src/java/com/android/internal/telephony/data/AccessNetworksManager.java
 +++ b/src/java/com/android/internal/telephony/data/AccessNetworksManager.java
 @@ -16,9 +16,12 @@
@@ -222,7 +222,7 @@ index a657ecd8cf..f9a35b6c94 100644
  
      /** Event to guide a transport type for initial data connection of emergency data network. */
      private static final int EVENT_GUIDE_TRANSPORT_TYPE_FOR_EMERGENCY = 1;
-@@ -389,22 +425,30 @@ public class AccessNetworksManager extends Handler {
+@@ -408,22 +444,30 @@ public class AccessNetworksManager extends Handler {
                  Context.CARRIER_CONFIG_SERVICE);
          mLogTag = "ANM-" + mPhone.getPhoneId();
          mApnTypeToQnsChangeNetworkCounter = new SparseArray<>();
@@ -268,7 +268,7 @@ index a657ecd8cf..f9a35b6c94 100644
  
          // Using post to delay the registering because data retry manager and data config
          // manager instances are created later than access networks manager.
-@@ -509,7 +553,8 @@ public class AccessNetworksManager extends Handler {
+@@ -528,7 +572,8 @@ public class AccessNetworksManager extends Handler {
      /**
       * Get the qualified network service package.
       *
@@ -278,7 +278,7 @@ index a657ecd8cf..f9a35b6c94 100644
       */
      private String getQualifiedNetworksServicePackageName() {
          // Read package name from the resource
-@@ -598,9 +643,30 @@ public class AccessNetworksManager extends Handler {
+@@ -617,9 +662,30 @@ public class AccessNetworksManager extends Handler {
      }
  
      /**
@@ -311,7 +311,7 @@ index a657ecd8cf..f9a35b6c94 100644
          return mAvailableTransports;
      }
  
-@@ -635,6 +701,11 @@ public class AccessNetworksManager extends Handler {
+@@ -657,6 +723,11 @@ public class AccessNetworksManager extends Handler {
       * @return The preferred transport.
       */
      public @TransportType int getPreferredTransport(@ApnType int apnType) {
@@ -323,7 +323,7 @@ index a657ecd8cf..f9a35b6c94 100644
          return mPreferredTransports.get(apnType) == null
                  ? AccessNetworkConstants.TRANSPORT_TYPE_WWAN : mPreferredTransports.get(apnType);
      }
-@@ -737,6 +808,9 @@ public class AccessNetworksManager extends Handler {
+@@ -759,6 +830,9 @@ public class AccessNetworksManager extends Handler {
          }
  
          pw.decreaseIndent();
@@ -334,10 +334,10 @@ index a657ecd8cf..f9a35b6c94 100644
          pw.increaseIndent();
          mLocalLog.dump(fd, pw, args);
 diff --git a/src/java/com/android/internal/telephony/data/DataNetworkController.java b/src/java/com/android/internal/telephony/data/DataNetworkController.java
-index 63fe7e5cdd..3a499c9af5 100644
+index 70d3b23..fa67c0d 100644
 --- a/src/java/com/android/internal/telephony/data/DataNetworkController.java
 +++ b/src/java/com/android/internal/telephony/data/DataNetworkController.java
-@@ -1006,10 +1006,12 @@ public class DataNetworkController extends Handler {
+@@ -1039,10 +1039,12 @@ public class DataNetworkController extends Handler {
          mDataServiceManagers.get(AccessNetworkConstants.TRANSPORT_TYPE_WWAN)
                  .registerForServiceBindingChanged(this, EVENT_DATA_SERVICE_BINDING_CHANGED);
  
@@ -355,10 +355,10 @@ index 63fe7e5cdd..3a499c9af5 100644
          mPhone.getContext().getSystemService(TelephonyRegistryManager.class)
                  .addOnSubscriptionsChangedListener(new OnSubscriptionsChangedListener() {
 diff --git a/src/java/com/android/internal/telephony/imsphone/ImsPhone.java b/src/java/com/android/internal/telephony/imsphone/ImsPhone.java
-index b21d45da25..8ed3d8433f 100644
+index a6bb1d6..2ebaca5 100644
 --- a/src/java/com/android/internal/telephony/imsphone/ImsPhone.java
 +++ b/src/java/com/android/internal/telephony/imsphone/ImsPhone.java
-@@ -490,7 +490,11 @@ public class ImsPhone extends ImsPhoneBase {
+@@ -492,7 +492,11 @@ public class ImsPhone extends ImsPhoneBase {
          mCT.registerPhoneStateListener(mExternalCallTracker);
          mExternalCallTracker.setCallPuller(mCT);
  
@@ -371,7 +371,7 @@ index b21d45da25..8ed3d8433f 100644
  
          mPhoneId = mDefaultPhone.getPhoneId();
  
-@@ -2412,7 +2416,7 @@ public class ImsPhone extends ImsPhoneBase {
+@@ -2422,7 +2426,7 @@ public class ImsPhone extends ImsPhoneBase {
      /**
       * Update roaming state and WFC mode in the following situations:
       *     1) voice is in service.
@@ -380,7 +380,7 @@ index b21d45da25..8ed3d8433f 100644
       * @param ss non-null ServiceState
       */
      private void updateRoamingState(ServiceState ss) {
-@@ -2433,7 +2437,15 @@ public class ImsPhone extends ImsPhoneBase {
+@@ -2443,7 +2447,15 @@ public class ImsPhone extends ImsPhoneBase {
              logi("updateRoamingState: we are not IN_SERVICE, ignoring roaming change.");
              return;
          }
@@ -396,8 +396,8 @@ index b21d45da25..8ed3d8433f 100644
 +        }
          if (mCT.getState() == PhoneConstants.State.IDLE) {
              if (DBG) logd("updateRoamingState now: " + newRoamingState);
-             mLastKnownRoamingState = newRoamingState;
-@@ -2452,6 +2464,30 @@ public class ImsPhone extends ImsPhoneBase {
+             if (!mFeatureFlags.updateRoamingStateToSetWfcMode()) {
+@@ -2467,6 +2479,30 @@ public class ImsPhone extends ImsPhoneBase {
          }
      }
  

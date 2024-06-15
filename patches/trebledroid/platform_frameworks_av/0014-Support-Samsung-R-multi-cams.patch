@@ -1,4 +1,4 @@
-From fc237c765b88c235e1d1ddb00c7229d26f1fe986 Mon Sep 17 00:00:00 2001
+From 8603694d0799b780c24fed3b8753f08949163ed0 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sat, 13 Mar 2021 14:20:03 -0500
 Subject: [PATCH 14/24] Support Samsung R multi-cams
@@ -10,7 +10,7 @@ Change-Id: If46f385e8dd16185cbf37ab083e6a1242e1d1555
  2 files changed, 8 insertions(+), 1 deletion(-)
 
 diff --git a/services/camera/libcameraservice/Android.bp b/services/camera/libcameraservice/Android.bp
-index 080ccf646d..1ece884867 100644
+index 2f57413..6b7a74e 100644
 --- a/services/camera/libcameraservice/Android.bp
 +++ b/services/camera/libcameraservice/Android.bp
 @@ -108,6 +108,7 @@ cc_defaults {
@@ -22,7 +22,7 @@ index 080ccf646d..1ece884867 100644
          "libbinderthreadstateutils",
          "libcameraservice_device_independent",
 diff --git a/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp b/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp
-index 71aabc14b3..aefd6c3d4f 100644
+index 1b22767..c60c0c4 100644
 --- a/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp
 +++ b/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp
 @@ -29,6 +29,7 @@

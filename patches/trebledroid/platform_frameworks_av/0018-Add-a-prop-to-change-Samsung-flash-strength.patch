@@ -1,4 +1,4 @@
-From 8cfaa1bf23ef4a99a7e08936ba78132215f01cef Mon Sep 17 00:00:00 2001
+From 5f23deeeb8111ed2f0f39b070f829e8ab043fadc Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sat, 16 Apr 2022 14:30:14 -0400
 Subject: [PATCH 18/24] Add a prop to change Samsung flash strength
@@ -9,7 +9,7 @@ Subject: [PATCH 18/24] Add a prop to change Samsung flash strength
  2 files changed, 21 insertions(+), 1 deletion(-)
 
 diff --git a/services/camera/libcameraservice/Android.bp b/services/camera/libcameraservice/Android.bp
-index 1ece884867..6599763814 100644
+index 6b7a74e..1e1423f 100644
 --- a/services/camera/libcameraservice/Android.bp
 +++ b/services/camera/libcameraservice/Android.bp
 @@ -83,6 +83,8 @@ cc_defaults {
@@ -22,7 +22,7 @@ index 1ece884867..6599763814 100644
          "android.hardware.common.fmq-V1-ndk",
          "camera_platform_flags_c_lib",
 diff --git a/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp b/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp
-index aefd6c3d4f..2412f82c37 100644
+index c60c0c4..9d9275c 100644
 --- a/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp
 +++ b/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp
 @@ -30,6 +30,8 @@
@@ -34,7 +34,7 @@ index aefd6c3d4f..2412f82c37 100644
  
  namespace {
  const bool kEnableLazyHal(property_get_bool("ro.camera.enableLazyHal", false));
-@@ -804,7 +806,23 @@ HidlProviderInfo::HidlDeviceInfo3::HidlDeviceInfo3(
+@@ -812,7 +814,23 @@ HidlProviderInfo::HidlDeviceInfo3::HidlDeviceInfo3(
  status_t HidlProviderInfo::HidlDeviceInfo3::setTorchMode(bool enabled) {
      using hardware::camera::common::V1_0::TorchMode;
      const sp<hardware::camera::device::V3_2::ICameraDevice> interface = startDeviceInterface();

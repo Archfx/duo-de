@@ -1,4 +1,4 @@
-From 5b0de88a1bffb6a6d08bedc4726c37b384f1fe8a Mon Sep 17 00:00:00 2001
+From b7a9db10b434485d34adc87308c7e806727d75a6 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Tue, 29 Sep 2020 22:39:47 +0200
 Subject: [PATCH 13/53] Some devices have proximity sensor reporting NaN as max
@@ -6,14 +6,14 @@ Subject: [PATCH 13/53] Some devices have proximity sensor reporting NaN as max
 
 Change-Id: I3c39e3e914a05903c140235702e0480d2d58a612
 ---
- .../com/android/server/display/DisplayPowerController.java     | 3 +++
+ .../server/display/DisplayPowerProximityStateController.java   | 3 +++
  1 file changed, 3 insertions(+)
 
-diff --git a/services/core/java/com/android/server/display/DisplayPowerController.java b/services/core/java/com/android/server/display/DisplayPowerController.java
-index 8f82995563d4..8206f5df9fde 100644
---- a/services/core/java/com/android/server/display/DisplayPowerController.java
-+++ b/services/core/java/com/android/server/display/DisplayPowerController.java
-@@ -2489,6 +2489,9 @@ final class DisplayPowerController implements AutomaticBrightnessController.Call
+diff --git a/services/core/java/com/android/server/display/DisplayPowerProximityStateController.java b/services/core/java/com/android/server/display/DisplayPowerProximityStateController.java
+index c517aa794aa1..565cbcd6bb56 100644
+--- a/services/core/java/com/android/server/display/DisplayPowerProximityStateController.java
++++ b/services/core/java/com/android/server/display/DisplayPowerProximityStateController.java
+@@ -398,6 +398,9 @@ public final class DisplayPowerProximityStateController {
          if (mProximitySensor != null) {
              mProximityThreshold = Math.min(mProximitySensor.getMaximumRange(),
                      TYPICAL_PROXIMITY_THRESHOLD);

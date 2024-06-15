@@ -1,4 +1,4 @@
-From 1017569a02cfee23faae4efc97d8d3f48ce9ab54 Mon Sep 17 00:00:00 2001
+From 4d4eb69f44fc80fbcf0e7256713eb26cc95be668 Mon Sep 17 00:00:00 2001
 From: Peter Cai <peter@typeblog.net>
 Date: Wed, 16 Dec 2020 21:26:45 +0800
 Subject: [PATCH 19/53] TelephonyManager: add API annotations for
@@ -14,10 +14,10 @@ Subject: [PATCH 19/53] TelephonyManager: add API annotations for
  1 file changed, 3 insertions(+), 2 deletions(-)
 
 diff --git a/telephony/java/android/telephony/TelephonyManager.java b/telephony/java/android/telephony/TelephonyManager.java
-index 0cd5ab7fad20..bd5255d4a21a 100644
+index 0c1857754fd5..0c9601ad7b30 100644
 --- a/telephony/java/android/telephony/TelephonyManager.java
 +++ b/telephony/java/android/telephony/TelephonyManager.java
-@@ -8216,7 +8216,7 @@ public class TelephonyManager {
+@@ -8568,7 +8568,7 @@ public class TelephonyManager {
       * @hide
       */
      @UnsupportedAppUsage
@@ -26,7 +26,7 @@ index 0cd5ab7fad20..bd5255d4a21a 100644
          String propVal = "";
          String p[] = null;
          String prop = SystemProperties.get(property);
-@@ -8270,7 +8270,8 @@ public class TelephonyManager {
+@@ -8622,7 +8622,8 @@ public class TelephonyManager {
       *
       * @hide
       */

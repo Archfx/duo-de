@@ -1,4 +1,4 @@
-From 7895048da1f8aa0fe7f6b18d0b9c6389dd572d45 Mon Sep 17 00:00:00 2001
+From 719a0bd08c90d44931faeaeb3ee92a518359657d Mon Sep 17 00:00:00 2001
 From: Peter Cai <peter@typeblog.net>
 Date: Wed, 1 Jun 2022 16:56:20 -0400
 Subject: [PATCH 06/53] Implement a persistent property to override the default
@@ -11,7 +11,7 @@ Change-Id: I49b45d00bf71d7932591b3516d49a680e1b6568b
  2 files changed, 15 insertions(+)
 
 diff --git a/core/java/android/hardware/Camera.java b/core/java/android/hardware/Camera.java
-index 039644387715..26ba0ca39ab9 100644
+index 1c36a88726b8..3ec40136e084 100644
 --- a/core/java/android/hardware/Camera.java
 +++ b/core/java/android/hardware/Camera.java
 @@ -41,6 +41,7 @@ import android.os.Message;
@@ -35,10 +35,10 @@ index 039644387715..26ba0ca39ab9 100644
          CameraInfo cameraInfo = new CameraInfo();
          for (int i = 0; i < numberOfCameras; i++) {
 diff --git a/core/java/android/hardware/camera2/CameraManager.java b/core/java/android/hardware/camera2/CameraManager.java
-index bcce4b65be18..ef2e0e570578 100644
+index d2e4a614202f..b5a00b192edc 100644
 --- a/core/java/android/hardware/camera2/CameraManager.java
 +++ b/core/java/android/hardware/camera2/CameraManager.java
-@@ -2234,6 +2234,15 @@ public final class CameraManager {
+@@ -2196,6 +2196,15 @@ public final class CameraManager {
                          }
                      }});
  
