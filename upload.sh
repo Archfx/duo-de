@@ -38,12 +38,12 @@ uploadAssets() {
 
 updateOta() {
     echo "--> Updating OTA file"
-    pushd "$BL"
+    #pushd "$BL"
     git add config/ota.json
     git commit -m "build: Bump OTA to $TAG"
-    git push
-    # git push --set-upstream origin main-14
-    popd
+    #git push
+    git push --set-upstream origin main-14
+    #popd
     echo
 }
 
@@ -51,7 +51,7 @@ START=$(date +%s)
 
 createRelease
 uploadAssets
-# [ "$SKIPOTA" = false ] && updateOta
+[ "$SKIPOTA" = false ] && updateOta
 
 END=$(date +%s)
 ELAPSEDM=$(($(($END-$START))/60))
