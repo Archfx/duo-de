@@ -1,4 +1,4 @@
-From 9244db7472836e5ffeea05b61117b0895b6ec370 Mon Sep 17 00:00:00 2001
+From fa0f46f45d79aaafb44add93c60ab38b4cae3364 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sat, 3 Feb 2024 07:38:33 -0500
 Subject: [PATCH 11/13] Increase SW_MAX *= 4
@@ -14,10 +14,10 @@ We increase the size of SW_MAX for two reasons:
  2 files changed, 4 insertions(+), 4 deletions(-)
 
 diff --git a/services/inputflinger/reader/EventHub.cpp b/services/inputflinger/reader/EventHub.cpp
-index ad2394d791..18742c6b37 100644
+index a2b5d7d..2697ae1 100644
 --- a/services/inputflinger/reader/EventHub.cpp
 +++ b/services/inputflinger/reader/EventHub.cpp
-@@ -1112,7 +1112,7 @@ int32_t EventHub::getKeyCodeForKeyLocation(int32_t deviceId, int32_t locationKey
+@@ -1118,7 +1118,7 @@ int32_t EventHub::getKeyCodeForKeyLocation(int32_t deviceId, int32_t locationKey
  }
  
  int32_t EventHub::getSwitchState(int32_t deviceId, int32_t sw) const {
@@ -26,7 +26,7 @@ index ad2394d791..18742c6b37 100644
          return AKEY_STATE_UNKNOWN;
      }
      std::scoped_lock _l(mLock);
-@@ -2419,7 +2419,7 @@ void EventHub::openDeviceLocked(const std::string& devicePath) {
+@@ -2441,7 +2441,7 @@ void EventHub::openDeviceLocked(const std::string& devicePath) {
      }
  
      // Check whether this device has switches.
@@ -36,10 +36,10 @@ index ad2394d791..18742c6b37 100644
              device->classes |= InputDeviceClass::SWITCH;
              break;
 diff --git a/services/inputflinger/reader/include/EventHub.h b/services/inputflinger/reader/include/EventHub.h
-index 0bcab42417..5659ffb006 100644
+index a7e0675..f33ee5a 100644
 --- a/services/inputflinger/reader/include/EventHub.h
 +++ b/services/inputflinger/reader/include/EventHub.h
-@@ -629,8 +629,8 @@ private:
+@@ -635,8 +635,8 @@ private:
          BitArray<KEY_CNT> keyBitmask;
          BitArray<KEY_CNT> keyState;
          BitArray<REL_CNT> relBitmask;

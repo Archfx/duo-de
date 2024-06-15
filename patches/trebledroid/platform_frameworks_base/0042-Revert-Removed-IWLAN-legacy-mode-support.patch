@@ -1,4 +1,4 @@
-From 1386df08ed6ed94879c65d7c595a39069a84de78 Mon Sep 17 00:00:00 2001
+From d1f2921d980231b9abbd8c44569066168239d6f3 Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Fri, 20 Oct 2023 09:26:19 +0000
 Subject: [PATCH 42/53] Revert "Removed IWLAN legacy mode support"
@@ -9,10 +9,10 @@ This reverts commit 2832dee607ab33eee688abea206f4adfcfc896f1.
  1 file changed, 20 insertions(+), 10 deletions(-)
 
 diff --git a/telephony/java/android/telephony/ServiceState.java b/telephony/java/android/telephony/ServiceState.java
-index 85a85c6dfadb..6c96ac4bc712 100644
+index db167c0592df..ef64fc9fcc65 100644
 --- a/telephony/java/android/telephony/ServiceState.java
 +++ b/telephony/java/android/telephony/ServiceState.java
-@@ -1215,8 +1215,13 @@ public class ServiceState implements Parcelable {
+@@ -1217,8 +1217,13 @@ public class ServiceState implements Parcelable {
  
      /**
       * Initialize the service state. Set everything to the default value.
@@ -27,7 +27,7 @@ index 85a85c6dfadb..6c96ac4bc712 100644
          if (DBG) Rlog.d(LOG_TAG, "init");
          mVoiceRegState = STATE_OUT_OF_SERVICE;
          mDataRegState = STATE_OUT_OF_SERVICE;
-@@ -1248,11 +1253,13 @@ public class ServiceState implements Parcelable {
+@@ -1250,11 +1255,13 @@ public class ServiceState implements Parcelable {
                      .setTransportType(AccessNetworkConstants.TRANSPORT_TYPE_WWAN)
                      .setRegistrationState(NetworkRegistrationInfo.REGISTRATION_STATE_UNKNOWN)
                      .build());
@@ -46,7 +46,7 @@ index 85a85c6dfadb..6c96ac4bc712 100644
          }
          mOperatorAlphaLongRaw = null;
          mOperatorAlphaShortRaw = null;
-@@ -1261,11 +1268,11 @@ public class ServiceState implements Parcelable {
+@@ -1263,11 +1270,11 @@ public class ServiceState implements Parcelable {
      }
  
      public void setStateOutOfService() {
@@ -60,7 +60,7 @@ index 85a85c6dfadb..6c96ac4bc712 100644
          mVoiceRegState = STATE_POWER_OFF;
          mDataRegState = STATE_POWER_OFF;
      }
-@@ -1273,11 +1280,14 @@ public class ServiceState implements Parcelable {
+@@ -1275,11 +1282,14 @@ public class ServiceState implements Parcelable {
      /**
       * Set the service state to out-of-service
       *

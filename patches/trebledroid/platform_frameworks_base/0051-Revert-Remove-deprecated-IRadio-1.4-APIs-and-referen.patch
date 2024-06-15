@@ -1,4 +1,4 @@
-From 048e042cbcd5d86a65aa5703b04583dac0d80589 Mon Sep 17 00:00:00 2001
+From 140173d78ccb5184973e0759e493208da63b361e Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Sun, 31 Mar 2024 23:38:19 +0000
 Subject: [PATCH 51/53] Revert "Remove deprecated IRadio <1.4 APIs and
@@ -12,11 +12,11 @@ This reverts commit 4d53aa0caec7029bf6c9b5789c1708bc4bb71b76.
  3 files changed, 39 insertions(+)
 
 diff --git a/telephony/java/android/telephony/TelephonyManager.java b/telephony/java/android/telephony/TelephonyManager.java
-index bd5255d4a21a..859326ee0ca4 100644
+index 0c9601ad7b30..4ac056a15f1e 100644
 --- a/telephony/java/android/telephony/TelephonyManager.java
 +++ b/telephony/java/android/telephony/TelephonyManager.java
-@@ -11472,6 +11472,29 @@ public class TelephonyManager {
-         return false;
+@@ -11488,6 +11488,29 @@ public class TelephonyManager {
+         return result;
      }
  
 +    /**
@@ -43,10 +43,10 @@ index bd5255d4a21a..859326ee0ca4 100644
 +    }
 +
      /**
-      * @deprecated Use {@link android.telephony.ims.ImsMmTelManager#setVtSettingEnabled(boolean)}
-      * instead.
+      * Shut down all the live radios over all the slot indexes.
+      *
 diff --git a/telephony/java/com/android/internal/telephony/ITelephony.aidl b/telephony/java/com/android/internal/telephony/ITelephony.aidl
-index 397fb2d6db96..192ead0fb163 100644
+index ff2ee27abc60..d7ca28c447a6 100644
 --- a/telephony/java/com/android/internal/telephony/ITelephony.aidl
 +++ b/telephony/java/com/android/internal/telephony/ITelephony.aidl
 @@ -1194,6 +1194,17 @@ interface ITelephony {
@@ -68,7 +68,7 @@ index 397fb2d6db96..192ead0fb163 100644
       * Check if any mobile Radios need to be shutdown.
       *
 diff --git a/telephony/java/com/android/internal/telephony/RILConstants.java b/telephony/java/com/android/internal/telephony/RILConstants.java
-index 50590177f791..69ea593a3a00 100644
+index b7dd4df1c843..5f5e21916bd0 100644
 --- a/telephony/java/com/android/internal/telephony/RILConstants.java
 +++ b/telephony/java/com/android/internal/telephony/RILConstants.java
 @@ -298,6 +298,11 @@ public interface RILConstants {

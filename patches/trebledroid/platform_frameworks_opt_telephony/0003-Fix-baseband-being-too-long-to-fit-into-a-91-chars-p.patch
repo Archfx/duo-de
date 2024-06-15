@@ -1,4 +1,4 @@
-From c5e263b52de564d76b428fad75b05c9313267610 Mon Sep 17 00:00:00 2001
+From ff5a12771d3f38146f637bda5fdaf66a693dbf37 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Mon, 6 Dec 2021 16:28:22 -0500
 Subject: [PATCH 03/16] Fix baseband being too long to fit into a 91 chars
@@ -10,10 +10,10 @@ Change-Id: I1762e4a8cc137626be89f350229d6be162bdaf57
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/src/java/com/android/internal/telephony/GsmCdmaPhone.java b/src/java/com/android/internal/telephony/GsmCdmaPhone.java
-index acd0196dd1..cf81125aab 100644
+index 42d5d0f..79a23ec 100644
 --- a/src/java/com/android/internal/telephony/GsmCdmaPhone.java
 +++ b/src/java/com/android/internal/telephony/GsmCdmaPhone.java
-@@ -3377,7 +3377,7 @@ public class GsmCdmaPhone extends Phone {
+@@ -3438,7 +3438,7 @@ public class GsmCdmaPhone extends Phone {
                  String version = (String)ar.result;
                  if (version != null) {
                      int length = version.length();

@@ -1,4 +1,4 @@
-From 494571995e975191cbe6f4af70f3f3d477fa7322 Mon Sep 17 00:00:00 2001
+From 20087e6db0fe4aa87caa00eb5ffa793e7ab15d28 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Mon, 30 Oct 2023 10:30:58 -0400
 Subject: [PATCH 21/24] Add a prop to disable AUDIO_OUTPUT_FLAG_FAST from audio
@@ -9,7 +9,7 @@ Subject: [PATCH 21/24] Add a prop to disable AUDIO_OUTPUT_FLAG_FAST from audio
  1 file changed, 4 insertions(+)
 
 diff --git a/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp b/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp
-index 77a96b47a4..26edcaa1c4 100644
+index 77a96b4..26edcaa 100644
 --- a/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp
 +++ b/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp
 @@ -504,6 +504,10 @@ std::variant<status_t, MixPortTraits::Element> PolicySerializer::deserialize<Mix

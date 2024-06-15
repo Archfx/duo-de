@@ -1,4 +1,4 @@
-From b36f3f8416d472ce27b092edead4a0f03e4d0a8c Mon Sep 17 00:00:00 2001
+From 6fff3cad3b5df8748575758c95a7a9212f58a352 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sun, 4 Feb 2024 18:01:07 -0500
 Subject: [PATCH 47/53] Some Samsung devices use SW_FLIP 0x15 rather than
@@ -9,10 +9,10 @@ Subject: [PATCH 47/53] Some Samsung devices use SW_FLIP 0x15 rather than
  1 file changed, 18 insertions(+), 7 deletions(-)
 
 diff --git a/services/core/java/com/android/server/input/InputManagerService.java b/services/core/java/com/android/server/input/InputManagerService.java
-index 2f813324b75f..09f8e2a337cd 100644
+index 0f44f37e2262..d3d29ef85c62 100644
 --- a/services/core/java/com/android/server/input/InputManagerService.java
 +++ b/services/core/java/com/android/server/input/InputManagerService.java
-@@ -375,6 +375,8 @@ public class InputManagerService extends IInputManager.Stub
+@@ -378,6 +378,8 @@ public class InputManagerService extends IInputManager.Stub
  
      /** Switch code: Cover. When set, the cover is closed. */
      public static final int SW_MACHINE_COVER = 0x10;
@@ -21,7 +21,7 @@ index 2f813324b75f..09f8e2a337cd 100644
  
      public static final int SW_LID_BIT = 1 << SW_LID;
      public static final int SW_TABLET_MODE_BIT = 1 << SW_TABLET_MODE;
-@@ -500,13 +502,22 @@ public class InputManagerService extends IInputManager.Stub
+@@ -505,13 +507,22 @@ public class InputManagerService extends IInputManager.Stub
      }
  
      private void checkForSwMachineCover() {

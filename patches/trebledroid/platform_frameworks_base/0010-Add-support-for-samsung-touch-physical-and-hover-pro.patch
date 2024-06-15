@@ -1,4 +1,4 @@
-From b36739e8a9e5ac6e2e2a0ae55dd06322ae13a673 Mon Sep 17 00:00:00 2001
+From 9bfec89d176625d0f5da3c72e5257377540e690e Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Mon, 12 Aug 2019 23:08:26 +0200
 Subject: [PATCH 10/53] Add support for samsung touch, physical and hover
@@ -6,14 +6,35 @@ Subject: [PATCH 10/53] Add support for samsung touch, physical and hover
 
 Change-Id: I7a0f8b4665c802140d19197d850b77b2a7ac1865
 ---
- .../display/DisplayPowerController.java       | 35 +++++++++++++++++++
+ .../DisplayPowerProximityStateController.java | 35 +++++++++++++++++++
  1 file changed, 35 insertions(+)
 
-diff --git a/services/core/java/com/android/server/display/DisplayPowerController.java b/services/core/java/com/android/server/display/DisplayPowerController.java
-index 2cca72e4c883..8f82995563d4 100644
---- a/services/core/java/com/android/server/display/DisplayPowerController.java
-+++ b/services/core/java/com/android/server/display/DisplayPowerController.java
-@@ -2465,6 +2465,27 @@ final class DisplayPowerController implements AutomaticBrightnessController.Call
+diff --git a/services/core/java/com/android/server/display/DisplayPowerProximityStateController.java b/services/core/java/com/android/server/display/DisplayPowerProximityStateController.java
+index 882c02faedf9..c517aa794aa1 100644
+--- a/services/core/java/com/android/server/display/DisplayPowerProximityStateController.java
++++ b/services/core/java/com/android/server/display/DisplayPowerProximityStateController.java
+@@ -80,6 +80,20 @@ public final class DisplayPowerProximityStateController {
+         public void onSensorChanged(SensorEvent event) {
+             if (mProximitySensorEnabled) {
+                 final long time = mClock.uptimeMillis();
++                if("com.samsung.sensor.touch_proximity".equals(mProximitySensor.getStringType())) {
++                    int v = (int)event.values[0];
++                    boolean positive = (v <= 4);
++                    android.util.Log.d("PHH", "Samsung sensor changed " + positive + ":" + v);
++                    handleProximitySensorEvent(time, positive);
++                    return;
++                }
++                if("com.samsung.sensor.hover_proximity".equals(mProximitySensor.getStringType())) {
++                    float v = event.values[0];
++                    boolean positive = (v >= 0.5f && v <= 4.5);
++                    android.util.Log.d("PHH", "Samsung hover sensor changed " + positive + ":" + v);
++                    handleProximitySensorEvent(time, positive);
++                    return;
++                }
+                 final float distance = event.values[0];
+                 boolean positive = distance >= 0.0f && distance < mProximityThreshold;
+                 handleProximitySensorEvent(time, positive);
+@@ -360,6 +374,27 @@ public final class DisplayPowerProximityStateController {
          }
          mProximitySensor = SensorUtils.findSensor(mSensorManager,
                  mDisplayDeviceConfig.getProximitySensor(), Sensor.TYPE_PROXIMITY);
@@ -41,27 +62,6 @@ index 2cca72e4c883..8f82995563d4 100644
          if (mProximitySensor != null) {
              mProximityThreshold = Math.min(mProximitySensor.getMaximumRange(),
                      TYPICAL_PROXIMITY_THRESHOLD);
-@@ -3512,6 +3533,20 @@ final class DisplayPowerController implements AutomaticBrightnessController.Call
-         public void onSensorChanged(SensorEvent event) {
-             if (mProximitySensorEnabled) {
-                 final long time = mClock.uptimeMillis();
-+                if("com.samsung.sensor.touch_proximity".equals(mProximitySensor.getStringType())) {
-+                    int v = (int)event.values[0];
-+                    boolean positive = (v <= 4);
-+                    android.util.Log.d("PHH", "Samsung sensor changed " + positive + ":" + v);
-+                    handleProximitySensorEvent(time, positive);
-+                    return;
-+                }
-+                if("com.samsung.sensor.hover_proximity".equals(mProximitySensor.getStringType())) {
-+                    float v = event.values[0];
-+                    boolean positive = (v >= 0.5f && v <= 4.5);
-+                    android.util.Log.d("PHH", "Samsung hover sensor changed " + positive + ":" + v);
-+                    handleProximitySensorEvent(time, positive);
-+                    return;
-+                }
-                 final float distance = event.values[0];
-                 boolean positive = distance >= 0.0f && distance < mProximityThreshold;
-                 handleProximitySensorEvent(time, positive);
 -- 
 2.34.1
 

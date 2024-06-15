@@ -1,4 +1,4 @@
-From 4fd9ce801d88b2baa4ec23fa0038edd6b20e4d6b Mon Sep 17 00:00:00 2001
+From c55f547a627f71f99cf20e24f26b0597fbece120 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sun, 18 Oct 2020 18:14:47 +0200
 Subject: [PATCH 02/26] Don't abandon creating property tree if there is a
@@ -10,7 +10,7 @@ Change-Id: I194c815fdd58bfb84aaf7db02b8f0d00b4db21e8
  1 file changed, 2 insertions(+), 1 deletion(-)
 
 diff --git a/property_service/libpropertyinfoserializer/property_info_serializer.cpp b/property_service/libpropertyinfoserializer/property_info_serializer.cpp
-index 803657ab8..ecdd0be20 100644
+index 803657a..ecdd0be 100644
 --- a/property_service/libpropertyinfoserializer/property_info_serializer.cpp
 +++ b/property_service/libpropertyinfoserializer/property_info_serializer.cpp
 @@ -19,6 +19,7 @@

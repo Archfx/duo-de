@@ -1,4 +1,4 @@
-From 5ffbd9c3845f498c3ab68aaa469785ef6e3e6321 Mon Sep 17 00:00:00 2001
+From 31b10e829a0a9b33cebe3afdede013aee0ef4d5e Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Tue, 11 Jul 2023 14:52:40 -0400
 Subject: [PATCH 16/26] Add /vendor/firmware_mnt. Moto Razr 2019 look for
@@ -9,7 +9,7 @@ Subject: [PATCH 16/26] Add /vendor/firmware_mnt. Moto Razr 2019 look for
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/rootdir/ueventd.rc b/rootdir/ueventd.rc
-index d0ab3f7bb..39e8fe9eb 100644
+index d0ab3f7..39e8fe9 100644
 --- a/rootdir/ueventd.rc
 +++ b/rootdir/ueventd.rc
 @@ -1,7 +1,7 @@

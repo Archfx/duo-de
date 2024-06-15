@@ -1,4 +1,4 @@
-From 39a824fd35780e5bbc4c5c135a7c6328f75a024e Mon Sep 17 00:00:00 2001
+From 72d544f074637f037e21bd915f11af8574e8cfef Mon Sep 17 00:00:00 2001
 From: Chris Crump <chriscrawford893@gmail.com>
 Date: Tue, 1 Nov 2022 17:27:48 -0400
 Subject: [PATCH 9/9] feat: Add Face Unlock with ParanoidSense (1/2)
@@ -136,10 +136,10 @@ index a3d316b611a7..866bc590d33f 100644
          pw.println("  bouncerShowing: $bouncerShowing")
          pw.println("  altBouncerShowing: $altBouncerShowing")
 diff --git a/services/core/Android.bp b/services/core/Android.bp
-index 3be9ab693335..ad201d14a0bc 100644
+index 69089d3a69bc..680669ff8047 100644
 --- a/services/core/Android.bp
 +++ b/services/core/Android.bp
-@@ -212,6 +212,7 @@ java_library_static {
+@@ -263,6 +263,7 @@ java_library_static {
          "vendor.oplus.hardware.biometrics.fingerprint-V2.1-java",
          "vendor.oppo.hardware.biometrics.fingerprint-V2.1-java",
          "vendor.xiaomi.hardware.fingerprintextension-V1.0-java",
@@ -148,26 +148,26 @@ index 3be9ab693335..ad201d14a0bc 100644
          //AIDL
          "vendor.samsung.hardware.sysinput-V1-java",
 diff --git a/services/core/java/com/android/server/biometrics/sensors/face/FaceService.java b/services/core/java/com/android/server/biometrics/sensors/face/FaceService.java
-index 578d9dc2aede..4955f0240bc0 100644
+index 7ee2a7ababb3..6ada92b5d021 100644
 --- a/services/core/java/com/android/server/biometrics/sensors/face/FaceService.java
 +++ b/services/core/java/com/android/server/biometrics/sensors/face/FaceService.java
-@@ -25,6 +25,7 @@ import android.annotation.Nullable;
- import android.app.ActivityManager;
+@@ -26,6 +26,7 @@ import android.app.ActivityManager;
  import android.content.Context;
+ import android.hardware.biometrics.AuthenticationStateListener;
  import android.hardware.biometrics.BiometricsProtoEnums;
 +import android.hardware.biometrics.SensorProperties;
  import android.hardware.biometrics.IBiometricSensorReceiver;
  import android.hardware.biometrics.IBiometricService;
  import android.hardware.biometrics.IBiometricServiceLockoutResetCallback;
-@@ -36,6 +37,7 @@ import android.hardware.biometrics.face.IFace;
- import android.hardware.biometrics.face.SensorProps;
- import android.hardware.face.Face;
+@@ -39,6 +40,7 @@ import android.hardware.face.Face;
  import android.hardware.face.FaceAuthenticateOptions;
+ import android.hardware.face.FaceEnrollOptions;
+ import android.hardware.face.FaceSensorConfigurations;
 +import android.hardware.face.FaceSensorProperties;
  import android.hardware.face.FaceSensorPropertiesInternal;
  import android.hardware.face.FaceServiceReceiver;
  import android.hardware.face.IFaceAuthenticatorsRegisteredCallback;
-@@ -67,6 +69,8 @@ import com.android.server.biometrics.sensors.LockoutResetDispatcher;
+@@ -73,6 +75,8 @@ import com.android.server.biometrics.sensors.LockoutResetDispatcher;
  import com.android.server.biometrics.sensors.LockoutTracker;
  import com.android.server.biometrics.sensors.face.aidl.FaceProvider;
  import com.android.server.biometrics.sensors.face.hidl.Face10;
@@ -176,7 +176,7 @@ index 578d9dc2aede..4955f0240bc0 100644
  
  import com.google.android.collect.Lists;
  
-@@ -682,24 +686,32 @@ public class FaceService extends SystemService {
+@@ -692,24 +696,32 @@ public class FaceService extends SystemService {
              return providers;
          }
  
@@ -205,7 +205,7 @@ index 578d9dc2aede..4955f0240bc0 100644
  
              mRegistry.registerAll(() -> {
 -                List<String> aidlSensors = new ArrayList<>();
--                final String[] instances = ServiceManager.getDeclaredInstances(IFace.DESCRIPTOR);
+-                final String[] instances = mAidlInstanceNameSupplier.get();
 -                if (instances != null) {
 -                    aidlSensors.addAll(Lists.newArrayList(instances));
 -                }

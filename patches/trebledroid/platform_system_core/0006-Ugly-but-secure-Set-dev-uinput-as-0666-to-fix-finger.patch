@@ -1,4 +1,4 @@
-From 090481ad1c5944ef13065c442969c970c36e5a54 Mon Sep 17 00:00:00 2001
+From d0f5219eacf36e1815e8fe9f405b01dfa546c7ea Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Fri, 1 Nov 2019 18:22:13 +0100
 Subject: [PATCH 06/26] Ugly but secure: Set /dev/uinput as 0666 to fix
@@ -15,7 +15,7 @@ Change-Id: Id374e781957927d5604cb96c7a39b3fb28b3a6c5
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/rootdir/ueventd.rc b/rootdir/ueventd.rc
-index 3927501a4..d0ab3f7bb 100644
+index 3927501..d0ab3f7 100644
 --- a/rootdir/ueventd.rc
 +++ b/rootdir/ueventd.rc
 @@ -60,7 +60,7 @@ subsystem vfio

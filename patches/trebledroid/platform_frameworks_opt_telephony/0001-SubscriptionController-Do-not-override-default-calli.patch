@@ -1,4 +1,4 @@
-From 8b7003d32b4a58e64a9de820931518d4e42d2283 Mon Sep 17 00:00:00 2001
+From 5f095d707285722f5fd1e28640eb9b0afa35d2e8 Mon Sep 17 00:00:00 2001
 From: Peter Cai <peter@typeblog.net>
 Date: Mon, 5 Sep 2022 14:02:37 -0400
 Subject: [PATCH 01/16] SubscriptionController: Do not override default calling
@@ -18,10 +18,10 @@ Change-Id: Iccab64e9b3b3ab4773bd8944d47c2006f229d472
  1 file changed, 17 insertions(+), 1 deletion(-)
 
 diff --git a/src/java/com/android/internal/telephony/subscription/SubscriptionManagerService.java b/src/java/com/android/internal/telephony/subscription/SubscriptionManagerService.java
-index a8d05a334b..42310ccc3f 100644
+index 8757c97..489c0b3 100644
 --- a/src/java/com/android/internal/telephony/subscription/SubscriptionManagerService.java
 +++ b/src/java/com/android/internal/telephony/subscription/SubscriptionManagerService.java
-@@ -81,6 +81,7 @@ import android.util.Base64;
+@@ -85,6 +85,7 @@ import android.util.Base64;
  import android.util.EventLog;
  import android.util.IndentingPrintWriter;
  import android.util.LocalLog;
@@ -29,7 +29,7 @@ index a8d05a334b..42310ccc3f 100644
  
  import com.android.internal.R;
  import com.android.internal.annotations.VisibleForTesting;
-@@ -3023,7 +3024,22 @@ public class SubscriptionManagerService extends ISub.Stub {
+@@ -3153,7 +3154,22 @@ public class SubscriptionManagerService extends ISub.Stub {
  
                  TelecomManager telecomManager = mContext.getSystemService(TelecomManager.class);
                  if (telecomManager != null) {

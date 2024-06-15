@@ -1,7 +1,7 @@
-From 18a88fec9e4fae43c9cdf2d026556fe281ac4c40 Mon Sep 17 00:00:00 2001
+From f9b22c69552f1d4b22283e7e971892757756edf4 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sun, 17 Oct 2021 17:17:13 -0400
-Subject: [PATCH 4/9] Don't abort when failing to get real-time priority
+Subject: [PATCH 4/8] Don't abort when failing to get real-time priority
 
 On some devices (like OP6), for unknown reason, trying to go to realtime
 fails with EPERM.
@@ -19,33 +19,33 @@ Change-Id: Id25dac186628e933185bdfd640498004459b375a
  4 files changed, 14 insertions(+), 4 deletions(-)
 
 diff --git a/system/btif/src/btif_a2dp_sink.cc b/system/btif/src/btif_a2dp_sink.cc
-index be2098788e..4da1dcf449 100644
+index 8e0083b..0f6369e 100644
 --- a/system/btif/src/btif_a2dp_sink.cc
 +++ b/system/btif/src/btif_a2dp_sink.cc
-@@ -196,7 +196,7 @@ bool btif_a2dp_sink_init() {
+@@ -197,7 +197,7 @@ bool btif_a2dp_sink_init() {
    /* Schedule the rest of the operations */
    if (!btif_a2dp_sink_cb.worker_thread.EnableRealTimeScheduling()) {
  #if defined(__ANDROID__)
--    LOG(FATAL) << __func__
-+    LOG(ERROR) << __func__
-                << ": Failed to increase A2DP decoder thread priority";
+-    log::fatal("Failed to increase A2DP decoder thread priority");
++    log::error("Failed to increase A2DP decoder thread priority");
  #endif
    }
+   btif_a2dp_sink_cb.worker_thread.DoInThread(
 diff --git a/system/btif/src/btif_a2dp_source.cc b/system/btif/src/btif_a2dp_source.cc
-index c0cb38fd08..63eca47dbf 100644
+index 6b6555e..2dcf06d 100644
 --- a/system/btif/src/btif_a2dp_source.cc
 +++ b/system/btif/src/btif_a2dp_source.cc
-@@ -367,7 +367,7 @@ static void btif_a2dp_source_startup_delayed() {
-   LOG_INFO("%s: state=%s", __func__, btif_a2dp_source_cb.StateStr().c_str());
+@@ -374,7 +374,7 @@ static void btif_a2dp_source_startup_delayed() {
+   log::info("state={}", btif_a2dp_source_cb.StateStr());
    if (!btif_a2dp_source_thread.EnableRealTimeScheduling()) {
  #if defined(__ANDROID__)
--    LOG(FATAL) << __func__ << ": unable to enable real time scheduling";
-+    LOG(ERROR) << __func__ << ": unable to enable real time scheduling";
+-    log::fatal("unable to enable real time scheduling");
++    log::error("unable to enable real time scheduling");
  #endif
    }
    if (!bluetooth::audio::a2dp::init(&btif_a2dp_source_thread)) {
 diff --git a/system/osi/src/alarm.cc b/system/osi/src/alarm.cc
-index 408f4f3bee..4b48be24c7 100644
+index 408f4f3..4b48be2 100644
 --- a/system/osi/src/alarm.cc
 +++ b/system/osi/src/alarm.cc
 @@ -673,7 +673,17 @@ static bool timer_create_internal(const clockid_t clock_id, timer_t* timer) {
@@ -68,17 +68,17 @@ index 408f4f3bee..4b48be24c7 100644
                strerror(errno));
      if (clock_id == CLOCK_BOOTTIME_ALARM) {
 diff --git a/system/stack/btu/main_thread.cc b/system/stack/btu/main_thread.cc
-index b41a56bcfb..e4f5ba2255 100644
+index a2cdd7b..045cbc3 100644
 --- a/system/stack/btu/main_thread.cc
 +++ b/system/stack/btu/main_thread.cc
-@@ -69,7 +69,7 @@ void main_thread_start_up() {
+@@ -71,7 +71,7 @@ void main_thread_start_up() {
    }
    if (!main_thread.EnableRealTimeScheduling()) {
  #if defined(__ANDROID__)
--    LOG(FATAL) << __func__ << ": unable to enable real time scheduling";
-+    LOG(ERROR) << __func__ << ": unable to enable real time scheduling";
+-    log::fatal("unable to enable real time scheduling");
++    log::error("unable to enable real time scheduling");
  #else
-     LOG(ERROR) << __func__ << ": unable to enable real time scheduling";
+     log::error("unable to enable real time scheduling");
  #endif
 -- 
 2.34.1
