@@ -1,7 +1,7 @@
-From 7b5b0b7cf8f587bfa508d328e9c1a109688ca6a1 Mon Sep 17 00:00:00 2001
+From 076eaa54c724ca845f55faae08fa65970bb7e601 Mon Sep 17 00:00:00 2001
 From: Michael Bestas <mkbestas@gmail.com>
 Date: Mon, 11 Mar 2024 01:52:21 +0200
-Subject: [PATCH 07/11] netbpfload: Support <4.14 kernels
+Subject: [PATCH 07/10] netbpfload: Support <4.14 kernels
 
 Change-Id: I3d6573c102c1d64a64209bf61ecb8ed0c4ecb64c
 ---
@@ -9,10 +9,10 @@ Change-Id: I3d6573c102c1d64a64209bf61ecb8ed0c4ecb64c
  1 file changed, 4 insertions(+), 2 deletions(-)
 
 diff --git a/netbpfload/NetBpfLoad.cpp b/netbpfload/NetBpfLoad.cpp
-index adc78d5773..e9c1b10651 100644
+index 6b9b8c5..9b71eaa 100644
 --- a/netbpfload/NetBpfLoad.cpp
 +++ b/netbpfload/NetBpfLoad.cpp
-@@ -227,12 +227,14 @@ int main(int argc, char** argv, char * const envp[]) {
+@@ -354,12 +354,14 @@ int main(int argc, char** argv, char * const envp[]) {
          //  kernel does not have CONFIG_BPF_JIT=y)
          // BPF_JIT is required by R VINTF (which means 4.14/4.19/5.4 kernels),
          // but 4.14/4.19 were released with P & Q, and only 5.4 is new in R+.

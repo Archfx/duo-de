@@ -83,7 +83,7 @@ taskbar_app(){
 
 buildVariant() {
     echo "--> Building $1"
-    lunch "$1"-ap1a-userdebug
+    lunch "$1"-ap2a-userdebug
     make -j$(nproc --all) installclean
     make -j$(nproc --all) systemimage
     make -j$(nproc --all) target-files-package otatools

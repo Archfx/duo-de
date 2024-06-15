@@ -71,4 +71,3 @@ jobs:
       - name: Cleanup
         run: |
           docker stop treble || true
-          docker system prune -f

@@ -48,4 +48,3 @@ jobs:
       - name: Cleanup
         run: |
           docker stop td || true
-          docker system prune -f

@@ -37,7 +37,7 @@ jobs:
           mkdir builds
           docker run --rm \
                      --privileged \
-                     --name treble \
+                     --name test \
                      --volume ${{ github.workspace }}/builds:/root/builds \
                      --volume ${{ github.workspace }}/vendor_ponces-priv:/aosp/vendor/ponces-priv \
                      ponces/treble treblebuild ${{ inputs.variant }}
@@ -55,5 +55,4 @@ jobs:
     steps:
       - name: Cleanup
         run: |
-          docker stop treble || true
-          docker system prune -f
+          docker stop test || true

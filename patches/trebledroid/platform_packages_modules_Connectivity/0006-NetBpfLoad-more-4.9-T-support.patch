@@ -1,7 +1,7 @@
-From 933e250f2f9561cb831b77733cf0c186caf4a66f Mon Sep 17 00:00:00 2001
+From ae7055e5c96a5feff6659723aa4a83a53e2e6690 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Maciej=20=C5=BBenczykowski?= <maze@google.com>
 Date: Fri, 15 Mar 2024 19:03:13 +0000
-Subject: [PATCH 06/11] NetBpfLoad: more 4.9-T support
+Subject: [PATCH 06/10] NetBpfLoad: more 4.9-T support
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -16,7 +16,7 @@ Change-Id: If59b8947021394e1ce0a91326fee4272a5bddd38
  1 file changed, 4 insertions(+), 2 deletions(-)
 
 diff --git a/netbpfload/loader.cpp b/netbpfload/loader.cpp
-index 7754a3ef4f..d9d3b5067c 100644
+index 7754a3e..d9d3b50 100644
 --- a/netbpfload/loader.cpp
 +++ b/netbpfload/loader.cpp
 @@ -784,7 +784,8 @@ static int createMaps(const char* elfPath, ifstream& elfFile, vector<unique_fd>&
