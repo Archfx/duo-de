@@ -1,4 +1,4 @@
-From c13559ccae038d52310f1fedc28152b7a1d5a40f Mon Sep 17 00:00:00 2001
+From e0d0fce849431dd86dbc6f770919b209ec8da9de Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sun, 12 Dec 2021 08:45:36 -0500
 Subject: [PATCH 05/13] Mark accelerometer input as sensor exclusively if there
@@ -15,10 +15,10 @@ Change-Id: I491ab89724c908ef09a23a6427d24a8889bf806a
  1 file changed, 7 insertions(+), 1 deletion(-)
 
 diff --git a/services/inputflinger/reader/EventHub.cpp b/services/inputflinger/reader/EventHub.cpp
-index f7bbc511f9..ad2394d791 100644
+index 3ca691efba..a2b5d7d8b0 100644
 --- a/services/inputflinger/reader/EventHub.cpp
 +++ b/services/inputflinger/reader/EventHub.cpp
-@@ -2409,7 +2409,13 @@ void EventHub::openDeviceLocked(const std::string& devicePath) {
+@@ -2431,7 +2431,13 @@ void EventHub::openDeviceLocked(const std::string& devicePath) {
  
      // Check whether this device is an accelerometer.
      if (device->propBitmask.test(INPUT_PROP_ACCELEROMETER)) {

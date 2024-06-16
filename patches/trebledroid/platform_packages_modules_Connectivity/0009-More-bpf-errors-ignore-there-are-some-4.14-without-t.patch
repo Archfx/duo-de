@@ -1,7 +1,7 @@
-From c4834801bbbc52882dc15951b0e1773873fd69d5 Mon Sep 17 00:00:00 2001
+From 2d14b64e07940a82de12f7e59c88f439b402111c Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Wed, 15 May 2024 05:56:59 -0400
-Subject: [PATCH 10/11] More bpf errors ignore -- there are some 4.14 without
+Subject: [PATCH 09/10] More bpf errors ignore -- there are some 4.14 without
  the bpf jit file
 
 ---
@@ -9,10 +9,10 @@ Subject: [PATCH 10/11] More bpf errors ignore -- there are some 4.14 without
  1 file changed, 3 insertions(+), 6 deletions(-)
 
 diff --git a/netbpfload/NetBpfLoad.cpp b/netbpfload/NetBpfLoad.cpp
-index e9c1b10651..3853916df2 100644
+index 9b71eaaa35..0484577a49 100644
 --- a/netbpfload/NetBpfLoad.cpp
 +++ b/netbpfload/NetBpfLoad.cpp
-@@ -218,8 +218,7 @@ int main(int argc, char** argv, char * const envp[]) {
+@@ -345,8 +345,7 @@ int main(int argc, char** argv, char * const envp[]) {
          // but we need 0 (enabled)
          // (this writeFile is known to fail on at least 4.19, but always defaults to 0 on
          // pre-5.13, on 5.13+ it depends on CONFIG_BPF_UNPRIV_DEFAULT_OFF)
@@ -22,7 +22,7 @@ index e9c1b10651..3853916df2 100644
  
          // Enable the eBPF JIT -- but do note that on 64-bit kernels it is likely
          // already force enabled by the kernel config option BPF_JIT_ALWAYS_ON.
-@@ -227,14 +226,12 @@ int main(int argc, char** argv, char * const envp[]) {
+@@ -354,14 +353,12 @@ int main(int argc, char** argv, char * const envp[]) {
          //  kernel does not have CONFIG_BPF_JIT=y)
          // BPF_JIT is required by R VINTF (which means 4.14/4.19/5.4 kernels),
          // but 4.14/4.19 were released with P & Q, and only 5.4 is new in R+.

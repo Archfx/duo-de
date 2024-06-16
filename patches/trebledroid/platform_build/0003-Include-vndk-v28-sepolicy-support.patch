@@ -1,4 +1,4 @@
-From dee022cf161b49ea30d6ea46ed0c23e9f13671dc Mon Sep 17 00:00:00 2001
+From e6b76d1e7d9be605890c8125efdf0b4a33957048 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Fri, 6 Oct 2023 19:11:22 -0400
 Subject: [PATCH 3/4] Include vndk v28 sepolicy support
@@ -8,10 +8,10 @@ Subject: [PATCH 3/4] Include vndk v28 sepolicy support
  1 file changed, 1 insertion(+)
 
 diff --git a/core/config.mk b/core/config.mk
-index d0d7e6e4cf..750d5fb4cd 100644
+index 546858aac9..11e8799405 100644
 --- a/core/config.mk
 +++ b/core/config.mk
-@@ -927,6 +927,7 @@ endif
+@@ -879,6 +879,7 @@ BOARD_SEPOLICY_VERS := $(PLATFORM_SEPOLICY_VERSION)
  
  # A list of SEPolicy versions, besides PLATFORM_SEPOLICY_VERSION, that the framework supports.
  PLATFORM_SEPOLICY_COMPAT_VERSIONS := $(filter-out $(PLATFORM_SEPOLICY_VERSION), \

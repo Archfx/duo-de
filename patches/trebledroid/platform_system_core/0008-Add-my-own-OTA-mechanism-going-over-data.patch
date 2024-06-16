@@ -1,4 +1,4 @@
-From 9e3f7a09dd752b965eef383ff9b30f41d041ffa4 Mon Sep 17 00:00:00 2001
+From 3ff1ec39c393feec99a10a31bd561881ab86ca15 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sat, 22 Jan 2022 14:34:45 -0500
 Subject: [PATCH 08/26] Add my own OTA mechanism going over /data
@@ -10,7 +10,7 @@ Change-Id: I9cacff2d761affa0376b4bb8ca63353a9d95b5de
  2 files changed, 65 insertions(+), 1 deletion(-)
 
 diff --git a/fs_mgr/libfiemap/image_manager.cpp b/fs_mgr/libfiemap/image_manager.cpp
-index c416f4df4..b8eba80aa 100644
+index a5da6e342..85f4ed62d 100644
 --- a/fs_mgr/libfiemap/image_manager.cpp
 +++ b/fs_mgr/libfiemap/image_manager.cpp
 @@ -156,7 +156,7 @@ bool ImageManager::MetadataDirIsTest() const {

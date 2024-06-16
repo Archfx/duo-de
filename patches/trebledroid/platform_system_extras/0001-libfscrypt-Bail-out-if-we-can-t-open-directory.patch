@@ -1,4 +1,4 @@
-From d7eddbbf8e62f503ce49532c1650860793b965d6 Mon Sep 17 00:00:00 2001
+From e12cf11ceb1981a28ac2826407ca3c99a92bb01e Mon Sep 17 00:00:00 2001
 From: Luca Stefani <luca.stefani.ge1@gmail.com>
 Date: Wed, 9 Sep 2020 12:43:54 +0200
 Subject: [PATCH] libfscrypt: Bail out if we can't open directory
@@ -18,10 +18,10 @@ Change-Id: I5ea37019221cd0887b8a5d7454f5a42ac01335c7
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/libfscrypt/fscrypt.cpp b/libfscrypt/fscrypt.cpp
-index 174cecad..285cb9d7 100644
+index 4c756b18..f3b106e9 100644
 --- a/libfscrypt/fscrypt.cpp
 +++ b/libfscrypt/fscrypt.cpp
-@@ -328,7 +328,7 @@ bool EnsurePolicy(const EncryptionPolicy& policy, const std::string& directory)
+@@ -354,7 +354,7 @@ bool EnsurePolicy(const EncryptionPolicy& policy, const std::string& directory)
      android::base::unique_fd fd(open(directory.c_str(), O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
      if (fd == -1) {
          PLOG(ERROR) << "Failed to open directory " << directory;

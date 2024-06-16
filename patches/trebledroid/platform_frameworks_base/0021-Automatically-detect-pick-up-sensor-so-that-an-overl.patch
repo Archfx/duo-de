@@ -1,4 +1,4 @@
-From d3ab3a871dddb30b4689d908977eadca097da9b5 Mon Sep 17 00:00:00 2001
+From bd0c7445a8e30b1834f167e8fb6844c5eaedf2dc Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sat, 20 Mar 2021 14:31:01 +0100
 Subject: [PATCH 21/53] Automatically detect pick up sensor, so that an overlay

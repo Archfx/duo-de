@@ -1,4 +1,4 @@
-From d6e25483a85b782d60ff23318e6aa3cbf881b355 Mon Sep 17 00:00:00 2001
+From ce509a6a4788e696de672d7d772853cc49c5b38e Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Wed, 18 Oct 2023 17:44:59 -0400
 Subject: [PATCH] Don't crash when we get no DeviceLockManager
@@ -9,12 +9,12 @@ Change-Id: Iaba659694e706c82a95ec2e99feb26e2bc6314e0
  1 file changed, 4 insertions(+), 1 deletion(-)
 
 diff --git a/DeviceLockController/src/com/android/devicelockcontroller/SystemDeviceLockManagerImpl.java b/DeviceLockController/src/com/android/devicelockcontroller/SystemDeviceLockManagerImpl.java
-index e376aaeb..af90d23e 100644
+index 93540aec..4916c823 100644
 --- a/DeviceLockController/src/com/android/devicelockcontroller/SystemDeviceLockManagerImpl.java
 +++ b/DeviceLockController/src/com/android/devicelockcontroller/SystemDeviceLockManagerImpl.java
 @@ -48,7 +48,10 @@ public final class SystemDeviceLockManagerImpl implements SystemDeviceLockManage
-         final DeviceLockManager deviceLockManager =
-                 context.getSystemService(DeviceLockManager.class);
+         final DeviceLockManager deviceLockManager = context.getSystemService(
+                 DeviceLockManager.class);
  
 -        mIDeviceLockService = deviceLockManager.getService();
 +        if (deviceLockManager != null)

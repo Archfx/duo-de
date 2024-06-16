@@ -1,4 +1,4 @@
-From 4d3925eb9d2d2ce31012df8a9e320f77fdbff888 Mon Sep 17 00:00:00 2001
+From 5cea503e63b91024670a641c1ff02227113853db Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Tue, 7 May 2024 19:28:41 -0400
 Subject: [PATCH] Disable O_DIRECT for old kernels
@@ -16,7 +16,7 @@ Change-Id: I710e870bc467000547b00958b0818aaf0ddca072
  1 file changed, 15 insertions(+), 1 deletion(-)
 
 diff --git a/apexd/apexd_loop.cpp b/apexd/apexd_loop.cpp
-index 1ae573d8..b613c7c9 100644
+index e15a7fa8..464eca0f 100644
 --- a/apexd/apexd_loop.cpp
 +++ b/apexd/apexd_loop.cpp
 @@ -35,6 +35,7 @@

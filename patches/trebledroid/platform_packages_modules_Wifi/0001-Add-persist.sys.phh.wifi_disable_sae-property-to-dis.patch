@@ -1,4 +1,4 @@
-From b28cb024741e06a50b31389f8f7e553ffc4a4d86 Mon Sep 17 00:00:00 2001
+From 69f7824ab0ad50c982a48a3fc21a30d7e715831e Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Wed, 21 Feb 2024 17:26:07 -0500
 Subject: [PATCH] Add persist.sys.phh.wifi_disable_sae property to disable
@@ -10,19 +10,19 @@ Change-Id: I72a0133e986f2c745af3c915ed65d7b540d2119b
  1 file changed, 4 insertions(+), 1 deletion(-)
 
 diff --git a/service/java/com/android/server/wifi/WifiGlobals.java b/service/java/com/android/server/wifi/WifiGlobals.java
-index 1725ed7cec..25e7846b5c 100644
+index 454d8c25c7..9601064af8 100644
 --- a/service/java/com/android/server/wifi/WifiGlobals.java
 +++ b/service/java/com/android/server/wifi/WifiGlobals.java
-@@ -56,7 +56,7 @@ public class WifiGlobals {
-     private final AtomicBoolean mIsWepAllowed = new AtomicBoolean(false);
+@@ -59,7 +59,7 @@ public class WifiGlobals {
+     private final AtomicInteger mSendDhcpHostnameRestriction = new AtomicInteger();
  
      // These are read from the overlay, cache them after boot up.
 -    private final boolean mIsWpa3SaeUpgradeEnabled;
 +    private boolean mIsWpa3SaeUpgradeEnabled;
-     private final boolean mIsWpa3SaeUpgradeOffloadEnabled;
+     private boolean mIsWpa3SaeUpgradeOffloadEnabled;
      private final boolean mIsOweUpgradeEnabled;
      private final boolean mFlushAnqpCacheOnWifiToggleOffEvent;
-@@ -98,6 +98,9 @@ public class WifiGlobals {
+@@ -108,6 +108,9 @@ public class WifiGlobals {
  
          mIsWpa3SaeUpgradeEnabled = mContext.getResources()
                  .getBoolean(R.bool.config_wifiSaeUpgradeEnabled);
