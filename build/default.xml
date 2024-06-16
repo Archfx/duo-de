@@ -25,8 +25,11 @@
   <!-- LineageOS -->
   <remove-project name="platform/packages/apps/Launcher3" />
   <remove-project name="platform/packages/apps/ThemePicker" />
-  <project name="LineageOS/android_packages_apps_Trebuchet" path="packages/apps/Trebuchet" remote="github" revision="lineage-21.0" />
-  <project name="LineageOS/android_packages_apps_ThemePicker" path="packages/apps/ThemePicker" remote="github" revision="lineage-21.0" />
+  <project name="ponces/android_packages_apps_Trebuchet" path="packages/apps/Trebuchet" remote="github" revision="lineage-21.0-dev" />
+  <project name="ponces/android_packages_apps_ThemePicker" path="packages/apps/ThemePicker" remote="github" revision="lineage-21.0-dev" />
+  <!-- <project name="LineageOS/android_packages_apps_Trebuchet" path="packages/apps/Trebuchet" remote="github" revision="lineage-21.0" />
+  <project name="LineageOS/android_packages_apps_ThemePicker" path="packages/apps/ThemePicker" remote="github" revision="lineage-21.0" /> -->
+
 
   <!-- duo specifics -->
   <project name="Archfx/duoOverlays" path="packages/thain/rro_overlays" remote="github" revision="main" />
@@ -34,4 +37,5 @@
   <project name="Archfx/duoPosture" path="packages/thain/services/PostureProcessor" remote="github" revision="main"/>
  
 
+  
 </manifest>
