@@ -1,7 +1,7 @@
-From c07aed86276c2f3dae585473967459245a0308a8 Mon Sep 17 00:00:00 2001
+From e47def17699ce64f2ebf0f7a928f3f91ff0cd7f4 Mon Sep 17 00:00:00 2001
 From: Andy CrossGate Yan <GeForce8800Ultra@gmail.com>
 Date: Sun, 26 May 2024 12:15:41 +0800
-Subject: [PATCH 10/10] Fixup! Support non-working BPF maps on old BPF-less
+Subject: [PATCH 11/11] Fixup! Support non-working BPF maps on old BPF-less
  kernel
 
 Null-check all other BPF map usages, which could be used by e.g. internet restriction in LOS
@@ -10,10 +10,10 @@ Null-check all other BPF map usages, which could be used by e.g. internet restri
  1 file changed, 25 insertions(+)
 
 diff --git a/service/src/com/android/server/BpfNetMaps.java b/service/src/com/android/server/BpfNetMaps.java
-index 6f7b94c..833a6a9 100644
+index 9b2202b295..ec1d1abfbc 100644
 --- a/service/src/com/android/server/BpfNetMaps.java
 +++ b/service/src/com/android/server/BpfNetMaps.java
-@@ -389,6 +389,8 @@ public class BpfNetMaps {
+@@ -381,6 +381,8 @@ public class BpfNetMaps {
      }
  
      private void removeRule(final int uid, final long match, final String caller) {
@@ -22,7 +22,7 @@ index 6f7b94c..833a6a9 100644
          try {
              synchronized (sUidOwnerMap) {
                  final UidOwnerValue oldMatch = sUidOwnerMap.getValue(new S32(uid));
-@@ -416,6 +418,8 @@ public class BpfNetMaps {
+@@ -408,6 +410,8 @@ public class BpfNetMaps {
      }
  
      private void addRule(final int uid, final long match, final int iif, final String caller) {
@@ -31,7 +31,7 @@ index 6f7b94c..833a6a9 100644
          if (match != IIF_MATCH && iif != 0) {
              throw new ServiceSpecificException(EINVAL,
                      "Non-interface match must have zero interface index");
-@@ -518,6 +522,8 @@ public class BpfNetMaps {
+@@ -510,6 +514,8 @@ public class BpfNetMaps {
      public void setChildChain(final int childChain, final boolean enable) {
          throwIfPreT("setChildChain is not available on pre-T devices");
  
@@ -40,7 +40,7 @@ index 6f7b94c..833a6a9 100644
          final long match = getMatchByFirewallChain(childChain);
          try {
              synchronized (sUidRulesConfigBpfMapLock) {
-@@ -570,6 +576,8 @@ public class BpfNetMaps {
+@@ -562,6 +568,8 @@ public class BpfNetMaps {
      public void replaceUidChain(final int chain, final int[] uids) {
          throwIfPreT("replaceUidChain is not available on pre-T devices");
  
@@ -49,7 +49,7 @@ index 6f7b94c..833a6a9 100644
          final long match;
          try {
              match = getMatchByFirewallChain(chain);
-@@ -650,6 +658,9 @@ public class BpfNetMaps {
+@@ -642,6 +650,9 @@ public class BpfNetMaps {
      private Set<Integer> getUidsMatchEnabled(final int childChain) throws ErrnoException {
          final long match = getMatchByFirewallChain(childChain);
          Set<Integer> uids = new ArraySet<>();
@@ -59,7 +59,7 @@ index 6f7b94c..833a6a9 100644
          synchronized (sUidOwnerMap) {
              sUidOwnerMap.forEach((uid, val) -> {
                  if (val == null) {
-@@ -884,6 +895,8 @@ public class BpfNetMaps {
+@@ -876,6 +887,8 @@ public class BpfNetMaps {
      public void setDataSaverEnabled(boolean enable) {
          throwIfPreT("setDataSaverEnabled is not available on pre-T devices");
  
@@ -68,7 +68,7 @@ index 6f7b94c..833a6a9 100644
          try {
              final short config = enable ? DATA_SAVER_ENABLED : DATA_SAVER_DISABLED;
              sDataSaverEnabledMap.updateEntry(DATA_SAVER_ENABLED_KEY, new U8(config));
-@@ -902,6 +915,9 @@ public class BpfNetMaps {
+@@ -894,6 +907,9 @@ public class BpfNetMaps {
      @RequiresApi(Build.VERSION_CODES.TIRAMISU)
      public void setIngressDiscardRule(final InetAddress address, final String iface) {
          throwIfPreT("setIngressDiscardRule is not available on pre-T devices");
@@ -78,7 +78,7 @@ index 6f7b94c..833a6a9 100644
          final int ifIndex = mDeps.getIfIndex(iface);
          if (ifIndex == 0) {
              Log.e(TAG, "Failed to get if index, skip setting ingress discard rule for " + address
-@@ -925,6 +941,9 @@ public class BpfNetMaps {
+@@ -917,6 +933,9 @@ public class BpfNetMaps {
      @RequiresApi(Build.VERSION_CODES.TIRAMISU)
      public void removeIngressDiscardRule(final InetAddress address) {
          throwIfPreT("removeIngressDiscardRule is not available on pre-T devices");
@@ -88,7 +88,7 @@ index 6f7b94c..833a6a9 100644
          try {
              sIngressDiscardMap.deleteEntry(new IngressDiscardKey(address));
          } catch (ErrnoException e) {
-@@ -997,6 +1016,8 @@ public class BpfNetMaps {
+@@ -989,6 +1008,8 @@ public class BpfNetMaps {
      }
  
      private void dumpOwnerMatchConfig(final IndentingPrintWriter pw) {
@@ -97,7 +97,7 @@ index 6f7b94c..833a6a9 100644
          try {
              final long match = sConfigurationMap.getValue(UID_RULES_CONFIGURATION_KEY).val;
              pw.println("current ownerMatch configuration: " + match + " " + matchToString(match));
-@@ -1006,6 +1027,8 @@ public class BpfNetMaps {
+@@ -998,6 +1019,8 @@ public class BpfNetMaps {
      }
  
      private void dumpCurrentStatsMapConfig(final IndentingPrintWriter pw) {
@@ -106,7 +106,7 @@ index 6f7b94c..833a6a9 100644
          try {
              final long config = sConfigurationMap.getValue(CURRENT_STATS_MAP_CONFIGURATION_KEY).val;
              final String currentStatsMap =
-@@ -1017,6 +1040,8 @@ public class BpfNetMaps {
+@@ -1009,6 +1032,8 @@ public class BpfNetMaps {
      }
  
      private void dumpDataSaverConfig(final IndentingPrintWriter pw) {

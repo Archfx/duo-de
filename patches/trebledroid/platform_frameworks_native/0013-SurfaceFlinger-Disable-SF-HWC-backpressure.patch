@@ -1,4 +1,4 @@
-From e638c9eb1ee34cfcfefd0148a04ab1d826c8a592 Mon Sep 17 00:00:00 2001
+From f78f0cfcc6f6ed6eb2c6a33774c1edd3fc49f2d1 Mon Sep 17 00:00:00 2001
 From: Andy CrossGate Yan <GeForce8800Ultra@gmail.com>
 Date: Sun, 26 May 2024 21:34:17 +0800
 Subject: [PATCH 13/13] SurfaceFlinger: Disable SF HWC backpressure
@@ -8,10 +8,10 @@ Subject: [PATCH 13/13] SurfaceFlinger: Disable SF HWC backpressure
  1 file changed, 2 insertions(+), 1 deletion(-)
 
 diff --git a/services/surfaceflinger/SurfaceFlinger.cpp b/services/surfaceflinger/SurfaceFlinger.cpp
-index cf5f55d..ac5567b 100644
+index 4fe729feb3..3a80a086da 100644
 --- a/services/surfaceflinger/SurfaceFlinger.cpp
 +++ b/services/surfaceflinger/SurfaceFlinger.cpp
-@@ -2547,7 +2547,8 @@ bool SurfaceFlinger::commit(PhysicalDisplayId pacesetterId,
+@@ -2546,7 +2546,8 @@ bool SurfaceFlinger::commit(PhysicalDisplayId pacesetterId,
          }
      }
  

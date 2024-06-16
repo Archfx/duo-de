@@ -1,4 +1,4 @@
-From 58ff465ed021368744fc011069f6525e36e9095a Mon Sep 17 00:00:00 2001
+From 470070680f5ba495f1f9571fcc8b30af2bc7ad19 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Tue, 7 May 2024 22:34:40 +0000
 Subject: [PATCH 12/13] Disable gpuservice on old BPF-less kernel
@@ -9,7 +9,7 @@ Change-Id: I8e1626e2e9d12ee0dc03d758799bc88085899476
  1 file changed, 1 insertion(+)
 
 diff --git a/services/gpuservice/gpumem/GpuMem.cpp b/services/gpuservice/gpumem/GpuMem.cpp
-index 141fe02..90b8b5c 100644
+index 141fe021ee..90b8b5c52d 100644
 --- a/services/gpuservice/gpumem/GpuMem.cpp
 +++ b/services/gpuservice/gpumem/GpuMem.cpp
 @@ -48,6 +48,7 @@ void GpuMem::initialize() {

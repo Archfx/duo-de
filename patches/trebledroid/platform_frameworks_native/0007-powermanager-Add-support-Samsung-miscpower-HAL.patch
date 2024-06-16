@@ -1,4 +1,4 @@
-From 9610e50c0bd93b82ce59c8491c89557a6f07958f Mon Sep 17 00:00:00 2001
+From e530843ac0424a589b387221ba90fbafd9bc4f83 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Mon, 27 Dec 2021 18:00:43 -0500
 Subject: [PATCH 07/13] powermanager: Add support Samsung miscpower HAL
@@ -27,7 +27,7 @@ Change-Id: I182a91ccb0a89f9d0d7d41f36eccab218b553bbc
  7 files changed, 136 insertions(+), 6 deletions(-)
 
 diff --git a/include/powermanager/PowerHalLoader.h b/include/powermanager/PowerHalLoader.h
-index cbbfa59..c27a833 100644
+index cbbfa597ba..c27a833a07 100644
 --- a/include/powermanager/PowerHalLoader.h
 +++ b/include/powermanager/PowerHalLoader.h
 @@ -22,6 +22,7 @@
@@ -55,20 +55,20 @@ index cbbfa59..c27a833 100644
      static sp<hardware::power::V1_0::IPower> loadHidlV1_0Locked()
              EXCLUSIVE_LOCKS_REQUIRED(gHalMutex);
 diff --git a/include/powermanager/PowerHalWrapper.h b/include/powermanager/PowerHalWrapper.h
-index e2da014..2c623d4 100644
+index 4e4a1b000d..0411f9f8cf 100644
 --- a/include/powermanager/PowerHalWrapper.h
 +++ b/include/powermanager/PowerHalWrapper.h
-@@ -27,6 +27,7 @@
+@@ -26,6 +26,7 @@
  #include <android/hardware/power/1.2/IPower.h>
  #include <android/hardware/power/1.3/IPower.h>
  #include <binder/Status.h>
 +#include <vendor/samsung/hardware/miscpower/2.0/ISehMiscPower.h>
  
- #include <utility>
+ namespace android {
  
-@@ -278,8 +279,10 @@ protected:
+@@ -240,8 +241,10 @@ protected:
  // Wrapper for the AIDL Power HAL.
- class AidlHalWrapper : public EmptyHalWrapper {
+ class AidlHalWrapper : public HalWrapper {
  public:
 -    explicit AidlHalWrapper(std::shared_ptr<aidl::android::hardware::power::IPower> handle)
 -          : mHandle(std::move(handle)) {}
@@ -79,7 +79,7 @@ index e2da014..2c623d4 100644
      ~AidlHalWrapper() override = default;
  
      HalResult<void> setBoost(aidl::android::hardware::power::Boost boost,
-@@ -307,6 +310,7 @@ private:
+@@ -257,6 +260,7 @@ private:
      std::mutex mBoostMutex;
      std::mutex mModeMutex;
      std::shared_ptr<aidl::android::hardware::power::IPower> mHandle;
@@ -87,7 +87,7 @@ index e2da014..2c623d4 100644
      // Android framework only sends boost upto DISPLAY_UPDATE_IMMINENT.
      // Need to increase the array size if more boost supported.
      std::array<
-@@ -321,6 +325,34 @@ private:
+@@ -271,6 +275,34 @@ private:
              mModeSupportedArray GUARDED_BY(mModeMutex) = {HalSupport::UNKNOWN};
  };
  
@@ -123,7 +123,7 @@ index e2da014..2c623d4 100644
  
  }; // namespace android
 diff --git a/services/powermanager/Android.bp b/services/powermanager/Android.bp
-index 1f72e8b..d7eea4d 100644
+index 1f72e8ba2c..d7eea4dfc7 100644
 --- a/services/powermanager/Android.bp
 +++ b/services/powermanager/Android.bp
 @@ -42,6 +42,7 @@ cc_library_shared {
@@ -143,7 +143,7 @@ index 1f72e8b..d7eea4d 100644
  
      cflags: [
 diff --git a/services/powermanager/PowerHalController.cpp b/services/powermanager/PowerHalController.cpp
-index bc178bc..98dc5ad 100644
+index 9a23c848c9..4949d49db7 100644
 --- a/services/powermanager/PowerHalController.cpp
 +++ b/services/powermanager/PowerHalController.cpp
 @@ -20,6 +20,7 @@
@@ -184,7 +184,7 @@ index bc178bc..98dc5ad 100644
          }
          return std::make_unique<HidlHalWrapperV1_0>(halHidlV1_0);
 diff --git a/services/powermanager/PowerHalLoader.cpp b/services/powermanager/PowerHalLoader.cpp
-index 2214461..5823fa6 100644
+index 22144615da..5823fa697d 100644
 --- a/services/powermanager/PowerHalLoader.cpp
 +++ b/services/powermanager/PowerHalLoader.cpp
 @@ -21,6 +21,7 @@
@@ -229,10 +229,10 @@ index 2214461..5823fa6 100644
  
  // -------------------------------------------------------------------------------------------------
 diff --git a/services/powermanager/PowerHalWrapper.cpp b/services/powermanager/PowerHalWrapper.cpp
-index 1009100..79605a1 100644
+index 76afbfc646..1d40252d7d 100644
 --- a/services/powermanager/PowerHalWrapper.cpp
 +++ b/services/powermanager/PowerHalWrapper.cpp
-@@ -232,6 +232,10 @@ HalResult<void> AidlHalWrapper::setMode(Aidl::Mode mode, bool enabled) {
+@@ -221,6 +221,10 @@ HalResult<void> AidlHalWrapper::setMode(Aidl::Mode mode, bool enabled) {
      std::unique_lock<std::mutex> lock(mModeMutex);
      size_t idx = static_cast<size_t>(mode);
  
@@ -242,9 +242,9 @@ index 1009100..79605a1 100644
 +
      // Quick return if mode is not supported by HAL
      if (idx >= mModeSupportedArray.size() || mModeSupportedArray[idx] == HalSupport::OFF) {
-         ALOGV("Skipped setMode %s because %s", toString(mode).c_str(), getUnsupportedMessage());
-@@ -294,6 +298,72 @@ const char* AidlHalWrapper::getUnsupportedMessage() {
-     return "Power HAL doesn't support it";
+         ALOGV("Skipped setMode %s because Power HAL doesn't support it", toString(mode).c_str());
+@@ -260,6 +264,72 @@ HalResult<int64_t> AidlHalWrapper::getHintSessionPreferredRate() {
+     return HalResult<int64_t>::fromStatus(result, rate);
  }
  
 +HalResult<void> HidlHalWrapperSeh::setBoost(Aidl::Boost boost, int32_t durationMs) {
@@ -317,10 +317,10 @@ index 1009100..79605a1 100644
  
  } // namespace power
 diff --git a/services/surfaceflinger/CompositionEngine/Android.bp b/services/surfaceflinger/CompositionEngine/Android.bp
-index 0b01c66..4c9220b 100644
+index ae2f2dbbf5..96ae9aa8de 100644
 --- a/services/surfaceflinger/CompositionEngine/Android.bp
 +++ b/services/surfaceflinger/CompositionEngine/Android.bp
-@@ -39,6 +39,7 @@ cc_defaults {
+@@ -38,6 +38,7 @@ cc_defaults {
          "libui",
          "libutils",
          "server_configurable_flags",

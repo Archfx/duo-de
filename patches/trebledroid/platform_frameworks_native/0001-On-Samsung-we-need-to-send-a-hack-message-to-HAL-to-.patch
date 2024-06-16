@@ -1,4 +1,4 @@
-From 30e1d13dfc357c91697c0be49c07665bfd789687 Mon Sep 17 00:00:00 2001
+From dc6c9ae247d0165c3d2dd8f582d2c0d07245d273 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Wed, 14 Aug 2019 23:37:10 +0200
 Subject: [PATCH 01/13] On Samsung, we need to send a hack-message to HAL to
@@ -10,18 +10,18 @@ Change-Id: Id6a1fa48340de61c418493668e9abd22c2599376
  1 file changed, 3 insertions(+)
 
 diff --git a/services/sensorservice/SensorDevice.cpp b/services/sensorservice/SensorDevice.cpp
-index f62562c..be7d33b 100644
+index dd83fdefc3..1996b306a4 100644
 --- a/services/sensorservice/SensorDevice.cpp
 +++ b/services/sensorservice/SensorDevice.cpp
 @@ -40,6 +40,7 @@
- #include "android/hardware/sensors/2.1/types.h"
- #include "convertV2_1.h"
+ #include <mutex>
+ #include <condition_variable>
  
 +#include <android-base/properties.h>
  using namespace android::hardware::sensors;
  using android::util::ProtoOutputStream;
- namespace sensorservice_flags = com::android::frameworks::sensorservice::flags;
-@@ -79,6 +80,8 @@ SensorDevice::SensorDevice() : mInHalBypassMode(false) {
+ 
+@@ -78,6 +79,8 @@ SensorDevice::SensorDevice() : mInHalBypassMode(false) {
  }
  
  void SensorDevice::initializeSensorList() {
