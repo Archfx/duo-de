@@ -1,7 +1,7 @@
-From 2e82d01aa5c87fca1c42e508986f7d9f40834bc7 Mon Sep 17 00:00:00 2001
+From 4ac6d660bb9172f3584f3893d49a4aff9a3c4b3f Mon Sep 17 00:00:00 2001
 From: Michael Bestas <mkbestas@gmail.com>
 Date: Fri, 15 Mar 2024 14:59:21 +0200
-Subject: [PATCH 08/10] netd: Remove <4.14 kernel restrictions
+Subject: [PATCH 08/11] netd: Remove <4.14 kernel restrictions
 
 Change-Id: I4d4abbacd6b9589260de06663e2143bc37d8ea0f
 ---
@@ -9,7 +9,7 @@ Change-Id: I4d4abbacd6b9589260de06663e2143bc37d8ea0f
  1 file changed, 10 deletions(-)
 
 diff --git a/netd/BpfHandler.cpp b/netd/BpfHandler.cpp
-index aaaa41c..b833352 100644
+index aaaa41c6d7..b8333526d8 100644
 --- a/netd/BpfHandler.cpp
 +++ b/netd/BpfHandler.cpp
 @@ -75,16 +75,6 @@ static Status initPrograms(const char* cg2_path) {

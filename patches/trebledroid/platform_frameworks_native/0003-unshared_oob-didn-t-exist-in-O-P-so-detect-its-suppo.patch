@@ -1,4 +1,4 @@
-From 617ecce6bbf810497d32cafb32952312325866eb Mon Sep 17 00:00:00 2001
+From a35b282d16105908905b0e8e3cf1151656d9f712 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Tue, 5 Jan 2021 23:44:00 +0100
 Subject: [PATCH 03/13] unshared_oob didn't exist in O/P, so detect its
@@ -9,7 +9,7 @@ Subject: [PATCH 03/13] unshared_oob didn't exist in O/P, so detect its
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/cmds/installd/migrate_legacy_obb_data.sh b/cmds/installd/migrate_legacy_obb_data.sh
-index 7399681..9d5b73e 100644
+index 7399681c3e..9d5b73eae2 100644
 --- a/cmds/installd/migrate_legacy_obb_data.sh
 +++ b/cmds/installd/migrate_legacy_obb_data.sh
 @@ -18,7 +18,7 @@

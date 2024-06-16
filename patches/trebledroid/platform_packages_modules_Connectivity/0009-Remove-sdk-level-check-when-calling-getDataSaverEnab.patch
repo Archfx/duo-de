@@ -1,0 +1,62 @@
+From 428f8a3d1640b5f1a9c74ab5cd18eeaaceb0a1d0 Mon Sep 17 00:00:00 2001
+From: Junyu Lai <junyulai@google.com>
+Date: Mon, 18 Dec 2023 16:13:12 +0800
+Subject: [PATCH 09/11] Remove sdk level check when calling getDataSaverEnabled
+
+Follow-up from aosp/2856948, the data saver status value is
+filled by ConnectivityService before Android V. Thus, calling
+BpfNetMapsReader#getDataSaverEnabled() is a legit use case, which
+should not trigger log.wtf.
+
+Remove the check accordingly.
+
+Test: TH
+Bug: 314858283
+Fix: 316839561
+Change-Id: I90c85ab98fbefd1f99ec799a4eec8d1d0cfd47b0
+---
+ framework/src/android/net/BpfNetMapsReader.java     | 8 --------
+ tests/unit/java/android/net/BpfNetMapsReaderTest.kt | 1 -
+ 2 files changed, 9 deletions(-)
+
+diff --git a/framework/src/android/net/BpfNetMapsReader.java b/framework/src/android/net/BpfNetMapsReader.java
+index 70890dac8c..d31024c686 100644
+--- a/framework/src/android/net/BpfNetMapsReader.java
++++ b/framework/src/android/net/BpfNetMapsReader.java
+@@ -36,7 +36,6 @@ import android.os.Build;
+ import android.os.ServiceSpecificException;
+ import android.system.ErrnoException;
+ import android.system.Os;
+-import android.util.Log;
+ 
+ import com.android.internal.annotations.VisibleForTesting;
+ import com.android.modules.utils.build.SdkLevel;
+@@ -284,13 +283,6 @@ public class BpfNetMapsReader {
+     public boolean getDataSaverEnabled() {
+         throwIfPreT("getDataSaverEnabled is not available on pre-T devices");
+ 
+-        // Note that this is not expected to be called until V given that it relies on the
+-        // counterpart platform solution to set data saver status to bpf.
+-        // See {@code NetworkManagementService#setDataSaverModeEnabled}.
+-        if (!SdkLevel.isAtLeastV()) {
+-            Log.wtf(TAG, "getDataSaverEnabled is not expected to be called on pre-V devices");
+-        }
+-
+         if (mDataSaverEnabledMap == null) return false;
+         try {
+             return mDataSaverEnabledMap.getValue(DATA_SAVER_ENABLED_KEY).val == DATA_SAVER_ENABLED;
+diff --git a/tests/unit/java/android/net/BpfNetMapsReaderTest.kt b/tests/unit/java/android/net/BpfNetMapsReaderTest.kt
+index 9de7f4dc7c..8919666551 100644
+--- a/tests/unit/java/android/net/BpfNetMapsReaderTest.kt
++++ b/tests/unit/java/android/net/BpfNetMapsReaderTest.kt
+@@ -213,7 +213,6 @@ class BpfNetMapsReaderTest {
+         assertFalse(isUidNetworkingBlocked(TEST_UID3))
+     }
+ 
+-    @IgnoreUpTo(VERSION_CODES.UPSIDE_DOWN_CAKE)
+     @Test
+     fun testGetDataSaverEnabled() {
+         testDataSaverEnabledMap.updateEntry(DATA_SAVER_ENABLED_KEY, U8(DATA_SAVER_DISABLED))
+-- 
+2.34.1
+
