@@ -1,0 +1,59 @@
+From 45edc02364fca64bd24315f79038f5bc9203cc5c Mon Sep 17 00:00:00 2001
+From: Archfx <cybx@live.com>
+Date: Fri, 14 Jun 2024 10:29:49 -0400
+Subject: [PATCH] moved launch icon to settings
+
+---
+ app/src/main/AndroidManifest.xml                  | 10 +++++++++-
+ .../activities/SettingsLaunchActivity.kt          | 15 +++++++++++++++
+ 2 files changed, 24 insertions(+), 1 deletion(-)
+ create mode 100644 app/src/main/java/cu/axel/smartdock/activities/SettingsLaunchActivity.kt
+
+diff --git a/app/src/main/AndroidManifest.xml b/app/src/main/AndroidManifest.xml
+index d8138bc..6d8fcfc 100644
+--- a/app/src/main/AndroidManifest.xml
++++ b/app/src/main/AndroidManifest.xml
+@@ -32,10 +32,18 @@
+         <activity
+             android:name=".activities.MainActivity"
+             android:exported="true">
+-            <intent-filter>
++            <!-- <intent-filter>
+                 <action android:name="android.intent.action.MAIN" />
+ 
+                 <category android:name="android.intent.category.LAUNCHER" />
++            </intent-filter> -->
++        </activity>
++        <activity 
++            android:name=".activities.SettingsLaunchActivity"
++            android:exported="true">
++            <intent-filter>
++                <action android:name="cu.axel.smartdock.LAUNCH_APP_FROM_SETTINGS" />
++                <category android:name="android.intent.category.DEFAULT" />
+             </intent-filter>
+         </activity>
+         <activity
+diff --git a/app/src/main/java/cu/axel/smartdock/activities/SettingsLaunchActivity.kt b/app/src/main/java/cu/axel/smartdock/activities/SettingsLaunchActivity.kt
+new file mode 100644
+index 0000000..95af3ab
+--- /dev/null
++++ b/app/src/main/java/cu/axel/smartdock/activities/SettingsLaunchActivity.kt
+@@ -0,0 +1,15 @@
++package cu.axel.smartdock.activities
++
++import android.app.Activity
++import android.content.Intent
++import android.os.Bundle
++import cu.axel.smartdock.activities.MainActivity
++
++open class SettingsLaunchActivity : Activity() {
++    override fun onCreate(savedInstanceState: Bundle?) {
++        super.onCreate(savedInstanceState)
++        val intent = Intent(this, MainActivity::class.java)
++        startActivity(intent)
++        finish()
++    }
++}
+-- 
+2.34.1
+

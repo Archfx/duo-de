@@ -3,6 +3,9 @@
   <remote name="github" fetch="https://github.com" />
   <remote name="gitlab" fetch="https://gitlab.com" />
 
+  <!-- Taskbar -->
+  <project name="axel358/smartdock" path="smartdock" remote="github" revision="main" />
+
   <!-- TrebleDroid -->
   <project name="TrebleDroid/device_phh_treble" path="device/phh/treble" remote="github" revision="android-14.0" />
   <project name="TrebleDroid/vendor_hardware_overlay" path="vendor/hardware_overlay" remote="github" revision="pie" />
@@ -24,4 +27,14 @@
   <remove-project name="platform/packages/apps/ThemePicker" />
   <project name="ponces/android_packages_apps_Trebuchet" path="packages/apps/Trebuchet" remote="github" revision="lineage-21.0-dev" />
   <project name="ponces/android_packages_apps_ThemePicker" path="packages/apps/ThemePicker" remote="github" revision="lineage-21.0-dev" />
+
+  <!-- <project name="LineageOS/android_packages_apps_Trebuchet" path="packages/apps/Trebuchet" remote="github" revision="lineage-21.0" />
+  <project name="LineageOS/android_packages_apps_ThemePicker" path="packages/apps/ThemePicker" remote="github" revision="lineage-21.0" /> -->
+
+
+  <!-- duo specifics -->
+  <project name="Archfx/duoOverlays" path="packages/thain/rro_overlays" remote="github" revision="main" />
+  <project name="Archfx/duoBoot" path="vendor/surface" remote="github" revision="main" />
+  <project name="Archfx/duoPosture" path="packages/thain/services/PostureProcessor" remote="github" revision="main"/>
+ 
 </manifest>

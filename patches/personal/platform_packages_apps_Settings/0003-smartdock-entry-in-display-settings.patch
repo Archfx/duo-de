@@ -1,0 +1,59 @@
+From 8205a2396b435b2284ed2f0f66bd34a95d69b0b9 Mon Sep 17 00:00:00 2001
+From: Archfx <cybx@live.com>
+Date: Fri, 14 Jun 2024 10:34:27 -0400
+Subject: [PATCH] smartdock entry in display settings
+
+Change-Id: I3427cbbdc5e9d2c9b87b24b3970b1f539b8a7f6a
+---
+ res/xml/display_settings.xml                  |  6 +++++
+ .../android/settings/SmartDockFragment.java   | 22 +++++++++++++++++++
+ 2 files changed, 28 insertions(+)
+ create mode 100644 src/com/android/settings/SmartDockFragment.java
+
+diff --git a/res/xml/display_settings.xml b/res/xml/display_settings.xml
+index 2df360d6840..e2af3f942b8 100644
+--- a/res/xml/display_settings.xml
++++ b/res/xml/display_settings.xml
+@@ -179,5 +179,11 @@
+             android:key="vr_display_pref"
+             android:title="@string/display_vr_pref_title"
+             android:fragment="com.android.settings.display.VrDisplayPreferencePicker"/>
++
++        <Preference
++                android:key="smartdock_launch"
++                android:title="Smartdock"
++                android:summary="Desktop experience dock"
++                android:fragment="com.android.settings.SmartDockFragment"/>
+     </PreferenceCategory>
+ </PreferenceScreen>
+diff --git a/src/com/android/settings/SmartDockFragment.java b/src/com/android/settings/SmartDockFragment.java
+new file mode 100644
+index 00000000000..4111e1047fd
+--- /dev/null
++++ b/src/com/android/settings/SmartDockFragment.java
+@@ -0,0 +1,22 @@
++package com.android.settings;
++
++import android.content.Intent;
++import android.os.Bundle;
++import androidx.preference.Preference;
++import androidx.preference.PreferenceFragmentCompat;
++
++public class SmartDockFragment extends PreferenceFragmentCompat {
++    @Override
++    public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
++        setPreferencesFromResource(R.xml.display_settings, rootKey);
++
++        Preference myAppPreference = findPreference("smartdock_launch");
++        if (myAppPreference != null) {
++            myAppPreference.setOnPreferenceClickListener(preference -> {
++                Intent intent = new Intent("cu.axel.smartdock.LAUNCH_APP_FROM_SETTINGS");
++                startActivity(intent);
++                return true;
++            });
++        }
++    }
++}
+-- 
+2.34.1
+

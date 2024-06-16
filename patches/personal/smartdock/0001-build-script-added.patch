@@ -1,0 +1,41 @@
+From 98ce06d3340c19577e9c12f13fa34ef330184d7f Mon Sep 17 00:00:00 2001
+From: Archfx <cybx@live.com>
+Date: Wed, 12 Jun 2024 11:57:16 -0400
+Subject: [PATCH] build script added
+
+---
+ build.sh | 22 ++++++++++++++++++++++
+ 1 file changed, 22 insertions(+)
+ create mode 100755 build.sh
+
+diff --git a/build.sh b/build.sh
+new file mode 100755
+index 0000000..2ac295f
+--- /dev/null
++++ b/build.sh
+@@ -0,0 +1,22 @@
++#!/bin/bash
++
++set -e
++
++if [ -d /usr/lib/jvm/java-17-openjdk-amd64/bin/ ];then
++export PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin/:$PATH
++fi
++
++if [ -z "$ANDROID_HOME" ];then
++    export ANDROID_HOME=$PWD/sdk
++fi
++
++gradleTarget=assembleDebug
++target=debug
++file=app-debug
++if [ "$1" == "release" ];then
++    gradleTarget=assembleRelease
++    target=release
++    file=app-release
++fi
++./gradlew $gradleTarget
++LD_LIBRARY_PATH=./signapk/ java -jar signapk/signapk.jar keys/platform.x509.pem keys/platform.pk8 ./app/build/outputs/apk/$target/${file}.apk Smartdock.apk
+-- 
+2.34.1
+

@@ -1,0 +1,170 @@
+From ba91be6cc4373271e2a9a634fc35add2e9b0fb9f Mon Sep 17 00:00:00 2001
+From: Archfx <cybx@live.com>
+Date: Thu, 6 Jun 2024 09:40:26 -0400
+Subject: [PATCH] added duo specific settings from thain
+
+---
+ app/src/main/java/me/phh/treble/app/Duo.kt    | 27 +++++++++++++++++++
+ .../java/me/phh/treble/app/DuoSettings.kt     | 19 +++++++++++++
+ .../java/me/phh/treble/app/EntryService.kt    |  1 +
+ .../me/phh/treble/app/SettingsActivity.kt     |  3 +++
+ app/src/main/res/xml/pref_duo.xml             |  8 ++++++
+ app/src/main/res/xml/pref_headers.xml         |  3 +++
+ keys/keys                                     |  1 +
+ sdk/sdk                                       |  1 +
+ signapk/signapk                               |  1 +
+ 9 files changed, 64 insertions(+)
+ create mode 100644 app/src/main/java/me/phh/treble/app/Duo.kt
+ create mode 100644 app/src/main/java/me/phh/treble/app/DuoSettings.kt
+ create mode 100644 app/src/main/res/xml/pref_duo.xml
+ create mode 120000 keys/keys
+ create mode 120000 sdk/sdk
+ create mode 120000 signapk/signapk
+
+diff --git a/app/src/main/java/me/phh/treble/app/Duo.kt b/app/src/main/java/me/phh/treble/app/Duo.kt
+new file mode 100644
+index 0000000..70ee0a5
+--- /dev/null
++++ b/app/src/main/java/me/phh/treble/app/Duo.kt
+@@ -0,0 +1,27 @@
++package me.phh.treble.app
++
++import android.content.Context
++import android.content.SharedPreferences
++import android.preference.PreferenceManager
++import android.util.Log
++import java.io.File
++import java.lang.Exception
++
++object Duo: EntryStartup {
++    val spListener = SharedPreferences.OnSharedPreferenceChangeListener { sp, key ->
++        when(key) {
++            DuoSettings.disableHingeGap -> {
++                val b = sp.getBoolean(key, false)
++                val value = if(b) "1" else "0"
++                Misc.safeSetprop("persist.sys.phh.duo.disable_hinge", value)
++            }
++        }
++    }
++
++    override fun startup(ctxt: Context) {
++        if(!DuoSettings.enabled()) return
++        Log.d("PHH", "Starting Duo service")
++        val sp = PreferenceManager.getDefaultSharedPreferences(ctxt)
++        sp.registerOnSharedPreferenceChangeListener(spListener)
++    }
++}
+\ No newline at end of file
+diff --git a/app/src/main/java/me/phh/treble/app/DuoSettings.kt b/app/src/main/java/me/phh/treble/app/DuoSettings.kt
+new file mode 100644
+index 0000000..b5c2307
+--- /dev/null
++++ b/app/src/main/java/me/phh/treble/app/DuoSettings.kt
+@@ -0,0 +1,19 @@
++package me.phh.treble.app
++
++import android.os.Bundle
++import android.os.SystemProperties
++
++object DuoSettings : Settings {
++    val disableHingeGap = "key_disable_hinge_gap"
++
++    override fun enabled() = (SystemProperties.get("ro.hardware", "N/A") == "surfaceduo" || SystemProperties.get("ro.hardware", "N/A") == "surfaceduo2")
++}
++
++class DuoSettingsFragment : SettingsFragment() {
++    override val preferencesResId = R.xml.pref_duo
++
++    override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
++        super.onCreatePreferences(savedInstanceState, rootKey)
++        android.util.Log.d("PHH", "Loading duo fragment ${DuoSettings.enabled()}")
++    }
++}
+\ No newline at end of file
+diff --git a/app/src/main/java/me/phh/treble/app/EntryService.kt b/app/src/main/java/me/phh/treble/app/EntryService.kt
+index f6c501b..e33f300 100644
+--- a/app/src/main/java/me/phh/treble/app/EntryService.kt
++++ b/app/src/main/java/me/phh/treble/app/EntryService.kt
+@@ -56,6 +56,7 @@ class EntryService: Service() {
+             tryC { Ims.startup(this) }
+             tryC { Custom.startup(this) }
+             tryC { Hct.startup(this) }
++            tryC { Duo.startup(this) }
+ 
+             tryC { Desktop.startup(this) }
+             tryC { Lid.startup(this) }
+diff --git a/app/src/main/java/me/phh/treble/app/SettingsActivity.kt b/app/src/main/java/me/phh/treble/app/SettingsActivity.kt
+index 547c579..703d66d 100644
+--- a/app/src/main/java/me/phh/treble/app/SettingsActivity.kt
++++ b/app/src/main/java/me/phh/treble/app/SettingsActivity.kt
+@@ -67,6 +67,8 @@ class SettingsActivity : PreferenceActivity() {
+             target.removeIf { it.fragment == AsusSettingsFragment::class.java.name }
+         if (!QualcommSettings.enabled())
+             target.removeIf { it.fragment == QualcommSettingsFragment::class.java.name }
++        if (!DuoSettings.enabled())
++            target.removeIf { it.fragment == DuoSettingsFragment::class.java.name }
+         if (!VsmartSettings.enabled())
+             target.removeIf { it.fragment == VsmartSettingsFragment::class.java.name }
+         if (!MyDeviceSettings.enabled())
+@@ -105,6 +107,7 @@ class SettingsActivity : PreferenceActivity() {
+                 || ImsSettingsFragment::class.java.name == fragmentName
+                 || CustomSettingsFragment::class.java.name == fragmentName
+                 || AudioEffectsFragment::class.java.name == fragmentName
++                || DuoSettingsFragment::class.java.name == fragmentName
+     }
+ 
+     companion object {
+diff --git a/app/src/main/res/xml/pref_duo.xml b/app/src/main/res/xml/pref_duo.xml
+new file mode 100644
+index 0000000..8649f7e
+--- /dev/null
++++ b/app/src/main/res/xml/pref_duo.xml
+@@ -0,0 +1,8 @@
++<?xml version="1.0" encoding="utf-8"?>
++<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
++    <SwitchPreference
++        android:defaultValue="false"
++        android:key="key_disable_hinge_gap"
++        android:title="Disable Hinge Gap"
++        android:summary="Disable the hinge gap for Surface Duo. Requires a reboot" />
++</PreferenceScreen>
+\ No newline at end of file
+diff --git a/app/src/main/res/xml/pref_headers.xml b/app/src/main/res/xml/pref_headers.xml
+index ed5fb55..64314ed 100644
+--- a/app/src/main/res/xml/pref_headers.xml
++++ b/app/src/main/res/xml/pref_headers.xml
+@@ -56,4 +56,7 @@
+         <intent android:action="android.settings.SYSTEM_UPDATE_SETTINGS"
+                 android:targetClass=".UpdaterActivity"/>
+     </header>
++    <header
++        android:fragment="me.phh.treble.app.DuoSettingsFragment"
++        android:title="Surface Duo features" />
+ </preference-headers>
+diff --git a/keys/keys b/keys/keys
+new file mode 120000
+index 0000000..36518a5
+--- /dev/null
++++ b/keys/keys
+@@ -0,0 +1 @@
++../treble_app/keys
+\ No newline at end of file
+diff --git a/sdk/sdk b/sdk/sdk
+new file mode 120000
+index 0000000..b4be28b
+--- /dev/null
++++ b/sdk/sdk
+@@ -0,0 +1 @@
++../treble_app/sdk
+\ No newline at end of file
+diff --git a/signapk/signapk b/signapk/signapk
+new file mode 120000
+index 0000000..1b9c0cf
+--- /dev/null
++++ b/signapk/signapk
+@@ -0,0 +1 @@
++../treble_app/signapk
+\ No newline at end of file
+-- 
+2.34.1
+

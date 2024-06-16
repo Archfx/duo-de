@@ -40,7 +40,6 @@ jobs:
         with:
           name: patches-for-developers
           path: patches/patches-for-developers.zip
-
   cleanup:
     needs: sync
     runs-on: self-hosted

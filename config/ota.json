@@ -1,46 +1,16 @@
 {
-  "version": "v2024.05.09",
-  "date": "1715241738",
+  "version": "v2024.06.15",
+  "date": "1718421917",
   "variants": [
     {
-      "name": "treble_a64_bgN",
-      "size": "897355620",
-      "url": "https://github.com/ponces/treble_aosp/releases/download/v2024.05.09/aosp-arm32_binder64-ab-gapps-14.0-20240509.img.xz"
-    },
-    {
-      "name": "treble_a64_bgN-vndklite",
-      "size": "857896516",
-      "url": "https://github.com/ponces/treble_aosp/releases/download/v2024.05.09/aosp-arm32_binder64-ab-gapps-vndklite-14.0-20240509.img.xz"
-    },
-    {
-      "name": "treble_a64_bvN",
-      "size": "583452280",
-      "url": "https://github.com/ponces/treble_aosp/releases/download/v2024.05.09/aosp-arm32_binder64-ab-vanilla-14.0-20240509.img.xz"
-    },
-    {
-      "name": "treble_a64_bvN-vndklite",
-      "size": "566778516",
-      "url": "https://github.com/ponces/treble_aosp/releases/download/v2024.05.09/aosp-arm32_binder64-ab-vanilla-vndklite-14.0-20240509.img.xz"
-    },
-    {
       "name": "treble_arm64_bgN",
-      "size": "1266469276",
-      "url": "https://github.com/ponces/treble_aosp/releases/download/v2024.05.09/aosp-arm64-ab-gapps-14.0-20240509.img.xz"
-    },
-    {
-      "name": "treble_arm64_bgN-vndklite",
-      "size": "1178927880",
-      "url": "https://github.com/ponces/treble_aosp/releases/download/v2024.05.09/aosp-arm64-ab-gapps-vndklite-14.0-20240509.img.xz"
+      "size": "1322062872",
+      "url": "https://github.com/archfx/duo-de/releases/download/v2024.06.15/aosp-arm64-ab-gapps-14.0-20240615.img.xz"
     },
     {
       "name": "treble_arm64_bvN",
-      "size": "781760768",
-      "url": "https://github.com/ponces/treble_aosp/releases/download/v2024.05.09/aosp-arm64-ab-vanilla-14.0-20240509.img.xz"
-    },
-    {
-      "name": "treble_arm64_bvN-vndklite",
-      "size": "738478812",
-      "url": "https://github.com/ponces/treble_aosp/releases/download/v2024.05.09/aosp-arm64-ab-vanilla-vndklite-14.0-20240509.img.xz"
+      "size": "810346244",
+      "url": "https://github.com/archfx/duo-de/releases/download/v2024.06.15/aosp-arm64-ab-vanilla-14.0-20240615.img.xz"
     }
   ]
 }

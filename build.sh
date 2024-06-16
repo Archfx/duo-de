@@ -10,8 +10,9 @@ echo
 
 set -e
 
+
 BL=$PWD/treble_aosp
-BD=$HOME/builds
+BD=$PWD/duo-de/builds
 BV=$1
 
 initRepos() {
@@ -28,6 +29,8 @@ initRepos() {
 
 syncRepos() {
     echo "--> Syncing repos"
+    repo forall -c 'git checkout -f' 
+    repo forall -c 'git clean -fd'
     repo sync -c --force-sync --no-clone-bundle --no-tags -j$(nproc --all) || repo sync -c --force-sync --no-clone-bundle --no-tags -j$(nproc --all)
     echo
 }
@@ -65,15 +68,30 @@ buildTrebleApp() {
     echo
 }
 
+taskbar_app(){
+
+    echo "Building the Smartdock app"
+    cd smartdock
+    ln -sf ../treble_app/sdk sdk
+    ln -sf ../treble_app/signapk signapk
+    ln -sf ../treble_app/keys keys
+    bash build.sh release
+    cd ..
+    cp smartdock/Smartdock.apk vendor/hardware_overlay/Smartdock/app.apk
+    echo "Smartdock app included"
+}
+
 buildVariant() {
     echo "--> Building $1"
     lunch "$1"-ap2a-userdebug
     make -j$(nproc --all) installclean
     make -j$(nproc --all) systemimage
     make -j$(nproc --all) target-files-package otatools
-    bash $BL/sign.sh "vendor/ponces-priv/keys" $OUT/signed-target_files.zip
-    unzip -jqo $OUT/signed-target_files.zip IMAGES/system.img -d $OUT
+    bash $BL/sign.sh "vendor/archfx-priv/keys" $OUT/signed-target_files.zip
+    unzip -jq $OUT/signed-target_files.zip IMAGES/system.img -d $OUT
     mv $OUT/system.img $BD/system-"$1".img
+
+    echo "image copied to $BD/system-"$1".img"
     echo
 }
 
@@ -89,14 +107,14 @@ buildVndkliteVariant() {
 }
 
 buildVariants() {
-    buildVariant treble_a64_bvN
-    buildVariant treble_a64_bgN
+    # buildVariant treble_a64_bvN
+    # buildVariant treble_a64_bgN
     buildVariant treble_arm64_bvN
     buildVariant treble_arm64_bgN
-    buildVndkliteVariant treble_a64_bvN
-    buildVndkliteVariant treble_a64_bgN
-    buildVndkliteVariant treble_arm64_bvN
-    buildVndkliteVariant treble_arm64_bgN
+    # buildVndkliteVariant treble_a64_bvN
+    # buildVndkliteVariant treble_a64_bgN
+    # buildVndkliteVariant treble_arm64_bvN
+    # buildVndkliteVariant treble_arm64_bgN
 }
 
 generatePackages() {
@@ -128,7 +146,7 @@ generateOta() {
             [[ "$filename" == *"-vndklite"* ]] && vndk="-vndklite" || vndk=""
             name="treble_${arch}_b${variant}N${vndk}"
             size=$(wc -c $file | awk '{print $1}')
-            url="https://github.com/ponces/treble_aosp/releases/download/$version/$filename"
+            url="https://github.com/archfx/duo-de/releases/download/$version/$filename"
             json="${json} {\"name\": \"$name\",\"size\": \"$size\",\"url\": \"$url\"},"
         done
         json="${json%?}]}"
@@ -137,14 +155,18 @@ generateOta() {
     echo
 }
 
+
+
+
 START=$(date +%s)
 
-initRepos
-syncRepos
-applyPatches
+# initRepos
+# syncRepos
+# applyPatches
 setupEnv
-buildTrebleApp
-[ ! -z "$BV" ] && buildVariant "$BV" || buildVariants
+# buildTrebleApp
+taskbar_app
+buildVariants
 generatePackages
 generateOta
 
