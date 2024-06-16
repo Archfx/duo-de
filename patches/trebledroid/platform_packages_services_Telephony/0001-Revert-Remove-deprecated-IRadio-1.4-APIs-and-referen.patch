@@ -1,4 +1,4 @@
-From d471946c91b4dfed8c1fbcbae9f681d116957158 Mon Sep 17 00:00:00 2001
+From 9199bcc009aae59a36572e9df9aca41b516b031f Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Mon, 1 Apr 2024 09:15:33 +0000
 Subject: [PATCH] Revert "Remove deprecated IRadio <1.4 APIs and references"
@@ -9,10 +9,10 @@ This reverts commit b4a31f92a15ccf1f74c804ab3706ef8e4b59c8df.
  1 file changed, 48 insertions(+)
 
 diff --git a/src/com/android/phone/PhoneInterfaceManager.java b/src/com/android/phone/PhoneInterfaceManager.java
-index 3bd29e311..dd3869217 100644
+index e18818c0f..3a6a96725 100644
 --- a/src/com/android/phone/PhoneInterfaceManager.java
 +++ b/src/com/android/phone/PhoneInterfaceManager.java
-@@ -302,6 +302,8 @@ public class PhoneInterfaceManager extends ITelephony.Stub {
+@@ -312,6 +312,8 @@ public class PhoneInterfaceManager extends ITelephony.Stub {
      private static final int EVENT_GET_ALLOWED_NETWORK_TYPES_BITMASK_DONE = 22;
      private static final int CMD_SEND_ENVELOPE = 25;
      private static final int EVENT_SEND_ENVELOPE_DONE = 26;
@@ -21,7 +21,7 @@ index 3bd29e311..dd3869217 100644
      private static final int CMD_TRANSMIT_APDU_BASIC_CHANNEL = 29;
      private static final int EVENT_TRANSMIT_APDU_BASIC_CHANNEL_DONE = 30;
      private static final int CMD_EXCHANGE_SIM_IO = 31;
-@@ -1161,6 +1163,19 @@ public class PhoneInterfaceManager extends ITelephony.Stub {
+@@ -1174,6 +1176,19 @@ public class PhoneInterfaceManager extends ITelephony.Stub {
                      handleNullReturnEvent(msg, "setAllowedNetworkTypesForReason");
                      break;
  
@@ -41,7 +41,7 @@ index 3bd29e311..dd3869217 100644
                  case CMD_SET_VOICEMAIL_NUMBER:
                      request = (MainThreadRequest) msg.obj;
                      onCompleted = obtainMessage(EVENT_SET_VOICEMAIL_NUMBER_DONE, request);
-@@ -7519,6 +7534,39 @@ public class PhoneInterfaceManager extends ITelephony.Stub {
+@@ -8047,6 +8062,39 @@ public class PhoneInterfaceManager extends ITelephony.Stub {
          }
      }
  

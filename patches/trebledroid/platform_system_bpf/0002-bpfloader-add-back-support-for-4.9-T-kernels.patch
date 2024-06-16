@@ -1,7 +1,7 @@
-From 2403a0eb4ec170d7963e06f8316e513476a66a24 Mon Sep 17 00:00:00 2001
+From 0e0575d0cdf7d10042dba79d4894bd94b2a709d4 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Maciej=20=C5=BBenczykowski?= <maze@google.com>
 Date: Mon, 11 Mar 2024 12:40:06 +0000
-Subject: [PATCH 2/4] bpfloader: add back support for 4.9-T kernels
+Subject: [PATCH 2/3] bpfloader: add back support for 4.9-T kernels
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

@@ -1,4 +1,4 @@
-From 5ccb1dd0e78eeae1767febd733b9a0e9cd99e1a4 Mon Sep 17 00:00:00 2001
+From ce0f8fed3ff7e9ca42d0da8aea4ec9903d57435e Mon Sep 17 00:00:00 2001
 From: ponces <ponces26@gmail.com>
 Date: Mon, 7 Nov 2022 16:14:20 +0000
 Subject: [PATCH 08/10] Improve SELinux policy workaround on device/phh/treble

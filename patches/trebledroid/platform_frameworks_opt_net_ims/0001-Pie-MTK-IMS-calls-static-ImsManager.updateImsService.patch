@@ -1,4 +1,4 @@
-From e1832b745a9d991d919235788777e82bc3e7c1f6 Mon Sep 17 00:00:00 2001
+From 874d9e14f0b04c6118c065160f72669a72eb0bdd Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sun, 14 Nov 2021 13:47:29 -0500
 Subject: [PATCH] Pie MTK IMS calls static
@@ -10,10 +10,10 @@ Change-Id: I3dd66d436629d37c8ec795df6569736195ae570e
  1 file changed, 8 insertions(+)
 
 diff --git a/src/java/com/android/ims/ImsManager.java b/src/java/com/android/ims/ImsManager.java
-index c9252f24..9d6a3122 100644
+index 217a26f2..b687e4bf 100644
 --- a/src/java/com/android/ims/ImsManager.java
 +++ b/src/java/com/android/ims/ImsManager.java
-@@ -1667,6 +1667,14 @@ public class ImsManager implements FeatureUpdates {
+@@ -1679,6 +1679,14 @@ public class ImsManager implements FeatureUpdates {
          }
      }
  

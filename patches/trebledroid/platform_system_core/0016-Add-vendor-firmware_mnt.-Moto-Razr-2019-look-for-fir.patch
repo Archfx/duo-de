@@ -1,4 +1,4 @@
-From 5ffbd9c3845f498c3ab68aaa469785ef6e3e6321 Mon Sep 17 00:00:00 2001
+From 6f4b6d9993d93e5efe6476e1e297022d816b14b4 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Tue, 11 Jul 2023 14:52:40 -0400
 Subject: [PATCH 16/26] Add /vendor/firmware_mnt. Moto Razr 2019 look for
