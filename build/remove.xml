@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <manifest>
   <remove-project name="device/google/atv" />
+  <remove-project name="device/google/akita" />
+  <remove-project name="device/google/akita-kernel" />
+  <remove-project name="device/google/akita-sepolicy" />
   <remove-project name="device/google/barbet" />
   <remove-project name="device/google/barbet-sepolicy" />
   <remove-project name="device/google/bluejay" />
