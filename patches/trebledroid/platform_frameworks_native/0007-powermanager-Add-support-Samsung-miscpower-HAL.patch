@@ -1,4 +1,4 @@
-From e3687615934afa24ee1b4725d15da2604437cf8a Mon Sep 17 00:00:00 2001
+From a38497ff4222dfb75efd39a079935e421d0578f4 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Mon, 27 Dec 2021 18:00:43 -0500
 Subject: [PATCH 07/13] powermanager: Add support Samsung miscpower HAL
@@ -55,7 +55,7 @@ index cbbfa597ba..c27a833a07 100644
      static sp<hardware::power::V1_0::IPower> loadHidlV1_0Locked()
              EXCLUSIVE_LOCKS_REQUIRED(gHalMutex);
 diff --git a/include/powermanager/PowerHalWrapper.h b/include/powermanager/PowerHalWrapper.h
-index e2da014606..2c623d44d7 100644
+index e2da014606..66bb910ec2 100644
 --- a/include/powermanager/PowerHalWrapper.h
 +++ b/include/powermanager/PowerHalWrapper.h
 @@ -27,6 +27,7 @@
@@ -91,7 +91,7 @@ index e2da014606..2c623d44d7 100644
              mModeSupportedArray GUARDED_BY(mModeMutex) = {HalSupport::UNKNOWN};
  };
  
-+class HidlHalWrapperSeh : public HalWrapper {
++class HidlHalWrapperSeh : public EmptyHalWrapper {
 +public:
 +    explicit HidlHalWrapperSeh(sp<vendor::samsung::hardware::miscpower::V2_0::ISehMiscPower> hal1,
 +            sp<android::hardware::power::V1_1::IPower> hal2,

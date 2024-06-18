@@ -1,16 +1,16 @@
-From 17e44306f7536bed11764065f6f2108a057fa9b6 Mon Sep 17 00:00:00 2001
+From 4b95e8567c81493ded4ed9cd779b18e9846e9b5e Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Wed, 26 Oct 2022 18:11:10 -0400
-Subject: [PATCH 02/10] Support non-working BPF maps on old BPF-less kernel
+Subject: [PATCH 2/9] Support non-working BPF maps on old BPF-less kernel
 
 ---
  .../src/android/net/BpfNetMapsReader.java     | 13 +++++--
- netbpfload/NetBpfLoad.cpp                     | 34 ++++++++-----------
+ netbpfload/NetBpfLoad.cpp                     | 34 +++++++---------
  .../libs/libnetworkstats/BpfNetworkStats.cpp  |  1 +
- .../server/net/NetworkStatsService.java       | 29 +++++++++-------
- .../src/com/android/server/BpfNetMaps.java    | 14 ++++++--
- .../native/bpf_headers/include/bpf/BpfMap.h   | 21 +++++++-----
- 6 files changed, 66 insertions(+), 46 deletions(-)
+ .../server/net/NetworkStatsService.java       | 29 ++++++++------
+ .../src/com/android/server/BpfNetMaps.java    | 39 ++++++++++++++++++-
+ .../native/bpf_headers/include/bpf/BpfMap.h   | 21 +++++-----
+ 6 files changed, 91 insertions(+), 46 deletions(-)
 
 diff --git a/framework/src/android/net/BpfNetMapsReader.java b/framework/src/android/net/BpfNetMapsReader.java
 index ee422abd9c..d31024c686 100644
@@ -228,7 +228,7 @@ index f7f133c5a1..90cc39040a 100644
              mCookieTagMap.forEach((key, value) -> {
                  // If SkDestroyListener deletes the socket tag while this code is running,
 diff --git a/service/src/com/android/server/BpfNetMaps.java b/service/src/com/android/server/BpfNetMaps.java
-index a7fddd08f0..6f7b94c0e7 100644
+index a7fddd08f0..833a6a9a5a 100644
 --- a/service/src/com/android/server/BpfNetMaps.java
 +++ b/service/src/com/android/server/BpfNetMaps.java
 @@ -366,7 +366,11 @@ public class BpfNetMaps {
@@ -244,7 +244,53 @@ index a7fddd08f0..6f7b94c0e7 100644
          }
          mNetd = netd;
          mDeps = deps;
-@@ -802,6 +806,8 @@ public class BpfNetMaps {
+@@ -385,6 +389,8 @@ public class BpfNetMaps {
+     }
+ 
+     private void removeRule(final int uid, final long match, final String caller) {
++        if (sUidOwnerMap == null) return;
++
+         try {
+             synchronized (sUidOwnerMap) {
+                 final UidOwnerValue oldMatch = sUidOwnerMap.getValue(new S32(uid));
+@@ -412,6 +418,8 @@ public class BpfNetMaps {
+     }
+ 
+     private void addRule(final int uid, final long match, final int iif, final String caller) {
++        if (sUidOwnerMap == null) return;
++
+         if (match != IIF_MATCH && iif != 0) {
+             throw new ServiceSpecificException(EINVAL,
+                     "Non-interface match must have zero interface index");
+@@ -514,6 +522,8 @@ public class BpfNetMaps {
+     public void setChildChain(final int childChain, final boolean enable) {
+         throwIfPreT("setChildChain is not available on pre-T devices");
+ 
++        if (sConfigurationMap == null) return;
++
+         final long match = getMatchByFirewallChain(childChain);
+         try {
+             synchronized (sUidRulesConfigBpfMapLock) {
+@@ -566,6 +576,8 @@ public class BpfNetMaps {
+     public void replaceUidChain(final int chain, final int[] uids) {
+         throwIfPreT("replaceUidChain is not available on pre-T devices");
+ 
++        if (sUidOwnerMap == null) return;
++
+         final long match;
+         try {
+             match = getMatchByFirewallChain(chain);
+@@ -646,6 +658,9 @@ public class BpfNetMaps {
+     private Set<Integer> getUidsMatchEnabled(final int childChain) throws ErrnoException {
+         final long match = getMatchByFirewallChain(childChain);
+         Set<Integer> uids = new ArraySet<>();
++
++        if (sUidOwnerMap == null) return uids;
++
+         synchronized (sUidOwnerMap) {
+             sUidOwnerMap.forEach((uid, val) -> {
+                 if (val == null) {
+@@ -802,6 +817,8 @@ public class BpfNetMaps {
      public void swapActiveStatsMap() {
          throwIfPreT("swapActiveStatsMap is not available on pre-T devices");
  
@@ -253,7 +299,7 @@ index a7fddd08f0..6f7b94c0e7 100644
          try {
              synchronized (sCurrentStatsMapConfigLock) {
                  final long config = sConfigurationMap.getValue(
-@@ -842,6 +848,8 @@ public class BpfNetMaps {
+@@ -842,6 +859,8 @@ public class BpfNetMaps {
              return;
          }
  
@@ -262,7 +308,36 @@ index a7fddd08f0..6f7b94c0e7 100644
          // Remove the entry if package is uninstalled or uid has only INTERNET permission.
          if (permissions == PERMISSION_UNINSTALLED || permissions == PERMISSION_INTERNET) {
              for (final int uid : uids) {
-@@ -940,7 +948,9 @@ public class BpfNetMaps {
+@@ -876,6 +895,8 @@ public class BpfNetMaps {
+     public void setDataSaverEnabled(boolean enable) {
+         throwIfPreT("setDataSaverEnabled is not available on pre-T devices");
+ 
++        if (sDataSaverEnabledMap == null) return;
++
+         try {
+             final short config = enable ? DATA_SAVER_ENABLED : DATA_SAVER_DISABLED;
+             sDataSaverEnabledMap.updateEntry(DATA_SAVER_ENABLED_KEY, new U8(config));
+@@ -894,6 +915,9 @@ public class BpfNetMaps {
+     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+     public void setIngressDiscardRule(final InetAddress address, final String iface) {
+         throwIfPreT("setIngressDiscardRule is not available on pre-T devices");
++
++        if (sIngressDiscardMap == null) return;
++
+         final int ifIndex = mDeps.getIfIndex(iface);
+         if (ifIndex == 0) {
+             Log.e(TAG, "Failed to get if index, skip setting ingress discard rule for " + address
+@@ -917,6 +941,9 @@ public class BpfNetMaps {
+     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+     public void removeIngressDiscardRule(final InetAddress address) {
+         throwIfPreT("removeIngressDiscardRule is not available on pre-T devices");
++
++        if (sIngressDiscardMap == null) return;
++
+         try {
+             sIngressDiscardMap.deleteEntry(new IngressDiscardKey(address));
+         } catch (ErrnoException e) {
+@@ -940,7 +967,9 @@ public class BpfNetMaps {
          // deletion. netd and skDestroyListener could delete CookieTagMap entry concurrently.
          // So using Set to count the number of entry in the map.
          Set<K> keySet = new ArraySet<>();
@@ -273,6 +348,33 @@ index a7fddd08f0..6f7b94c0e7 100644
          return keySet.size();
      }
  
+@@ -987,6 +1016,8 @@ public class BpfNetMaps {
+     }
+ 
+     private void dumpOwnerMatchConfig(final IndentingPrintWriter pw) {
++        if (sConfigurationMap == null) return;
++
+         try {
+             final long match = sConfigurationMap.getValue(UID_RULES_CONFIGURATION_KEY).val;
+             pw.println("current ownerMatch configuration: " + match + " " + matchToString(match));
+@@ -996,6 +1027,8 @@ public class BpfNetMaps {
+     }
+ 
+     private void dumpCurrentStatsMapConfig(final IndentingPrintWriter pw) {
++        if (sConfigurationMap == null) return;
++
+         try {
+             final long config = sConfigurationMap.getValue(CURRENT_STATS_MAP_CONFIGURATION_KEY).val;
+             final String currentStatsMap =
+@@ -1007,6 +1040,8 @@ public class BpfNetMaps {
+     }
+ 
+     private void dumpDataSaverConfig(final IndentingPrintWriter pw) {
++        if (sDataSaverEnabledMap == null) return;
++
+         try {
+             final short config = sDataSaverEnabledMap.getValue(DATA_SAVER_ENABLED_KEY).val;
+             // Any non-zero value converted from short to boolean is true by convention.
 diff --git a/staticlibs/native/bpf_headers/include/bpf/BpfMap.h b/staticlibs/native/bpf_headers/include/bpf/BpfMap.h
 index 1037bebf29..b8e8991c57 100644
 --- a/staticlibs/native/bpf_headers/include/bpf/BpfMap.h

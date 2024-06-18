@@ -1,4 +1,4 @@
-From 862a65341b5ae96e05b824f69fc5b9e7b25ef1ad Mon Sep 17 00:00:00 2001
+From 16817ce6a8d7b1240b3212aa6e03b732f3aab642 Mon Sep 17 00:00:00 2001
 From: LuK1337 <priv.luk@gmail.com>
 Date: Fri, 21 Oct 2022 20:55:05 +0200
 Subject: [PATCH 09/16] Pass correct value to setPreferredNetworkType() for RIL
@@ -11,7 +11,7 @@ Change-Id: Id14be66a2ea4e85b6504bc03fd7d2f038185c17d
  2 files changed, 5 insertions(+), 3 deletions(-)
 
 diff --git a/src/java/com/android/internal/telephony/RIL.java b/src/java/com/android/internal/telephony/RIL.java
-index 4aed675642..8e97147610 100644
+index 42de7882a3..9eceae2810 100644
 --- a/src/java/com/android/internal/telephony/RIL.java
 +++ b/src/java/com/android/internal/telephony/RIL.java
 @@ -3169,7 +3169,8 @@ public class RIL extends BaseCommands implements CommandsInterface {

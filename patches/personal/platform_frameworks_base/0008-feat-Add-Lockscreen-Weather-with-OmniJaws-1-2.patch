@@ -1,4 +1,4 @@
-From 92c588a18558e8afe967ffd5d144559a9a95a6bf Mon Sep 17 00:00:00 2001
+From f29bdd7e5226704261812bb9fe2b536530cb9375 Mon Sep 17 00:00:00 2001
 From: maxwen <max.weninger@gmail.com>
 Date: Fri, 22 Oct 2021 14:55:26 +0200
 Subject: [PATCH 8/9] feat: Add Lockscreen Weather with OmniJaws (1/2)
@@ -24,7 +24,7 @@ Co-authored-by: Pranav Vashi <neobuddy89@gmail.com>
  create mode 100644 packages/SystemUI/src/com/android/systemui/crdroid/CurrentWeatherView.java
 
 diff --git a/core/java/android/provider/Settings.java b/core/java/android/provider/Settings.java
-index 51585af10f5d..f8e86e0fdcdd 100644
+index 51585af1..f8e86e0f 100644
 --- a/core/java/android/provider/Settings.java
 +++ b/core/java/android/provider/Settings.java
 @@ -6201,6 +6201,16 @@ public final class Settings {
@@ -46,7 +46,7 @@ index 51585af10f5d..f8e86e0fdcdd 100644
           * process when restoring historical backup datasets.
 diff --git a/core/java/com/android/internal/util/crdroid/OmniJawsClient.java b/core/java/com/android/internal/util/crdroid/OmniJawsClient.java
 new file mode 100644
-index 000000000000..26437e03495c
+index 00000000..26437e03
 --- /dev/null
 +++ b/core/java/com/android/internal/util/crdroid/OmniJawsClient.java
 @@ -0,0 +1,437 @@
@@ -488,7 +488,7 @@ index 000000000000..26437e03495c
 +    }
 +}
 diff --git a/data/etc/com.android.systemui.xml b/data/etc/com.android.systemui.xml
-index ce2543a47cf5..ef330da99760 100644
+index ce2543a4..ef330da9 100644
 --- a/data/etc/com.android.systemui.xml
 +++ b/data/etc/com.android.systemui.xml
 @@ -16,6 +16,7 @@
@@ -500,7 +500,7 @@ index ce2543a47cf5..ef330da99760 100644
          <permission name="android.permission.ALLOW_SLIPPERY_TOUCHES"/>
          <permission name="android.permission.BATTERY_STATS"/>
 diff --git a/packages/SystemUI/AndroidManifest.xml b/packages/SystemUI/AndroidManifest.xml
-index 774d6cbce558..86a8a2a067d1 100644
+index 774d6cbc..86a8a2a0 100644
 --- a/packages/SystemUI/AndroidManifest.xml
 +++ b/packages/SystemUI/AndroidManifest.xml
 @@ -364,6 +364,10 @@
@@ -516,7 +516,7 @@ index 774d6cbce558..86a8a2a067d1 100644
      <protected-broadcast android:name="com.android.settings.flashlight.action.FLASHLIGHT_CHANGED" />
 diff --git a/packages/SystemUI/res-keyguard/layout/current_weather_view.xml b/packages/SystemUI/res-keyguard/layout/current_weather_view.xml
 new file mode 100644
-index 000000000000..502df830f9fd
+index 00000000..502df830
 --- /dev/null
 +++ b/packages/SystemUI/res-keyguard/layout/current_weather_view.xml
 @@ -0,0 +1,59 @@
@@ -580,7 +580,7 @@ index 000000000000..502df830f9fd
 +
 +</com.android.systemui.crdroid.CurrentWeatherView>
 diff --git a/packages/SystemUI/res-keyguard/layout/keyguard_clock_switch.xml b/packages/SystemUI/res-keyguard/layout/keyguard_clock_switch.xml
-index fc9c917c152b..5b26e3145e13 100644
+index fc9c917c..5b26e314 100644
 --- a/packages/SystemUI/res-keyguard/layout/keyguard_clock_switch.xml
 +++ b/packages/SystemUI/res-keyguard/layout/keyguard_clock_switch.xml
 @@ -56,6 +56,12 @@
@@ -597,7 +597,7 @@ index fc9c917c152b..5b26e3145e13 100644
            android:id="@+id/left_aligned_notification_icon_container"
            android:layout_width="match_parent"
 diff --git a/packages/SystemUI/src/com/android/keyguard/KeyguardClockSwitchController.java b/packages/SystemUI/src/com/android/keyguard/KeyguardClockSwitchController.java
-index e621ffe4cbc4..6015604e11fc 100644
+index e621ffe4..6015604e 100644
 --- a/packages/SystemUI/src/com/android/keyguard/KeyguardClockSwitchController.java
 +++ b/packages/SystemUI/src/com/android/keyguard/KeyguardClockSwitchController.java
 @@ -27,6 +27,7 @@ import static com.android.systemui.flags.Flags.LOCKSCREEN_WALLPAPER_DREAM_ENABLE
@@ -739,7 +739,7 @@ index e621ffe4cbc4..6015604e11fc 100644
          if (mSmartspaceController.isEnabled()) {
              removeViewsFromStatusArea();
 diff --git a/packages/SystemUI/src/com/android/keyguard/KeyguardStatusViewController.java b/packages/SystemUI/src/com/android/keyguard/KeyguardStatusViewController.java
-index c0ae4a1f4036..9f71ed7047a5 100644
+index c0ae4a1f..9f71ed70 100644
 --- a/packages/SystemUI/src/com/android/keyguard/KeyguardStatusViewController.java
 +++ b/packages/SystemUI/src/com/android/keyguard/KeyguardStatusViewController.java
 @@ -436,6 +436,7 @@ public class KeyguardStatusViewController extends ViewController<KeyguardStatusV
@@ -752,7 +752,7 @@ index c0ae4a1f4036..9f71ed7047a5 100644
      };
 diff --git a/packages/SystemUI/src/com/android/systemui/crdroid/CurrentWeatherView.java b/packages/SystemUI/src/com/android/systemui/crdroid/CurrentWeatherView.java
 new file mode 100644
-index 000000000000..9e4eb16ed50f
+index 00000000..9e4eb16e
 --- /dev/null
 +++ b/packages/SystemUI/src/com/android/systemui/crdroid/CurrentWeatherView.java
 @@ -0,0 +1,163 @@

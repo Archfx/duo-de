@@ -1,4 +1,4 @@
-From 0936a5381e81fbb1e6e00b4012b771576062e00d Mon Sep 17 00:00:00 2001
+From c5a1a3601c678df1c4c9db3d2829b5004129ba60 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sun, 18 Dec 2022 18:20:40 -0500
 Subject: [PATCH 38/53] FOD support for Asus, Samsung recent Xiaomi and
@@ -911,7 +911,7 @@ index 1ba12134ab29..41a7eb0acffa 100644
                  return providers;
              });
 diff --git a/services/core/java/com/android/server/biometrics/sensors/fingerprint/aidl/FingerprintProvider.java b/services/core/java/com/android/server/biometrics/sensors/fingerprint/aidl/FingerprintProvider.java
-index c04c47e2d95a..5bcb6e5f649f 100644
+index c04c47e2d95a..a7b86964e3e5 100644
 --- a/services/core/java/com/android/server/biometrics/sensors/fingerprint/aidl/FingerprintProvider.java
 +++ b/services/core/java/com/android/server/biometrics/sensors/fingerprint/aidl/FingerprintProvider.java
 @@ -38,6 +38,7 @@ import android.hardware.biometrics.common.ComponentInfo;
@@ -937,7 +937,7 @@ index c04c47e2d95a..5bcb6e5f649f 100644
 +                    android.util.Log.e("PHH-Enroll", " - " + loc.sensorLocationX + ", " + loc.sensorLocationY + ", " +loc.sensorRadius + ", disp =" + loc.display + ", shape " + loc.sensorShape);
 +                }
 +                if (locations.length == 1 && locations[0].sensorLocationX == 0) {
-+                    int[] otherValues = com.android.server.biometrics.AuthService.dynamicUdfpsProps(context);
++                    int[] otherValues = com.android.server.biometrics.AuthService.dynamicUdfpsProps(mContext);
 +                    if (otherValues.length > 0) {
 +                        SensorLocation loc = new SensorLocation();
 +                        loc.sensorLocationX = otherValues[0];
