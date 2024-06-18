@@ -1,4 +1,4 @@
-From 32f6973dfee5c8a0d659c320949492877bfc9514 Mon Sep 17 00:00:00 2001
+From 5e5041a5107d159d1b481665a1872447028cbd66 Mon Sep 17 00:00:00 2001
 From: Daniel Zhang <danielzhang130@gmail.com>
 Date: Sat, 30 Mar 2024 14:44:57 -0400
 Subject: [PATCH 06/16] Revert "Remove deprecated HAL versions for IRadio"
@@ -11,7 +11,7 @@ Change-Id: Ia3aa57286fb5cce42065f7db8133fa3caf1fcd61
  .../telephony/CellularNetworkService.java     |  105 +-
  .../internal/telephony/NetworkIndication.java |    5 +-
  .../internal/telephony/NetworkResponse.java   |   19 +
- .../com/android/internal/telephony/RIL.java   | 2375 +++++++++++------
+ .../com/android/internal/telephony/RIL.java   | 2377 +++++++++++------
  .../android/internal/telephony/RILUtils.java  |  399 ++-
  .../internal/telephony/RadioConfig.java       |    9 +-
  .../internal/telephony/RadioConfigProxy.java  |   22 +-
@@ -26,7 +26,7 @@ Change-Id: Ia3aa57286fb5cce42065f7db8133fa3caf1fcd61
  .../internal/telephony/RadioVoiceProxy.java   |    8 +-
  .../android/internal/telephony/RILTest.java   | 1382 +++++-----
  .../internal/telephony/SimulatedCommands.java |   31 +-
- 19 files changed, 3396 insertions(+), 1676 deletions(-)
+ 19 files changed, 3397 insertions(+), 1677 deletions(-)
 
 diff --git a/Android.bp b/Android.bp
 index c3b43735f1..331b722ace 100644
@@ -251,7 +251,7 @@ index b4a37b3d60..b2571d981a 100644
       * @param responseInfo Response info struct containing response type, serial no. and error
       */
 diff --git a/src/java/com/android/internal/telephony/RIL.java b/src/java/com/android/internal/telephony/RIL.java
-index 53e288f321..88cbb00043 100644
+index 53e288f321..b44fb0f119 100644
 --- a/src/java/com/android/internal/telephony/RIL.java
 +++ b/src/java/com/android/internal/telephony/RIL.java
 @@ -60,6 +60,13 @@ import android.telephony.AccessNetworkConstants;
@@ -402,6 +402,15 @@ index 53e288f321..88cbb00043 100644
                  }
  
                  if (mRadioProxy != null) {
+@@ -728,7 +785,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
+     public synchronized RadioServiceProxy getRadioServiceProxy(int service) {
+         if (!SubscriptionManager.isValidPhoneId(mPhoneId)) return mServiceProxies.get(service);
+         if ((service >= HAL_SERVICE_IMS) && !isRadioServiceSupported(service)) {
+-            riljLogw("getRadioServiceProxy: " + serviceToString(service) + " for "
++            Rlog.w(RILJ_LOG_TAG, "getRadioServiceProxy: " + serviceToString(service) + " for "
+                     + HIDL_SERVICE_NAME[mPhoneId] + " is not supported\n"
+                     + android.util.Log.getStackTraceString(new RuntimeException()));
+             return mServiceProxies.get(service);
 @@ -894,7 +951,46 @@ public class RIL extends BaseCommands implements CommandsInterface {
  
                  if (serviceProxy.isEmpty()

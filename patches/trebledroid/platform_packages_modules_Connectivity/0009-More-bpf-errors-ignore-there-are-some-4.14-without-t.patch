@@ -1,8 +1,8 @@
-From 2d14b64e07940a82de12f7e59c88f439b402111c Mon Sep 17 00:00:00 2001
+From 3d84cebda12468a5a2b686b7167ce8b93fb010ae Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Wed, 15 May 2024 05:56:59 -0400
-Subject: [PATCH 09/10] More bpf errors ignore -- there are some 4.14 without
- the bpf jit file
+Subject: [PATCH 9/9] More bpf errors ignore -- there are some 4.14 without the
+ bpf jit file
 
 ---
  netbpfload/NetBpfLoad.cpp | 9 +++------

@@ -1,4 +1,4 @@
-From 0075da0ff620cf827e9993b5c410c9326ecdd6d7 Mon Sep 17 00:00:00 2001
+From cd5fa549f82d7387810a465e248211fabe6f02f1 Mon Sep 17 00:00:00 2001
 From: Raphael Mounier <mounierr07@gmail.com>
 Date: Thu, 6 Oct 2022 08:35:38 +0200
 Subject: [PATCH 07/16] Fix signalstrength for huawei kirin (hi6250, hi3670)
@@ -21,7 +21,7 @@ Change-Id: I4409683dc7cd9b870237a2939188b71ce94a9fc7
  2 files changed, 139 insertions(+), 4 deletions(-)
 
 diff --git a/src/java/com/android/internal/telephony/RIL.java b/src/java/com/android/internal/telephony/RIL.java
-index 88cbb00043..4aed675642 100644
+index b44fb0f119..42de7882a3 100644
 --- a/src/java/com/android/internal/telephony/RIL.java
 +++ b/src/java/com/android/internal/telephony/RIL.java
 @@ -6992,6 +6992,129 @@ public class RIL extends BaseCommands implements CommandsInterface {

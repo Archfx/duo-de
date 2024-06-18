@@ -1,4 +1,4 @@
-From 0f669f76584d9848ed5c128853827cea3f04b871 Mon Sep 17 00:00:00 2001
+From 43dfd8506111bcc7ba25aba8ca064e8a55f4e4b5 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Wed, 21 Feb 2024 12:50:28 -0500
 Subject: [PATCH 14/16] Initialize Samsung AIDL ISehRadioNetwork. Fixes 5G on
@@ -23,7 +23,7 @@ index 331b722ace..6e2c045bd1 100644
          "ims-common",
          "unsupportedappusage",
 diff --git a/src/java/com/android/internal/telephony/RIL.java b/src/java/com/android/internal/telephony/RIL.java
-index 8e97147610..aac5059a8e 100644
+index 9eceae2810..6f5f89d22d 100644
 --- a/src/java/com/android/internal/telephony/RIL.java
 +++ b/src/java/com/android/internal/telephony/RIL.java
 @@ -866,7 +866,7 @@ public class RIL extends BaseCommands implements CommandsInterface {

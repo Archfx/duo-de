@@ -1,4 +1,4 @@
-From 38f4feacd5fe06c88156a690503a5c5d24589a77 Mon Sep 17 00:00:00 2001
+From 8d33ce4a0091722294f9cb403b6c9dd7ccaae639 Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Sun, 5 Mar 2023 17:54:25 +0000
 Subject: [PATCH 7/9] permissions: Pre-grant google restore permissions
@@ -9,7 +9,7 @@ Change-Id: I241886b63e0660ef01e7801b273045c3c91d44ea
  1 file changed, 19 insertions(+)
 
 diff --git a/services/core/java/com/android/server/pm/permission/DefaultPermissionGrantPolicy.java b/services/core/java/com/android/server/pm/permission/DefaultPermissionGrantPolicy.java
-index f7f76aaaee16..03ec8f7dd97e 100644
+index f7f76aaa..03ec8f7d 100644
 --- a/services/core/java/com/android/server/pm/permission/DefaultPermissionGrantPolicy.java
 +++ b/services/core/java/com/android/server/pm/permission/DefaultPermissionGrantPolicy.java
 @@ -210,6 +210,15 @@ final class DefaultPermissionGrantPolicy {

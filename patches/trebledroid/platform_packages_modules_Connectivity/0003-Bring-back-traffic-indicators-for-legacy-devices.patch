@@ -1,7 +1,7 @@
-From 80fa3cf38c66c64b1160f7f037bf92b968bc1c85 Mon Sep 17 00:00:00 2001
+From 852e5615e27b645ff5c1f98599da328771652cf0 Mon Sep 17 00:00:00 2001
 From: koron393 <koron393@gmail.com>
 Date: Fri, 20 Jan 2023 05:41:13 +0900
-Subject: [PATCH 03/10] Bring back traffic indicators for legacy devices
+Subject: [PATCH 3/9] Bring back traffic indicators for legacy devices
 
 Revert: "remove qtaguid parsing"
 (commit 0b99c46bcde8e607d9233c474035da95ab68a6fe.)
@@ -16,7 +16,7 @@ Signed-off-by: koron393 <koron393@gmail.com>
  1 file changed, 81 insertions(+), 3 deletions(-)
 
 diff --git a/service-t/jni/com_android_server_net_NetworkStatsService.cpp b/service-t/jni/com_android_server_net_NetworkStatsService.cpp
-index c99939864d..d34755b3c1 100644
+index c99939864d..741f13c7ed 100644
 --- a/service-t/jni/com_android_server_net_NetworkStatsService.cpp
 +++ b/service-t/jni/com_android_server_net_NetworkStatsService.cpp
 @@ -39,6 +39,9 @@ using android::bpf::NetworkTraceHandler;
@@ -104,7 +104,7 @@ index c99939864d..d34755b3c1 100644
      } else {
 -        return nullptr;
 +        if (parseIfaceStats(nullptr, &stats) == 0) {
-+            return getStatsType(&stats, (StatsType) type);
++            return statsValueToEntry(env, &stats);
 +        } else {
 +            return nullptr;
 +        }
@@ -117,7 +117,7 @@ index c99939864d..d34755b3c1 100644
      } else {
 -        return nullptr;
 +        if (parseIfaceStats(iface8.c_str(), &stats) == 0) {
-+            return getStatsType(&stats, (StatsType) type);
++            return statsValueToEntry(env, &stats);
 +        } else {
 +            return nullptr;
 +        }
@@ -130,7 +130,7 @@ index c99939864d..d34755b3c1 100644
      } else {
 -        return nullptr;
 +        if (parseUidStats(uid, &stats) == 0) {
-+            return getStatsType(&stats, (StatsType) type);
++            return statsValueToEntry(env, &stats);
 +        } else {
 +            return nullptr;
 +        }

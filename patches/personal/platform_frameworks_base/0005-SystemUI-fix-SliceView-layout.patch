@@ -1,4 +1,4 @@
-From 26db55fd4e450c123cef7e448c7ed1a0acb2701f Mon Sep 17 00:00:00 2001
+From 0a70c7694c5af08fb39c458d6d3af94e7f808dc6 Mon Sep 17 00:00:00 2001
 From: Anay Wadhera <anay1018@gmail.com>
 Date: Sun, 13 Nov 2022 10:42:03 -0500
 Subject: [PATCH 5/9] SystemUI: fix SliceView layout
@@ -12,7 +12,7 @@ Change-Id: Ib5fb2e3b9c0f3948bc3e88c2333df816bde265f8
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/packages/SystemUI/res-keyguard/layout/keyguard_slice_view.xml b/packages/SystemUI/res-keyguard/layout/keyguard_slice_view.xml
-index 7c5dbc247428..64657547621f 100644
+index 7c5dbc24..64657547 100644
 --- a/packages/SystemUI/res-keyguard/layout/keyguard_slice_view.xml
 +++ b/packages/SystemUI/res-keyguard/layout/keyguard_slice_view.xml
 @@ -38,7 +38,7 @@
