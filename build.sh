@@ -155,6 +155,9 @@ generateOta() {
     echo
 }
 
+uploadOTA() {
+    bash $BL/upload.sh
+}
 
 
 
@@ -164,11 +167,12 @@ START=$(date +%s)
 # syncRepos
 # applyPatches
 setupEnv
-buildTrebleApp
-taskbar_app
-buildVariants
+# buildTrebleApp
+# taskbar_app
+# buildVariants
 generatePackages
 generateOta
+uploadOTA
 
 END=$(date +%s)
 ELAPSEDM=$(($(($END-$START))/60))

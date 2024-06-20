@@ -23,7 +23,7 @@ fi
 
 createRelease() {
     echo "--> Creating release $TAG"
-    res=$(gh release create "$TAG" --repo "$GUSER/$GREPO" --title "DUO-DE AOSP 14.0 $TAG"  )
+    res=$(gh release create "$TAG" --repo "$GUSER/$GREPO" --title "$TAG"  )
     echo
 }
 
@@ -37,6 +37,7 @@ uploadAssets() {
 }
 
 updateOta() {
+    cd treble_aosp
     echo "--> Updating OTA file"
     #pushd "$BL"
     git add config/ota.json
@@ -45,13 +46,14 @@ updateOta() {
     git push --set-upstream origin main-14
     #popd
     echo
+    cd ..
 }
 
 START=$(date +%s)
 
 createRelease
 uploadAssets
-# [ "$SKIPOTA" = false ] && updateOta
+[ "$SKIPOTA" = false ] && updateOta
 
 END=$(date +%s)
 ELAPSEDM=$(($(($END-$START))/60))
