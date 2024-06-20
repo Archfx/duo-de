@@ -7,6 +7,7 @@ on:
       - android-14.0
     paths-ignore:
       - '.github/**'
+      - 'config/**'
 
 concurrency: 
   group: ${{ github.workflow }}
