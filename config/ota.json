@@ -1,11 +1,11 @@
 {
-  "version": "v2024.06.19",
-  "date": "1718850112",
+  "version": "v2024.06.21",
+  "date": "1719012043",
   "variants": [
     {
       "name": "treble_arm64_bgN",
-      "size": "1345784300",
-      "url": "https://github.com/archfx/duo-de/releases/download/v2024.06.19/aosp-arm64-ab-gapps-14.0-20240619.img.xz"
+      "size": "1345803792",
+      "url": "https://github.com/archfx/duo-de/releases/download/v2024.06.21/aosp-arm64-ab-gapps-14.0-20240621.img.xz"
     }
   ]
 }
