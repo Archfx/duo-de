@@ -163,13 +163,13 @@ uploadOTA() {
 
 START=$(date +%s)
 
-# initRepos
-# syncRepos
-# applyPatches
+initRepos
+syncRepos
+applyPatches
 setupEnv
-# buildTrebleApp
-# taskbar_app
-# buildVariants
+buildTrebleApp
+taskbar_app
+buildVariants
 generatePackages
 generateOta
 uploadOTA
