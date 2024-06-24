@@ -1,6 +1,6 @@
 # duo-de <sup><sup>[surface-duo desktop experience]</sup></sup>
 
-This is a GSI variant rom build targetted for Microsoft Surface Duo with the intention of using the Surface Duo as a desktop environment using experimental floating window features. This build combines gapps variant of the GSI rom from [ponces](https://github.com/ponces/treble_aosp) with the [smartdock](https://github.com/axel358/smartdock) with various tweaks to make it nice and smooth with the help of [thain](https://github.com/thai-ng) tweaks. All credits go to respective developers.
+This is a GSI variant rom build targetted for Microsoft Surface Duo with the intention of using the Surface Duo as a desktop environment using experimental floating window features. This build combines gapps/vanila variants of the GSI rom from [ponces](https://github.com/ponces/treble_aosp) with desktop mode enabled + various tweaks to make it nice and smooth with the help of [thain](https://github.com/thai-ng) tweaks. All credits go to respective developers.
 
 
 <p align="center">
@@ -52,10 +52,7 @@ fastboot reboot
 
 ## Issues
 
-Currently known issues : 
-- GAPPS variant has an issue with GBOARD, use an alternate keyboard (e.i. Microsoft swift-key) for the time being until AOSP GSI GAPPS packages are updated.
-
-Any other issues, please 
+Any issues, please 
 [open an issue](https://github.com/Archfx/duo-de/issues/new/choose) with a detailed description.
 
 ## Credits
