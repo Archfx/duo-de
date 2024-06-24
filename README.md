@@ -10,8 +10,8 @@ This is a GSI variant rom build targetted for Microsoft Surface Duo with the int
 
 Thanks to [thain](https://github.com/thai-ng), duo react to various duo postures and the hinge gaps can be enabled/disabled through the treble app.
 <p align="center">
-<img src="https://raw.githubusercontent.com/Archfx/duo-de/main-14/images/duo-1.jpeg" alt="drawing" style="height:300px;" /> 
-<img src="https://raw.githubusercontent.com/Archfx/duo-de/main-14/images/duo-2.jpeg" alt="drawing" style="height:300px;"/> </p>
+<img src="images/duo-1.png" alt="drawing" style="height:300px;" /> 
+<img src="images/duo-2.png" alt="drawing" style="height:300px;"/> </p>
 
 
 ## Flashing steps
