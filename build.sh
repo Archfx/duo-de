@@ -68,18 +68,6 @@ buildTrebleApp() {
     echo
 }
 
-taskbar_app(){
-
-    echo "Building the Smartdock app"
-    cd smartdock
-    ln -sf ../treble_app/sdk sdk
-    ln -sf ../treble_app/signapk signapk
-    ln -sf ../treble_app/keys keys
-    bash build.sh release
-    cd ..
-    cp smartdock/Smartdock.apk vendor/hardware_overlay/Smartdock/app.apk
-    echo "Smartdock app included"
-}
 
 buildVariant() {
     echo "--> Building $1"
@@ -163,15 +151,14 @@ uploadOTA() {
 
 START=$(date +%s)
 
-initRepos
-syncRepos
-applyPatches
-setupEnv
-buildTrebleApp
-taskbar_app
-buildVariants
-generatePackages
-generateOta
+# initRepos
+# syncRepos
+# applyPatches
+# setupEnv
+# # buildTrebleApp
+# buildVariants
+# generatePackages
+# generateOta
 uploadOTA
 
 END=$(date +%s)
