@@ -1,0 +1,26 @@
+From 2bc7a21043a39f897ffe09ef207834a57ae64772 Mon Sep 17 00:00:00 2001
+From: Archfx <cybx@live.com>
+Date: Mon, 24 Jun 2024 21:21:58 -0400
+Subject: [PATCH] enable freeform mode by default
+
+Change-Id: I9b307cb74e1bfd3e38babee9f00fa6f73bd4440c
+---
+ core/res/res/values/config.xml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/core/res/res/values/config.xml b/core/res/res/values/config.xml
+index 7af64afa620a..e81d77a12bdf 100644
+--- a/core/res/res/values/config.xml
++++ b/core/res/res/values/config.xml
+@@ -4180,7 +4180,7 @@
+          PackageManager.FEATURE_FREEFORM_WINDOW_MANAGEMENT feature to your device specification.
+          The duplication is necessary, because this information is used before the features are
+          available to the system.-->
+-    <bool name="config_freeformWindowManagement">false</bool>
++    <bool name="config_freeformWindowManagement">true</bool>
+ 
+     <!-- If set, this will force all windows to draw the status bar background, including the apps
+          that have not requested doing so (via the WindowManager.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS
+-- 
+2.34.1
+
