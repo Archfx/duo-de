@@ -1,7 +1,7 @@
-From b68c5d1ed8e863c5b567e481b0801c55bac30741 Mon Sep 17 00:00:00 2001
+From f29bdd7e5226704261812bb9fe2b536530cb9375 Mon Sep 17 00:00:00 2001
 From: maxwen <max.weninger@gmail.com>
 Date: Fri, 22 Oct 2021 14:55:26 +0200
-Subject: [PATCH 08/10] feat: Add Lockscreen Weather with OmniJaws (1/2)
+Subject: [PATCH 8/9] feat: Add Lockscreen Weather with OmniJaws (1/2)
 
 Based on OmniROM's implementation, updated by @maxwen and adapted by @neobuddy89.
 
