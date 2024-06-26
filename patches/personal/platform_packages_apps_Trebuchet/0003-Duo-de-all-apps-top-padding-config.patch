@@ -1,0 +1,46 @@
+From 4bfbae075c499e544bf615465dfbf493d744ba34 Mon Sep 17 00:00:00 2001
+From: Archfx <cybx@live.com>
+Date: Wed, 26 Jun 2024 11:45:38 -0400
+Subject: [PATCH] Duo-de all-apps top padding config
+
+---
+ src/com/android/launcher3/DeviceProfile.java               | 5 +++--
+ src/com/android/launcher3/util/ActivityOptionsWrapper.java | 6 +++---
+ 2 files changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/src/com/android/launcher3/DeviceProfile.java b/src/com/android/launcher3/DeviceProfile.java
+index f96d59ebba..dddd98841b 100644
+--- a/src/com/android/launcher3/DeviceProfile.java
++++ b/src/com/android/launcher3/DeviceProfile.java
+@@ -754,8 +754,9 @@ public class DeviceProfile {
+         }
+ 
+         if (isTablet) {
+-            allAppsPadding.top = mInsets.top;
+-            allAppsShiftRange = heightPx;
++            float allAppsHeightScale = 0.7f;
++            allAppsPadding.top = (heightPx > 1400) ? ((int) Math.round(heightPx * (1 - allAppsHeightScale))) : mInsets.top;
++            allAppsShiftRange = (heightPx > 1400) ? ((int) Math.round(heightPx * (allAppsHeightScale))) : heightPx;
+         } else {
+             allAppsPadding.top = 0;
+             allAppsShiftRange =
+diff --git a/src/com/android/launcher3/util/ActivityOptionsWrapper.java b/src/com/android/launcher3/util/ActivityOptionsWrapper.java
+index 20e6568b3a..870ae82282 100644
+--- a/src/com/android/launcher3/util/ActivityOptionsWrapper.java
++++ b/src/com/android/launcher3/util/ActivityOptionsWrapper.java
+@@ -51,9 +51,9 @@ public class ActivityOptionsWrapper {
+         String mode = "freeform";
+         int windowMode;
+         Rect rect = new Rect(
+-            100,
+-            120,
+-            1244,
++            50,
++            60,
++            1344,
+             1600);
+         
+         if (this.context != null) {
+-- 
+2.34.1
+

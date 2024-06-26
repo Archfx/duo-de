@@ -97,7 +97,7 @@ buildVndkliteVariant() {
 buildVariants() {
     # buildVariant treble_a64_bvN
     # buildVariant treble_a64_bgN
-    # buildVariant treble_arm64_bvN
+    buildVariant treble_arm64_bvN
     buildVariant treble_arm64_bgN
     # buildVndkliteVariant treble_a64_bvN
     # buildVndkliteVariant treble_a64_bgN
@@ -151,15 +151,15 @@ uploadOTA() {
 
 START=$(date +%s)
 
-initRepos
-syncRepos
-applyPatches
+# initRepos
+# syncRepos
+# applyPatches
 # setupEnv
 # # buildTrebleApp
 # buildVariants
 # generatePackages
 # generateOta
-# uploadOTA
+uploadOTA
 
 END=$(date +%s)
 ELAPSEDM=$(($(($END-$START))/60))
