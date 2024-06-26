@@ -1,13 +1,10 @@
-name: Test
+name: Release
 
 on:
   workflow_dispatch:
-    inputs:
-      variant:
-        description: 'Build variant to test'
-        default: 'treble_arm64_bgN'
-        required: false
-        type: string
+  push:
+    tags:
+      - 'v*'
 
 concurrency: 
   group: ${{ github.workflow }}
@@ -16,9 +13,14 @@ concurrency:
 jobs:
   build:
     runs-on: self-hosted
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Environment
+        run: echo "RELEASE_TITLE=$(date +'v%Y.%m.%d')" >> $GITHUB_ENV
 
       - name: Build Image
         run: docker build -f build/Dockerfile -t ponces/treble .
@@ -35,16 +37,27 @@ jobs:
           mkdir builds
           docker run --rm \
                      --privileged \
-                     --name test \
+                     --name treble \
                      --volume ${{ github.workspace }}/builds:/root/builds \
                      --volume ${{ github.workspace }}/vendor_ponces-priv:/aosp/vendor/ponces-priv \
-                     ponces/treble treblebuild ${{ inputs.variant }}
+                     --volume ${{ github.workspace }}/config/ota.json:/aosp/treble_aosp/config/ota.json \
+                     ponces/treble treblebuild
 
-      - name: Upload ROM
+      - name: Upload OTA
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.variant }}
-          path: builds/*.xz
+          name: ota
+          path: config/ota.json
+
+      - name: Upload ROM
+        uses: softprops/action-gh-release@v1
+        with:
+          files: builds/*.xz
+          title: ${{ env.RELEASE_TITLE }}
+          tag_name: ${{ env.RELEASE_TITLE }}
+          body: "## Changelog\n- ...\n\n## Notes\n- ..."
+          draft: true
+          prerelease: false
 
   cleanup:
     needs: build
@@ -52,4 +65,4 @@ jobs:
     if: ${{ always() }}
     steps:
       - name: Cleanup
-        run: docker stop test || true
+        run: docker stop treble || true
