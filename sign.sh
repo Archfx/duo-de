@@ -15,7 +15,10 @@ fi
 
 sign_target_files_apks -o -d $KEYSDIR \
     --extra_apks AdServicesApk.apk=$KEYSDIR/releasekey \
+    --extra_apks FederatedCompute.apk=$KEYSDIR/releasekey \
     --extra_apks HalfSheetUX.apk=$KEYSDIR/releasekey \
+    --extra_apks HealthConnectBackupRestore.apk=$KEYSDIR/releasekey \
+    --extra_apks HealthConnectController.apk=$KEYSDIR/releasekey \
     --extra_apks OsuLogin.apk=$KEYSDIR/releasekey \
     --extra_apks SafetyCenterResources.apk=$KEYSDIR/releasekey \
     --extra_apks ServiceConnectivityResources.apk=$KEYSDIR/releasekey \
