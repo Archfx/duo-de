@@ -56,6 +56,8 @@ fastboot reboot
 > - Force activities to be resizable
 > - Enable freeform windows
 > - Enable non-resizable in multi-window
+>   
+> This issue will be fixed in subsequent releases after `v2024.07.09`
 
 ## Issues
 
