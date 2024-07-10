@@ -50,6 +50,13 @@ fastboot reboot
 ```
 4. Once you flash a **duo-de** version using the above steps, subsequent updates will be received using OTA. You can check updates using ``settings -> system -> system updates``.
 
+## FAQ
+- I flashed the ROM, however, the windows are not floating even if the desktop mode is enabled.
+> In this situation please enable the following settings from the developer options.
+> - Force activities to be resizable
+> - Enable freeform windows
+> - Enable non-resizable in multi-window
+
 ## Issues
 
 Any issues, please 
