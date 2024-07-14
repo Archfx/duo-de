@@ -13,18 +13,20 @@ Thanks to [thain](https://github.com/thai-ng), duo react to various duo postures
 <img src="images/duo-1.png" alt="drawing" style="height:300px;" /> 
 <img src="images/duo-2.png" alt="drawing" style="height:300px;"/> </p>
 
+### Duo1 and Duo2 Variants
+Releases after `v2024.07.14` version will have two separate images for Surface Duo 1 and Surface Duo 2. Please flash the corresponding version to your device to receive OTA updates properly. This is due to Duo1 and Duo2 using different touch drivers in Posture Engine.
 
 ## Flashing steps
 **Try this at your own risk and proceed with caution!**
 
 Following are the steps to flash this image to your surface duo.
 
-1. Download the release 
+1. Download the corresponding release for your device (`_duo1` and `_duo2` for the first and second generations, respectively). 
 ```shell
-wget https://github.com/Archfx/duo-de/releases/download/<<version>>/aosp-arm64-ab-gapps-14.0-<<version>>.img.xz
-tar -xf aosp-arm64-ab-gapps-14.0-<<version>>.img.xz
+wget https://github.com/Archfx/duo-de/releases/download/<<version>>/aosp-arm64-ab-gapps_duo<<X>>-14.0-<<version>>.img.xz
+tar -xf aosp-arm64-ab-gapps_duo<<X>>-14.0-<<version>>.img.xz
 # or
-gunzip aosp-arm64-ab-gapps-14.0-<<version>>.img.xz
+gunzip aosp-arm64-ab-gapps_duo<<X>>-14.0-<<version>>.img.xz
 ```
 2. If you are migrating from Android 12L (stock) follow this step. You need to unlock the bootloader before proceeding. Please pay attention to commands, do not copy and execute the commands blindly.
 ```shell
@@ -39,13 +41,13 @@ fastboot delete-logical-partition system_b
 # if current slot is b, delete the system_a
 fastboot delete-logical-partition system_a
 
-fastboot flash system aosp-arm64-ab-gapps-14.0-<<version>>.img
+fastboot flash system aosp-arm64-ab-gapps_duo<<X>>-14.0-<<version>>.img
 fastboot reboot 
 ```
 3. Migrating from 13/14 pixel experience, follow the below steps 
 ```shell
 adb reboot fastboot
-fastboot flash system aosp-arm64-ab-gapps-14.0-<<version>>.img
+fastboot flash system aosp-arm64-ab-gapps_duo<<X>>-14.0-<<version>>.img
 fastboot reboot 
 ```
 4. Once you flash a **duo-de** version using the above steps, subsequent updates will be received using OTA. You can check updates using ``settings -> system -> system updates``.
