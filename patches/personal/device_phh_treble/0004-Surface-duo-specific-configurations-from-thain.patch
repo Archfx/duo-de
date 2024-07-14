@@ -5,7 +5,7 @@ Subject: [PATCH] Surface duo specific configurations from thain
 
 ---
  aosp.mk                                |  4 ++++
- base.mk                                | 25 +++++++++++++++++++++++++
+ base.mk                                | 24 ++++++++++++++++++++++++
  files/com.microsoft.surface.duo_v1.xml |  7 +++++++
  files/device_state_configuration.xml   | 18 ++++++++++++++++++
  phh-on-data.sh                         | 14 ++++++++++++++
@@ -14,7 +14,7 @@ Subject: [PATCH] Surface duo specific configurations from thain
  sepolicy/service_contexts              |  5 +++++
  sepolicy/surface.te                    |  5 +++++
  system.prop                            |  8 ++++++++
- 10 files changed, 89 insertions(+)
+ 10 files changed, 88 insertions(+)
  create mode 100644 aosp.mk
  create mode 100644 files/com.microsoft.surface.duo_v1.xml
  create mode 100644 files/device_state_configuration.xml
@@ -47,7 +47,6 @@ index 53c4459..c8e9a33 100644
 +	device/phh/treble/files/device_state_configuration.xml:system/etc/devicestate/device_state_configuration.xml
 +
 +PRODUCT_PACKAGES += \
-+	PostureProcessor \
 +	SurfaceDuoGeneralOverlay \
 +	SurfaceDuo1DisplayFeaturesWMShellOverlay \
 +	SurfaceDuo1NoHingeAndroidOverlay \

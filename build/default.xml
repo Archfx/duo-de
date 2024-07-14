@@ -28,6 +28,7 @@
   <!-- duo specifics -->
   <project name="Archfx/duoOverlays" path="packages/thain/rro_overlays" remote="github" revision="main" />
   <project name="Archfx/duoBoot" path="vendor/surface" remote="github" revision="main" />
-  <project name="Archfx/duoPosture" path="packages/thain/services/PostureProcessor" remote="github" revision="main"/>
+  <project name="Archfx/duoPosture" path="packages/thain/services/PostureProcessor" remote="github" revision="duo1"/>
+  <project name="Archfx/duoPosture" path="packages/thain/services/PostureProcessorV2" remote="github" revision="duo2"/>
  
 </manifest>

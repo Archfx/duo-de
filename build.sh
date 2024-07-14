@@ -75,7 +75,7 @@ buildVariant() {
     make -j$(nproc --all) installclean
     make -j$(nproc --all) systemimage
     make -j$(nproc --all) target-files-package otatools
-    bash $BL/sign.sh "../archfx-priv/keys" $OUT/signed-target_files.zip
+    yes | bash $BL/sign.sh "../archfx-priv/keys" $OUT/signed-target_files.zip
     unzip -jq $OUT/signed-target_files.zip IMAGES/system.img -d $OUT
     mv $OUT/system.img $BD/system-"$1".img
 
@@ -97,12 +97,16 @@ buildVndkliteVariant() {
 buildVariants() {
     # buildVariant treble_a64_bvN
     # buildVariant treble_a64_bgN
-    buildVariant treble_arm64_bvN
-    buildVariant treble_arm64_bgN
+    # buildVariant treble_arm64_bvN
+    # buildVariant treble_arm64_bgN
     # buildVndkliteVariant treble_a64_bvN
     # buildVndkliteVariant treble_a64_bgN
     # buildVndkliteVariant treble_arm64_bvN
     # buildVndkliteVariant treble_arm64_bgN
+    buildVariant treble_arm64_bvN_duo1
+    buildVariant treble_arm64_bgN_duo1
+    buildVariant treble_arm64_bvN_duo2
+    buildVariant treble_arm64_bgN_duo2
 }
 
 generatePackages() {
@@ -113,7 +117,10 @@ generatePackages() {
         [[ "$filename" == *"_a64"* ]] && arch="arm32_binder64" || arch="arm64"
         [[ "$filename" == *"_bvN"* ]] && variant="vanilla" || variant="gapps"
         [[ "$filename" == *"-vndklite"* ]] && vndk="-vndklite" || vndk=""
-        name="aosp-${arch}-ab-${variant}${vndk}-14.0-$buildDate"
+        duo=""
+        [[ "$filename" == *"_duo1"* ]] && duo="_duo1"
+        [[ "$filename" == *"_duo2"* ]] && duo="_duo2"
+        name="aosp-${arch}-ab-${variant}${vndk}${duo}-14.0-$buildDate"
         xz -cv "$file" -T0 > $BD/"$name".img.xz
     done
     rm -rf $BD/system-*.img
@@ -132,7 +139,10 @@ generateOta() {
             [[ "$filename" == *"-arm32"* ]] && arch="a64" || arch="arm64"
             [[ "$filename" == *"-vanilla"* ]] && variant="v" || variant="g"
             [[ "$filename" == *"-vndklite"* ]] && vndk="-vndklite" || vndk=""
-            name="treble_${arch}_b${variant}N${vndk}"
+            duo=""
+            [[ "$filename" == *"_duo1"* ]] && duo="_duo1"
+            [[ "$filename" == *"_duo2"* ]] && duo="_duo2"
+            name="treble_${arch}_b${variant}N${vndk}${duo}"
             size=$(wc -c $file | awk '{print $1}')
             url="https://github.com/archfx/duo-de/releases/download/$version/$filename"
             json="${json} {\"name\": \"$name\",\"size\": \"$size\",\"url\": \"$url\"},"
@@ -154,12 +164,12 @@ START=$(date +%s)
 # initRepos
 # syncRepos
 # applyPatches
-# setupEnv
+setupEnv
 # buildTrebleApp
-# buildVariants
-# generatePackages
-# generateOta
-# uploadOTA
+buildVariants
+generatePackages
+generateOta
+uploadOTA
 
 END=$(date +%s)
 ELAPSEDM=$(($(($END-$START))/60))
