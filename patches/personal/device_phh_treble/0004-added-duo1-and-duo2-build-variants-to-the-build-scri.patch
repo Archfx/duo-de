@@ -106,12 +106,12 @@ index 4c7690a..77dfd89 100644
 -				target="treble_${arch}_${part_suffix}${apps_suffix}${su_suffix}"
 +				duo_suffix=''
 +				if [ "$duo" == "_duo1" ];then
-+					duo_suffix='_duo1'
++					duo_suffix='d1'
 +					extra_packages+=' PostureProcessor SurfaceDuoGeneralOverlay SurfaceDuo1DisplayFeaturesWMShellOverlay SurfaceDuo1NoHingeAndroidOverlay SurfaceDuo1NoHingeWMShellOverlay SurfaceDuo1DisplayFeaturesOverlay SurfaceDuo2DisplayFeaturesOverlay SurfaceDuo2DisplayFeaturesWMShellOverlay SurfaceDuo2NoHingeAndroidOverlay SurfaceDuo2NoHingeWMShellOverlay SurfaceDuo2PostureProcessorOverlay SurfaceDuoSettingsOverlay SurfaceDuoSettingsIconsOverlay SurfaceDuoAppHintingOverlay'
 +					copy_files=" device/phh/treble/files/com.microsoft.surface.duo_v1.xml:system/etc/permissions/com.microsoft.surface.duo_v1.xml device/phh/treble/files/device_state_configuration.xml:system/etc/devicestate/device_state_configuration.xml"
 +					duo_script='$(call inherit-product-if-exists, vendor/surface/prebuilts/bootanimation/bootanimation.mk)'
 +				elif [ "$duo" == "_duo2" ];then
-+					duo_suffix='_duo2'
++					duo_suffix='d2'
 +					extra_packages+=' PostureProcessorV2 SurfaceDuoGeneralOverlay SurfaceDuo1DisplayFeaturesWMShellOverlay SurfaceDuo1NoHingeAndroidOverlay SurfaceDuo1NoHingeWMShellOverlay SurfaceDuo1DisplayFeaturesOverlay SurfaceDuo2DisplayFeaturesOverlay SurfaceDuo2DisplayFeaturesWMShellOverlay SurfaceDuo2NoHingeAndroidOverlay SurfaceDuo2NoHingeWMShellOverlay SurfaceDuo2PostureProcessorOverlay SurfaceDuoSettingsOverlay SurfaceDuoSettingsIconsOverlay SurfaceDuoAppHintingOverlay'
 +					copy_files=" device/phh/treble/files/com.microsoft.surface.duo_v1.xml:system/etc/permissions/com.microsoft.surface.duo_v1.xml device/phh/treble/files/device_state_configuration.xml:system/etc/devicestate/device_state_configuration.xml"
 +					duo_script='$(call inherit-product-if-exists, vendor/surface/prebuilts/bootanimation/bootanimation.mk)'

@@ -103,10 +103,10 @@ buildVariants() {
     # buildVndkliteVariant treble_a64_bgN
     # buildVndkliteVariant treble_arm64_bvN
     # buildVndkliteVariant treble_arm64_bgN
-    buildVariant treble_arm64_bvN_duo1
-    buildVariant treble_arm64_bgN_duo1
-    buildVariant treble_arm64_bvN_duo2
-    buildVariant treble_arm64_bgN_duo2
+    buildVariant treble_arm64_bvNd1
+    buildVariant treble_arm64_bvNd2
+    buildVariant treble_arm64_bgNd1
+    buildVariant treble_arm64_bgNd2
 }
 
 generatePackages() {
@@ -118,8 +118,8 @@ generatePackages() {
         [[ "$filename" == *"_bvN"* ]] && variant="vanilla" || variant="gapps"
         [[ "$filename" == *"-vndklite"* ]] && vndk="-vndklite" || vndk=""
         duo=""
-        [[ "$filename" == *"_duo1"* ]] && duo="-duo1"
-        [[ "$filename" == *"_duo2"* ]] && duo="-duo2"
+        [[ "$filename" == *"d1"* ]] && duo="-duo1"
+        [[ "$filename" == *"d2"* ]] && duo="-duo2"
         name="aosp-${arch}-ab-${variant}${vndk}${duo}-14.0-$buildDate"
         xz -cv "$file" -T0 > $BD/"$name".img.xz
     done
@@ -140,8 +140,8 @@ generateOta() {
             [[ "$filename" == *"-vanilla"* ]] && variant="v" || variant="g"
             [[ "$filename" == *"-vndklite"* ]] && vndk="-vndklite" || vndk=""
             duo=""
-            [[ "$filename" == *"-duo1"* ]] && duo="-duo1"
-            [[ "$filename" == *"-duo2"* ]] && duo="-duo2"
+            [[ "$filename" == *"-duo1"* ]] && duo="d1"
+            [[ "$filename" == *"-duo2"* ]] && duo="d2"
             name="treble_${arch}_b${variant}N${vndk}${duo}"
             size=$(wc -c $file | awk '{print $1}')
             url="https://github.com/archfx/duo-de/releases/download/$version/$filename"
