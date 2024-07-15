@@ -21,12 +21,12 @@ Releases after `v2024.07.14` version will have two separate images for Surface D
 
 Following are the steps to flash this image to your surface duo.
 
-1. Download the corresponding release for your device (`_duo1` and `_duo2` for the first and second generations, respectively). 
+1. Download the corresponding release for your device (`-duo1` and `-duo2` for the first and second generations, respectively). 
 ```shell
-wget https://github.com/Archfx/duo-de/releases/download/<<version>>/aosp-arm64-ab-gapps_duo<<X>>-14.0-<<version>>.img.xz
-tar -xf aosp-arm64-ab-gapps_duo<<X>>-14.0-<<version>>.img.xz
+wget https://github.com/Archfx/duo-de/releases/download/<<version>>/aosp-arm64-ab-gapps-duo<<X>>-14.0-<<version>>.img.xz
+tar -xf aosp-arm64-ab-gapps-duo<<X>>-14.0-<<version>>.img.xz
 # or
-gunzip aosp-arm64-ab-gapps_duo<<X>>-14.0-<<version>>.img.xz
+gunzip aosp-arm64-ab-gapps-duo<<X>>-14.0-<<version>>.img.xz
 ```
 2. If you are migrating from Android 12L (stock) follow this step. You need to unlock the bootloader before proceeding. Please pay attention to commands, do not copy and execute the commands blindly.
 ```shell
@@ -41,13 +41,13 @@ fastboot delete-logical-partition system_b
 # if current slot is b, delete the system_a
 fastboot delete-logical-partition system_a
 
-fastboot flash system aosp-arm64-ab-gapps_duo<<X>>-14.0-<<version>>.img
+fastboot flash system aosp-arm64-ab-gapps-duo<<X>>-14.0-<<version>>.img
 fastboot reboot 
 ```
 3. Migrating from 13/14 pixel experience, follow the below steps 
 ```shell
 adb reboot fastboot
-fastboot flash system aosp-arm64-ab-gapps_duo<<X>>-14.0-<<version>>.img
+fastboot flash system aosp-arm64-ab-gapps-duo<<X>>-14.0-<<version>>.img
 fastboot reboot 
 ```
 4. Once you flash a **duo-de** version using the above steps, subsequent updates will be received using OTA. You can check updates using ``settings -> system -> system updates``.

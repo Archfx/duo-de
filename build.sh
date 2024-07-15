@@ -118,8 +118,8 @@ generatePackages() {
         [[ "$filename" == *"_bvN"* ]] && variant="vanilla" || variant="gapps"
         [[ "$filename" == *"-vndklite"* ]] && vndk="-vndklite" || vndk=""
         duo=""
-        [[ "$filename" == *"_duo1"* ]] && duo="_duo1"
-        [[ "$filename" == *"_duo2"* ]] && duo="_duo2"
+        [[ "$filename" == *"_duo1"* ]] && duo="-duo1"
+        [[ "$filename" == *"_duo2"* ]] && duo="-duo2"
         name="aosp-${arch}-ab-${variant}${vndk}${duo}-14.0-$buildDate"
         xz -cv "$file" -T0 > $BD/"$name".img.xz
     done
@@ -140,8 +140,8 @@ generateOta() {
             [[ "$filename" == *"-vanilla"* ]] && variant="v" || variant="g"
             [[ "$filename" == *"-vndklite"* ]] && vndk="-vndklite" || vndk=""
             duo=""
-            [[ "$filename" == *"_duo1"* ]] && duo="_duo1"
-            [[ "$filename" == *"_duo2"* ]] && duo="_duo2"
+            [[ "$filename" == *"-duo1"* ]] && duo="-duo1"
+            [[ "$filename" == *"-duo2"* ]] && duo="-duo2"
             name="treble_${arch}_b${variant}N${vndk}${duo}"
             size=$(wc -c $file | awk '{print $1}')
             url="https://github.com/archfx/duo-de/releases/download/$version/$filename"
