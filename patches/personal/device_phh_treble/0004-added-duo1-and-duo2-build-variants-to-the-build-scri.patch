@@ -1,20 +1,20 @@
-From 0f7a0d35ad94820f7cc919255433f6c327a7739d Mon Sep 17 00:00:00 2001
+From b3997aefe872464622ea6fbf72213f2ea098805a Mon Sep 17 00:00:00 2001
 From: Archfx <cybx@live.com>
-Date: Thu, 6 Jun 2024 10:01:49 -0400
-Subject: [PATCH] Surface duo specific configurations from thain
+Date: Mon, 15 Jul 2024 11:37:20 -0400
+Subject: [PATCH] added duo1 and duo2 build variants to the build script
 
 ---
  aosp.mk                                |  4 ++++
- base.mk                                | 24 ++++++++++++++++++++++++
  files/com.microsoft.surface.duo_v1.xml |  7 +++++++
- files/device_state_configuration.xml   | 18 ++++++++++++++++++
- phh-on-data.sh                         | 14 ++++++++++++++
+ files/device_state_configuration.xml   | 18 +++++++++++++++++
+ generate.sh                            | 28 +++++++++++++++++++++++---
+ phh-on-data.sh                         | 14 +++++++++++++
  sepolicy/hal.te                        |  2 ++
  sepolicy/service.te                    |  1 +
  sepolicy/service_contexts              |  5 +++++
  sepolicy/surface.te                    |  5 +++++
  system.prop                            |  8 ++++++++
- 10 files changed, 88 insertions(+)
+ 10 files changed, 89 insertions(+), 3 deletions(-)
  create mode 100644 aosp.mk
  create mode 100644 files/com.microsoft.surface.duo_v1.xml
  create mode 100644 files/device_state_configuration.xml
@@ -29,40 +29,7 @@ index 0000000..6493ba4
 +$(call inherit-product, vendor/ponces/config/common.mk)
 +
 +PRODUCT_SYSTEM_DEFAULT_PROPERTIES += \
-+    ro.system.ota.json_url=https://raw.githubusercontent.com/ponces/treble_aosp/android-14.0/config/ota.json
-diff --git a/base.mk b/base.mk
-index 53c4459..c8e9a33 100644
---- a/base.mk
-+++ b/base.mk
-@@ -266,3 +266,28 @@ PRODUCT_PRODUCT_PROPERTIES += \
-     persist.settings.large_screen_opt.enabled=true
- 
- PRODUCT_EXTRA_VNDK_VERSIONS += 28 29
-+
-+
-+PRODUCT_COPY_FILES += \
-+	device/phh/treble/files/com.microsoft.surface.duo_v1.xml:system/etc/permissions/com.microsoft.surface.duo_v1.xml
-+
-+PRODUCT_COPY_FILES += \
-+	device/phh/treble/files/device_state_configuration.xml:system/etc/devicestate/device_state_configuration.xml
-+
-+PRODUCT_PACKAGES += \
-+	SurfaceDuoGeneralOverlay \
-+	SurfaceDuo1DisplayFeaturesWMShellOverlay \
-+	SurfaceDuo1NoHingeAndroidOverlay \
-+	SurfaceDuo1NoHingeWMShellOverlay \
-+	SurfaceDuo1DisplayFeaturesOverlay \
-+	SurfaceDuo2DisplayFeaturesOverlay \
-+	SurfaceDuo2DisplayFeaturesWMShellOverlay \
-+	SurfaceDuo2NoHingeAndroidOverlay \
-+	SurfaceDuo2NoHingeWMShellOverlay \
-+	SurfaceDuo2PostureProcessorOverlay \
-+	SurfaceDuoSettingsOverlay \
-+	SurfaceDuoSettingsIconsOverlay \
-+	SurfaceDuoAppHintingOverlay
-+
-+$(call inherit-product-if-exists, vendor/surface/prebuilts/bootanimation/bootanimation.mk)
-\ No newline at end of file
++    ro.system.ota.json_url=https://raw.githubusercontent.com/Archfx/duo-de/main-14/config/ota.json
 diff --git a/files/com.microsoft.surface.duo_v1.xml b/files/com.microsoft.surface.duo_v1.xml
 new file mode 100644
 index 0000000..2a3cfcd
@@ -102,6 +69,73 @@ index 0000000..1647d08
 +  </device-state>
 +</device-state-config>
 \ No newline at end of file
+diff --git a/generate.sh b/generate.sh
+index 4c7690a..77dfd89 100644
+--- a/generate.sh
++++ b/generate.sh
+@@ -18,12 +18,15 @@ for part in a ab;do
+ 	for apps in vanilla gapps foss gapps-go;do
+ 		for arch in arm64 arm a64;do
+ 			for su in yes no;do
++			for duo in "" _duo1 _duo2; do
+ 				apps_suffix=""
+ 				apps_script=""
+ 				apps_name=""
+ 				extra_packages=""
++				copy_files=""
++				duo_script=""
+                 vndk="vndk.mk"
+-		optional_base=""
++				optional_base=""
+ 				if [ "$apps" == "gapps" ];then
+ 					apps_suffix="g"
+ 					[[ "$arch" == "a64" ]] && base="arm" || base="arm64"
+@@ -57,7 +60,7 @@ for part in a ab;do
+ 					su_suffix='S'
+ 					extra_packages+=' phh-su me.phh.superuser'
+ 				fi
+-
++				
+ 				part_suffix='a'
+ 				if [ "$part" == 'ab' ];then
+ 					part_suffix='b'
+@@ -65,7 +68,20 @@ for part in a ab;do
+ 					optional_base='$(call inherit-product, device/phh/treble/base-sas.mk)'
+ 				fi
+ 
+-				target="treble_${arch}_${part_suffix}${apps_suffix}${su_suffix}"
++				duo_suffix=''
++				if [ "$duo" == "_duo1" ];then
++					duo_suffix='_duo1'
++					extra_packages+=' PostureProcessor SurfaceDuoGeneralOverlay SurfaceDuo1DisplayFeaturesWMShellOverlay SurfaceDuo1NoHingeAndroidOverlay SurfaceDuo1NoHingeWMShellOverlay SurfaceDuo1DisplayFeaturesOverlay SurfaceDuo2DisplayFeaturesOverlay SurfaceDuo2DisplayFeaturesWMShellOverlay SurfaceDuo2NoHingeAndroidOverlay SurfaceDuo2NoHingeWMShellOverlay SurfaceDuo2PostureProcessorOverlay SurfaceDuoSettingsOverlay SurfaceDuoSettingsIconsOverlay SurfaceDuoAppHintingOverlay'
++					copy_files=" device/phh/treble/files/com.microsoft.surface.duo_v1.xml:system/etc/permissions/com.microsoft.surface.duo_v1.xml device/phh/treble/files/device_state_configuration.xml:system/etc/devicestate/device_state_configuration.xml"
++					duo_script='$(call inherit-product-if-exists, vendor/surface/prebuilts/bootanimation/bootanimation.mk)'
++				elif [ "$duo" == "_duo2" ];then
++					duo_suffix='_duo2'
++					extra_packages+=' PostureProcessorV2 SurfaceDuoGeneralOverlay SurfaceDuo1DisplayFeaturesWMShellOverlay SurfaceDuo1NoHingeAndroidOverlay SurfaceDuo1NoHingeWMShellOverlay SurfaceDuo1DisplayFeaturesOverlay SurfaceDuo2DisplayFeaturesOverlay SurfaceDuo2DisplayFeaturesWMShellOverlay SurfaceDuo2NoHingeAndroidOverlay SurfaceDuo2NoHingeWMShellOverlay SurfaceDuo2PostureProcessorOverlay SurfaceDuoSettingsOverlay SurfaceDuoSettingsIconsOverlay SurfaceDuoAppHintingOverlay'
++					copy_files=" device/phh/treble/files/com.microsoft.surface.duo_v1.xml:system/etc/permissions/com.microsoft.surface.duo_v1.xml device/phh/treble/files/device_state_configuration.xml:system/etc/devicestate/device_state_configuration.xml"
++					duo_script='$(call inherit-product-if-exists, vendor/surface/prebuilts/bootanimation/bootanimation.mk)'
++				fi
++
++				target="treble_${arch}_${part_suffix}${apps_suffix}${su_suffix}${duo_suffix}"
+ 
+ 				baseArch="$arch"
+ 				if [ "$arch" = "a64" ];then
+@@ -96,8 +112,14 @@ PRODUCT_CHARACTERISTICS := device
+ 
+ PRODUCT_PACKAGES += $extra_packages
+ 
++PRODUCT_COPY_FILES += $copy_files
++
++$duo_script
++
+ EOF
+ echo -e '\t$(LOCAL_DIR)/'$target.mk '\' >> AndroidProducts.mk
++
++			done
+ 			done
+ 		done
+ 	done
 diff --git a/phh-on-data.sh b/phh-on-data.sh
 index 472d16e..f36b15e 100644
 --- a/phh-on-data.sh

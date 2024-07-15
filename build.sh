@@ -161,15 +161,15 @@ uploadOTA() {
 
 START=$(date +%s)
 
-# initRepos
-# syncRepos
-# applyPatches
-setupEnv
-# buildTrebleApp
-buildVariants
-generatePackages
-generateOta
-uploadOTA
+initRepos
+syncRepos
+applyPatches
+# setupEnv
+# # buildTrebleApp
+# buildVariants
+# generatePackages
+# generateOta
+# uploadOTA
 
 END=$(date +%s)
 ELAPSEDM=$(($(($END-$START))/60))
