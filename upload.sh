@@ -4,7 +4,7 @@ echo
 echo "--------------------------------------"
 echo "         AOSP 14.0 Uploadbot          "
 echo "                  by                  "
-echo "                ponces                "
+echo "                ArchFX                "
 echo "--------------------------------------"
 echo
 
