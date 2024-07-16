@@ -72,12 +72,12 @@ buildTrebleApp() {
 buildVariant() {
     echo "--> Building $1"
     lunch "$1"-ap2a-userdebug
-    make -j$(nproc --all) installclean
-    make -j$(nproc --all) systemimage
-    make -j$(nproc --all) target-files-package otatools
-    yes | bash $BL/sign.sh "../archfx-priv/keys" $OUT/signed-target_files.zip
-    unzip -jq $OUT/signed-target_files.zip IMAGES/system.img -d $OUT
-    mv $OUT/system.img $BD/system-"$1".img
+    # make -j$(nproc --all) installclean
+    # make -j$(nproc --all) systemimage
+    # make -j$(nproc --all) target-files-package otatools
+    # bash $BL/sign.sh "../archfx-priv/keys" $OUT/signed-target_files.zip
+    # unzip -jqo $OUT/signed-target_files.zip IMAGES/system.img -d $OUT
+    # mv $OUT/system.img $BD/system-"$1".img
 
     echo "image copied to $BD/system-"$1".img"
     echo
@@ -103,9 +103,9 @@ buildVariants() {
     # buildVndkliteVariant treble_a64_bgN
     # buildVndkliteVariant treble_arm64_bvN
     # buildVndkliteVariant treble_arm64_bgN
-    buildVariant treble_arm64_bvNd1
-    buildVariant treble_arm64_bvNd2
-    buildVariant treble_arm64_bgNd1
+    #buildVariant treble_arm64_bvNd1
+    #buildVariant treble_arm64_bvNd2
+    # buildVariant treble_arm64_bgNd1
     buildVariant treble_arm64_bgNd2
 }
 
@@ -161,12 +161,12 @@ uploadOTA() {
 
 START=$(date +%s)
 
-initRepos
-syncRepos
-applyPatches
-# setupEnv
-# # buildTrebleApp
-# buildVariants
+# initRepos
+# syncRepos
+# applyPatches
+setupEnv
+# buildTrebleApp
+buildVariants
 # generatePackages
 # generateOta
 # uploadOTA
