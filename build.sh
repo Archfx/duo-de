@@ -155,11 +155,11 @@ START=$(date +%s)
 # syncRepos
 # applyPatches
 setupEnv
-# buildTrebleApp
+buildTrebleApp
 buildVariants
-# generatePackages
-# generateOta
-# uploadOTA
+generatePackages
+generateOta
+uploadOTA
 
 END=$(date +%s)
 ELAPSEDM=$(($(($END-$START))/60))
