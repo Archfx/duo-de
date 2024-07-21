@@ -1,7 +1,7 @@
 From cda15e1f87122072d17a1fe11cb89e50a52e5ad7 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Mon, 29 Jan 2024 17:15:38 -0500
-Subject: [PATCH 46/53] Bunch of FOD stuff -- commonize refreshing the
+Subject: [PATCH 46/54] Bunch of FOD stuff -- commonize refreshing the
  services, start supporting AIDL Samsung
 
 ---
