@@ -1,5 +1,4 @@
 FROM ubuntu:22.04
-LABEL Alberto Ponces="ponces26@gmail.com"
 
 COPY . /aosp/treble_aosp
 RUN ln -s /aosp/treble_aosp/build.sh /usr/bin/treblebuild && \
@@ -60,8 +59,8 @@ RUN curl https://packagecloud.io/install/repositories/github/git-lfs/script.deb.
     apt update && apt install git-lfs && \
     git lfs install
 
-RUN git config --global user.name "Alberto Ponces" && \
-    git config --global user.email ponces26@gmail.com && \
+RUN git config --global user.name "Archfx" && \
+    git config --global user.email cybx@live.com && \
     git config --global color.ui auto
 
 USER root

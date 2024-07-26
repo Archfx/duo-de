@@ -7,7 +7,7 @@ on:
 
 jobs:
   sync:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
@@ -15,14 +15,14 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build Image
-        run: docker build -f build/Dockerfile -t ponces/treble .
+        run: docker build -f build/Dockerfile -t archfx/treble .
 
       - name: Sync with TrebleDroid
         run: |
           docker run --rm \
                      --name td \
                      --volume ${{ github.workspace }}/patches:/aosp/treble_aosp/patches \
-                     ponces/treble treblesync
+                     archfx/treble treblesync
           cp -r patches/trebledroid patches/patches
           cd patches
           zip -rq patches-for-developers.zip patches
@@ -42,7 +42,7 @@ jobs:
           path: patches/patches-for-developers.zip
   cleanup:
     needs: sync
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     if: ${{ always() }}
     steps:
       - name: Cleanup
