@@ -1,7 +1,7 @@
 From f467002fa0316030a1cbaa2513dab689c84040e8 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Maciej=20=C5=BBenczykowski?= <maze@google.com>
 Date: Fri, 15 Mar 2024 19:03:13 +0000
-Subject: [PATCH 06/10] NetBpfLoad: more 4.9-T support
+Subject: [PATCH 6/9] NetBpfLoad: more 4.9-T support
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

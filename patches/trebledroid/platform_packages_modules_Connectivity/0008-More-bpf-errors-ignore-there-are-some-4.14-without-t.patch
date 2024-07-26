@@ -1,15 +1,15 @@
-From 3d84cebda12468a5a2b686b7167ce8b93fb010ae Mon Sep 17 00:00:00 2001
+From 6bebcc5a2eb42e4d060f19219872beb716e08df8 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Wed, 15 May 2024 05:56:59 -0400
-Subject: [PATCH 09/10] More bpf errors ignore -- there are some 4.14 without
- the bpf jit file
+Subject: [PATCH 8/9] More bpf errors ignore -- there are some 4.14 without the
+ bpf jit file
 
 ---
- netbpfload/NetBpfLoad.cpp | 9 +++------
- 1 file changed, 3 insertions(+), 6 deletions(-)
+ netbpfload/NetBpfLoad.cpp | 7 +++----
+ 1 file changed, 3 insertions(+), 4 deletions(-)
 
 diff --git a/netbpfload/NetBpfLoad.cpp b/netbpfload/NetBpfLoad.cpp
-index 9b71eaaa35..0484577a49 100644
+index 6b9b8c5729..0484577a49 100644
 --- a/netbpfload/NetBpfLoad.cpp
 +++ b/netbpfload/NetBpfLoad.cpp
 @@ -345,8 +345,7 @@ int main(int argc, char** argv, char * const envp[]) {
@@ -22,19 +22,17 @@ index 9b71eaaa35..0484577a49 100644
  
          // Enable the eBPF JIT -- but do note that on 64-bit kernels it is likely
          // already force enabled by the kernel config option BPF_JIT_ALWAYS_ON.
-@@ -354,14 +353,12 @@ int main(int argc, char** argv, char * const envp[]) {
+@@ -354,12 +353,12 @@ int main(int argc, char** argv, char * const envp[]) {
          //  kernel does not have CONFIG_BPF_JIT=y)
          // BPF_JIT is required by R VINTF (which means 4.14/4.19/5.4 kernels),
          // but 4.14/4.19 were released with P & Q, and only 5.4 is new in R+.
--        if (writeProcSysFile("/proc/sys/net/core/bpf_jit_enable", "1\n") &&
--            android::bpf::isAtLeastKernelVersion(4, 14, 0)) return 1;
+-        if (writeProcSysFile("/proc/sys/net/core/bpf_jit_enable", "1\n")) return 1;
 +        writeProcSysFile("/proc/sys/net/core/bpf_jit_enable", "1\n");
  
          // Enable JIT kallsyms export for privileged users only
          // (Note: this (open) will fail with ENOENT 'No such file or directory' if
          //  kernel does not have CONFIG_HAVE_EBPF_JIT=y)
--        if (writeProcSysFile("/proc/sys/net/core/bpf_jit_kallsyms", "1\n") &&
--            android::bpf::isAtLeastKernelVersion(4, 14, 0)) return 1;
+-        if (writeProcSysFile("/proc/sys/net/core/bpf_jit_kallsyms", "1\n")) return 1;
 +        writeProcSysFile("/proc/sys/net/core/bpf_jit_kallsyms", "1\n");
      }
  
