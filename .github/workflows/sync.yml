@@ -6,7 +6,7 @@ on:
     - cron: '0 0 * * 0'
 
 jobs:
-  update-folder:
+  update-TrebleDroid-patches:
     runs-on: ubuntu-latest
 
     steps:
