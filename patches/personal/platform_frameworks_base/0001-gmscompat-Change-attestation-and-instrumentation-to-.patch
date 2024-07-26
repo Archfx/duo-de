@@ -121,7 +121,7 @@ index 00000000..cff1250c
 +        setBuildField("MANUFACTURER", "Google");
 +        setBuildField("BRAND", "google");
 +        setBuildField("MODEL", "Pixel");
-+        setBuildField("FINGERPRINT", "google/sailfish/sailfish:8.1.0/OPM1.171019.011/4448085:user/release-keys");
++        setBuildField("FINGERPRINT", "google/sailfish/sailfish:10/QPP3.190404.015/5505587:user/release-keys");
 +        setVersionField("SECURITY_PATCH", "2017-12-05");
 +        setVersionField("DEVICE_INITIAL_SDK_INT", Build.VERSION_CODES.N_MR1);
 +    }
