@@ -12,8 +12,6 @@ jobs:
     steps:
     - name: Checkout duo-de
       uses: actions/checkout@v3
-      with:
-        path: duo-de
 
     - name: Checkout treble_aosp
       uses: actions/checkout@v3
@@ -23,8 +21,8 @@ jobs:
 
     - name: Replace folder
       run: |
-        rm -rf ./duo-de/patches/trebledroid
-        cp -R ./treble_aosp/patches/trebledroid ./duo-de/patches/trebledroid
+        rm -rf ./patches/trebledroid
+        cp -R ./treble_aosp/patches/trebledroid ./patches/trebledroid
         rm -rf ./treble_aosp
 
     - name: Configure Git
@@ -34,7 +32,6 @@ jobs:
 
     - name: Commit changes
       run: |
-        cd duo-de
         git add .
         git commit -m "feat: sync with latest sources of TrebleDroid [via Ponces]"
 
