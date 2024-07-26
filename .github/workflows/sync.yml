@@ -6,7 +6,7 @@ on:
     - cron: '0 0 * * 0'
 
 jobs:
-  update-TrebleDroid-patches:
+  sync-bot:
     runs-on: ubuntu-latest
 
     steps:
@@ -40,7 +40,8 @@ jobs:
       uses: peter-evans/create-pull-request@v5
       with:
         commit-message: "feat: sync with latest sources of TrebleDroid [via Ponces]"
-        branch: main-14
+        branch: sync-bot
+        base: main-14
         title: "TrebleDroid patches"
         body: "This PR updates the patches from TrebleDroid."
         labels: 'automated-pr'
