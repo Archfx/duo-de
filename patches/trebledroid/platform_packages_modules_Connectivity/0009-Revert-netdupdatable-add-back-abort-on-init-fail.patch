@@ -1,7 +1,7 @@
-From bc89782540891ee95727a8d1e2af772d586714f9 Mon Sep 17 00:00:00 2001
+From d770a7eeca41db1832b0b0ea4bc218ed89449a77 Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Thu, 20 Jun 2024 12:38:58 +0100
-Subject: [PATCH 10/10] Revert "netdupdatable: add back abort() on init() fail"
+Subject: [PATCH 9/9] Revert "netdupdatable: add back abort() on init() fail"
 
 This reverts commit ff845a642bc988f960c77ac60664560f8cdc7ee3.
 ---
