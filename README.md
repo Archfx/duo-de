@@ -2,7 +2,7 @@
 
 
 
-This is a GSI variant rom build targetted for Microsoft Surface Duo with the intention of using the Surface Duo as a desktop environment using experimental floating window features. This build combines gapps/vanila variants of the GSI rom from [ponces](https://github.com/ponces/treble_aosp) with desktop mode enabled + various tweaks to make it nice and smooth with the help of [thain](https://github.com/thai-ng) tweaks. All credits go to respective developers. Desktop mode can be disabled from the ``home settings``.
+This is a GSI variant rom build targetted for Microsoft Surface Duo with the intention of using the Surface Duo as a desktop environment using experimental floating window features. This build combines gapps/vanila variants of the GSI rom from [ponces](https://github.com/ponces/treble_aosp) with desktop mode enabled + various tweaks to make it nice and smooth with the help of [thain](https://github.com/thai-ng) tweaks. All credits go to respective developers. Desktop mode can be disabled from the ``home settings``, if required. The latest version is fairly stable and secure for daily usage.
 
 ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/archfx/duo-de/total?style=for-the-badge&label=duo-de%20Downloads&color=%2333cc33)
 
@@ -11,7 +11,7 @@ This is a GSI variant rom build targetted for Microsoft Surface Duo with the int
 
 ## Posture Engine
 
-Thanks to [thain](https://github.com/thai-ng), both duo1 and duo2 react to various postures and the hinge gaps can be enabled/disabled through the treble app.
+With the posture processor engine, both duo1 and duo2 react to various postures. Specifically, the touch configurations and display settings will toggle between left-screen phone mode, right-screen phone mode, and tablet mode based on the hinge position. The hinge gaps can be enabled/disabled through the treble app.
 <p align="center">
 <img src="images/duo-1.png" alt="drawing" style="height:300px;" /> 
 <img src="images/duo-2.png" alt="drawing" style="height:300px;"/> </p>
