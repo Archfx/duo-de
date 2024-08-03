@@ -65,7 +65,7 @@ fastboot reboot
 ## Issues
 
 Any issues, please 
-[open an issue](https://github.com/Archfx/duo-de/issues/new/choose) with a detailed description.
+[open an issue](https://github.com/Archfx/duo-de/issues/new/choose) with a detailed description. Please use the [discussion](https://github.com/Archfx/duo-de/discussions/new/choose) section for any questions regarding flashing and similar stuff.
 
 ## Credits
 These people have helped this project in some way or another, so they should be the ones who receive all the credit:
