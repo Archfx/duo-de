@@ -36,10 +36,10 @@ jobs:
         git add .
         if git diff-index --quiet HEAD; then
           echo "No changes to commit"
-          echo "::set-output name=changes::false"
+          echo "changes=false" >> $GITHUB_OUTPUT
         else
           git commit -m "feat: sync with latest sources of TrebleDroid [via Ponces]"
-          echo "::set-output name=changes::true"
+          echo "changes=true" >> $GITHUB_OUTPUT
         fi
 
     - name: Create Pull Request
