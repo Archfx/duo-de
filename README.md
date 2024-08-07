@@ -53,7 +53,8 @@ adb reboot fastboot
 fastboot flash system aosp-arm64-ab-gapps-14.0-<<version>>.img
 fastboot reboot 
 ```
-4. Once you flash a **duo-de** version using the above steps, subsequent updates will be received using OTA. You can check updates using ``settings -> system -> system updates``.
+4. Perform a manual reboot once the device is booted to the home screen so that first-time configurations are applied.
+5. Once you flash a **duo-de** version using the above steps, subsequent updates will be received using OTA. You can check updates using ``settings -> system -> system updates``.
 
 ## FAQ
 - I flashed the ROM, however, the windows are not floating even if the desktop mode is enabled.
@@ -62,7 +63,7 @@ fastboot reboot
 > - Enable freeform windows
 > - Enable non-resizable in multi-window
 >   
-> This issue will be fixed in subsequent releases after `v2024.07.09`
+> This issue is fixed in subsequent releases after `v2024.07.09`
 
 ## Issues
 
