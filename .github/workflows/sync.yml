@@ -1,4 +1,4 @@
-name: Sync
+name: TrebleDroid-Sync
 
 on:
   workflow_dispatch:
@@ -31,13 +31,21 @@ jobs:
         git config --global user.email 'github-actions[bot]@users.noreply.github.com'
 
     - name: Commit changes
+      id: commit_changes
       run: |
         git add .
-        git commit -m "feat: sync with latest sources of TrebleDroid [via Ponces]"
+        if git diff-index --quiet HEAD; then
+          echo "No changes to commit"
+          echo "changes=false" >> $GITHUB_OUTPUT
+        else
+          git commit -m "feat: sync with latest sources of TrebleDroid [via Ponces]"
+          echo "changes=true" >> $GITHUB_OUTPUT
+        fi
 
     - name: Create Pull Request
       id: create_pr
       uses: peter-evans/create-pull-request@v5
+      if: steps.commit_changes.outputs.changes == 'true'
       with:
         commit-message: "feat: sync with latest sources of TrebleDroid [via Ponces]"
         branch: sync-bot
