@@ -66,6 +66,7 @@ fastboot reboot
 > This issue is fixed in subsequent releases after `v2024.07.09`
 
 ## Issues
+Before you start please read [this](https://github.com/Archfx/duo-de/discussions/47).
 
 Any issues, please 
 [open an issue](https://github.com/Archfx/duo-de/issues/new/choose) with a detailed description. Please use the [discussion](https://github.com/Archfx/duo-de/discussions/new/choose) section for any questions regarding flashing and similar stuff.
