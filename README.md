@@ -4,8 +4,11 @@
 
 This is a GSI variant rom build targetted for Microsoft Surface Duo with the intention of using the Surface Duo as a desktop environment using experimental floating window features. This build combines gapps/vanila variants of the GSI rom from [ponces](https://github.com/ponces/treble_aosp) with desktop mode enabled + various tweaks to make it nice and smooth with the help of [thain](https://github.com/thai-ng) tweaks. All credits go to respective developers. Desktop mode can be disabled from the ``home settings``, if required. The latest version is stable and secure for daily usage.
 
+Before you start please read [this announcement](https://github.com/Archfx/duo-de/discussions/47) regarding this project.
+
 ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/archfx/duo-de/total?style=for-the-badge&label=duo-de%20Downloads&color=%2333cc33)
 ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/archfx/duo-de/sync.yml?style=for-the-badge&label=TrebleDroid%20Sync)
+
 
 
 <p align="center">
@@ -66,8 +69,6 @@ fastboot reboot
 > This issue is fixed in subsequent releases after `v2024.07.09`
 
 ## Issues
-Before you start please read [this](https://github.com/Archfx/duo-de/discussions/47).
-
 Any issues, please 
 [open an issue](https://github.com/Archfx/duo-de/issues/new/choose) with a detailed description. Please use the [discussion](https://github.com/Archfx/duo-de/discussions/new/choose) section for any questions regarding flashing and similar stuff.
 
