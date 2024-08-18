@@ -1,7 +1,7 @@
 From 0e3e58ee51ebf509fd662fe1146f723b185dd542 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sat, 25 Nov 2023 08:15:28 -0500
-Subject: [PATCH 09/13] Add MTK GED KPI support to fix broken Mediatek gpufreq
+Subject: [PATCH 09/14] Add MTK GED KPI support to fix broken Mediatek gpufreq
 
 Mediatek GPU scheduler likes to have the timestamps of the frames to be
 able to adjust DVFS.
