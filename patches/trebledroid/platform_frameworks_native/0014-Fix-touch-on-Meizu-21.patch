@@ -1,0 +1,137 @@
+From 8f1479900dff4ab624a3ad51628d4d04a5698b93 Mon Sep 17 00:00:00 2001
+From: Andy CrossGate Yan <GeForce8800Ultra@gmail.com>
+Date: Sat, 17 Aug 2024 20:49:53 +0800
+Subject: [PATCH 14/14] Fix touch on Meizu 21
+
+Raw values from the panel are multiplied by 10,
+causing most touch events to fall out of bounds and get dropped
+
+Change-Id: If854a814dee784a2693cc4597169107d6b8561f3
+---
+ .../accumulator/MultiTouchMotionAccumulator.cpp    | 12 ++++++++++--
+ .../accumulator/MultiTouchMotionAccumulator.h      |  4 ++++
+ .../accumulator/SingleTouchMotionAccumulator.cpp   | 14 ++++++++++----
+ .../accumulator/SingleTouchMotionAccumulator.h     |  2 ++
+ 4 files changed, 26 insertions(+), 6 deletions(-)
+
+diff --git a/services/inputflinger/reader/mapper/accumulator/MultiTouchMotionAccumulator.cpp b/services/inputflinger/reader/mapper/accumulator/MultiTouchMotionAccumulator.cpp
+index b3f170075c..7a2ecffe00 100644
+--- a/services/inputflinger/reader/mapper/accumulator/MultiTouchMotionAccumulator.cpp
++++ b/services/inputflinger/reader/mapper/accumulator/MultiTouchMotionAccumulator.cpp
+@@ -14,6 +14,8 @@
+  * limitations under the License.
+  */
+ 
++#include <android-base/properties.h>
++
+ // clang-format off
+ #include "../Macros.h"
+ // clang-format on
+@@ -151,6 +153,12 @@ void MultiTouchMotionAccumulator::populateCurrentSlot(
+ 
+ // --- MultiTouchMotionAccumulator::Slot ---
+ 
++MultiTouchMotionAccumulator::Slot::Slot() {
++    if (android::base::GetProperty("ro.product.vendor.device", "") == "meizu21") {
++        mAbsMtPositionXYRatio = 10;
++    }
++}
++
+ ToolType MultiTouchMotionAccumulator::Slot::getToolType() const {
+     if (mHaveAbsMtToolType) {
+         switch (mAbsMtToolType) {
+@@ -168,10 +176,10 @@ ToolType MultiTouchMotionAccumulator::Slot::getToolType() const {
+ void MultiTouchMotionAccumulator::Slot::populateAxisValue(int32_t axisCode, int32_t value) {
+     switch (axisCode) {
+         case ABS_MT_POSITION_X:
+-            mAbsMtPositionX = value;
++            mAbsMtPositionX = value / mAbsMtPositionXYRatio;
+             break;
+         case ABS_MT_POSITION_Y:
+-            mAbsMtPositionY = value;
++            mAbsMtPositionY = value / mAbsMtPositionXYRatio;
+             break;
+         case ABS_MT_TOUCH_MAJOR:
+             mAbsMtTouchMajor = value;
+diff --git a/services/inputflinger/reader/mapper/accumulator/MultiTouchMotionAccumulator.h b/services/inputflinger/reader/mapper/accumulator/MultiTouchMotionAccumulator.h
+index a0f21470c4..e82b7df1ba 100644
+--- a/services/inputflinger/reader/mapper/accumulator/MultiTouchMotionAccumulator.h
++++ b/services/inputflinger/reader/mapper/accumulator/MultiTouchMotionAccumulator.h
+@@ -30,6 +30,8 @@ class MultiTouchMotionAccumulator {
+ public:
+     class Slot {
+     public:
++        Slot();
++
+         inline bool isInUse() const { return mInUse; }
+         inline int32_t getX() const { return mAbsMtPositionX; }
+         inline int32_t getY() const { return mAbsMtPositionY; }
+@@ -67,6 +69,8 @@ public:
+         int32_t mAbsMtDistance = 0;
+         int32_t mAbsMtToolType = 0;
+ 
++        int32_t mAbsMtPositionXYRatio = 1;
++
+         void clear() { *this = Slot(); }
+         void populateAxisValue(int32_t axisCode, int32_t value);
+     };
+diff --git a/services/inputflinger/reader/mapper/accumulator/SingleTouchMotionAccumulator.cpp b/services/inputflinger/reader/mapper/accumulator/SingleTouchMotionAccumulator.cpp
+index 27b8e40fc6..e33b229221 100644
+--- a/services/inputflinger/reader/mapper/accumulator/SingleTouchMotionAccumulator.cpp
++++ b/services/inputflinger/reader/mapper/accumulator/SingleTouchMotionAccumulator.cpp
+@@ -14,6 +14,8 @@
+  * limitations under the License.
+  */
+ 
++#include <android-base/properties.h>
++
+ #include "SingleTouchMotionAccumulator.h"
+ 
+ #include "EventHub.h"
+@@ -23,11 +25,15 @@ namespace android {
+ 
+ SingleTouchMotionAccumulator::SingleTouchMotionAccumulator() {
+     clearAbsoluteAxes();
++
++    if (android::base::GetProperty("ro.product.vendor.device", "") == "meizu21") {
++        mAbsXYRatio = 10;
++    }
+ }
+ 
+ void SingleTouchMotionAccumulator::reset(InputDeviceContext& deviceContext) {
+-    mAbsX = deviceContext.getAbsoluteAxisValue(ABS_X);
+-    mAbsY = deviceContext.getAbsoluteAxisValue(ABS_Y);
++    mAbsX = deviceContext.getAbsoluteAxisValue(ABS_X) / mAbsXYRatio;
++    mAbsY = deviceContext.getAbsoluteAxisValue(ABS_Y) / mAbsXYRatio;
+     mAbsPressure = deviceContext.getAbsoluteAxisValue(ABS_PRESSURE);
+     mAbsToolWidth = deviceContext.getAbsoluteAxisValue(ABS_TOOL_WIDTH);
+     mAbsDistance = deviceContext.getAbsoluteAxisValue(ABS_DISTANCE);
+@@ -49,10 +55,10 @@ void SingleTouchMotionAccumulator::process(const RawEvent* rawEvent) {
+     if (rawEvent->type == EV_ABS) {
+         switch (rawEvent->code) {
+             case ABS_X:
+-                mAbsX = rawEvent->value;
++                mAbsX = rawEvent->value / mAbsXYRatio;
+                 break;
+             case ABS_Y:
+-                mAbsY = rawEvent->value;
++                mAbsY = rawEvent->value / mAbsXYRatio;
+                 break;
+             case ABS_PRESSURE:
+                 mAbsPressure = rawEvent->value;
+diff --git a/services/inputflinger/reader/mapper/accumulator/SingleTouchMotionAccumulator.h b/services/inputflinger/reader/mapper/accumulator/SingleTouchMotionAccumulator.h
+index 93056f06e6..59b8298a34 100644
+--- a/services/inputflinger/reader/mapper/accumulator/SingleTouchMotionAccumulator.h
++++ b/services/inputflinger/reader/mapper/accumulator/SingleTouchMotionAccumulator.h
+@@ -48,6 +48,8 @@ private:
+     int32_t mAbsTiltX;
+     int32_t mAbsTiltY;
+ 
++    int32_t mAbsXYRatio = 1;
++
+     void clearAbsoluteAxes();
+ };
+ 
+-- 
+2.34.1
+
