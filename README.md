@@ -42,13 +42,14 @@ Following are the steps to flash this image to your surface duo.
 
 1. Download the release. 
 ```shell
-wget https://github.com/Archfx/duo-de/releases/download/<<version>>/aosp-arm64-ab-gapps-14.0-<<version>>.img.xz
+wget https://github.com/Archfx/duo-de/releases/download/[[version]]/aosp-arm64-ab-gapps-14.0-[[version]].img.xz
 ```
-2. Extract the image file to obtain the `aosp-arm64-ab-gapps-14.0-<<version>>.img`.
+2. Extract the compressed `*.xz` file to obtain the `*.img`. (Windows users can use something like 7-zip, Linux and Mac users can use either of following commands with respective commandline utilities).
 ```shell
-tar -xf aosp-arm64-ab-gapps-14.0-<<version>>.img.xz
-# or
-gunzip aosp-arm64-ab-gapps-14.0-<<version>>.img.xz
+tar -xf aosp-arm64-ab-gapps-14.0-[[version]].img.xz #tar utility
+```
+```shell
+gunzip aosp-arm64-ab-gapps-14.0-[[version]].img.xz #gunzip utility
 ```
 3. If you are migrating from Android 12L (stock) follow this step. You need to unlock the bootloader before proceeding. Please pay attention to commands, do not copy and execute the commands blindly.
 ```shell
@@ -63,13 +64,13 @@ fastboot delete-logical-partition system_b
 # if current slot is b, delete the system_a
 fastboot delete-logical-partition system_a
 
-fastboot flash system aosp-arm64-ab-gapps-14.0-<<version>>.img
+fastboot flash system aosp-arm64-ab-gapps-14.0-[[version]].img
 fastboot reboot 
 ```
 4. Migrating from 13/14 pixel experience, follow the below steps 
 ```shell
 adb reboot fastboot
-fastboot flash system aosp-arm64-ab-gapps-14.0-<<version>>.img
+fastboot flash system aosp-arm64-ab-gapps-14.0-[[version]].img
 fastboot reboot 
 ```
 5. Perform a manual reboot once the device is booted to the home screen so that first-time configurations are applied.
