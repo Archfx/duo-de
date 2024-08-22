@@ -43,11 +43,14 @@ Following are the steps to flash this image to your surface duo.
 1. Download the release. 
 ```shell
 wget https://github.com/Archfx/duo-de/releases/download/<<version>>/aosp-arm64-ab-gapps-14.0-<<version>>.img.xz
+```
+2. Extract the image file to obtain the `aosp-arm64-ab-gapps-14.0-<<version>>.img`.
+```shell
 tar -xf aosp-arm64-ab-gapps-14.0-<<version>>.img.xz
 # or
 gunzip aosp-arm64-ab-gapps-14.0-<<version>>.img.xz
 ```
-2. If you are migrating from Android 12L (stock) follow this step. You need to unlock the bootloader before proceeding. Please pay attention to commands, do not copy and execute the commands blindly.
+3. If you are migrating from Android 12L (stock) follow this step. You need to unlock the bootloader before proceeding. Please pay attention to commands, do not copy and execute the commands blindly.
 ```shell
 adb reboot fastboot
 fastboot delete-logical-partition system_ext
@@ -63,14 +66,14 @@ fastboot delete-logical-partition system_a
 fastboot flash system aosp-arm64-ab-gapps-14.0-<<version>>.img
 fastboot reboot 
 ```
-3. Migrating from 13/14 pixel experience, follow the below steps 
+4. Migrating from 13/14 pixel experience, follow the below steps 
 ```shell
 adb reboot fastboot
 fastboot flash system aosp-arm64-ab-gapps-14.0-<<version>>.img
 fastboot reboot 
 ```
-4. Perform a manual reboot once the device is booted to the home screen so that first-time configurations are applied.
-5. Once you flash a **duo-de** version using the above steps, subsequent updates will be received using OTA. You can check updates using ``settings -> system -> system updates``.
+5. Perform a manual reboot once the device is booted to the home screen so that first-time configurations are applied.
+6. Once you flash a **duo-de** version using the above steps, subsequent updates will be received using OTA. You can check updates using ``settings -> system -> system updates``.
 
 ## FAQ
 - I flashed the ROM, however, the windows are not floating even if the desktop mode is enabled.
