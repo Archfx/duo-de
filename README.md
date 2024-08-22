@@ -21,6 +21,17 @@ With the posture processor engine, both duo1 and duo2 react to various postures.
 <img src="images/duo-1.png" alt="drawing" style="height:300px;" /> 
 <img src="images/duo-2.png" alt="drawing" style="height:300px;"/> </p>
 
+## Benchmarks
+
+These results are just for reference (for people who enjoy numbers) to compare the CPU and GPU performance of this ROM (latest build) with other operating system options. Best case numbers of each operating system are included in the graphs.
+
+
+![Duo1 CPU](images/duo1-geekbench-6-cpu.svg)
+Find CPU resuls at [duo-de-1-cpu](https://browser.geekbench.com/v6/cpu/7437614).
+
+![Duo1 GPU](images/duo1-geekbench-6-gpu.svg)
+Find GPU resuls at [duo-de-1-gpu](https://browser.geekbench.com/v6/compute/2640466).
+
 
 ## Flashing steps
 **Try this at your own risk and proceed with caution!**
