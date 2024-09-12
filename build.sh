@@ -151,9 +151,9 @@ uploadOTA() {
 
 START=$(date +%s)
 
-initRepos
-syncRepos
-applyPatches
+# initRepos
+# syncRepos
+# applyPatches
 setupEnv
 buildTrebleApp
 buildVariants
