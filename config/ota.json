@@ -1,16 +1,11 @@
 {
-  "version": "v2024.09.16",
-  "date": "1726538163",
+  "version": "v2024.09.17",
+  "date": "1726602246",
   "variants": [
     {
       "name": "treble_arm64_bgN",
-      "size": "1342014696",
-      "url": "https://github.com/archfx/duo-de/releases/download/v2024.09.16/aosp-arm64-ab-gapps-14.0-20240916.img.xz"
-    },
-    {
-      "name": "treble_arm64_bvN",
-      "size": "830430336",
-      "url": "https://github.com/archfx/duo-de/releases/download/v2024.09.16/aosp-arm64-ab-vanilla-14.0-20240916.img.xz"
+      "size": "1341999148",
+      "url": "https://github.com/archfx/duo-de/releases/download/v2024.09.17/aosp-arm64-ab-gapps-14.0-20240917.img.xz"
     }
   ]
 }
