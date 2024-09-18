@@ -21,18 +21,12 @@ With the posture processor engine, both duo1 and duo2 react to various postures.
 <img src="images/duo-1.png" alt="drawing" style="height:300px;" /> 
 <img src="images/duo-2.png" alt="drawing" style="height:300px;"/> </p>
 
-This ROM switches between tablet mode and phone mode when you change the postures. These modes are optimized (both visually and utility wise) for each of the situation and the screen real state.
+This ROM switches between tablet mode (first image) and phone mode (second image) when you change the postures. These modes are optimized (both visually and utility wise) for each of the situation and the screen real state.
 
 <p align="center">
-  <figure style="display: inline-block; margin: 10px;">
-    <img src="images/tabletmode.png" alt="drawing" style="height:300px;" />
-    <figcaption style="text-align: center;">Tablet Mode</figcaption>
-  </figure>
-  <figure style="display: inline-block; margin: 10px;">
-    <img src="images/phonemode.png" alt="drawing" style="height:300px;" />
-    <figcaption style="text-align: center;">Phone Mode</figcaption>
-  </figure>
-</p>
+<img src="images/tabletmode.png" alt="drawing" style="height:300px;" /> 
+<img src="images/phonemode.png" alt="drawing" style="height:300px;"/> </p>
+
 
 ## Benchmarks
 
