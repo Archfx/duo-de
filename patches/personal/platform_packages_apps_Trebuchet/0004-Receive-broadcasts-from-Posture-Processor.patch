@@ -48,8 +48,8 @@ index 870c42183e..72bded2691 100644
 +        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
 +        context.startActivity(intent);
 +        // Process.killProcess(Process.myPid());
-+        ((ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE))
-+            .clearApplicationUserData();
++        //((ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE))
++        //    .clearApplicationUserData();
 +        Log.d("RestartReceiver by Archfx", "Launcher restarted.");
 +    }
 +
