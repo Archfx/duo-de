@@ -97,8 +97,9 @@ buildVndkliteVariant() {
 buildVariants() {
     # buildVariant treble_a64_bvN
     # buildVariant treble_a64_bgN
+    
     buildVariant treble_arm64_bvN
-    buildVariant treble_arm64_bgN
+    # buildVariant treble_arm64_bgN
     # buildVndkliteVariant treble_a64_bvN
     # buildVndkliteVariant treble_a64_bgN
     # buildVndkliteVariant treble_arm64_bvN

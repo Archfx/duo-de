@@ -1,0 +1,83 @@
+From 00f0f98f7eb5ae5505b579028262287f4b220266 Mon Sep 17 00:00:00 2001
+From: Archfx <cybx@live.com>
+Date: Wed, 18 Sep 2024 15:26:24 -0400
+Subject: [PATCH] Receive broadcasts from Posture Processor
+
+---
+ AndroidManifest.xml                           |  9 +++++++
+ .../android/launcher3/LauncherAppState.java   | 26 +++++++++++++++++++
+ 2 files changed, 35 insertions(+)
+
+diff --git a/AndroidManifest.xml b/AndroidManifest.xml
+index c1473456a3..49f2c2dcb7 100644
+--- a/AndroidManifest.xml
++++ b/AndroidManifest.xml
+@@ -75,5 +75,14 @@
+                 android:value="${packageName}.grid_control" />
+         </activity>
+ 
++        <!-- Receiver for restart intent -->
++
++        <receiver android:name=".RestartReceiver"
++        android:exported="true">
++        <intent-filter>
++            <action android:name="com.thain.duo.LAUNCHER_RESTART" />
++        </intent-filter>
++        </receiver>
++
+     </application>
+ </manifest>
+diff --git a/src/com/android/launcher3/LauncherAppState.java b/src/com/android/launcher3/LauncherAppState.java
+index 870c42183e..72bded2691 100644
+--- a/src/com/android/launcher3/LauncherAppState.java
++++ b/src/com/android/launcher3/LauncherAppState.java
+@@ -61,6 +61,7 @@ import com.android.launcher3.util.SimpleBroadcastReceiver;
+ import com.android.launcher3.util.Themes;
+ import com.android.launcher3.util.TraceHelper;
+ import com.android.launcher3.widget.custom.CustomWidgetManager;
++import android.app.ActivityManager;
+ 
+ public class LauncherAppState implements SafeCloseable {
+ 
+@@ -91,6 +92,16 @@ public class LauncherAppState implements SafeCloseable {
+         return mContext;
+     }
+ 
++    public void restartLauncher(Context context) {
++        Intent intent = new Intent(context, Launcher.class);
++        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
++        context.startActivity(intent);
++        // Process.killProcess(Process.myPid());
++        ((ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE))
++            .clearApplicationUserData();
++        Log.d("RestartReceiver by Archfx", "Launcher restarted.");
++    }
++
+     @SuppressWarnings("NewApi")
+     public LauncherAppState(Context context) {
+         this(context, LauncherFiles.APP_ICONS_DB);
+@@ -105,6 +116,21 @@ public class LauncherAppState implements SafeCloseable {
+             }
+         });
+ 
++
++        // Add RestartReceiver to listen for restart intent
++        SimpleBroadcastReceiver restartReceiver = new SimpleBroadcastReceiver(intent -> {
++            if ("com.thain.duo.LAUNCHER_RESTART".equals(intent.getAction())) {
++                Log.d("RestartReceiver by Archfx", "Received broadcast to restart the launcher.");
++                // refreshAndReloadLauncher(); 
++                restartLauncher(context);
++            }
++        });
++        mContext.registerReceiver(restartReceiver, new IntentFilter("com.thain.duo.LAUNCHER_RESTART"), 
++                            RECEIVER_EXPORTED);
++        mOnTerminateCallback.add(() -> mContext.unregisterReceiver(restartReceiver));
++
++
++
+         ModelLauncherCallbacks callbacks = mModel.newModelCallbacks();
+         LauncherApps launcherApps = mContext.getSystemService(LauncherApps.class);
+         launcherApps.registerCallback(callbacks);
+-- 
+2.34.1
+

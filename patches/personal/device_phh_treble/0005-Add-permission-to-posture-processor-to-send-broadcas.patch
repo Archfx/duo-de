@@ -1,0 +1,38 @@
+From c68a97adad3cf0d05b9f777e15f16fbace94d9b6 Mon Sep 17 00:00:00 2001
+From: Archfx <cybx@live.com>
+Date: Wed, 18 Sep 2024 15:30:57 -0400
+Subject: [PATCH] Add permission to posture processor to send broadcasts
+
+---
+ aosp.mk | 2 +-
+ base.mk | 4 ++++
+ 2 files changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/aosp.mk b/aosp.mk
+index 6493ba4..093dba0 100644
+--- a/aosp.mk
++++ b/aosp.mk
+@@ -1,4 +1,4 @@
+ $(call inherit-product, vendor/ponces/config/common.mk)
+ 
+ PRODUCT_SYSTEM_DEFAULT_PROPERTIES += \
+-    ro.system.ota.json_url=https://raw.githubusercontent.com/ponces/treble_aosp/android-14.0/config/ota.json
++    ro.system.ota.json_url=https://raw.githubusercontent.com/Archfx/duo-de/main-14/config/ota.json
+diff --git a/base.mk b/base.mk
+index c8e9a33..f4d5963 100644
+--- a/base.mk
++++ b/base.mk
+@@ -195,6 +195,10 @@ PRODUCT_PACKAGES += \
+ PRODUCT_COPY_FILES += \
+ 	device/phh/treble/privapp-permissions-me.phh.treble.app.xml:system/etc/permissions/privapp-permissions-me.phh.treble.app.xml
+ 
++# Privapp-permissions whitelist for postureProcessor
++PRODUCT_COPY_FILES += \
++	vendor/surface/privapp-permissions-duo.xml:system/system_ext/etc/permissions/privapp-permissions-com.thain.duo.xml
++
+ # Remote debugging
+ PRODUCT_COPY_FILES += \
+ 	device/phh/treble/remote/dbclient:system/bin/dbclient \
+-- 
+2.34.1
+

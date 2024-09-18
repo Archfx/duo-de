@@ -50,7 +50,7 @@ START=$(date +%s)
 
 createRelease
 uploadAssets
-# [ "$SKIPOTA" = false ] && updateOta
+[ "$SKIPOTA" = false ] && updateOta
 
 END=$(date +%s)
 ELAPSEDM=$(($(($END-$START))/60))
