@@ -44,12 +44,12 @@ index 870c42183e..72bded2691 100644
      }
  
 +    public void restartLauncher(Context context) {
-+        Intent intent = new Intent(context, Launcher.class);
-+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-+        context.startActivity(intent);
-+        // Process.killProcess(Process.myPid());
-+        //((ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE))
-+        //    .clearApplicationUserData();
++        // Restart the launcher
++        MODEL_EXECUTOR.execute(() -> {
++            android.os.Process.killProcess(android.os.Process.myPid());
++       });
++        
++
 +        Log.d("RestartReceiver by Archfx", "Launcher restarted.");
 +    }
 +
