@@ -1,7 +1,12 @@
 {
   "version": "v2024.09.25",
-  "date": "1727297029",
+  "date": "1727303185",
   "variants": [
+    {
+      "name": "treble_arm64_bgN",
+      "size": "1342012656",
+      "url": "https://github.com/archfx/duo-de/releases/download/v2024.09.25/aosp-arm64-ab-gapps-14.0-20240925.img.xz"
+    },
     {
       "name": "treble_arm64_bvN",
       "size": "830443688",
