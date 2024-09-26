@@ -27,7 +27,7 @@ This ROM switches between tablet mode (first image) and phone mode (second image
 <img src="images/tabletmode.png" alt="drawing" style="height:300px;" /> 
 <img src="images/phonemode.png" alt="drawing" style="height:300px;"/> </p>
 
-> Note: In phone mode, default settings do not rotate the screen with auto-rotation. You have to enable it from the `home settings`. When you are in Phone mode, click and hold on the display, click `Home settings`, and enable the feature `Allow home screen rotation`. This will enable the launcher to serve the Tent mode and Ramp modes.
+> Note: In phone mode, default settings do not rotate the screen with auto-rotation. You have to enable it from the `home settings`. When you are in Phone mode, click and hold on the display, click `Home settings` on the popup menu, and enable the `Allow home screen rotation` feature. This will enable the launcher to serve the Tent mode and Ramp modes.
 
 
 ## Benchmarks
