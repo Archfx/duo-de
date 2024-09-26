@@ -21,16 +21,18 @@ With the posture processor engine, both duo1 and duo2 react to various postures.
 <img src="images/duo-1.png" alt="drawing" style="height:300px;" /> 
 <img src="images/duo-2.png" alt="drawing" style="height:300px;"/> </p>
 
-This ROM switches between tablet mode (first image) and phone mode (second image) when you change the postures. These modes are optimized (both visually and utility wise) for each of the situation and the screen real state.
+This ROM switches between tablet mode (first image) and phone mode (second image) when you change the postures. These modes are optimized (both visually and utility-wise) for each of the situations and the screen's real state.
 
 <p align="center">
 <img src="images/tabletmode.png" alt="drawing" style="height:300px;" /> 
 <img src="images/phonemode.png" alt="drawing" style="height:300px;"/> </p>
 
+> Note: In phone mode, default settings does not rotate the screen with auto-rotation. You have to enable it from the `home settings`. When you are in Phone mode, click and hold on the display, click `Home settings`, and enable the feature `Allow home screen rotation`. This will enable the launcher to serve the Tent mode and Ramp modes correctly.
+
 
 ## Benchmarks
 
-These results are just for reference (for people who enjoy numbers) to compare the CPU and GPU performance of this ROM (latest build) with other operating system options. Best case numbers of each operating system are included in the graphs.
+These results are just for reference (for people who enjoy numbers) to compare the CPU and GPU performance of this ROM (latest build) with other operating system options. The best case numbers of each operating system are included in the graphs.
 
 <div style="text-align: center;">
   
