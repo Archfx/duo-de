@@ -89,6 +89,8 @@ fastboot reboot
 
 6. Once you flash a **duo-de** version using the above steps, subsequent updates will be received using OTA. You can check updates using ``settings -> system -> system updates``.
 
+7. If you wish to see future updates and feature improvements, consider _starring_ (★) the project—it motivates the development of new releases!
+
 
 ## Issues
 Any issues, please 
