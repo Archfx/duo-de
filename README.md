@@ -20,7 +20,7 @@ With the posture processor engine, both duo1 and duo2 react to various postures.
 <img src="images/duo-1.png" alt="drawing" style="height:300px;" /> 
 <img src="images/duo-2.png" alt="drawing" style="height:300px;"/> </p>
 
-This ROM switches between tablet mode (first image) and phone mode (second image) when you change the postures. These modes are optimized (both visually and utility-wise) for each of the situations and the screen's real state. Desktop mode can be enabled/disabled for tablet mode and phone mode separately. To do that, hold the desktop, click `home settings`, and find the settings `Tablet Mode Floating Windows` and `Phone Mode Floating Windows`. 
+This ROM switches between tablet mode (first image) and phone mode (second image) when you change the postures. These modes are optimized (both visually and utility-wise) for each of the situations and the screen's real state. Desktop mode can be enabled/disabled for tablet mode and phone mode separately. To do that, hold the desktop, click `home settings`, and find the settings `Tablet Mode Floating Windows` and `Phone Mode Floating Windows`. You can still, launch apps in split window mode from the recent apps window.
 
 <p align="center">
 <img src="images/tabletmode.png" alt="drawing" style="height:300px;" /> 
