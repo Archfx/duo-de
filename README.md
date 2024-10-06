@@ -20,14 +20,24 @@ With the posture processor engine, both duo1 and duo2 react to various postures.
 <img src="images/duo-1.png" alt="drawing" style="height:300px;" /> 
 <img src="images/duo-2.png" alt="drawing" style="height:300px;"/> </p>
 
-This ROM switches between tablet mode (first image) and phone mode (second image) when you change the postures. These modes are optimized (both visually and utility-wise) for each of the situations and the screen's real state. Desktop mode can be enabled/disabled for tablet mode and phone mode separately. To do that, hold the desktop, click `home settings`, and find the settings `Tablet Mode Floating Windows` and `Phone Mode Floating Windows`. You can still, launch apps in split window mode from the recent apps window.
+This ROM switches between tablet mode (first image) and phone mode (second image) when you change the postures. These modes are optimized (both visually and utility-wise) for each of the situations and the screen's real state. 
 
 <p align="center">
 <img src="images/tabletmode.png" alt="drawing" style="height:300px;" /> 
 <img src="images/phonemode.png" alt="drawing" style="height:300px;"/> </p>
 
-> Note: In case your device does not react to tent or ramp mode (landscaped phone mode) by default, you have to enable it from the `home settings`. When you are in Phone mode, click and hold on the display, click `Home settings` on the popup menu, and enable the `Allow home screen rotation` feature. This will enable the launcher to serve the Tent mode and Ramp modes.
+> Note: In case your device does not react to tent or ramp mode (landscaped phone mode) by default, you have to enable it from the `Home settings`. When you are in Phone mode, click and hold on the desktop, click `Home settings` on the popup menu, and enable the `Allow home screen rotation` feature. This will enable the launcher to serve the Tent mode and Ramp modes.
 
+### Floating Windows
+Floating windowed mode can be enabled/disabled for tablet mode and phone mode separately. To do that, hold the desktop, click `Home settings`, and find the settings `Tablet Mode Floating Windows` and `Phone Mode Floating Windows`. 
+
+### Split Windows
+You can still launch apps in split window mode (similar to the Stock 12L) using two methods, 
+
+1. Click and hold the application icon, and click the option `split` from the popup menu
+2. Launch the apps first, and use the gesture (or recent apps button on the navigation bar) to access the recent apps window and click `split`.
+
+Both options will prompt you to open the second application to share the screen.
 
 ## Benchmarks
 
