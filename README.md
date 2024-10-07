@@ -29,19 +29,19 @@ This ROM switches between tablet mode (first image) and phone mode (second image
 > Note: In case your device does not react to tent or ramp mode (landscaped phone mode) by default, you have to enable it from the `Home settings`. When you are in Phone mode, click and hold on the desktop, click `Home settings` on the popup menu, and enable the `Allow home screen rotation` feature. This will enable the launcher to serve the Tent mode and Ramp modes.
 
 ### Floating Windows
-Floating windowed mode can be enabled/disabled for tablet mode and phone mode separately. To do that, hold the desktop, click `Home settings`, and find the settings `Tablet Mode Floating Windows` and `Phone Mode Floating Windows`. 
+Floating windowed mode can be enabled/disabled for tablet mode and phone mode separately. To do that, click and hold the desktop, click `Home settings`, and find the settings `Tablet Mode Floating Windows` and `Phone Mode Floating Windows`. 
 
 ### Split Windows
 You can still launch apps in split window mode (similar to the Stock 12L) using two methods, 
 
-1. Click and hold the application icon, and click the option `split` from the popup menu
-2. Launch the apps first, and use the gesture (or recent apps button on the navigation bar) to access the recent apps window and click `split`.
+1. Click and hold the application icon, and click the option `Split Screen` from the popup menu
+2. Launch the apps first, and use the gesture (or recent apps button on the navigation bar) to access the recent apps window and click `Split`.
 
 Both options will prompt you to open the second application to share the screen.
 
 ## Benchmarks
 
-These results are just for reference (for people who enjoy numbers) to compare the CPU and GPU performance of this ROM (latest build) with other operating system options. The best case numbers of each operating system are included in the graphs.
+These results are just for reference (for people who enjoy numbers) to compare the CPU and GPU performance of this ROM (latest build) with other operating system options. The best-case numbers of each operating system are included in the graphs.
 
 <div style="text-align: center;">
   
