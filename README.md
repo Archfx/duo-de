@@ -1,6 +1,9 @@
-# duo-de <sup><sup>[surface-duo dual experience]</sup></sup>
+# Surface-duo Dual Experience (duo-de)
 
-
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/duo-light.svg" />
+  <img align="left" src="images/duo-dark.svg" />
+</picture>
 This is a GSI variant ROM build designed for Microsoft Surface Duo devices, offering a clean AOSP experience. This build combines gapps/vanila variants of the GSI ROM from [ponces](https://github.com/ponces/treble_aosp) with desktop mode enabled + various tweaks to make it nice and smooth with the help of [thain](https://github.com/thai-ng) tweaks. All credits go to respective developers. The latest version is stable and secure for daily usage.
 
 Before you proceed, please take a moment to read [this announcement](https://github.com/Archfx/duo-de/discussions/52) regarding this project. By using this ROM, you are agreeing to the [`DISCLAIMER`](#disclaimer).
