@@ -4,6 +4,8 @@
   <source media="(prefers-color-scheme: dark)" srcset="images/duo-light.svg" />
   <img align="left" src="images/duo-dark.svg" />
 </picture>
+The Surface Duo, Microsoft's dual-screen Android device, aimed to redefine mobile productivity by offering a unique form factor that combined the versatility of two screens with the familiarity of the Android operating system. Launched in September 2020, the device garnered attention for its innovative design but faced criticism for its high price, software bugs, and lack of 5G support. Despite a subsequent release of the Surface Duo 2 in October 2021, which addressed some of these issues with improved hardware and features, the devices struggled to gain significant market traction. Microsoft officially ceased updates and support for the Surface Duo line in early 2023, marking the end of its interest in the dual-screen smartphone market. However, with AOSP GSI and the help of the opensource community, it is time to give a second life to this awesome hardware.
+
 This is a GSI variant ROM build designed for Microsoft Surface Duo devices, offering a clean AOSP experience. This build combines gapps/vanila variants of the GSI ROM from [ponces](https://github.com/ponces/treble_aosp) with desktop mode enabled + various tweaks to make it nice and smooth with the help of [thain](https://github.com/thai-ng) tweaks. All credits go to respective developers. The latest version is stable and secure for daily usage.
 
 Before you proceed, please take a moment to read [this announcement](https://github.com/Archfx/duo-de/discussions/52) regarding this project. By using this ROM, you are agreeing to the [`DISCLAIMER`](#disclaimer).
