@@ -76,9 +76,9 @@ index 20e6568b3a..fa338f6719 100644
 +            Boolean freeformTablet = pref.getBoolean("allow_freeform_mode_tablet", true);
 +            Boolean freeformPhone = pref.getBoolean("allow_freeform_mode_phone", false);
 +            
-+            DeviceProfile deviceProfile = ActivityContext.lookupContext(this.context).getDeviceProfile();
++            Boolean isTabletMode = ActivityContext.lookupContext(this.context).getDeviceProfile().isTablet;
 +
-+            if (!deviceProfile.isTablet) {
++            if (!isTabletMode) {
 +                if (freeformPhone) mode = "freeform";
 +                else mode = "fullscreen";
 +            } else {

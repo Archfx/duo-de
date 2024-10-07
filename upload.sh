@@ -48,7 +48,7 @@ updateOta() {
 
 START=$(date +%s)
 
-# createRelease
+createRelease
 uploadAssets
 [ "$SKIPOTA" = false ] && updateOta
 
