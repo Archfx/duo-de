@@ -1,18 +1,18 @@
-From 04b319ec7da6f356f8710e2b30c1061d7627e180 Mon Sep 17 00:00:00 2001
+From d3556b4fb27bf3ee01f7447b6eeaf091fb2477ad Mon Sep 17 00:00:00 2001
 From: Michael Bestas <mkbestas@gmail.com>
 Date: Fri, 15 Mar 2024 14:59:21 +0200
-Subject: [PATCH 7/9] netd: Remove <4.14 kernel restrictions
+Subject: [PATCH 5/7] netd: Remove <4.14 kernel restrictions
 
 Change-Id: I4d4abbacd6b9589260de06663e2143bc37d8ea0f
 ---
- netd/BpfHandler.cpp | 10 ----------
- 1 file changed, 10 deletions(-)
+ netd/BpfHandler.cpp | 9 ---------
+ 1 file changed, 9 deletions(-)
 
 diff --git a/netd/BpfHandler.cpp b/netd/BpfHandler.cpp
-index aaaa41c6d7..b8333526d8 100644
+index 3c68b27126..6226bd9582 100644
 --- a/netd/BpfHandler.cpp
 +++ b/netd/BpfHandler.cpp
-@@ -75,16 +75,6 @@ static Status initPrograms(const char* cg2_path) {
+@@ -76,15 +76,6 @@ static Status initPrograms(const char* cg2_path) {
      // This code was mainlined in T, so this should be trivially satisfied.
      if (!modules::sdklevel::IsAtLeastT()) return Status("S- platform is unsupported");
  
@@ -25,10 +25,9 @@ index aaaa41c6d7..b8333526d8 100644
 -    if (modules::sdklevel::IsAtLeastU() && !bpf::isAtLeastKernelVersion(4, 14, 0)) {
 -        return Status("U+ platform with kernel version < 4.14.0 is unsupported");
 -    }
--
-     if (modules::sdklevel::IsAtLeastV()) {
-         // V bumps the kernel requirement up to 4.19
-         // see also: //system/netd/tests/kernel_test.cpp TestKernel419
+ 
+     // U mandates this mount point (though it should also be the case on T)
+     if (modules::sdklevel::IsAtLeastU() && !!strcmp(cg2_path, "/sys/fs/cgroup")) {
 -- 
 2.34.1
 

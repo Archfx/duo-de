@@ -1,4 +1,4 @@
-From 152328ae268b982acedcba95c7d9e48ddd465d40 Mon Sep 17 00:00:00 2001
+From c9bda2dec24ea7590e57c1b2500c3237290fea7b Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Mon, 21 Dec 2020 20:19:11 +0100
 Subject: [PATCH 13/24] Make camera IDs filter-out optional
@@ -11,10 +11,10 @@ Add a property for that.
  1 file changed, 9 insertions(+), 5 deletions(-)
 
 diff --git a/services/camera/libcameraservice/common/CameraProviderManager.cpp b/services/camera/libcameraservice/common/CameraProviderManager.cpp
-index 60e4eb7b42..fbfdecc2ed 100644
+index ce1070dff2..071390db44 100644
 --- a/services/camera/libcameraservice/common/CameraProviderManager.cpp
 +++ b/services/camera/libcameraservice/common/CameraProviderManager.cpp
-@@ -328,7 +328,9 @@ std::vector<std::string> CameraProviderManager::getAPI1CompatibleCameraDeviceIds
+@@ -330,7 +330,9 @@ std::vector<std::string> CameraProviderManager::getAPI1CompatibleCameraDeviceIds
          // API1 app doesn't handle logical and physical camera devices well. So
          // for each camera facing, only take the first id advertised by HAL in
          // all [logical, physical1, physical2, ...] id combos, and filter out the rest.
@@ -25,7 +25,7 @@ index 60e4eb7b42..fbfdecc2ed 100644
          collectDeviceIdsLocked(providerDeviceIds, publicDeviceIds, systemDeviceIds);
      }
      auto sortFunc =
-@@ -1137,10 +1139,12 @@ SystemCameraKind CameraProviderManager::ProviderInfo::DeviceInfo3::getSystemCame
+@@ -1130,10 +1132,12 @@ SystemCameraKind CameraProviderManager::ProviderInfo::DeviceInfo3::getSystemCame
  
      // Go through the capabilities and check if it has
      // ANDROID_REQUEST_AVAILABLE_CAPABILITIES_SYSTEM_CAMERA

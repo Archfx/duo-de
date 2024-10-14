@@ -1,4 +1,4 @@
-From ce712b5cfed6a037d90daef047717e68f0ad1d2f Mon Sep 17 00:00:00 2001
+From 7e8cc69d9c74e90c4a3f02e7b2ded007b038416d Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Fri, 28 Apr 2023 12:29:05 -0400
 Subject: [PATCH 12/26] Allow apex on > 5.0 kernels. This is needed because on
@@ -10,7 +10,7 @@ Change-Id: I334cde4c5557b0ff70d550205c5bb727d4b5dbf5
  1 file changed, 14 insertions(+), 1 deletion(-)
 
 diff --git a/init/property_service.cpp b/init/property_service.cpp
-index eedad50f3..dbd1e61a5 100644
+index 50e72d0cf..9d8bb508a 100644
 --- a/init/property_service.cpp
 +++ b/init/property_service.cpp
 @@ -64,6 +64,7 @@
@@ -21,7 +21,7 @@ index eedad50f3..dbd1e61a5 100644
  #include <vendorsupport/api_level.h>
  
  #include "debug_ramdisk.h"
-@@ -705,6 +706,16 @@ uint32_t InitPropertySet(const std::string& name, const std::string& value) {
+@@ -709,6 +710,16 @@ uint32_t InitPropertySet(const std::string& name, const std::string& value) {
  static Result<void> load_properties_from_file(const char*, const char*,
                                                std::map<std::string, std::string>*);
  
@@ -38,7 +38,7 @@ index eedad50f3..dbd1e61a5 100644
  /*
   * Filter is used to decide which properties to load: NULL loads all keys,
   * "ro.foo.*" is a prefix match, and "ro.foo.bar" is an exact match.
-@@ -802,7 +813,9 @@ static void LoadProperties(char* data, const char* filter, const char* filename,
+@@ -806,7 +817,9 @@ static void LoadProperties(char* data, const char* filter, const char* filename,
                  } else if (it->second != value) {
                      LOG(WARNING) << "Overriding previous property '" << key << "':'" << it->second
                                   << "' with new value '" << value << "'";

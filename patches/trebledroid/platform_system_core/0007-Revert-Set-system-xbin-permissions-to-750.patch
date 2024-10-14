@@ -1,4 +1,4 @@
-From 6dd7c07a73c4a80269bd3ef9e9586d6392511f02 Mon Sep 17 00:00:00 2001
+From 8f69dfddeea5910dff831edb848e94895aeae58a Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Tue, 1 Feb 2022 13:48:35 +0000
 Subject: [PATCH 07/26] Revert "Set /system/xbin permissions to 750."
@@ -11,10 +11,10 @@ Change-Id: I277def5153616d6f00bc877e6170b7fed7cd799d
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/libcutils/fs_config.cpp b/libcutils/fs_config.cpp
-index 919be2ff2..9ab7f4305 100644
+index 2e4b9b475..9da8b58c3 100644
 --- a/libcutils/fs_config.cpp
 +++ b/libcutils/fs_config.cpp
-@@ -83,7 +83,7 @@ static const struct fs_path_config android_dirs[] = {
+@@ -79,7 +79,7 @@ static const struct fs_path_config android_dirs[] = {
      { 00751, AID_ROOT,         AID_SHELL,        0, "system/bin" },
      { 00755, AID_ROOT,         AID_ROOT,         0, "system/etc/ppp" },
      { 00755, AID_ROOT,         AID_SHELL,        0, "system/vendor" },

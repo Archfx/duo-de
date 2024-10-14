@@ -49,7 +49,7 @@ jobs:
       with:
         commit-message: "feat: sync with latest sources of TrebleDroid [via Ponces]"
         branch: sync-bot
-        base: main-14
+        base: main-15
         title: "TrebleDroid patches"
         body: "This PR updates the patches from TrebleDroid."
         labels: 'automated-pr'
