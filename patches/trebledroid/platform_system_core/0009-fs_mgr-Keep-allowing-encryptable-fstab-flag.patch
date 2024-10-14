@@ -1,4 +1,4 @@
-From 1941fa397c4dcf4f8bc06ad49f284da0576d2da7 Mon Sep 17 00:00:00 2001
+From c3504e11543607990e44c296eed4a10a071a1da2 Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Mon, 3 Oct 2022 13:50:36 +0100
 Subject: [PATCH 09/26] fs_mgr: Keep allowing encryptable fstab flag
@@ -11,10 +11,10 @@ Change-Id: Id2554d6563a869bb5bcf39c67b0322484bdab0c9
  1 file changed, 10 deletions(-)
 
 diff --git a/fs_mgr/libfstab/fstab.cpp b/fs_mgr/libfstab/fstab.cpp
-index 6fa22fee5..0603f25b0 100644
+index f00e0dc26..bd01049df 100644
 --- a/fs_mgr/libfstab/fstab.cpp
 +++ b/fs_mgr/libfstab/fstab.cpp
-@@ -327,16 +327,6 @@ bool ParseFsMgrFlags(const std::string& flags, FstabEntry* entry) {
+@@ -341,16 +341,6 @@ bool ParseFsMgrFlags(const std::string& flags, FstabEntry* entry) {
          }
      }
  

@@ -1,7 +1,7 @@
-From e37f6b8fa5406d08115a558ceaba783c638d31ef Mon Sep 17 00:00:00 2001
+From b9020fb9a56973863bdd4cea82ebce5f1e6cf205 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sun, 25 Feb 2024 10:23:29 -0500
-Subject: [PATCH 16/16] When reading SMSC, ignore invalid SMSC
+Subject: [PATCH 10/10] When reading SMSC, ignore invalid SMSC
 
 On Samsung, when reading SMSC we get weird strings like
 "4392084000100",149
@@ -31,10 +31,10 @@ index 19211e15f5..3ddf6762dd 100644
      }
  
 diff --git a/src/java/com/android/internal/telephony/RadioResponse.java b/src/java/com/android/internal/telephony/RadioResponse.java
-index 71bb2e5b75..87cb4ad615 100644
+index 84e15c6d2c..5663dc816b 100644
 --- a/src/java/com/android/internal/telephony/RadioResponse.java
 +++ b/src/java/com/android/internal/telephony/RadioResponse.java
-@@ -1267,6 +1267,8 @@ public class RadioResponse extends IRadioResponse.Stub {
+@@ -1237,6 +1237,8 @@ public class RadioResponse extends IRadioResponse.Stub {
       * @param smsc Short Message Service Center address on the device
       */
      public void getSmscAddressResponse(RadioResponseInfo responseInfo, String smsc) {

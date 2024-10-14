@@ -1,7 +1,7 @@
-From 68b31d894f3898314b118b21d633b27a75a47ad4 Mon Sep 17 00:00:00 2001
+From 0f50f9b6dd823eca93699dcaea27f3fc65031c5c Mon Sep 17 00:00:00 2001
 From: ironydelerium <42721860+ironydelerium@users.noreply.github.com>
 Date: Fri, 31 Dec 2021 02:20:28 -0800
-Subject: [PATCH 04/16] Reintroduce 'public void
+Subject: [PATCH 04/10] Reintroduce 'public void
  TelephonyMetrics.writeRilSendSms(int, int, int, int)'. (#8)
 
 The MediaTek IMS package for Android Q, at the very least (likely for the rest, too)

@@ -1,7 +1,7 @@
-From 7de635ba1e5979396146cd6062608d139f0c5ff3 Mon Sep 17 00:00:00 2001
+From 6ecf5f10e76ca6f418dc3182dce4e3395dcefb86 Mon Sep 17 00:00:00 2001
 From: LuK1337 <priv.luk@gmail.com>
 Date: Mon, 19 Feb 2024 16:20:04 +0100
-Subject: [PATCH 50/54] Allow signature spoofing for microG Companion/Services
+Subject: [PATCH 49/52] Allow signature spoofing for microG Companion/Services
 
 This patch enables signature spoofing when the following conditions are
 met:
@@ -41,7 +41,7 @@ index cc4c2b5bf893..57263da936d6 100644
                              || newPkg.isForceQueryable()
                              || ArrayUtils.contains(mForceQueryableByDevicePackageNames,
 diff --git a/services/core/java/com/android/server/pm/ComputerEngine.java b/services/core/java/com/android/server/pm/ComputerEngine.java
-index 9afdde53643c..60979e086a34 100644
+index ee0159d722b1..7eb8dc4ca266 100644
 --- a/services/core/java/com/android/server/pm/ComputerEngine.java
 +++ b/services/core/java/com/android/server/pm/ComputerEngine.java
 @@ -102,6 +102,7 @@ import android.content.pm.UserPackage;
@@ -60,7 +60,7 @@ index 9afdde53643c..60979e086a34 100644
  import java.util.Set;
  import java.util.UUID;
  
-@@ -423,6 +425,10 @@ public class ComputerEngine implements Computer {
+@@ -422,6 +424,10 @@ public class ComputerEngine implements Computer {
      private final PackageManagerInternal.ExternalSourcesPolicy mExternalSourcesPolicy;
      private final CrossProfileIntentResolverEngine mCrossProfileIntentResolverEngine;
  
@@ -71,7 +71,7 @@ index 9afdde53643c..60979e086a34 100644
      // PackageManagerService attributes that are primitives are referenced through the
      // pms object directly.  Primitives are the only attributes so referenced.
      protected final PackageManagerService mService;
-@@ -1465,6 +1471,42 @@ public class ComputerEngine implements Computer {
+@@ -1481,6 +1487,42 @@ public class ComputerEngine implements Computer {
          return result;
      }
  
@@ -114,7 +114,7 @@ index 9afdde53643c..60979e086a34 100644
      public final PackageInfo generatePackageInfo(PackageStateInternal ps,
              @PackageManager.PackageInfoFlagsBits long flags, int userId) {
          if (!mUserManager.exists(userId)) return null;
-@@ -1520,6 +1562,11 @@ public class ComputerEngine implements Computer {
+@@ -1536,6 +1578,11 @@ public class ComputerEngine implements Computer {
                              mApexManager.getActivePackageNameForApexModuleName(apexModuleName));
                  }
              }
