@@ -1,7 +1,7 @@
-From ef8ca709d05db7795c4ed151b25f7ea9b9e700bf Mon Sep 17 00:00:00 2001
+From 1713f8ea95cef6acaaefd19370c248f9a393e44f Mon Sep 17 00:00:00 2001
 From: Andy CrossGate Yan <GeForce8800Ultra@gmail.com>
 Date: Sun, 7 Jul 2024 21:55:42 +0800
-Subject: [PATCH 52/52] Allow APKs of a certain signature to install/work like
+Subject: [PATCH 54/54] Allow APKs of a certain signature to install/work like
  platform-signed
 
 Intended usecase - one authoritative set of signed IMS APKs for any GSI, regardless of their signature
@@ -14,10 +14,10 @@ Change-Id: Ia1a13edec8eb8ecf0ea25fffaee4aeff9c75a5e1
  3 files changed, 20 insertions(+), 1 deletion(-)
 
 diff --git a/services/core/java/com/android/server/pm/PackageManagerServiceUtils.java b/services/core/java/com/android/server/pm/PackageManagerServiceUtils.java
-index ff8abf879487..f2aa9d6ba435 100644
+index 189a138a191a..523eb59ec703 100644
 --- a/services/core/java/com/android/server/pm/PackageManagerServiceUtils.java
 +++ b/services/core/java/com/android/server/pm/PackageManagerServiceUtils.java
-@@ -189,6 +189,8 @@ public class PackageManagerServiceUtils {
+@@ -221,6 +221,8 @@ public class PackageManagerServiceUtils {
       */
      private static final boolean FORCE_PACKAGE_PARSED_CACHE_ENABLED = false;
  
@@ -26,7 +26,7 @@ index ff8abf879487..f2aa9d6ba435 100644
      /**
       * Returns the registered PackageManagerLocal instance, or else throws an unchecked error.
       */
-@@ -274,6 +276,11 @@ public class PackageManagerServiceUtils {
+@@ -306,6 +308,11 @@ public class PackageManagerServiceUtils {
          return maxModifiedTime;
      }
  
@@ -38,7 +38,7 @@ index ff8abf879487..f2aa9d6ba435 100644
      private static File getSettingsProblemFile() {
          File dataDir = Environment.getDataDirectory();
          File systemDir = new File(dataDir, "system");
-@@ -547,6 +554,10 @@ public class PackageManagerServiceUtils {
+@@ -579,6 +586,10 @@ public class PackageManagerServiceUtils {
              boolean compareCompat, boolean compareRecover, boolean isRollback)
              throws PackageManagerException {
          final String packageName = pkgSetting.getPackageName();
@@ -66,7 +66,7 @@ index e667bfe36d18..e08a6ba24807 100644
              seInfo = DEFAULT_SEINFO;
          }
 diff --git a/services/core/java/com/android/server/pm/ScanPackageUtils.java b/services/core/java/com/android/server/pm/ScanPackageUtils.java
-index 9ab6016f3d57..e8d67b1a3b19 100644
+index 2e67b2f41520..20a614235e6e 100644
 --- a/services/core/java/com/android/server/pm/ScanPackageUtils.java
 +++ b/services/core/java/com/android/server/pm/ScanPackageUtils.java
 @@ -47,6 +47,7 @@ import static com.android.server.pm.PackageManagerService.TAG;
@@ -77,7 +77,7 @@ index 9ab6016f3d57..e8d67b1a3b19 100644
  import static com.android.server.pm.PackageManagerServiceUtils.getLastModifiedTime;
  
  import android.annotation.NonNull;
-@@ -927,7 +928,9 @@ final class ScanPackageUtils {
+@@ -918,7 +919,9 @@ final class ScanPackageUtils {
                          || (platformPkg != null && compareSignatures(
                          platformPkg.getSigningDetails(),
                          parsedPackage.getSigningDetails()

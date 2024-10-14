@@ -1,7 +1,7 @@
-From f6cff8f0c5ee8ae7b26f73fb1849fa6fe643b917 Mon Sep 17 00:00:00 2001
+From 3503adeb4c3fa88555de054f8837c403325f2a03 Mon Sep 17 00:00:00 2001
 From: Andy CrossGate Yan <GeForce8800Ultra@gmail.com>
 Date: Sat, 15 Oct 2022 09:33:56 +0000
-Subject: [PATCH 27/52] Revert "Remove more FDE methods from StorageManager"
+Subject: [PATCH 27/54] Revert "Remove more FDE methods from StorageManager"
 
 This reverts commit bd13f84152449a3ead6fa8604fd31f48c0224676.
 
@@ -12,10 +12,10 @@ Change-Id: Ic394934ec27b1a486c60123130825d44dad73412
  2 files changed, 78 insertions(+)
 
 diff --git a/core/java/android/os/storage/StorageManager.java b/core/java/android/os/storage/StorageManager.java
-index 91ad22f51345..22622368b2ff 100644
+index d45a17f7194e..6850e261e6ad 100644
 --- a/core/java/android/os/storage/StorageManager.java
 +++ b/core/java/android/os/storage/StorageManager.java
-@@ -1711,6 +1711,15 @@ public class StorageManager {
+@@ -1709,6 +1709,15 @@ public class StorageManager {
          return false;
      }
  
@@ -31,7 +31,7 @@ index 91ad22f51345..22622368b2ff 100644
      /** {@hide}
       * Is this device encrypted?
       * <p>
-@@ -1735,6 +1744,71 @@ public class StorageManager {
+@@ -1733,6 +1742,71 @@ public class StorageManager {
          return RoSystemProperties.CRYPTO_FILE_ENCRYPTED;
      }
  

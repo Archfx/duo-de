@@ -1,4 +1,4 @@
-From 8b00d1f01d39faa1f1a555ecb93fe661b7bd6c11 Mon Sep 17 00:00:00 2001
+From 1bbe204e4a28752b3e9e2d2b85276469eaca7d7c Mon Sep 17 00:00:00 2001
 From: Andy CrossGate Yan <GeForce8800Ultra@gmail.com>
 Date: Sat, 17 Aug 2024 20:49:53 +0800
 Subject: [PATCH 14/14] Fix touch on Meizu 21 / Note
@@ -15,7 +15,7 @@ Change-Id: If854a814dee784a2693cc4597169107d6b8561f3
  4 files changed, 28 insertions(+), 6 deletions(-)
 
 diff --git a/services/inputflinger/reader/mapper/accumulator/MultiTouchMotionAccumulator.cpp b/services/inputflinger/reader/mapper/accumulator/MultiTouchMotionAccumulator.cpp
-index 4919068201..124df2c16c 100644
+index b3f170075c..0d50de0588 100644
 --- a/services/inputflinger/reader/mapper/accumulator/MultiTouchMotionAccumulator.cpp
 +++ b/services/inputflinger/reader/mapper/accumulator/MultiTouchMotionAccumulator.cpp
 @@ -14,6 +14,8 @@
@@ -55,7 +55,7 @@ index 4919068201..124df2c16c 100644
          case ABS_MT_TOUCH_MAJOR:
              mAbsMtTouchMajor = value;
 diff --git a/services/inputflinger/reader/mapper/accumulator/MultiTouchMotionAccumulator.h b/services/inputflinger/reader/mapper/accumulator/MultiTouchMotionAccumulator.h
-index 388ed82373..91d1613d0c 100644
+index a0f21470c4..e82b7df1ba 100644
 --- a/services/inputflinger/reader/mapper/accumulator/MultiTouchMotionAccumulator.h
 +++ b/services/inputflinger/reader/mapper/accumulator/MultiTouchMotionAccumulator.h
 @@ -30,6 +30,8 @@ class MultiTouchMotionAccumulator {
@@ -77,7 +77,7 @@ index 388ed82373..91d1613d0c 100644
          void populateAxisValue(int32_t axisCode, int32_t value);
      };
 diff --git a/services/inputflinger/reader/mapper/accumulator/SingleTouchMotionAccumulator.cpp b/services/inputflinger/reader/mapper/accumulator/SingleTouchMotionAccumulator.cpp
-index 2b82ddf33d..2f4f7d56b3 100644
+index 27b8e40fc6..fe37638103 100644
 --- a/services/inputflinger/reader/mapper/accumulator/SingleTouchMotionAccumulator.cpp
 +++ b/services/inputflinger/reader/mapper/accumulator/SingleTouchMotionAccumulator.cpp
 @@ -14,6 +14,8 @@
@@ -108,21 +108,21 @@ index 2b82ddf33d..2f4f7d56b3 100644
      mAbsPressure = deviceContext.getAbsoluteAxisValue(ABS_PRESSURE);
      mAbsToolWidth = deviceContext.getAbsoluteAxisValue(ABS_TOOL_WIDTH);
      mAbsDistance = deviceContext.getAbsoluteAxisValue(ABS_DISTANCE);
-@@ -49,10 +56,10 @@ void SingleTouchMotionAccumulator::process(const RawEvent& rawEvent) {
-     if (rawEvent.type == EV_ABS) {
-         switch (rawEvent.code) {
+@@ -49,10 +56,10 @@ void SingleTouchMotionAccumulator::process(const RawEvent* rawEvent) {
+     if (rawEvent->type == EV_ABS) {
+         switch (rawEvent->code) {
              case ABS_X:
--                mAbsX = rawEvent.value;
-+                mAbsX = rawEvent.value / mAbsXYRatio;
+-                mAbsX = rawEvent->value;
++                mAbsX = rawEvent->value / mAbsXYRatio;
                  break;
              case ABS_Y:
--                mAbsY = rawEvent.value;
-+                mAbsY = rawEvent.value / mAbsXYRatio;
+-                mAbsY = rawEvent->value;
++                mAbsY = rawEvent->value / mAbsXYRatio;
                  break;
              case ABS_PRESSURE:
-                 mAbsPressure = rawEvent.value;
+                 mAbsPressure = rawEvent->value;
 diff --git a/services/inputflinger/reader/mapper/accumulator/SingleTouchMotionAccumulator.h b/services/inputflinger/reader/mapper/accumulator/SingleTouchMotionAccumulator.h
-index fb74bcaf4c..70807063d1 100644
+index 93056f06e6..59b8298a34 100644
 --- a/services/inputflinger/reader/mapper/accumulator/SingleTouchMotionAccumulator.h
 +++ b/services/inputflinger/reader/mapper/accumulator/SingleTouchMotionAccumulator.h
 @@ -48,6 +48,8 @@ private:

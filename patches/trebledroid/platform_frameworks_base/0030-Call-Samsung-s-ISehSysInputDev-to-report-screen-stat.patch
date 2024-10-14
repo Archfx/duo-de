@@ -1,42 +1,40 @@
-From fc62b29f335cc4d21631d8b0b8d8264383c521ba Mon Sep 17 00:00:00 2001
+From 844e4f92f7324a5aa5988669e84cbe92ab4fcf27 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Wed, 14 Dec 2022 17:21:00 -0500
-Subject: [PATCH 30/52] Call Samsung's ISehSysInputDev to report screen state
+Subject: [PATCH 30/54] Call Samsung's ISehSysInputDev to report screen state
  to touchscreen driver
 
 This fixes touchscreen not waking up on Galaxy F23
-
-Change-Id: If2d74b97a51b19c730a6f9a1b1f4293d1469a9f8
 ---
  services/core/Android.bp                      |  1 +
  .../server/display/LocalDisplayAdapter.java   | 31 +++++++++++++++++++
  2 files changed, 32 insertions(+)
 
 diff --git a/services/core/Android.bp b/services/core/Android.bp
-index 53730e317ac6..413667cce657 100644
+index 5fe4be72c036..1934f8196639 100644
 --- a/services/core/Android.bp
 +++ b/services/core/Android.bp
-@@ -228,6 +228,7 @@ java_library_static {
-         "dreams_flags_lib",
-         "aconfig_new_storage_flags_lib",
-         "powerstats_flags_lib",
+@@ -255,6 +255,7 @@ java_library_static {
+         "net_flags_lib",
+         "stats_flags_lib",
+         "core_os_flags_lib",
 +        "vendor.samsung.hardware.sysinput-V1.2-java", // HIDL
      ],
      javac_shard_size: 50,
      javacflags: [
 diff --git a/services/core/java/com/android/server/display/LocalDisplayAdapter.java b/services/core/java/com/android/server/display/LocalDisplayAdapter.java
-index 44846f310348..1b638c8ea82e 100644
+index 88c24e0a7eff..ac4a9c474c9e 100644
 --- a/services/core/java/com/android/server/display/LocalDisplayAdapter.java
 +++ b/services/core/java/com/android/server/display/LocalDisplayAdapter.java
-@@ -39,6 +39,7 @@ import android.util.DisplayUtils;
+@@ -38,6 +38,7 @@ import android.os.Trace;
+ import android.util.DisplayUtils;
  import android.util.LongSparseArray;
- import android.util.MathUtils;
  import android.util.Slog;
 +import android.util.Log;
  import android.util.SparseArray;
  import android.view.Display;
  import android.view.DisplayAddress;
-@@ -60,6 +61,8 @@ import com.android.server.display.notifications.DisplayNotificationManager;
+@@ -58,6 +59,8 @@ import com.android.server.display.notifications.DisplayNotificationManager;
  import com.android.server.lights.LightsManager;
  import com.android.server.lights.LogicalLight;
  
@@ -45,7 +43,7 @@ index 44846f310348..1b638c8ea82e 100644
  import java.io.PrintWriter;
  import java.util.ArrayList;
  import java.util.Arrays;
-@@ -266,6 +269,8 @@ final class LocalDisplayAdapter extends DisplayAdapter {
+@@ -251,6 +254,8 @@ final class LocalDisplayAdapter extends DisplayAdapter {
  
          private DisplayEventReceiver.FrameRateOverride[] mFrameRateOverrides =
                  new DisplayEventReceiver.FrameRateOverride[0];
@@ -54,7 +52,7 @@ index 44846f310348..1b638c8ea82e 100644
  
          LocalDisplayDevice(IBinder displayToken, long physicalDisplayId,
                  SurfaceControl.StaticDisplayInfo staticDisplayInfo,
-@@ -875,16 +880,42 @@ final class LocalDisplayAdapter extends DisplayAdapter {
+@@ -859,16 +864,42 @@ final class LocalDisplayAdapter extends DisplayAdapter {
                              }
                          }
  

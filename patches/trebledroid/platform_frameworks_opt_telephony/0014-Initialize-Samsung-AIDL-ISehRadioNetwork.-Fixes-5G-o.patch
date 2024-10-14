@@ -1,7 +1,7 @@
-From 8b3861afbe724569b00f20fa520453820fd6b9de Mon Sep 17 00:00:00 2001
+From 43dfd8506111bcc7ba25aba8ca064e8a55f4e4b5 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Wed, 21 Feb 2024 12:50:28 -0500
-Subject: [PATCH 08/10] Initialize Samsung AIDL ISehRadioNetwork. Fixes 5G on
+Subject: [PATCH 14/16] Initialize Samsung AIDL ISehRadioNetwork. Fixes 5G on
  S24
 
 ---
@@ -11,7 +11,7 @@ Subject: [PATCH 08/10] Initialize Samsung AIDL ISehRadioNetwork. Fixes 5G on
  3 files changed, 144 insertions(+), 2 deletions(-)
 
 diff --git a/Android.bp b/Android.bp
-index c3b43735f1..c9ac926a03 100644
+index 331b722ace..6e2c045bd1 100644
 --- a/Android.bp
 +++ b/Android.bp
 @@ -90,6 +90,7 @@ java_library {
@@ -23,10 +23,10 @@ index c3b43735f1..c9ac926a03 100644
          "ims-common",
          "unsupportedappusage",
 diff --git a/src/java/com/android/internal/telephony/RIL.java b/src/java/com/android/internal/telephony/RIL.java
-index 8abebe2ec6..bb4ff4f486 100644
+index 9eceae2810..6f5f89d22d 100644
 --- a/src/java/com/android/internal/telephony/RIL.java
 +++ b/src/java/com/android/internal/telephony/RIL.java
-@@ -899,7 +899,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
+@@ -866,7 +866,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
                              mHalVersion.put(service, ((RadioNetworkProxy) serviceProxy).setAidl(
                                      mHalVersion.get(service),
                                      android.hardware.radio.network.IRadioNetwork.Stub
@@ -36,7 +36,7 @@ index 8abebe2ec6..bb4ff4f486 100644
                          break;
                      case HAL_SERVICE_SIM:
 diff --git a/src/java/com/android/internal/telephony/RadioNetworkProxy.java b/src/java/com/android/internal/telephony/RadioNetworkProxy.java
-index 4acc71acee..b8f5164680 100644
+index 708b1850c9..6acc90ed63 100644
 --- a/src/java/com/android/internal/telephony/RadioNetworkProxy.java
 +++ b/src/java/com/android/internal/telephony/RadioNetworkProxy.java
 @@ -32,6 +32,20 @@ import java.util.ArrayList;
@@ -58,9 +58,9 @@ index 4acc71acee..b8f5164680 100644
 +import vendor.samsung.hardware.radio.network.SehVendorConfiguration;
 +
  /**
-  * A holder for IRadioNetwork.
-  * Use getAidl to get IRadioNetwork and call the AIDL implementations of the HAL APIs.
-@@ -67,7 +81,7 @@ public class RadioNetworkProxy extends RadioServiceProxy {
+  * A holder for IRadioNetwork. Use getHidl to get IRadio 1.0 and call the HIDL implementations or
+  * getAidl to get IRadioNetwork and call the AIDL implementations of the HAL APIs.
+@@ -69,7 +83,7 @@ public class RadioNetworkProxy extends RadioServiceProxy {
       * @return updated HAL version
       */
      public HalVersion setAidl(HalVersion halVersion,
@@ -69,7 +69,7 @@ index 4acc71acee..b8f5164680 100644
          HalVersion version = halVersion;
          try {
              version = RIL.getServiceHalVersion(network.getInterfaceVersion());
-@@ -78,6 +92,133 @@ public class RadioNetworkProxy extends RadioServiceProxy {
+@@ -80,6 +94,133 @@ public class RadioNetworkProxy extends RadioServiceProxy {
          mNetworkProxy = network;
          mIsAidl = true;
  

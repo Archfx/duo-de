@@ -1,4 +1,4 @@
-From b007a8a1555c785f0945cfb92ed1d9059f7be921 Mon Sep 17 00:00:00 2001
+From bd071cdb22667a1b720a85eeda29d75b4bfb59af Mon Sep 17 00:00:00 2001
 From: Peter Cai <peter@typeblog.net>
 Date: Wed, 24 Aug 2022 10:41:29 -0400
 Subject: [PATCH 1/8] gd: hci: Ignore unexpected status events
@@ -9,30 +9,31 @@ error here (the status event comes from the failure response).
 
 Change-Id: Ifb9a65fd77f21d15a8dc1ced9240194d38218ef6
 ---
- system/gd/hci/hci_layer.cc | 14 +++++++-------
- 1 file changed, 7 insertions(+), 7 deletions(-)
+ system/gd/hci/hci_layer.cc | 15 +++++++--------
+ 1 file changed, 7 insertions(+), 8 deletions(-)
 
 diff --git a/system/gd/hci/hci_layer.cc b/system/gd/hci/hci_layer.cc
-index fe5fa33d18..9c411fb31f 100644
+index 5ae661cb75..d91bb1480d 100644
 --- a/system/gd/hci/hci_layer.cc
 +++ b/system/gd/hci/hci_layer.cc
-@@ -230,13 +230,13 @@ struct HciLayer::impl {
-           command_complete_view.IsValid(), "assert failed: command_complete_view.IsValid()");
-       (*command_queue_.front().GetCallback<CommandCompleteView>())(command_complete_view);
+@@ -218,14 +218,13 @@ struct HciLayer::impl {
+       command_queue_.front().GetCallback<CommandCompleteView>()->Invoke(
+           std::move(command_complete_view));
      } else {
--      log::assert_that(
+-      ASSERT_LOG(
 -          command_queue_.front().waiting_for_status_ == is_status,
--          "{} was not expecting {} event",
--          OpCodeText(op_code),
--          logging_id);
+-          "0x%02hx (%s) was not expecting %s event",
+-          op_code,
+-          OpCodeText(op_code).c_str(),
+-          logging_id.c_str());
 -
--      (*command_queue_.front().GetCallback<TResponse>())(std::move(response_view));
+-      command_queue_.front().GetCallback<TResponse>()->Invoke(std::move(response_view));
 +      if (command_queue_.front().waiting_for_status_ == is_status) {
-+        (*command_queue_.front().GetCallback<TResponse>())(std::move(response_view));
++        command_queue_.front().GetCallback<TResponse>()->Invoke(std::move(response_view));
 +      } else {
 +        CommandCompleteView command_complete_view = CommandCompleteView::Create(
 +            EventView::Create(PacketView<kLittleEndian>(std::make_shared<std::vector<uint8_t>>(std::vector<uint8_t>()))));
-+        (*command_queue_.front().GetCallback<CommandCompleteView>())(std::move(command_complete_view));
++        command_queue_.front().GetCallback<CommandCompleteView>()->Invoke(std::move(command_complete_view));
 +      }
      }
  

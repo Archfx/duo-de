@@ -1,0 +1,39 @@
+From 6b03579b2dea0a7d80e6505e8cb49fc380e7505e Mon Sep 17 00:00:00 2001
+From: corneranchu <corneranchu@gmail.com>
+Date: Sat, 1 Oct 2022 01:49:58 +0000
+Subject: [PATCH 08/16] telephony: forward-port support for forceCognitive
+
+* This is needed on some MTK devices. Android 10 refactored some code,
+  so now the "non-persistent/cognitive" filter is relocated to RIL and
+  also in DcTracker.setupData().
+
+Change-Id: I7dd387a9f064a969ca5774e53b05388de12aa308
+---
+ src/java/com/android/internal/telephony/RadioDataProxy.java | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/java/com/android/internal/telephony/RadioDataProxy.java b/src/java/com/android/internal/telephony/RadioDataProxy.java
+index 9671077b0f..561fceaa7d 100644
+--- a/src/java/com/android/internal/telephony/RadioDataProxy.java
++++ b/src/java/com/android/internal/telephony/RadioDataProxy.java
+@@ -21,6 +21,7 @@ import android.net.LinkProperties;
+ import android.os.AsyncResult;
+ import android.os.Message;
+ import android.os.RemoteException;
++import android.os.SystemProperties;
+ import android.telephony.Rlog;
+ import android.telephony.ServiceState;
+ import android.telephony.data.DataProfile;
+@@ -244,7 +245,8 @@ public class RadioDataProxy extends RadioServiceProxy {
+         } else {
+             ArrayList<android.hardware.radio.V1_0.DataProfileInfo> dpis = new ArrayList<>();
+             for (DataProfile dp : profiles) {
+-                if (dp.isPersistent()) {
++                boolean forceCognitive = SystemProperties.getBoolean("persist.sys.phh.radio.force_cognitive", false);
++                        if (dp.isPersistent() || forceCognitive) {
+                     dpis.add(RILUtils.convertToHalDataProfile10(dp));
+                 }
+             }
+-- 
+2.34.1
+

@@ -1,7 +1,7 @@
-From d634156872316a4400279a60c071de6954f1b4df Mon Sep 17 00:00:00 2001
+From 2926422e7d589a2b18714f457272f9c3239bec38 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Wed, 8 May 2024 11:55:07 -0400
-Subject: [PATCH 51/52] Add a prop to disable animation in for sysui media
+Subject: [PATCH 53/54] Add a prop to disable animation in for sysui media
  carousel
 
 ---
@@ -9,7 +9,7 @@ Subject: [PATCH 51/52] Add a prop to disable animation in for sysui media
  1 file changed, 2 insertions(+), 1 deletion(-)
 
 diff --git a/packages/SystemUI/src/com/android/systemui/media/controls/ui/controller/MediaCarouselController.kt b/packages/SystemUI/src/com/android/systemui/media/controls/ui/controller/MediaCarouselController.kt
-index 53794d2d2225..2e32330babd8 100644
+index b721236eab01..8da1ddc2010f 100644
 --- a/packages/SystemUI/src/com/android/systemui/media/controls/ui/controller/MediaCarouselController.kt
 +++ b/packages/SystemUI/src/com/android/systemui/media/controls/ui/controller/MediaCarouselController.kt
 @@ -22,6 +22,7 @@ import android.content.Intent
@@ -17,18 +17,18 @@ index 53794d2d2225..2e32330babd8 100644
  import android.content.res.Configuration
  import android.database.ContentObserver
 +import android.os.SystemProperties
- import android.os.UserHandle
  import android.provider.Settings
  import android.provider.Settings.ACTION_MEDIA_CONTROLS_SETTINGS
-@@ -1365,7 +1366,7 @@ constructor(
+ import android.util.Log
+@@ -1050,7 +1051,7 @@ constructor(
+                         desiredHostState.showsOnlyActiveMedia
  
-                 if (!mediaFlags.isSceneContainerEnabled()) {
-                     for (mediaPlayer in MediaPlayerData.players()) {
--                        if (animate) {
-+                        if (animate && !SystemProperties.getBoolean("persist.sys.phh.no_media_carousel_animation", false)) {
-                             mediaPlayer.mediaViewController.animatePendingStateChange(
-                                 duration = duration,
-                                 delay = startDelay
+                 for (mediaPlayer in MediaPlayerData.players()) {
+-                    if (animate) {
++                    if (animate && !SystemProperties.getBoolean("persist.sys.phh.no_media_carousel_animation", false)) {
+                         mediaPlayer.mediaViewController.animatePendingStateChange(
+                             duration = duration,
+                             delay = startDelay
 -- 
 2.34.1
 

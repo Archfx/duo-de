@@ -1,0 +1,193 @@
+From cd5fa549f82d7387810a465e248211fabe6f02f1 Mon Sep 17 00:00:00 2001
+From: Raphael Mounier <mounierr07@gmail.com>
+Date: Thu, 6 Oct 2022 08:35:38 +0200
+Subject: [PATCH 07/16] Fix signalstrength for huawei kirin (hi6250, hi3670)
+
+The RILUtils.convertHalSignalStrength function does not work correctly under Huawei hi6250 and hi3660 platform. We have therefore replaced this function with a new one specifically for this Kirin platform.
+
+ 23/11/2021 :
+  Initial release for Android 11
+
+ 06/10/2022 :
+  Android 13 release
+
+ xx/xx/2023 :
+  @AndyCGYan: Fixup for Android 14
+
+Change-Id: I4409683dc7cd9b870237a2939188b71ce94a9fc7
+---
+ .../com/android/internal/telephony/RIL.java   | 123 ++++++++++++++++++
+ .../internal/telephony/RadioIndication.java   |  20 ++-
+ 2 files changed, 139 insertions(+), 4 deletions(-)
+
+diff --git a/src/java/com/android/internal/telephony/RIL.java b/src/java/com/android/internal/telephony/RIL.java
+index b44fb0f119..42de7882a3 100644
+--- a/src/java/com/android/internal/telephony/RIL.java
++++ b/src/java/com/android/internal/telephony/RIL.java
+@@ -6992,6 +6992,129 @@ public class RIL extends BaseCommands implements CommandsInterface {
+                 new CellSignalStrengthNr());
+     }
+ 
++    /**
++     * Fixup for SignalStrength for Huawei device
++     * @param signalStrength the initial signal strength
++     * @return a new SignalStrength
++     */
++    public SignalStrength fixupSignalStrengthHuawei(android.hardware.radio.V1_0.SignalStrength signalStrength) {
++        int gsmSignalStrength = signalStrength.gw.signalStrength;
++        int gsmBitErrorRate = signalStrength.gw.bitErrorRate;
++        int gsmTimingAdvance = signalStrength.gw.timingAdvance;
++        int mWcdmaRscp = CellInfo.UNAVAILABLE;
++        int mWcdmaEcio = CellInfo.UNAVAILABLE;
++        int mWcdmaRssi = CellInfo.UNAVAILABLE;
++        int mWcdmabErrorRate = CellInfo.UNAVAILABLE;
++        int cdmaDbm = signalStrength.cdma.dbm;
++        int cdmaEcio = signalStrength.cdma.ecio;
++        int evdoDbm = signalStrength.evdo.dbm;
++        int evdoEcio = signalStrength.evdo.ecio;
++        int evdoSnr = signalStrength.evdo.signalNoiseRatio;
++        int lteSignalStrength = signalStrength.lte.signalStrength;
++        int lteRsrp = signalStrength.lte.rsrp; //4G signal
++        int lteRsrq = signalStrength.lte.rsrq;
++        int lteRssnr = signalStrength.lte.rssnr;
++        int lteCqi = signalStrength.lte.cqi;
++        int lteTimingAdvance = signalStrength.lte.timingAdvance;
++        int mGsm = 0;
++        int mRat = 0;
++        //int tdScdmaDbm = signalStrength.tdScdma.dbm; // TD-SCDMA is the 3G standard developed for and used by China Mobile
++
++
++
++        // 3G (UMTS) have a lot of protocol (WCDMA, TDSCDMA, CDMA, EVDO, CDMA-EVDO) - only WCDMA, TDSCDMA, CDMA on Android
++        // [UNSL]< UNSOL_SIGNAL_STRENGTH {
++        //.gw = {.signalStrength = -100, .bitErrorRate = -1, .timingAdvance = 0},
++        //.cdma = {.dbm = 0, .ecio = 0},
++        //.evdo = {.dbm = 32767, .ecio = -1, .signalNoiseRatio = 32767},
++        //.lte = {.signalStrength = 99, .rsrp = 2147483647, .rsrq = 0, .rssnr = 0, .cqi = 2147483647, .timingAdvance = -1},
++        //.tdScdma = {.rscp = 2147483647}} [PHONE0]
++        //public CellSignalStrengthWcdma(int rssi, int ber, int rscp, int ecno) {
++
++        CellSignalStrengthWcdma wcdmaStrength=null;         // Europe use WCDMA norme
++        if ((lteSignalStrength!=SignalStrength.INVALID) && (lteRsrq==0) && (gsmSignalStrength!=0))
++        {
++           // 3G UMTS found - wcdma
++           mWcdmaRscp = CellInfo.UNAVAILABLE;
++           mWcdmaEcio = CellInfo.UNAVAILABLE;
++           mWcdmaRssi = gsmSignalStrength; // Just copy level gw to CDMA
++           mWcdmabErrorRate=gsmBitErrorRate;
++
++           // use rssi calcul method
++           wcdmaStrength = new CellSignalStrengthWcdma(mWcdmaRssi, mWcdmabErrorRate, mWcdmaRscp, mWcdmaEcio);
++        }
++        else
++        {
++           // 3G not present
++           wcdmaStrength = new CellSignalStrengthWcdma();
++        }
++
++
++        // 4G - LTE
++        // [UNSL]< UNSOL_SIGNAL_STRENGTH {
++        //.gw = {.signalStrength = 0, .bitErrorRate = -1, .timingAdvance = 0}, .cdma = {.dbm = 0, .ecio = 0},
++        //.evdo = {.dbm = 32767, .ecio = -1, .signalNoiseRatio = 32767},
++        //.lte = {.signalStrength = 99, .rsrp = -105, .rsrq = -12, .rssnr = -10, .cqi = 2147483647, .timingAdvance = -1},
++        //.tdScdma = {.rscp = 2147483647}} [PHONE0]
++        // public CellSignalStrengthLte(int rssi, int rsrp, int rsrq, int rssnr, int cqi, int timingAdvance) {
++
++        CellSignalStrengthLte lteStrength=null;
++        if ((lteSignalStrength!=SignalStrength.INVALID) && ( lteRsrp!=0) && (lteRsrq!=0) && (lteRssnr!=0))
++        {
++           lteStrength = new CellSignalStrengthLte(SignalStrength.INVALID,
++                                      lteRsrp,
++                                      lteRsrq,
++                                      lteRssnr,
++                                      lteCqi,
++                                      lteTimingAdvance);
++        }
++        else
++        {
++           // 4G-LTE not present
++           lteStrength = new CellSignalStrengthLte();
++        }
++
++
++        // GSM
++        // .gw = {.signalStrength = -91, .bitErrorRate = -1, .timingAdvance = 0}
++        // public CellSignalStrengthGsm(int rssi, int ber, int ta) {
++        // rssi in dBm [-113, -51] or UNAVAILABLE
++        // bit error rate (0-7, 99) TS 27.007 8.5 or UNAVAILABLE
++        CellSignalStrengthGsm gsmStrength = new CellSignalStrengthGsm(gsmSignalStrength,
++                                                    gsmBitErrorRate,
++                                                    gsmTimingAdvance);
++
++
++        if (RILJ_LOGD) {
++           riljLog("Huawei signal : LTE dbm : " + String.valueOf(lteStrength.getDbm()) +
++                               ", level : " + String.valueOf(lteStrength.getLevel()) +
++                               ", rsrp  : " + String.valueOf(lteStrength.getRsrp()) +
++                               ", rsrq  : " + String.valueOf(lteStrength.getRsrq()) +
++                               ", rssi  : " + String.valueOf(lteStrength.getRssi()) +
++                               ", rssnr  : " + String.valueOf(lteStrength.getRssnr()));
++
++           riljLog("Huawei signal : WCDMA dbm : " + String.valueOf(wcdmaStrength.getDbm()) +
++                               ", asulevel : " + String.valueOf(wcdmaStrength.getAsuLevel()) +
++                               ", rssi  : " + String.valueOf(wcdmaStrength.getRssi()) +
++                               ", errorrate  : " + String.valueOf(wcdmaStrength.getBitErrorRate()) +
++                               ", rscp  : " + String.valueOf(wcdmaStrength.getRscp()) +
++                               ", ecno  : " + String.valueOf(wcdmaStrength.getEcNo()));
++
++           riljLog("Huawei signal : GSM dbm : " + String.valueOf(gsmStrength.getDbm()) +
++                               ", errorrate : " + String.valueOf(gsmStrength.getBitErrorRate()) +
++                               ", timingadvance  : " + String.valueOf(gsmStrength.getTimingAdvance()));
++        }
++
++        // Perhaps add also gsm signalStrength
++        return new SignalStrength(
++                       new CellSignalStrengthCdma(),
++                       gsmStrength,
++                       wcdmaStrength,
++                       new CellSignalStrengthTdscdma(),
++                       lteStrength,
++                       new CellSignalStrengthNr());
++    }
++
+     void notifyBarringInfoChanged(@NonNull BarringInfo barringInfo) {
+         mLastBarringInfo = barringInfo;
+         mBarringInfoChangedRegistrants.notifyRegistrants(new AsyncResult(null, barringInfo, null));
+diff --git a/src/java/com/android/internal/telephony/RadioIndication.java b/src/java/com/android/internal/telephony/RadioIndication.java
+index b29a7bf434..f62425d22a 100644
+--- a/src/java/com/android/internal/telephony/RadioIndication.java
++++ b/src/java/com/android/internal/telephony/RadioIndication.java
+@@ -241,13 +241,25 @@ public class RadioIndication extends IRadioIndication.Stub {
+ 
+     public void currentSignalStrength(int indicationType,
+                                       android.hardware.radio.V1_0.SignalStrength signalStrength) {
+-        mRil.processIndication(HAL_SERVICE_RADIO, indicationType);
++        SignalStrength ss = null;
+ 
+-        SignalStrength ssInitial = RILUtils.convertHalSignalStrength(signalStrength);
++        mRil.processIndication(HAL_SERVICE_RADIO, indicationType);
+ 
+-        SignalStrength ss = mRil.fixupSignalStrength10(ssInitial);
+         // Note this is set to "verbose" because it happens frequently
+-        if (mRil.isLogvOrTrace()) mRil.unsljLogvRet(RIL_UNSOL_SIGNAL_STRENGTH, ss);
++        if (mRil.isLogvOrTrace()) mRil.unsljLogvRet(RIL_UNSOL_SIGNAL_STRENGTH, signalStrength);
++
++        // Fix signalStrength for Huawei
++        String hardware = android.os.SystemProperties.get("ro.hardware", "");
++        if(hardware.contains("hi3660") || hardware.contains("hi6250") || hardware.contains("hi3670") || hardware.contains("kirin"))
++        {
++            if (RIL.RILJ_LOGV) mRil.riljLog("currentSignalStrength Found Huawei device");
++            ss = mRil.fixupSignalStrengthHuawei(signalStrength);
++        }
++        else
++        {
++            SignalStrength ssInitial = RILUtils.convertHalSignalStrength(signalStrength);
++            ss = mRil.fixupSignalStrength10(ssInitial);
++        }
+ 
+         if (mRil.mSignalStrengthRegistrant != null) {
+             mRil.mSignalStrengthRegistrant.notifyRegistrant(new AsyncResult (null, ss, null));
+-- 
+2.34.1
+

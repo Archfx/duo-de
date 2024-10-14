@@ -1,4 +1,4 @@
-From 8711080172b11c149e59cf74352a644e11e2968e Mon Sep 17 00:00:00 2001
+From 2ed23f83325f00f3d8e935b8e9ea3c63f1674af3 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sun, 18 Dec 2022 18:17:30 -0500
 Subject: [PATCH 08/14] FOD support for Samsung and Asus
@@ -19,7 +19,7 @@ Subject: [PATCH 08/14] FOD support for Samsung and Asus
  12 files changed, 77 insertions(+), 5 deletions(-)
 
 diff --git a/libs/gui/BLASTBufferQueue.cpp b/libs/gui/BLASTBufferQueue.cpp
-index 739c3c2a41..0cab8db365 100644
+index f317a2eea0..6a55bb3f70 100644
 --- a/libs/gui/BLASTBufferQueue.cpp
 +++ b/libs/gui/BLASTBufferQueue.cpp
 @@ -37,6 +37,7 @@
@@ -195,10 +195,10 @@ index bc067a0e5d..c0fcff6a7d 100644
  
  } // namespace Hwc2
 diff --git a/services/surfaceflinger/DisplayHardware/HWC2.cpp b/services/surfaceflinger/DisplayHardware/HWC2.cpp
-index 8c0f81e051..ac14c0b78b 100644
+index 84f668d9df..7f867c10c7 100644
 --- a/services/surfaceflinger/DisplayHardware/HWC2.cpp
 +++ b/services/surfaceflinger/DisplayHardware/HWC2.cpp
-@@ -1037,6 +1037,14 @@ Error Layer::setBlockingRegion(const Region& region) {
+@@ -1030,6 +1030,14 @@ Error Layer::setBlockingRegion(const Region& region) {
      return static_cast<Error>(intError);
  }
  
@@ -214,10 +214,10 @@ index 8c0f81e051..ac14c0b78b 100644
  } // namespace HWC2
  } // namespace android
 diff --git a/services/surfaceflinger/DisplayHardware/HWC2.h b/services/surfaceflinger/DisplayHardware/HWC2.h
-index 5b948318ae..bb55f0e695 100644
+index de044e0b76..09454e26e2 100644
 --- a/services/surfaceflinger/DisplayHardware/HWC2.h
 +++ b/services/surfaceflinger/DisplayHardware/HWC2.h
-@@ -354,6 +354,9 @@ public:
+@@ -353,6 +353,9 @@ public:
      // AIDL HAL
      [[nodiscard]] virtual hal::Error setBrightness(float brightness) = 0;
      [[nodiscard]] virtual hal::Error setBlockingRegion(const android::Region& region) = 0;
@@ -227,7 +227,7 @@ index 5b948318ae..bb55f0e695 100644
  };
  
  namespace impl {
-@@ -405,6 +408,8 @@ public:
+@@ -404,6 +407,8 @@ public:
      hal::Error setBrightness(float brightness) override;
      hal::Error setBlockingRegion(const android::Region& region) override;
  

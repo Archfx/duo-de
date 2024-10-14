@@ -1,38 +1,37 @@
-From 42040d59b73a7d1c9f593d23b0e6b77af8347074 Mon Sep 17 00:00:00 2001
+From 8a315f66383f91115ba8e3a28afa63ab7bea7834 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sat, 27 May 2023 06:41:32 -0400
 Subject: [PATCH 6/8] Add properties to disable some features/commands/states
  that the ble chip declared but doesnt actually support
 
 ---
- system/gd/hci/controller.cc | 73 +++++++++++++++++++++++++++++++++++--
- 1 file changed, 69 insertions(+), 4 deletions(-)
+ system/gd/hci/controller.cc | 72 ++++++++++++++++++++++++++++++++++---
+ 1 file changed, 68 insertions(+), 4 deletions(-)
 
 diff --git a/system/gd/hci/controller.cc b/system/gd/hci/controller.cc
-index 328babd385..1cf453d16b 100644
+index a6c16a9061..237dbe6b93 100644
 --- a/system/gd/hci/controller.cc
 +++ b/system/gd/hci/controller.cc
-@@ -19,6 +19,7 @@
- #include <bluetooth/log.h>
- #include <com_android_bluetooth_flags.h>
+@@ -18,6 +18,7 @@
+ 
+ #include <android_bluetooth_flags.h>
  
 +#include <base/strings/string_split.h>
  #include <future>
  #include <memory>
  #include <string>
-@@ -37,6 +38,8 @@
+@@ -33,6 +34,7 @@
+ #include "os/metrics.h"
+ #include "os/system_properties.h"
  #include "sysprops/sysprops_module.h"
- #endif
- 
 +using bluetooth::os::GetSystemProperty;
-+
+ 
  namespace bluetooth {
  namespace hci {
- 
-@@ -331,7 +334,23 @@ struct Controller::impl {
+@@ -313,7 +315,23 @@ struct Controller::impl {
      ASSERT(complete_view.IsValid());
      ErrorCode status = complete_view.GetStatus();
-     log::assert_that(status == ErrorCode::SUCCESS, "Status {}", ErrorCodeText(status));
+     ASSERT_LOG(status == ErrorCode::SUCCESS, "Status 0x%02hhx, %s", status, ErrorCodeText(status).c_str());
 -    local_supported_commands_ = complete_view.GetSupportedCommands();
 +    //local_supported_commands_ = complete_view.GetSupportedCommands();
 +
@@ -54,9 +53,9 @@ index 328babd385..1cf453d16b 100644
    }
  
    void read_local_extended_features_complete_handler(std::promise<void> promise, CommandCompleteView view) {
-@@ -340,7 +359,25 @@ struct Controller::impl {
+@@ -322,7 +340,25 @@ struct Controller::impl {
      ErrorCode status = complete_view.GetStatus();
-     log::assert_that(status == ErrorCode::SUCCESS, "Status {}", ErrorCodeText(status));
+     ASSERT_LOG(status == ErrorCode::SUCCESS, "Status 0x%02hhx, %s", status, ErrorCodeText(status).c_str());
      uint8_t page_number = complete_view.GetPageNumber();
 -    extended_lmp_features_array_.push_back(complete_view.GetExtendedLmpFeatures());
 +
@@ -81,10 +80,10 @@ index 328babd385..1cf453d16b 100644
      bluetooth::os::LogMetricBluetoothLocalSupportedFeatures(page_number, complete_view.GetExtendedLmpFeatures());
      // Query all extended features
      if (page_number < complete_view.GetMaximumPageNumber()) {
-@@ -492,7 +529,21 @@ struct Controller::impl {
+@@ -475,7 +511,21 @@ struct Controller::impl {
      ASSERT(complete_view.IsValid());
      ErrorCode status = complete_view.GetStatus();
-     log::assert_that(status == ErrorCode::SUCCESS, "Status {}", status, ErrorCodeText(status));
+     ASSERT_LOG(status == ErrorCode::SUCCESS, "Status 0x%02hhx, %s", status, ErrorCodeText(status).c_str());
 -    le_local_supported_features_ = complete_view.GetLeFeatures();
 +
 +    //le_local_supported_features_ = complete_view.GetLeFeatures();
@@ -104,13 +103,13 @@ index 328babd385..1cf453d16b 100644
    }
  
    void le_read_supported_states_handler(CommandCompleteView view) {
-@@ -500,7 +551,21 @@ struct Controller::impl {
+@@ -483,7 +533,21 @@ struct Controller::impl {
      ASSERT(complete_view.IsValid());
      ErrorCode status = complete_view.GetStatus();
-     log::assert_that(status == ErrorCode::SUCCESS, "Status {}", ErrorCodeText(status));
+     ASSERT_LOG(status == ErrorCode::SUCCESS, "Status 0x%02hhx, %s", status, ErrorCodeText(status).c_str());
 -    le_supported_states_ = complete_view.GetLeStates();
-+
 +    //le_supported_states_ = complete_view.GetLeStates();
++
 +    auto local_states = complete_view.GetLeStates();
 +    std::string ignored_states = GetSystemProperty("persist.sys.bt.unsupported.states").value_or("");
 +

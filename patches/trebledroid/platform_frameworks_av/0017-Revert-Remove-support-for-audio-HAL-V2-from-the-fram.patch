@@ -1,4 +1,4 @@
-From 713a71a18d8f3ef2f03e83125d9d509e589b79ba Mon Sep 17 00:00:00 2001
+From 95b8aab31d075baf0e472db616141d2397268c06 Mon Sep 17 00:00:00 2001
 From: Andy CrossGate Yan <GeForce8800Ultra@gmail.com>
 Date: Mon, 11 Oct 2021 16:10:42 -0400
 Subject: [PATCH 17/24] Revert "Remove support for audio HAL V2 from the
@@ -18,7 +18,7 @@ Change-Id: Icfd638a91b22ffa6d2cd6d19a624e699a85a850a
  5 files changed, 43 insertions(+), 1 deletion(-)
 
 diff --git a/media/libaudiohal/Android.bp b/media/libaudiohal/Android.bp
-index 639c7aa369..1f55211af6 100644
+index b8d099897f..e4a11a3fa8 100644
 --- a/media/libaudiohal/Android.bp
 +++ b/media/libaudiohal/Android.bp
 @@ -23,6 +23,7 @@ cc_library_shared {
@@ -49,7 +49,7 @@ index 15cb297b5c..c922dd184d 100644
  
  static const std::map<AudioHalVersionInfo::Type, InterfaceName> sDevicesHALInterfaces = {
 diff --git a/media/libaudiohal/impl/Android.bp b/media/libaudiohal/impl/Android.bp
-index 1a6b949508..e464758b9e 100644
+index 4d81f77d8e..23d7f0465b 100644
 --- a/media/libaudiohal/impl/Android.bp
 +++ b/media/libaudiohal/impl/Android.bp
 @@ -82,6 +82,32 @@ cc_defaults {
@@ -86,7 +86,7 @@ index 1a6b949508..e464758b9e 100644
      name: "libaudiohal@5.0",
      defaults: [
 diff --git a/media/libaudiohal/impl/DeviceHalHidl.cpp b/media/libaudiohal/impl/DeviceHalHidl.cpp
-index ea4258c878..4d4e8a8717 100644
+index 478e0f0026..a1b21d7d95 100644
 --- a/media/libaudiohal/impl/DeviceHalHidl.cpp
 +++ b/media/libaudiohal/impl/DeviceHalHidl.cpp
 @@ -587,6 +587,7 @@ status_t DeviceHalHidl::setConnectedState(const struct audio_port_v7 *port, bool

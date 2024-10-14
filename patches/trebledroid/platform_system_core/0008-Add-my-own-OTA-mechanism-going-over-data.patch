@@ -1,4 +1,4 @@
-From 1c441f20e514ea4e9aef174fad2f07fe7687e128 Mon Sep 17 00:00:00 2001
+From 3ff1ec39c393feec99a10a31bd561881ab86ca15 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sat, 22 Jan 2022 14:34:45 -0500
 Subject: [PATCH 08/26] Add my own OTA mechanism going over /data
@@ -23,7 +23,7 @@ index a5da6e342..85f4ed62d 100644
  
  FiemapStatus ImageManager::CreateBackingImage(
 diff --git a/init/selinux.cpp b/init/selinux.cpp
-index c2d9b8d28..038926172 100644
+index 1f211ddfa..bd7f02df8 100644
 --- a/init/selinux.cpp
 +++ b/init/selinux.cpp
 @@ -58,6 +58,9 @@
@@ -36,7 +36,7 @@ index c2d9b8d28..038926172 100644
  
  #include <android-base/chrono_utils.h>
  #include <android-base/file.h>
-@@ -72,12 +75,16 @@
+@@ -71,12 +74,16 @@
  #include <libgsi/libgsi.h>
  #include <libsnapshot/snapshot.h>
  #include <selinux/android.h>
@@ -53,7 +53,7 @@ index c2d9b8d28..038926172 100644
  
  using namespace std::string_literals;
  
-@@ -86,6 +93,7 @@ using android::base::Timer;
+@@ -85,6 +92,7 @@ using android::base::Timer;
  using android::base::unique_fd;
  using android::fs_mgr::AvbHandle;
  using android::snapshot::SnapshotManager;
@@ -61,7 +61,7 @@ index c2d9b8d28..038926172 100644
  
  namespace android {
  namespace init {
-@@ -642,6 +650,60 @@ void LoadSelinuxPolicyMicrodroid() {
+@@ -732,6 +740,60 @@ void LoadSelinuxPolicyMicrodroid() {
      LoadSelinuxPolicy(policy);
  }
  
@@ -122,7 +122,7 @@ index c2d9b8d28..038926172 100644
  // The SELinux setup process is carefully orchestrated around snapuserd. Policy
  // must be loaded off dynamic partitions, and during an OTA, those partitions
  // cannot be read without snapuserd. But, with kernel-privileged snapuserd
-@@ -658,6 +720,8 @@ void LoadSelinuxPolicyMicrodroid() {
+@@ -748,6 +810,8 @@ void LoadSelinuxPolicyMicrodroid() {
  //
  // After this sequence, it is safe to enable enforcing mode and continue booting.
  void LoadSelinuxPolicyAndroid() {

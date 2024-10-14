@@ -1,7 +1,7 @@
-From ad49b5cd02a63bb2361b4e7ff416ffecfc5cd75c Mon Sep 17 00:00:00 2001
+From 6bebcc5a2eb42e4d060f19219872beb716e08df8 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Wed, 15 May 2024 05:56:59 -0400
-Subject: [PATCH 6/7] More bpf errors ignore -- there are some 4.14 without the
+Subject: [PATCH 8/9] More bpf errors ignore -- there are some 4.14 without the
  bpf jit file
 
 ---
@@ -9,20 +9,20 @@ Subject: [PATCH 6/7] More bpf errors ignore -- there are some 4.14 without the
  1 file changed, 3 insertions(+), 4 deletions(-)
 
 diff --git a/netbpfload/NetBpfLoad.cpp b/netbpfload/NetBpfLoad.cpp
-index 7c8186d8c9..faf73b08ce 100644
+index 6b9b8c5729..0484577a49 100644
 --- a/netbpfload/NetBpfLoad.cpp
 +++ b/netbpfload/NetBpfLoad.cpp
-@@ -420,8 +420,7 @@ static int doLoad(char** argv, char * const envp[]) {
+@@ -345,8 +345,7 @@ int main(int argc, char** argv, char * const envp[]) {
          // but we need 0 (enabled)
          // (this writeFile is known to fail on at least 4.19, but always defaults to 0 on
          // pre-5.13, on 5.13+ it depends on CONFIG_BPF_UNPRIV_DEFAULT_OFF)
 -        if (writeProcSysFile("/proc/sys/kernel/unprivileged_bpf_disabled", "0\n") &&
--            isAtLeastKernelVersion(5, 13, 0)) return 1;
+-            android::bpf::isAtLeastKernelVersion(5, 13, 0)) return 1;
 +        writeProcSysFile("/proc/sys/kernel/unprivileged_bpf_disabled", "0\n");
-     }
  
-     if (isAtLeastU) {
-@@ -436,12 +435,12 @@ static int doLoad(char** argv, char * const envp[]) {
+         // Enable the eBPF JIT -- but do note that on 64-bit kernels it is likely
+         // already force enabled by the kernel config option BPF_JIT_ALWAYS_ON.
+@@ -354,12 +353,12 @@ int main(int argc, char** argv, char * const envp[]) {
          //  kernel does not have CONFIG_BPF_JIT=y)
          // BPF_JIT is required by R VINTF (which means 4.14/4.19/5.4 kernels),
          // but 4.14/4.19 were released with P & Q, and only 5.4 is new in R+.

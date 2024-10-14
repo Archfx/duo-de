@@ -1,4 +1,4 @@
-From 4fba4c104a5bd0245c97d9100fa905681c234f3f Mon Sep 17 00:00:00 2001
+From 6e4ac3b041074f31659737d43b0088465496220c Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sat, 16 Apr 2022 14:30:14 -0400
 Subject: [PATCH 18/24] Add a prop to change Samsung flash strength
@@ -9,10 +9,10 @@ Subject: [PATCH 18/24] Add a prop to change Samsung flash strength
  2 files changed, 21 insertions(+), 1 deletion(-)
 
 diff --git a/services/camera/libcameraservice/Android.bp b/services/camera/libcameraservice/Android.bp
-index 7fdbb6b1ec..d80b9091bd 100644
+index 6b7a74edb6..1e1423f42b 100644
 --- a/services/camera/libcameraservice/Android.bp
 +++ b/services/camera/libcameraservice/Android.bp
-@@ -85,6 +85,8 @@ cc_defaults {
+@@ -83,6 +83,8 @@ cc_defaults {
          "android.hardware.camera.device@3.5",
          "android.hardware.camera.device@3.6",
          "android.hardware.camera.device@3.7",
@@ -22,7 +22,7 @@ index 7fdbb6b1ec..d80b9091bd 100644
          "android.hardware.common.fmq-V1-ndk",
          "camera_platform_flags_c_lib",
 diff --git a/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp b/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp
-index 1fe2d48fb5..3673ffaa90 100644
+index c60c0c4ffa..9d9275c89c 100644
 --- a/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp
 +++ b/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp
 @@ -30,6 +30,8 @@

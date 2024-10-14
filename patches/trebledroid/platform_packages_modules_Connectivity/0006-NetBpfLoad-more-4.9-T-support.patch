@@ -1,0 +1,44 @@
+From f467002fa0316030a1cbaa2513dab689c84040e8 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Maciej=20=C5=BBenczykowski?= <maze@google.com>
+Date: Fri, 15 Mar 2024 19:03:13 +0000
+Subject: [PATCH 6/9] NetBpfLoad: more 4.9-T support
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+(older kernels don't support naming maps/programs)
+
+Test: TreeHugger
+Signed-off-by: Maciej Żenczykowski <maze@google.com>
+Change-Id: If59b8947021394e1ce0a91326fee4272a5bddd38
+---
+ netbpfload/loader.cpp | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/netbpfload/loader.cpp b/netbpfload/loader.cpp
+index 7754a3ef4f..d9d3b5067c 100644
+--- a/netbpfload/loader.cpp
++++ b/netbpfload/loader.cpp
+@@ -784,7 +784,8 @@ static int createMaps(const char* elfPath, ifstream& elfFile, vector<unique_fd>&
+               .max_entries = max_entries,
+               .map_flags = md[i].map_flags,
+             };
+-            strlcpy(req.map_name, mapNames[i].c_str(), sizeof(req.map_name));
++            if (isAtLeastKernelVersion(4, 14, 0))
++                strlcpy(req.map_name, mapNames[i].c_str(), sizeof(req.map_name));
+             fd.reset(bpf(BPF_MAP_CREATE, req));
+             saved_errno = errno;
+             ALOGD("bpf_create_map name %s, ret: %d", mapNames[i].c_str(), fd.get());
+@@ -1026,7 +1027,8 @@ static int loadCodeSections(const char* elfPath, vector<codeSection>& cs, const
+               .log_size = static_cast<__u32>(log_buf.size()),
+               .expected_attach_type = cs[i].expected_attach_type,
+             };
+-            strlcpy(req.prog_name, cs[i].name.c_str(), sizeof(req.prog_name));
++            if (isAtLeastKernelVersion(4, 14, 0))
++                strlcpy(req.prog_name, cs[i].name.c_str(), sizeof(req.prog_name));
+             fd.reset(bpf(BPF_PROG_LOAD, req));
+ 
+             ALOGD("BPF_PROG_LOAD call for %s (%s) returned fd: %d (%s)", elfPath,
+-- 
+2.34.1
+

@@ -1,4 +1,4 @@
-From f1783d86b0d3ed7e327456a74c879d86675b0d32 Mon Sep 17 00:00:00 2001
+From d9af5eff09ab05b8c81c52077e1017ef0c381aab Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Mon, 13 Apr 2020 21:01:16 +0200
 Subject: [PATCH 08/24] There are three SCO devices. Fallback from one to the
