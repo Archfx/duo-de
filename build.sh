@@ -2,7 +2,7 @@
 
 echo
 echo "--------------------------------------"
-echo "          AOSP 14.0 Buildbot          "
+echo "          AOSP 15.0 Buildbot          "
 echo "                  by                  "
 echo "                ponces                "
 echo "--------------------------------------"
@@ -17,7 +17,7 @@ BV=$1
 
 initRepos() {
     echo "--> Initializing workspace"
-    repo init -u https://android.googlesource.com/platform/manifest -b android-14.0.0_r55 --git-lfs
+    repo init -u https://android.googlesource.com/platform/manifest -b android-15.0.0_r1 --git-lfs
     echo
 
     echo "--> Preparing local manifest"
@@ -71,7 +71,7 @@ buildTrebleApp() {
 
 buildVariant() {
     echo "--> Building $1"
-    lunch "$1"-ap2a-userdebug
+    lunch "$1"-ap3a-userdebug
     make -j$(nproc --all) installclean
     make -j$(nproc --all) systemimage
     make -j$(nproc --all) target-files-package otatools
@@ -85,9 +85,8 @@ buildVariant() {
 
 buildVndkliteVariant() {
     echo "--> Building $1-vndklite"
-    [[ "$1" == *"a64"* ]] && arch="32" || arch="64"
     cd treble_adapter
-    sudo bash lite-adapter.sh "$arch" $BD/system-"$1".img
+    sudo bash lite-adapter.sh "64" $BD/system-"$1".img
     mv s.img $BD/system-"$1"-vndklite.img
     sudo rm -rf d tmp
     cd ..
@@ -115,7 +114,7 @@ generatePackages() {
         [[ "$filename" == *"_a64"* ]] && arch="arm32_binder64" || arch="arm64"
         [[ "$filename" == *"_bvN"* ]] && variant="vanilla" || variant="gapps"
         [[ "$filename" == *"-vndklite"* ]] && vndk="-vndklite" || vndk=""
-        name="aosp-${arch}-ab-${variant}${vndk}-14.0-$buildDate"
+        name="aosp-${arch}-ab-${variant}${vndk}-15.0-$buildDate"
         xz -cv "$file" -T0 > $BD/"$name".img.xz
     done
     rm -rf $BD/system-*.img
@@ -128,7 +127,7 @@ generateOta() {
     buildDate="$(date +%Y%m%d)"
     timestamp="$START"
     json="{\"version\": \"$version\",\"date\": \"$timestamp\",\"variants\": ["
-    find $BD/ -name "aosp-*-14.0-$buildDate.img.xz" | sort | {
+    find $BD/ -name "aosp-*-15.0-$buildDate.img.xz" | sort | {
         while read file; do
             filename="$(basename $file)"
             [[ "$filename" == *"-arm32"* ]] && arch="a64" || arch="arm64"
