@@ -1,23 +1,22 @@
-From 2bf85c385f0e9c41ab6c33cfab114457275db967 Mon Sep 17 00:00:00 2001
+From 990e22c107d7144f41c83b39a6e48f2f89248e10 Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Tue, 21 Feb 2023 22:51:12 +0000
-Subject: [PATCH 1/3] Import vendor/gapps
+Subject: [PATCH 1/2] Import vendor/gapps
 
 ---
- generate.sh | 3 ++-
- 1 file changed, 2 insertions(+), 1 deletion(-)
+ generate.sh | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/generate.sh b/generate.sh
-index 461eff1..4c7690a 100644
+index 9c20eb5..8fbb16b 100644
 --- a/generate.sh
 +++ b/generate.sh
-@@ -26,7 +26,8 @@ for part in a ab;do
+@@ -26,7 +26,7 @@ for part in a ab;do
  		optional_base=""
  				if [ "$apps" == "gapps" ];then
  					apps_suffix="g"
 -					apps_script='$(call inherit-product, device/phh/treble/gapps.mk)'
-+					[[ "$arch" == "a64" ]] && base="arm" || base="arm64"
-+					apps_script="\$(call inherit-product, vendor/gapps/$base/$base-vendor.mk)"
++					apps_script='$(call inherit-product, vendor/gapps/common/common-vendor.mk)'
  					apps_name="with GApps"
  				fi
  				if [ "$apps" == "gapps-go" ];then

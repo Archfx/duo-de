@@ -1,7 +1,7 @@
-From 1bb2ac790fe2568007c77cd2db2e8a4bfe2e15dd Mon Sep 17 00:00:00 2001
+From 6bb6ae865746aa6cf8258396daa95edbca434f8e Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Thu, 9 Nov 2023 12:33:55 +0100
-Subject: [PATCH 1/9] gmscompat: Change attestation and instrumentation to pass
+Subject: [PATCH 1/8] gmscompat: Change attestation and instrumentation to pass
  SafetyNet and Play Integrity API.
 
 Original work by @kdrag0n.
@@ -16,7 +16,7 @@ Adapted by @ponces based on the work of @chiteroman to pass newest Play Integrit
  create mode 100644 core/java/com/android/internal/gmscompat/AttestationHooks.java
 
 diff --git a/core/java/android/app/Instrumentation.java b/core/java/android/app/Instrumentation.java
-index db216b1a..9445bc1b 100644
+index db216b1af..9445bc1b5 100644
 --- a/core/java/android/app/Instrumentation.java
 +++ b/core/java/android/app/Instrumentation.java
 @@ -63,6 +63,8 @@ import android.view.WindowManagerGlobal;
@@ -46,7 +46,7 @@ index db216b1a..9445bc1b 100644
  
 diff --git a/core/java/com/android/internal/gmscompat/AttestationHooks.java b/core/java/com/android/internal/gmscompat/AttestationHooks.java
 new file mode 100644
-index 00000000..cff1250c
+index 000000000..eb59bed82
 --- /dev/null
 +++ b/core/java/com/android/internal/gmscompat/AttestationHooks.java
 @@ -0,0 +1,100 @@
@@ -116,14 +116,14 @@ index 00000000..cff1250c
 +    }
 +
 +    private static void spoofBuildGms() {
-+        setBuildField("PRODUCT", "sailfish");
-+        setBuildField("DEVICE", "sailfish");
++        setBuildField("PRODUCT", "oriole_beta");
++        setBuildField("DEVICE", "oriole");
 +        setBuildField("MANUFACTURER", "Google");
 +        setBuildField("BRAND", "google");
-+        setBuildField("MODEL", "Pixel");
-+        setBuildField("FINGERPRINT", "google/sailfish/sailfish:10/QPP3.190404.015/5505587:user/release-keys");
-+        setVersionField("SECURITY_PATCH", "2017-12-05");
-+        setVersionField("DEVICE_INITIAL_SDK_INT", Build.VERSION_CODES.N_MR1);
++        setBuildField("MODEL", "Pixel 6");
++        setBuildField("FINGERPRINT", "google/oriole_beta/oriole:15/AP41.240823.009/12329489:user/release-keys");
++        setVersionField("SECURITY_PATCH", "2024-09-05");
++        setVersionField("DEVICE_INITIAL_SDK_INT", Build.VERSION_CODES.LOLLIPOP);
 +    }
 +
 +    public static void initApplicationBeforeOnCreate(Application app) {
@@ -151,7 +151,7 @@ index 00000000..cff1250c
 +    }
 +}
 diff --git a/keystore/java/android/security/keystore2/AndroidKeyStoreSpi.java b/keystore/java/android/security/keystore2/AndroidKeyStoreSpi.java
-index e6a63b9c..6a80c14c 100644
+index e6a63b9c4..6a80c14c9 100644
 --- a/keystore/java/android/security/keystore2/AndroidKeyStoreSpi.java
 +++ b/keystore/java/android/security/keystore2/AndroidKeyStoreSpi.java
 @@ -48,6 +48,7 @@ import android.system.keystore2.ResponseCode;

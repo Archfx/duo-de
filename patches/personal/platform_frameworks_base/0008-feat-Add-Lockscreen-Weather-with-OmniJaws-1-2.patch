@@ -1,7 +1,7 @@
-From f29bdd7e5226704261812bb9fe2b536530cb9375 Mon Sep 17 00:00:00 2001
+From 98586827d510de79eac63c1fdeece3c81409605e Mon Sep 17 00:00:00 2001
 From: maxwen <max.weninger@gmail.com>
 Date: Fri, 22 Oct 2021 14:55:26 +0200
-Subject: [PATCH 8/9] feat: Add Lockscreen Weather with OmniJaws (1/2)
+Subject: [PATCH 8/8] feat: Add Lockscreen Weather with OmniJaws (1/2)
 
 Based on OmniROM's implementation, updated by @maxwen and adapted by @neobuddy89.
 
@@ -9,25 +9,20 @@ Change-Id: I138c0dc94f08142f6614659037a501d6ae8909b1
 Co-authored-by: maxwen <max.weninger@gmail.com>
 Co-authored-by: Pranav Vashi <neobuddy89@gmail.com>
 ---
- core/java/android/provider/Settings.java      |  10 +
- .../internal/util/crdroid/OmniJawsClient.java | 437 ++++++++++++++++++
+ core/java/android/provider/Settings.java      |   5 +
+ .../internal/util/crdroid/OmniJawsClient.java | 441 ++++++++++++++++++
  data/etc/com.android.systemui.xml             |   1 +
  packages/SystemUI/AndroidManifest.xml         |   4 +
- .../layout/current_weather_view.xml           |  59 +++
- .../layout/keyguard_clock_switch.xml          |   6 +
- .../KeyguardClockSwitchController.java        |  52 ++-
- .../KeyguardStatusViewController.java         |   1 +
- .../systemui/crdroid/CurrentWeatherView.java  | 163 +++++++
- 9 files changed, 732 insertions(+), 1 deletion(-)
+ .../android/keyguard/KeyguardSliceView.java   |  13 +
+ .../keyguard/KeyguardSliceProvider.java       | 103 +++-
+ 6 files changed, 566 insertions(+), 1 deletion(-)
  create mode 100644 core/java/com/android/internal/util/crdroid/OmniJawsClient.java
- create mode 100644 packages/SystemUI/res-keyguard/layout/current_weather_view.xml
- create mode 100644 packages/SystemUI/src/com/android/systemui/crdroid/CurrentWeatherView.java
 
 diff --git a/core/java/android/provider/Settings.java b/core/java/android/provider/Settings.java
-index 51585af1..f8e86e0f 100644
+index 5c392ae6b..e9f87249f 100644
 --- a/core/java/android/provider/Settings.java
 +++ b/core/java/android/provider/Settings.java
-@@ -6201,6 +6201,16 @@ public final class Settings {
+@@ -6249,6 +6249,11 @@ public final class Settings {
           * the setting value. See an example above.
           */
  
@@ -36,20 +31,15 @@ index 51585af1..f8e86e0f 100644
 +         */
 +        public static final String LOCKSCREEN_WEATHER_ENABLED = "lockscreen_weather_enabled";
 +
-+        /**
-+         * @hide
-+         */
-+        public static final String LOCKSCREEN_WEATHER_LOCATION = "lockscreen_weather_location";
-+
          /**
           * Keys we no longer back up under the current schema, but want to continue to
           * process when restoring historical backup datasets.
 diff --git a/core/java/com/android/internal/util/crdroid/OmniJawsClient.java b/core/java/com/android/internal/util/crdroid/OmniJawsClient.java
 new file mode 100644
-index 00000000..26437e03
+index 000000000..2bbd51ffa
 --- /dev/null
 +++ b/core/java/com/android/internal/util/crdroid/OmniJawsClient.java
-@@ -0,0 +1,437 @@
+@@ -0,0 +1,441 @@
 +/*
 +* Copyright (C) 2021 The OmniROM Project
 +*
@@ -106,7 +96,7 @@ index 00000000..26437e03
 +            = Uri.parse("content://org.omnirom.omnijaws.provider/control");
 +
 +    private static final String ICON_PACKAGE_DEFAULT = "org.omnirom.omnijaws";
-+    private static final String ICON_PREFIX_DEFAULT = "google";
++    private static final String ICON_PREFIX_DEFAULT = "google_new_light";
 +    private static final String ICON_PREFIX_OUTLINE = "outline";
 +    private static final String EXTRA_ERROR = "error";
 +    public static final int EXTRA_ERROR_NETWORK = 0;
@@ -406,21 +396,25 @@ index 00000000..26437e03
 +        if (!isOmniJawsServiceInstalled()) {
 +            return false;
 +        }
++        boolean enabled = false;
 +        try {
 +            final Cursor c = mContext.getContentResolver().query(SETTINGS_URI, SETTINGS_PROJECTION,
 +                    null, null, null);
 +            if (c != null) {
-+                int count = c.getCount();
-+                if (count == 1) {
-+                    c.moveToPosition(0);
-+                    boolean enabled = c.getInt(0) == 1;
-+                    return enabled;
++                try {
++                    int count = c.getCount();
++                    if (count == 1) {
++                        c.moveToPosition(0);
++                        enabled = c.getInt(0) == 1;
++                    }
++                } finally {
++                    c.close();
 +                }
 +            }
 +        } catch (Exception e) {
 +            Log.e(TAG, "isOmniJawsEnabled", e);
 +        }
-+        return false;
++        return enabled;
 +    }
 +
 +    private String getTemperatureUnit() {
@@ -488,7 +482,7 @@ index 00000000..26437e03
 +    }
 +}
 diff --git a/data/etc/com.android.systemui.xml b/data/etc/com.android.systemui.xml
-index ce2543a4..ef330da9 100644
+index a115c659d..d001b0329 100644
 --- a/data/etc/com.android.systemui.xml
 +++ b/data/etc/com.android.systemui.xml
 @@ -16,6 +16,7 @@
@@ -500,352 +494,237 @@ index ce2543a4..ef330da9 100644
          <permission name="android.permission.ALLOW_SLIPPERY_TOUCHES"/>
          <permission name="android.permission.BATTERY_STATS"/>
 diff --git a/packages/SystemUI/AndroidManifest.xml b/packages/SystemUI/AndroidManifest.xml
-index 774d6cbc..86a8a2a0 100644
+index e47dde0c1..ef993a447 100644
 --- a/packages/SystemUI/AndroidManifest.xml
 +++ b/packages/SystemUI/AndroidManifest.xml
-@@ -364,6 +364,10 @@
-     <!-- Listen to (dis-)connection of external displays and enable / disable them. -->
-     <uses-permission android:name="android.permission.MANAGE_DISPLAYS" />
+@@ -383,6 +383,10 @@
+     <protected-broadcast android:name="com.android.systemui.action.ACTION_LAUNCH_MEDIA_OUTPUT_BROADCAST_DIALOG" />
+     <protected-broadcast android:name="com.android.systemui.STARTED" />
  
 +    <!-- OmniJaws -->
 +    <uses-permission android:name="org.omnirom.omnijaws.READ_WEATHER" />
 +    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 +
-     <protected-broadcast android:name="com.android.settingslib.action.REGISTER_SLICE_RECEIVER" />
-     <protected-broadcast android:name="com.android.settingslib.action.UNREGISTER_SLICE_RECEIVER" />
-     <protected-broadcast android:name="com.android.settings.flashlight.action.FLASHLIGHT_CHANGED" />
-diff --git a/packages/SystemUI/res-keyguard/layout/current_weather_view.xml b/packages/SystemUI/res-keyguard/layout/current_weather_view.xml
-new file mode 100644
-index 00000000..502df830
---- /dev/null
-+++ b/packages/SystemUI/res-keyguard/layout/current_weather_view.xml
-@@ -0,0 +1,59 @@
-+<?xml version="1.0" encoding="utf-8"?>
-+<!--
-+     Copyright (C) 2023 crDroid Android Project
-+
-+     Licensed under the Apache License, Version 2.0 (the "License");
-+     you may not use this file except in compliance with the License.
-+     You may obtain a copy of the License at
-+
-+          http://www.apache.org/licenses/LICENSE-2.0
-+
-+     Unless required by applicable law or agreed to in writing, software
-+     distributed under the License is distributed on an "AS IS" BASIS,
-+     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-+     See the License for the specific language governing permissions and
-+     limitations under the License.
-+-->
-+<com.android.systemui.crdroid.CurrentWeatherView
-+    xmlns:android="http://schemas.android.com/apk/res/android"
-+    android:layout_width="match_parent"
-+    android:layout_height="wrap_content"
-+    android:layout_gravity="start"
-+    android:gravity="center_vertical"
-+    android:clipToPadding="false"
-+    android:paddingStart="@dimen/below_clock_padding_start">
-+
-+    <LinearLayout
-+        android:id="@+id/current"
-+        android:layout_width="match_parent"
-+        android:layout_height="wrap_content"
-+        android:gravity="center_vertical"
-+        android:orientation="horizontal" >
-+
-+        <TextView
-+            android:id="@+id/left_text"
-+            android:layout_width="wrap_content"
-+            android:layout_height="wrap_content"
-+            android:textColor="?attr/wallpaperTextColor"
-+            android:ellipsize="end"
-+            android:singleLine="true"
-+            android:paddingEnd="8dp"
-+            style="@style/TextAppearance.Keyguard.Secondary" />
-+
-+        <ImageView
-+            android:id="@+id/current_image"
-+            android:layout_width="@dimen/widget_icon_size"
-+            android:layout_height="@dimen/widget_icon_size"
-+            android:scaleType="centerInside"/>
-+
-+        <TextView
-+            android:id="@+id/right_text"
-+            android:layout_width="wrap_content"
-+            android:layout_height="wrap_content"
-+            android:textColor="?attr/wallpaperTextColor"
-+            android:singleLine="true"
-+            android:paddingStart="8dp"
-+            style="@style/TextAppearance.Keyguard.Secondary" />
-+    </LinearLayout>
-+
-+</com.android.systemui.crdroid.CurrentWeatherView>
-diff --git a/packages/SystemUI/res-keyguard/layout/keyguard_clock_switch.xml b/packages/SystemUI/res-keyguard/layout/keyguard_clock_switch.xml
-index fc9c917c..5b26e314 100644
---- a/packages/SystemUI/res-keyguard/layout/keyguard_clock_switch.xml
-+++ b/packages/SystemUI/res-keyguard/layout/keyguard_clock_switch.xml
-@@ -56,6 +56,12 @@
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
+     <application
+         android:name=".SystemUIApplication"
+         android:persistent="true"
+diff --git a/packages/SystemUI/src/com/android/keyguard/KeyguardSliceView.java b/packages/SystemUI/src/com/android/keyguard/KeyguardSliceView.java
+index d8be862e1..130f984be 100644
+--- a/packages/SystemUI/src/com/android/keyguard/KeyguardSliceView.java
++++ b/packages/SystemUI/src/com/android/keyguard/KeyguardSliceView.java
+@@ -163,14 +163,18 @@ public class KeyguardSliceView extends LinearLayout {
+             RowContent rc = (RowContent) subItems.get(i);
+             SliceItem item = rc.getSliceItem();
+             final Uri itemTag = item.getSlice().getUri();
++            final boolean isWeatherSlice = itemTag.toString().equals(KeyguardSliceProvider.KEYGUARD_WEATHER_URI);
+             // Try to reuse the view if already exists in the layout
+             KeyguardSliceTextView button = mRow.findViewWithTag(itemTag);
+             if (button == null) {
+                 button = new KeyguardSliceTextView(mContext);
++                button.setShouldTintDrawable(!isWeatherSlice);
+                 button.setTextColor(blendedColor);
+                 button.setTag(itemTag);
+                 final int viewIndex = i - (mHasHeader ? 1 : 0);
+                 mRow.addView(button, viewIndex);
++            } else {
++                button.setShouldTintDrawable(!isWeatherSlice);
+             }
  
-+        <include layout="@layout/current_weather_view"
-+            android:id="@+id/weather_container"
-+            android:layout_width="match_parent"
-+            android:layout_height="wrap_content"
-+            android:visibility="gone" />
-+
-       <com.android.systemui.statusbar.phone.NotificationIconContainer
-           android:id="@+id/left_aligned_notification_icon_container"
-           android:layout_width="match_parent"
-diff --git a/packages/SystemUI/src/com/android/keyguard/KeyguardClockSwitchController.java b/packages/SystemUI/src/com/android/keyguard/KeyguardClockSwitchController.java
-index e621ffe4..6015604e 100644
---- a/packages/SystemUI/src/com/android/keyguard/KeyguardClockSwitchController.java
-+++ b/packages/SystemUI/src/com/android/keyguard/KeyguardClockSwitchController.java
-@@ -27,6 +27,7 @@ import static com.android.systemui.flags.Flags.LOCKSCREEN_WALLPAPER_DREAM_ENABLE
- import static com.android.systemui.util.kotlin.JavaAdapterKt.collectFlow;
+             PendingIntent pendingIntent = null;
+@@ -424,12 +428,18 @@ public class KeyguardSliceView extends LinearLayout {
+         @StyleRes
+         private static int sStyleId = R.style.TextAppearance_Keyguard_Secondary;
  
- import android.annotation.Nullable;
-+import android.content.ContentResolver;
- import android.database.ContentObserver;
- import android.os.UserHandle;
++        private boolean shouldTintDrawable = true;
++
+         KeyguardSliceTextView(Context context) {
+             super(context, null /* attrs */, 0 /* styleAttr */, sStyleId);
+             onDensityOrFontScaleChanged();
+             setEllipsize(TruncateAt.END);
+         }
+ 
++        public void setShouldTintDrawable(boolean shouldTintDrawable){
++            this.shouldTintDrawable = shouldTintDrawable;
++        }
++
+         public void onDensityOrFontScaleChanged() {
+             updatePadding();
+         }
+@@ -472,6 +482,9 @@ public class KeyguardSliceView extends LinearLayout {
+         }
+ 
+         private void updateDrawableColors() {
++            if (!shouldTintDrawable) {
++                return;
++            }
+             final int color = getCurrentTextColor();
+             for (Drawable drawable : getCompoundDrawables()) {
+                 if (drawable != null) {
+diff --git a/packages/SystemUI/src/com/android/systemui/keyguard/KeyguardSliceProvider.java b/packages/SystemUI/src/com/android/systemui/keyguard/KeyguardSliceProvider.java
+index 68a252b2c..9d93ed73c 100644
+--- a/packages/SystemUI/src/com/android/systemui/keyguard/KeyguardSliceProvider.java
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/KeyguardSliceProvider.java
+@@ -24,6 +24,7 @@ import android.content.ContentResolver;
+ import android.content.Context;
+ import android.content.Intent;
+ import android.content.IntentFilter;
++import android.database.ContentObserver;
+ import android.graphics.Typeface;
+ import android.graphics.drawable.Icon;
+ import android.icu.text.DateFormat;
+@@ -33,6 +34,7 @@ import android.media.session.PlaybackState;
+ import android.net.Uri;
+ import android.os.Handler;
+ import android.os.Trace;
++import android.os.UserHandle;
  import android.provider.Settings;
-@@ -39,7 +40,9 @@ import android.widget.LinearLayout;
- import androidx.annotation.NonNull;
- import androidx.annotation.VisibleForTesting;
+ import android.service.notification.ZenModeConfig;
+ import android.text.TextUtils;
+@@ -45,8 +47,10 @@ import androidx.slice.SliceProvider;
+ import androidx.slice.builders.ListBuilder;
+ import androidx.slice.builders.ListBuilder.RowBuilder;
+ import androidx.slice.builders.SliceAction;
++import androidx.slice.widget.SliceViewUtil;
  
-+import com.android.systemui.Dependency;
- import com.android.systemui.Dumpable;
-+import com.android.systemui.crdroid.CurrentWeatherView;
- import com.android.systemui.dagger.qualifiers.Background;
- import com.android.systemui.dagger.qualifiers.Main;
- import com.android.systemui.dump.DumpManager;
-@@ -64,6 +67,7 @@ import com.android.systemui.statusbar.notification.shared.NotificationIconContai
- import com.android.systemui.statusbar.notification.stack.AnimationProperties;
- import com.android.systemui.statusbar.phone.NotificationIconAreaController;
- import com.android.systemui.statusbar.phone.NotificationIconContainer;
-+import com.android.systemui.tuner.TunerService;
- import com.android.systemui.util.ViewController;
- import com.android.systemui.util.concurrency.DelayableExecutor;
- import com.android.systemui.util.settings.SecureSettings;
-@@ -81,9 +85,12 @@ import kotlinx.coroutines.DisposableHandle;
-  * Injectable controller for {@link KeyguardClockSwitch}.
-  */
- public class KeyguardClockSwitchController extends ViewController<KeyguardClockSwitch>
--        implements Dumpable {
-+        implements Dumpable, TunerService.Tunable {
-     private static final String TAG = "KeyguardClockSwitchController";
+ import com.android.internal.annotations.VisibleForTesting;
++import com.android.internal.util.crdroid.OmniJawsClient;
+ import com.android.keyguard.KeyguardUpdateMonitor;
+ import com.android.keyguard.KeyguardUpdateMonitorCallback;
+ import com.android.systemui.SystemUIAppComponentFactoryBase;
+@@ -80,7 +84,7 @@ import javax.inject.Inject;
+ public class KeyguardSliceProvider extends SliceProvider implements
+         NextAlarmController.NextAlarmChangeCallback, ZenModeController.Callback,
+         NotificationMediaManager.MediaListener, StatusBarStateController.StateListener,
+-        SystemUIAppComponentFactoryBase.ContextInitializer {
++        SystemUIAppComponentFactoryBase.ContextInitializer, OmniJawsClient.OmniJawsObserver {
  
-+    private static final String LOCKSCREEN_WEATHER_ENABLED =
-+            "system:" + Settings.System.LOCKSCREEN_WEATHER_ENABLED;
-+
-     private final StatusBarStateController mStatusBarStateController;
-     private final ClockRegistry mClockRegistry;
-     private final KeyguardSliceViewController mKeyguardSliceViewController;
-@@ -94,6 +101,7 @@ public class KeyguardClockSwitchController extends ViewController<KeyguardClockS
-     private final ClockEventController mClockEventController;
-     private final LogBuffer mLogBuffer;
-     private final NotificationIconContainerAlwaysOnDisplayViewBinder mNicViewBinder;
-+    private final TunerService mTunerService;
-     private FrameLayout mSmallClockFrame; // top aligned clock
-     private FrameLayout mLargeClockFrame; // centered clock
+     private static final String TAG = "KgdSliceProvider";
  
-@@ -115,6 +123,9 @@ public class KeyguardClockSwitchController extends ViewController<KeyguardClockS
-     private final KeyguardUnlockAnimationController mKeyguardUnlockAnimationController;
-     private final InWindowLauncherUnlockAnimationManager mInWindowLauncherUnlockAnimationManager;
- 
-+    private CurrentWeatherView mCurrentWeatherView;
-+    private boolean mShowWeather;
-+
-     private boolean mShownOnSecondaryDisplay = false;
-     private boolean mOnlyClock = false;
-     private boolean mIsActiveDreamLockscreenHosted = false;
-@@ -209,6 +220,8 @@ public class KeyguardClockSwitchController extends ViewController<KeyguardClockS
-             @Override
-             public void onAvailableClocksChanged() { }
-         };
-+
-+        mTunerService = Dependency.get(TunerService.class);
-     }
+@@ -96,6 +100,8 @@ public class KeyguardSliceProvider extends SliceProvider implements
+             "content://com.android.systemui.keyguard/media";
+     public static final String KEYGUARD_ACTION_URI =
+             "content://com.android.systemui.keyguard/action";
++    public static final String KEYGUARD_WEATHER_URI =
++            "content://com.android.systemui.keyguard/weather";
  
      /**
-@@ -250,12 +263,15 @@ public class KeyguardClockSwitchController extends ViewController<KeyguardClockS
-             mLargeClockFrame = mView.findViewById(R.id.lockscreen_clock_view_large);
-         }
+      * Only show alarms that will ring within N hours.
+@@ -157,6 +163,12 @@ public class KeyguardSliceProvider extends SliceProvider implements
+     @Background
+     Handler mBgHandler;
  
-+        mCurrentWeatherView = mView.findViewById(R.id.weather_container);
- 
-         if (!mOnlyClock) {
-             mDumpManager.unregisterDumpable(getClass().getSimpleName()); // unregister previous
-             mDumpManager.registerDumpable(getClass().getSimpleName(), this);
-         }
- 
-+        mTunerService.addTunable(this, LOCKSCREEN_WEATHER_ENABLED);
++    protected final Uri mWeatherUri;
++    private OmniJawsClient mWeatherClient;
++    private OmniJawsClient.WeatherInfo mWeatherData;
++    private SettingsObserver mSettingsObserver;
++    private boolean mShowWeatherSlice;
 +
-         if (mFeatureFlags.isEnabled(LOCKSCREEN_WALLPAPER_DREAM_ENABLED)) {
-             mStatusArea = mView.findViewById(R.id.keyguard_status_area);
-             collectFlow(mStatusArea, mKeyguardInteractor.isActiveDreamLockscreenHosted(),
-@@ -291,6 +307,8 @@ public class KeyguardClockSwitchController extends ViewController<KeyguardClockS
-         mKeyguardDateWeatherViewInvisibility =
-                 mView.getResources().getInteger(R.integer.keyguard_date_weather_view_invisibility);
+     /**
+      * Receiver responsible for time ticking and updating the date format.
+      */
+@@ -195,6 +207,34 @@ public class KeyguardSliceProvider extends SliceProvider implements
+                 }
+             };
  
-+        updateWeatherView();
++    class SettingsObserver extends ContentObserver {
++        SettingsObserver(Handler handler) {
++            super(handler);
++        }
 +
-         if (mShownOnSecondaryDisplay) {
-             mView.setLargeClockOnSecondaryDisplay(true);
-             mClockEventController.setLargeClockOnSecondaryDisplay(true);
-@@ -364,6 +382,7 @@ public class KeyguardClockSwitchController extends ViewController<KeyguardClockS
- 
-     @Override
-     protected void onViewDetached() {
-+        mTunerService.removeTunable(this);
-         mClockRegistry.unregisterClockChangeListener(mClockChangedListener);
-         mClockEventController.unregisterListeners();
-         setClock(null);
-@@ -377,6 +396,37 @@ public class KeyguardClockSwitchController extends ViewController<KeyguardClockS
-                 mKeyguardUnlockAnimationListener);
++        void observe() {
++            mContentResolver.registerContentObserver(Settings.System.getUriFor(
++                    Settings.System.LOCKSCREEN_WEATHER_ENABLED), false, this,
++                    UserHandle.USER_ALL);
++            updateShowWeatherSlice();
++        }
++
++        void unobserve() {
++            mContentResolver.unregisterContentObserver(this);
++        }
++
++        void updateShowWeatherSlice() {
++            mShowWeatherSlice = Settings.System.getIntForUser(mContentResolver,
++                    Settings.System.LOCKSCREEN_WEATHER_ENABLED,
++                    0, UserHandle.USER_CURRENT) != 0;
++        }
++
++        @Override
++        public void onChange(boolean selfChange) {
++            updateShowWeatherSlice();
++        }
++    }
++
+     public static KeyguardSliceProvider getAttachedInstance() {
+         return KeyguardSliceProvider.sInstance;
+     }
+@@ -208,6 +248,7 @@ public class KeyguardSliceProvider extends SliceProvider implements
+         mAlarmUri = Uri.parse(KEYGUARD_NEXT_ALARM_URI);
+         mDndUri = Uri.parse(KEYGUARD_DND_URI);
+         mMediaUri = Uri.parse(KEYGUARD_MEDIA_URI);
++        mWeatherUri = Uri.parse(KEYGUARD_WEATHER_URI);
      }
  
-+    @Override
-+    public void onTuningChanged(String key, String newValue) {
-+        switch (key) {
-+            case LOCKSCREEN_WEATHER_ENABLED:
-+                mShowWeather =
-+                        TunerService.parseIntegerSwitch(newValue, false);
-+                updateWeatherView();
-+                break;
-+            default:
-+                break;
-+        }
-+    }
-+
-+    public void updateWeatherView() {
-+        mUiExecutor.execute(() -> {
-+            final ContentResolver resolver = getContext().getContentResolver();
-+            mShowWeather = Settings.System.getIntForUser(resolver,
-+                    Settings.System.LOCKSCREEN_WEATHER_ENABLED, 0,
-+                    UserHandle.USER_CURRENT) != 0;
-+            if (mCurrentWeatherView != null) {
-+                if (mShowWeather && !mOnlyClock) {
-+                    mCurrentWeatherView.enableUpdates();
-+                    mCurrentWeatherView.setVisibility(View.VISIBLE);
-+                } else {
-+                    mCurrentWeatherView.disableUpdates();
-+                    mCurrentWeatherView.setVisibility(View.GONE);
-+                }
-+            }
-+        });
-+    }
-+
-     void onLocaleListChanged() {
-         if (mSmartspaceController.isEnabled()) {
-             removeViewsFromStatusArea();
-diff --git a/packages/SystemUI/src/com/android/keyguard/KeyguardStatusViewController.java b/packages/SystemUI/src/com/android/keyguard/KeyguardStatusViewController.java
-index c0ae4a1f..9f71ed70 100644
---- a/packages/SystemUI/src/com/android/keyguard/KeyguardStatusViewController.java
-+++ b/packages/SystemUI/src/com/android/keyguard/KeyguardStatusViewController.java
-@@ -436,6 +436,7 @@ public class KeyguardStatusViewController extends ViewController<KeyguardStatusV
-             if (visible) {
-                 if (DEBUG) Slog.v(TAG, "refresh statusview visible:true");
-                 refreshTime();
-+                mKeyguardClockSwitchController.updateWeatherView();
+     @AnyThread
+@@ -227,6 +268,7 @@ public class KeyguardSliceProvider extends SliceProvider implements
+                 addNextAlarmLocked(builder);
+                 addZenModeLocked(builder);
+                 addPrimaryActionLocked(builder);
++                addWeatherLocked(builder);
+                 slice = builder.build();
              }
+         } catch (IllegalStateException e) {
+@@ -292,6 +334,17 @@ public class KeyguardSliceProvider extends SliceProvider implements
+         builder.addRow(alarmRowBuilder);
+     }
+ 
++    protected void addWeatherLocked(ListBuilder builder) {
++        if (!mShowWeatherSlice || !mWeatherClient.isOmniJawsEnabled() || mWeatherData == null) {
++            return;
++        }
++        IconCompat weatherIcon = SliceViewUtil.createIconFromDrawable(mWeatherClient.getWeatherConditionImage(mWeatherData.conditionCode));
++        RowBuilder weatherRowBuilder = new RowBuilder(mWeatherUri)
++                .setTitle(mWeatherData.temp + mWeatherData.tempUnits)
++                .addEndItem(weatherIcon, ListBuilder.ICON_IMAGE);
++        builder.addRow(weatherRowBuilder);
++    }
++
+     /**
+      * Add zen mode (DND) icon to slice if it's enabled.
+      * @param builder The slice builder.
+@@ -337,6 +390,9 @@ public class KeyguardSliceProvider extends SliceProvider implements
+             KeyguardSliceProvider.sInstance = this;
+             registerClockUpdate();
+             updateClockLocked();
++            mSettingsObserver = new SettingsObserver(mHandler);
++            mSettingsObserver.observe();
++            enableWeatherUpdates();
          }
-     };
-diff --git a/packages/SystemUI/src/com/android/systemui/crdroid/CurrentWeatherView.java b/packages/SystemUI/src/com/android/systemui/crdroid/CurrentWeatherView.java
-new file mode 100644
-index 00000000..9e4eb16e
---- /dev/null
-+++ b/packages/SystemUI/src/com/android/systemui/crdroid/CurrentWeatherView.java
-@@ -0,0 +1,163 @@
-+/*
-+ * Copyright (C) 2023 crDroid Android Project
-+ *
-+ * Licensed under the Apache License, Version 2.0 (the "License");
-+ * you may not use this file except in compliance with the License.
-+ * You may obtain a copy of the License at
-+ *
-+ *      http://www.apache.org/licenses/LICENSE-2.0
-+ *
-+ * Unless required by applicable law or agreed to in writing, software
-+ * distributed under the License is distributed on an "AS IS" BASIS,
-+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-+ * See the License for the specific language governing permissions and
-+ * limitations under the License.
-+ */
-+package com.android.systemui.crdroid;
+         return true;
+     }
+@@ -353,6 +409,8 @@ public class KeyguardSliceProvider extends SliceProvider implements
+                 mKeyguardUpdateMonitor.removeCallback(mKeyguardUpdateMonitorCallback);
+                 getContext().unregisterReceiver(mIntentReceiver);
+             }
++            disableWeatherUpdates();
++            mSettingsObserver.unobserve();
+             KeyguardSliceProvider.sInstance = null;
+         }
+     }
+@@ -549,4 +607,47 @@ public class KeyguardSliceProvider extends SliceProvider implements
+             SystemUIAppComponentFactoryBase.ContextAvailableCallback callback) {
+         mContextAvailableCallback = callback;
+     }
 +
-+import android.content.Context;
-+import android.database.ContentObserver;
-+import android.graphics.drawable.Drawable;
-+import android.os.Handler;
-+import android.os.UserHandle;
-+import android.provider.Settings;
-+import android.util.AttributeSet;
-+import android.view.View;
-+import android.widget.ImageView;
-+import android.widget.FrameLayout;
-+import android.widget.TextView;
-+
-+import com.android.internal.util.crdroid.OmniJawsClient;
-+import com.android.systemui.res.R;
-+
-+public class CurrentWeatherView extends FrameLayout implements OmniJawsClient.OmniJawsObserver {
-+
-+    static final String TAG = "SystemUI:CurrentWeatherView";
-+
-+    private ImageView mCurrentImage;
-+    private OmniJawsClient mWeatherClient;
-+    private OmniJawsClient.WeatherInfo mWeatherInfo;
-+    private TextView mLeftText;
-+    private TextView mRightText;
-+
-+    private SettingsObserver mSettingsObserver;
-+
-+    private boolean mShowWeatherLocation;
-+
-+    public CurrentWeatherView(Context context) {
-+        this(context, null);
++    private void enableWeatherUpdates() {
++        mWeatherClient = new OmniJawsClient(getContext());
++        mWeatherClient.addObserver(this);
++        queryAndUpdateWeather();
 +    }
 +
-+    public CurrentWeatherView(Context context, AttributeSet attrs) {
-+        this(context, attrs, 0);
-+    }
-+
-+    public CurrentWeatherView(Context context, AttributeSet attrs, int defStyle) {
-+        super(context, attrs, defStyle);
-+        if (mWeatherClient == null) {
-+            mWeatherClient = new OmniJawsClient(context);
-+        }
-+    }
-+
-+    public void enableUpdates() {
-+        if (mWeatherClient != null) {
-+            mWeatherClient.addObserver(this);
-+            queryAndUpdateWeather();
-+        }
-+    }
-+
-+    public void disableUpdates() {
++    private void disableWeatherUpdates() {
 +        if (mWeatherClient != null) {
 +            mWeatherClient.removeObserver(this);
 +        }
-+    }
-+
-+    @Override
-+    protected void onFinishInflate() {
-+        super.onFinishInflate();
-+        mCurrentImage  = (ImageView) findViewById(R.id.current_image);
-+        mLeftText = (TextView) findViewById(R.id.left_text);
-+        mRightText = (TextView) findViewById(R.id.right_text);
-+        if (mSettingsObserver == null) {
-+            mSettingsObserver = new SettingsObserver(new Handler());
-+            mSettingsObserver.observe();
-+        }
-+    }
-+
-+    private void setErrorView() {
-+        mCurrentImage.setImageDrawable(null);
-+        mLeftText.setText("");
-+        mRightText.setText("");
 +    }
 +
 +    @Override
@@ -856,8 +735,8 @@ index 00000000..9e4eb16e
 +        // to run fast enough
 +        // so only show the disabled state
 +        if (errorReason == OmniJawsClient.EXTRA_ERROR_DISABLED) {
-+            mWeatherInfo = null;
-+            setErrorView();
++            mWeatherData = null;
++            notifyChange();
 +        }
 +    }
 +
@@ -872,53 +751,13 @@ index 00000000..9e4eb16e
 +    }
 +
 +    private void queryAndUpdateWeather() {
-+        try {
-+            if (mWeatherClient == null || !mWeatherClient.isOmniJawsEnabled()) {
-+                return;
-+            }
++        if (mWeatherClient != null) {
 +            mWeatherClient.queryWeather();
-+            mWeatherInfo = mWeatherClient.getWeatherInfo();
-+            if (mWeatherInfo != null) {
-+                Drawable d = mWeatherClient.getWeatherConditionImage(mWeatherInfo.conditionCode);
-+                mCurrentImage.setImageDrawable(d);
-+                mRightText.setText(mWeatherInfo.temp + mWeatherInfo.tempUnits);
-+                mLeftText.setText(mWeatherInfo.city);
-+                mLeftText.setVisibility(mShowWeatherLocation ? View.VISIBLE : View.GONE);
-+            }
-+        } catch(Exception e) {
-+            // Do nothing
++            mWeatherData = mWeatherClient.getWeatherInfo();
++            notifyChange();
 +        }
 +    }
-+
-+    class SettingsObserver extends ContentObserver {
-+        SettingsObserver(Handler handler) {
-+            super(handler);
-+        }
-+
-+        void observe() {
-+            getContext().getContentResolver().registerContentObserver(Settings.System.getUriFor(
-+                    Settings.System.LOCKSCREEN_WEATHER_LOCATION), false, this,
-+                    UserHandle.USER_ALL);
-+            updateWeatherSettings();
-+        }
-+
-+        void unobserve() {
-+            getContext().getContentResolver().unregisterContentObserver(this);
-+        }
-+
-+        void updateWeatherSettings() {
-+            mShowWeatherLocation = Settings.System.getIntForUser(getContext().getContentResolver(),
-+                    Settings.System.LOCKSCREEN_WEATHER_LOCATION,
-+                    0, UserHandle.USER_CURRENT) != 0;
-+            mLeftText.setVisibility(mShowWeatherLocation ? View.VISIBLE : View.GONE);
-+        }
-+
-+        @Override
-+        public void onChange(boolean selfChange) {
-+            updateWeatherSettings();
-+        }
-+    }
-+}
+ }
 -- 
 2.34.1
 

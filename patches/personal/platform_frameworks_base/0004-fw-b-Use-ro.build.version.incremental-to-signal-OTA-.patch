@@ -1,75 +1,28 @@
-From bdf0f8cce4612cb7bb8e238f1af6fbe1a567a466 Mon Sep 17 00:00:00 2001
+From 22a165579df84085b3e18608264c616159b21bfe Mon Sep 17 00:00:00 2001
 From: dhacker29 <dhackerdvm@gmail.com>
 Date: Tue, 24 Nov 2015 01:53:47 -0500
-Subject: [PATCH 4/9] fw/b: Use ro.build.version.incremental to signal OTA
+Subject: [PATCH 4/8] fw/b: Use ro.build.version.incremental to signal OTA
  upgrades
 
-[PeterCxy]: On T, there is a new class PackagePartitions that is
-responsible for detecting updates to not just the system, but also other
-partitions. Most of the fingerprint detection were moved there, and thus
-modifications were made there to use the
-ro.<partition>.build.version.incremental property.
-
-Squash of:
-
-Author: dhacker29 <dhackerdvm@gmail.com>
-Date:   Tue Nov 24 01:53:47 2015 -0500
-    Core: Use ro.build.date to signal mIsUpgrade
-
-    M: We use a static fingerprint that is only changed when a new OEM build is released, so
-       every flash shows Android is starting instead of upgrading.  This will fix that.
-    N: even though we dont have the dexopt sceen on N, this is still needed to delete the
-       correct caches, and grant/deny specific runtime permissions like a true oem update
-       would do.
-       Updated for Nougat By: BeansTown106
-
-    Change-Id: I0e3ed5c8f0351e48944432ae6a0c5194ddeff1fa
-
-Author: Sam Mortimer <sam@mortimer.me.uk>
-Date:   Fri Sep 28 13:45:00 2018 -0700
-    fw/b UserManagerService: Use ro.build.date to signal upgrades
-
-    *) We changed PackageManagerService to use Build.DATE instead of
-       Build.FINGERPRINT to detect upgrade.  Do the same for
-       UserManagerService.
-    *) Affects generation of preboot intent and app data migration.
-
-    Change-Id: I56887b7ca842afdcf3cf84b27b4c04667cf43307
-
-Author: Wang Han <416810799@qq.com>
-Date:   Sat Dec 29 23:33:20 2018 +0800
-    ShortcutService: Use ro.build.date to signal package scanning
-
-     * Affects system apps scanning.
-
-    Change-Id: I5f6d6647929f5b5ae7e820b18e95bf5ed2ec8d1c
-
-Author: maxwen <max.weninger@gmail.com>
-Date:   Tue Nov 19 01:02:01 2019 +0100
-    base: Use ro.build.date to clear cache dirs on update
-
-    instead of using ro.build.fingerprint we explictly need to use ro.build.date
-
-    Change-Id: Ib3e80e58eb8c9a21c108e9f5cd2dbdb7ada8e3a4
-
-Author: maxwen <max.weninger@gmail.com>
-Date:   Wed Oct 28 07:07:10 2020 -0400
-    One more Build.FINGERPRINT to Build.DATE change
-
-    Change-Id: I13dbf3d7f6587d3fcd6591cc0f861b34b6d5561c
-
+Co-authored-by: maxwen <max.weninger@gmail.com>
+Co-authored-by: Sam Mortimer <sam@mortimer.me.uk>
+Co-authored-by: Wang Han <416810799@qq.com>
 Change-Id: If0eb969ba509981f9209ffa37a949d9042ef4c2a
 ---
- core/java/android/app/admin/SystemUpdateInfo.java             | 4 ++--
- core/java/android/content/pm/PackagePartitions.java           | 4 ++--
- services/core/java/com/android/server/pm/ShortcutService.java | 2 +-
- 3 files changed, 5 insertions(+), 5 deletions(-)
+ core/java/android/app/admin/SystemUpdateInfo.java            | 4 ++--
+ core/java/android/content/pm/PackagePartitions.java          | 2 +-
+ .../java/com/android/server/appwidget/AppWidgetXmlUtil.java  | 4 ++--
+ .../java/com/android/server/pm/PackageManagerService.java    | 5 +++--
+ .../com/android/server/pm/PackageManagerServiceUtils.java    | 3 +--
+ services/core/java/com/android/server/pm/Settings.java       | 2 +-
+ .../core/java/com/android/server/pm/ShortcutService.java     | 2 +-
+ 7 files changed, 11 insertions(+), 11 deletions(-)
 
 diff --git a/core/java/android/app/admin/SystemUpdateInfo.java b/core/java/android/app/admin/SystemUpdateInfo.java
-index 9e6c91f4..7459b0e0 100644
+index 9e6c91f4ec313..7459b0e05e3af 100644
 --- a/core/java/android/app/admin/SystemUpdateInfo.java
 +++ b/core/java/android/app/admin/SystemUpdateInfo.java
-@@ -133,7 +133,7 @@ public final class SystemUpdateInfo implements Parcelable {
+@@ -133,7 +133,7 @@ public void writeToXml(TypedXmlSerializer out, String tag) throws IOException {
          out.startTag(null, tag);
          out.attributeLong(null, ATTR_RECEIVED_TIME, mReceivedTime);
          out.attributeInt(null, ATTR_SECURITY_PATCH_STATE, mSecurityPatchState);
@@ -78,7 +31,7 @@ index 9e6c91f4..7459b0e0 100644
          out.endTag(null, tag);
      }
  
-@@ -142,7 +142,7 @@ public final class SystemUpdateInfo implements Parcelable {
+@@ -142,7 +142,7 @@ public void writeToXml(TypedXmlSerializer out, String tag) throws IOException {
      public static SystemUpdateInfo readFromXml(TypedXmlPullParser parser) {
          // If an OTA has been applied (build fingerprint has changed), discard stale info.
          final String buildFingerprint = parser.getAttributeValue(null, ATTR_ORIGINAL_BUILD );
@@ -88,26 +41,102 @@ index 9e6c91f4..7459b0e0 100644
          }
          try {
 diff --git a/core/java/android/content/pm/PackagePartitions.java b/core/java/android/content/pm/PackagePartitions.java
-index ff80e614..8bf0d5ff 100644
+index ff80e614be58b..da3b68ecf789f 100644
 --- a/core/java/android/content/pm/PackagePartitions.java
 +++ b/core/java/android/content/pm/PackagePartitions.java
-@@ -129,9 +129,9 @@ public class PackagePartitions {
-         final String[] digestProperties = new String[SYSTEM_PARTITIONS.size() + 1];
-         for (int i = 0; i < SYSTEM_PARTITIONS.size(); i++) {
+@@ -131,7 +131,7 @@ private static String getFingerprint() {
              final String partitionName = SYSTEM_PARTITIONS.get(i).getName();
--            digestProperties[i] = "ro." + partitionName + ".build.fingerprint";
-+            digestProperties[i] = "ro." + partitionName + ".build.version.incremental";
+             digestProperties[i] = "ro." + partitionName + ".build.fingerprint";
          }
 -        digestProperties[SYSTEM_PARTITIONS.size()] = "ro.build.fingerprint"; // build fingerprint
-+        digestProperties[SYSTEM_PARTITIONS.size()] = "ro.build.version.incremental"; // build fingerprint
++        digestProperties[SYSTEM_PARTITIONS.size()] = "ro.build.version.incremental";
          return SystemProperties.digestOf(digestProperties);
      }
  
+diff --git a/services/appwidget/java/com/android/server/appwidget/AppWidgetXmlUtil.java b/services/appwidget/java/com/android/server/appwidget/AppWidgetXmlUtil.java
+index d781cd8d58d89..c1b2c5824b519 100644
+--- a/services/appwidget/java/com/android/server/appwidget/AppWidgetXmlUtil.java
++++ b/services/appwidget/java/com/android/server/appwidget/AppWidgetXmlUtil.java
+@@ -100,7 +100,7 @@ public static void writeAppWidgetProviderInfoLocked(@NonNull final TypedXmlSeria
+         out.attributeInt(null, ATTR_WIDGET_FEATURES, info.widgetFeatures);
+         out.attributeInt(null, ATTR_DESCRIPTION_RES, info.descriptionRes);
+         out.attributeBoolean(null, ATTR_PROVIDER_INHERITANCE, info.isExtendedFromAppWidgetProvider);
+-        out.attribute(null, ATTR_OS_FINGERPRINT, Build.FINGERPRINT);
++        out.attribute(null, ATTR_OS_FINGERPRINT, Build.VERSION.INCREMENTAL);
+     }
+ 
+     /**
+@@ -111,7 +111,7 @@ public static AppWidgetProviderInfo readAppWidgetProviderInfoLocked(
+             @NonNull final TypedXmlPullParser parser) {
+         Objects.requireNonNull(parser);
+         final String fingerprint = parser.getAttributeValue(null, ATTR_OS_FINGERPRINT);
+-        if (!Build.FINGERPRINT.equals(fingerprint)) {
++        if (!Build.VERSION.INCREMENTAL.equals(fingerprint)) {
+             return null;
+         }
+         final AppWidgetProviderInfo info = new AppWidgetProviderInfo();
+diff --git a/services/core/java/com/android/server/pm/PackageManagerService.java b/services/core/java/com/android/server/pm/PackageManagerService.java
+index c0b8034b9a562..dd7d5cea82a83 100644
+--- a/services/core/java/com/android/server/pm/PackageManagerService.java
++++ b/services/core/java/com/android/server/pm/PackageManagerService.java
+@@ -2229,7 +2229,8 @@ public Set<String> getInstallConstraintsAllowlist() {
+             if (mIsUpgrade) {
+                 PackageManagerServiceUtils.logCriticalInfo(Log.INFO,
+                         "Upgrading from " + ver.fingerprint + " (" + ver.buildFingerprint + ") to "
+-                                + PackagePartitions.FINGERPRINT + " (" + Build.FINGERPRINT + ")");
++                                + PackagePartitions.FINGERPRINT
++                                + " (" + Build.VERSION.INCREMENTAL + ")");
+             }
+             mPriorSdkVersion = mIsUpgrade ? ver.sdkVersion : -1;
+             mInitAppsHelper = new InitAppsHelper(this, mApexManager, mInstallPackageHelper,
+@@ -2387,7 +2388,7 @@ public Set<String> getInstallConstraintsAllowlist() {
+                                         | Installer.FLAG_CLEAR_APP_DATA_KEEP_ART_PROFILES);
+                     }
+                 }
+-                ver.buildFingerprint = Build.FINGERPRINT;
++                ver.buildFingerprint = Build.VERSION.INCREMENTAL;
+                 ver.fingerprint = PackagePartitions.FINGERPRINT;
+             }
+ 
+diff --git a/services/core/java/com/android/server/pm/PackageManagerServiceUtils.java b/services/core/java/com/android/server/pm/PackageManagerServiceUtils.java
+index ff8abf8794874..0babd99a511ba 100644
+--- a/services/core/java/com/android/server/pm/PackageManagerServiceUtils.java
++++ b/services/core/java/com/android/server/pm/PackageManagerServiceUtils.java
+@@ -1399,8 +1399,6 @@ public static void enforceSystemOrRoot(String message) {
+         // that starts with "eng." to signify that this is an engineering build and not
+         // destined for release.
+         if (isUserDebugBuild && incrementalVersion.startsWith("eng.")) {
+-            Slog.w(TAG, "Wiping cache directory because the system partition changed.");
+-
+             // Heuristic: If the /system directory has been modified recently due to an "adb sync"
+             // or a regular make, then blow away the cache. Note that mtimes are *NOT* reliable
+             // in general and should not be used for production changes. In this specific case,
+@@ -1408,6 +1406,7 @@ public static void enforceSystemOrRoot(String message) {
+             File frameworkDir =
+                     new File(Environment.getRootDirectory(), "framework");
+             if (cacheDir.lastModified() < frameworkDir.lastModified()) {
++                Slog.w(TAG, "Wiping cache directory because the system partition changed.");
+                 FileUtils.deleteContents(cacheBaseDir);
+                 cacheDir = FileUtils.createDir(cacheBaseDir, cacheName);
+             }
+diff --git a/services/core/java/com/android/server/pm/Settings.java b/services/core/java/com/android/server/pm/Settings.java
+index 39565526f33ee..d410f237fd07c 100644
+--- a/services/core/java/com/android/server/pm/Settings.java
++++ b/services/core/java/com/android/server/pm/Settings.java
+@@ -484,7 +484,7 @@ public static class VersionInfo {
+         public void forceCurrent() {
+             sdkVersion = Build.VERSION.SDK_INT;
+             databaseVersion = CURRENT_DATABASE_VERSION;
+-            buildFingerprint = Build.FINGERPRINT;
++            buildFingerprint = Build.VERSION.INCREMENTAL;
+             fingerprint = PackagePartitions.FINGERPRINT;
+         }
+     }
 diff --git a/services/core/java/com/android/server/pm/ShortcutService.java b/services/core/java/com/android/server/pm/ShortcutService.java
-index c1ab3f9e..1b0c9917 100644
+index 1cd77ffcedaa2..b918cfa56f40d 100644
 --- a/services/core/java/com/android/server/pm/ShortcutService.java
 +++ b/services/core/java/com/android/server/pm/ShortcutService.java
-@@ -5230,7 +5230,7 @@ public class ShortcutService extends IShortcutService.Stub {
+@@ -5248,7 +5248,7 @@ void injectRestoreCallingIdentity(long token) {
  
      // Injection point.
      String injectBuildFingerprint() {

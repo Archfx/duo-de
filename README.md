@@ -1,5 +1,7 @@
 # Surface-duo Dual Experience [duo-de]
 
+
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/duo-light.svg" />
   <img align="left" src="images/duo-dark.svg" />
@@ -12,7 +14,7 @@ Before you proceed, please take a moment to read [this announcement](https://git
 ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/archfx/duo-de/total?style=for-the-badge&label=duo-de%20Downloads&color=%2333cc33)
 ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/archfx/duo-de/sync.yml?style=for-the-badge&label=TrebleDroid%20Sync)
 
-
+![Android 15 is here!](https://readme-typing-svg.herokuapp.com/?font=Fira+Code&pause=1000&width=435&lines=Yes%2C+Android+15+is+Here!!!)
 
 <p align="center">
 <img src="images/src-duo.png" alt="drawing" style="width:600px;"/> </p>

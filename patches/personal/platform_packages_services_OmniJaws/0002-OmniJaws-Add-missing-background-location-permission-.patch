@@ -1,0 +1,47 @@
+From 0af65aaf4bd507b52bef9dfc06189f3a0090c51c Mon Sep 17 00:00:00 2001
+From: Alberto Ponces <ponces26@gmail.com>
+Date: Mon, 23 Sep 2024 15:50:58 +0100
+Subject: [PATCH 2/3] OmniJaws: Add missing background location permission
+ request and validation
+
+---
+ .../org/omnirom/omnijaws/SettingsFragment.java   | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/app/src/main/java/org/omnirom/omnijaws/SettingsFragment.java b/app/src/main/java/org/omnirom/omnijaws/SettingsFragment.java
+index b1dd733..dadcc2c 100644
+--- a/app/src/main/java/org/omnirom/omnijaws/SettingsFragment.java
++++ b/app/src/main/java/org/omnirom/omnijaws/SettingsFragment.java
+@@ -114,6 +114,17 @@ public class SettingsFragment extends PreferenceFragmentCompat implements OnPref
+                     }
+             );
+ 
++    ActivityResultLauncher<String[]> requestBackgroundPermissionLauncher =
++            registerForActivityResult(new ActivityResultContracts
++                            .RequestMultiplePermissions(), result -> {
++                        Boolean backgroundLocationGranted = result.getOrDefault(
++                                Manifest.permission.ACCESS_BACKGROUND_LOCATION, false);
++                        if ((backgroundLocationGranted != null && backgroundLocationGranted)) {
++                            forceRefreshWeatherSettings();
++                        }
++                    }
++            );
++
+     @Override
+     public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
+         mPrefs = PreferenceManager.getDefaultSharedPreferences(getContext());
+@@ -323,6 +334,11 @@ public class SettingsFragment extends PreferenceFragmentCompat implements OnPref
+                     Manifest.permission.ACCESS_FINE_LOCATION,
+                     Manifest.permission.ACCESS_COARSE_LOCATION
+             });
++        } else if (getContext().checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
++                != PackageManager.PERMISSION_GRANTED) {
++            requestBackgroundPermissionLauncher.launch(new String[]{
++                    Manifest.permission.ACCESS_BACKGROUND_LOCATION
++            });
+         } else {
+             if (force) {
+                 forceRefreshWeatherSettings();
+-- 
+2.34.1
+

@@ -1,0 +1,30 @@
+From 075ae391d3905ebc5c3e0ebe9b1cbd029c328e3d Mon Sep 17 00:00:00 2001
+From: micky387 <mickaelsaibi@free.fr>
+Date: Fri, 13 Sep 2024 23:25:45 -0400
+Subject: [PATCH 1/3] OmniJaws: Fix required libraries between the build system
+ and the manifest
+
+https: //android.googlesource.com/platform/build/+/main/Changes.md#dexpreopt-starts-enforcing-checks-for-java-modules
+Change-Id: Ic01b3b2ff8878af5a7b7a0599de4e1a3120dc2ca
+---
+ Android.bp | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/Android.bp b/Android.bp
+index c2be871..8c5c81a 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -8,6 +8,10 @@ android_app {
+     "org.apache.http.legacy",
+   ],
+ 
++  optional_uses_libs: [
++    "org.apache.http.legacy",
++  ],
++
+   srcs: [
+     "app/src/main/**/*.java",
+   ],
+-- 
+2.34.1
+
