@@ -1,4 +1,4 @@
-From fe5645730f484a0eebed59150c931c8821f6ee34 Mon Sep 17 00:00:00 2001
+From fb4fba1c1ed35c0006e59d2cefe07f58c95309a0 Mon Sep 17 00:00:00 2001
 From: Andy CrossGate Yan <GeForce8800Ultra@gmail.com>
 Date: Wed, 8 Dec 2021 07:04:53 +0000
 Subject: [PATCH 1/4] Remove init.vndk-nodef.rc
@@ -14,15 +14,15 @@ Change-Id: I7c14fe5229e953f620bb225fa5c981752d0ac5f9
  target/product/gsi/Android.mk         | 13 -------------
  target/product/gsi/init.gsi.rc        |  2 --
  target/product/gsi/init.vndk-nodef.rc |  3 ---
- target/product/gsi_release.mk         |  1 -
- 4 files changed, 19 deletions(-)
+ target/product/gsi_release.mk         |  2 --
+ 4 files changed, 20 deletions(-)
  delete mode 100644 target/product/gsi/init.vndk-nodef.rc
 
 diff --git a/target/product/gsi/Android.mk b/target/product/gsi/Android.mk
-index f348fbb60b..ff8e688b12 100644
+index 36897fef8e..49741ac662 100644
 --- a/target/product/gsi/Android.mk
 +++ b/target/product/gsi/Android.mk
-@@ -278,16 +278,3 @@ LOCAL_SYSTEM_EXT_MODULE := true
+@@ -153,16 +153,3 @@ LOCAL_SYSTEM_EXT_MODULE := true
  LOCAL_MODULE_RELATIVE_PATH := init
  
  include $(BUILD_PREBUILT)
@@ -59,17 +59,18 @@ index 1b141a05e7..0000000000
 -    # Reboot if BOARD_VNDK_VERSION is not defined
 -    exec - root -- /system/bin/reboot bootloader
 diff --git a/target/product/gsi_release.mk b/target/product/gsi_release.mk
-index 2e373663a4..2636a11972 100644
+index da1284e7b8..61337e1e19 100644
 --- a/target/product/gsi_release.mk
 +++ b/target/product/gsi_release.mk
-@@ -51,7 +51,6 @@ PRODUCT_SET_DEBUGFS_RESTRICTIONS := false
+@@ -48,8 +48,6 @@ PRODUCT_USE_DYNAMIC_PARTITION_SIZE := true
  PRODUCT_PACKAGES += \
      gsi_skip_mount.cfg \
      init.gsi.rc \
 -    init.vndk-nodef.rc \
+-
  
  # Overlay the GSI specific SystemUI setting
- PRODUCT_PACKAGES += gsi_overlay_systemui
+ ifneq ($(PRODUCT_IS_AUTOMOTIVE),true)
 -- 
 2.34.1
 

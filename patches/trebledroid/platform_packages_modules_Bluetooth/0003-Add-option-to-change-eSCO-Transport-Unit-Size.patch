@@ -1,4 +1,4 @@
-From f67a732465c863d7767cb9bfd8d71403806a14c8 Mon Sep 17 00:00:00 2001
+From d2923450658a874a843b2129f46e8ca460518861 Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Thu, 17 Jun 2021 15:48:53 +0100
 Subject: [PATCH 3/8] Add option to change eSCO Transport Unit Size
@@ -15,12 +15,12 @@ Change-Id: I3e5897c2ce983042b9a4bef9def6744ba4253bcb
  1 file changed, 7 insertions(+), 1 deletion(-)
 
 diff --git a/system/device/src/esco_parameters.cc b/system/device/src/esco_parameters.cc
-index 15f1397087..21590782a6 100644
+index f571f06ff8..2536b0fd6f 100644
 --- a/system/device/src/esco_parameters.cc
 +++ b/system/device/src/esco_parameters.cc
-@@ -25,7 +25,8 @@
- #include "hci/controller_interface.h"
- #include "main/shim/entry.h"
+@@ -26,7 +26,8 @@
+ 
+ using namespace bluetooth;
  
 -static const enh_esco_params_t default_esco_parameters[ESCO_NUM_CODECS] = {
 +#include <cutils/properties.h>
@@ -28,7 +28,7 @@ index 15f1397087..21590782a6 100644
      // CVSD D1
      {
          .transmit_bandwidth = TXRX_64KBITS_RATE,
-@@ -352,6 +353,11 @@ enh_esco_params_t esco_parameters_for_codec(esco_codec_t codec, bool offload) {
+@@ -393,6 +394,11 @@ enh_esco_params_t esco_parameters_for_codec(esco_codec_t codec, bool offload) {
      }
    }
  

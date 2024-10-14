@@ -1,4 +1,4 @@
-From 7bb1ee6a7dda3ae5b7a8545a32fe248001539fb3 Mon Sep 17 00:00:00 2001
+From 94ee2a807995e98b1f96441928e27db91a6d4843 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sun, 31 Mar 2024 17:18:05 -0400
 Subject: [PATCH 25/26] If AVB fails, ignore/disable AVB
@@ -13,10 +13,10 @@ being AVB1.0
  2 files changed, 14 insertions(+), 2 deletions(-)
 
 diff --git a/init/first_stage_init.cpp b/init/first_stage_init.cpp
-index c4d0f758d..0470444ff 100644
+index bfe636bbf..2bf84cf7a 100644
 --- a/init/first_stage_init.cpp
 +++ b/init/first_stage_init.cpp
-@@ -520,7 +520,11 @@ int FirstStageMain(int argc, char** argv) {
+@@ -514,7 +514,11 @@ int FirstStageMain(int argc, char** argv) {
          }
  
          if (!created_devices && !fsm->DoCreateDevices()) {
@@ -30,10 +30,10 @@ index c4d0f758d..0470444ff 100644
  
          if (!fsm->DoFirstStageMount()) {
 diff --git a/init/first_stage_mount.cpp b/init/first_stage_mount.cpp
-index 4f5293771..5d58db6f4 100644
+index dde58aa9e..99bba9a3a 100644
 --- a/init/first_stage_mount.cpp
 +++ b/init/first_stage_mount.cpp
-@@ -231,6 +231,12 @@ Result<std::unique_ptr<FirstStageMount>> FirstStageMount::Create(const std::stri
+@@ -233,6 +233,12 @@ Result<std::unique_ptr<FirstStageMount>> FirstStageMount::Create(const std::stri
      } else {
          fstab = ReadFirstStageFstabAndroid();
      }
@@ -46,7 +46,7 @@ index 4f5293771..5d58db6f4 100644
      if (!fstab.ok()) {
          return fstab.error();
      }
-@@ -267,7 +273,9 @@ bool FirstStageMountVBootV2::DoFirstStageMount() {
+@@ -269,7 +275,9 @@ bool FirstStageMountVBootV2::DoFirstStageMount() {
          return true;
      }
  

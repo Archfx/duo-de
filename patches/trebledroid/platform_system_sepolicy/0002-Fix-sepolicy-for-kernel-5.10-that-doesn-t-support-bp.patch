@@ -1,4 +1,4 @@
-From 5aee0e8138f55e3de9889f12b2c48b08da8ceb97 Mon Sep 17 00:00:00 2001
+From 4b166cef484731045a29193b6530ab449c3ff88f Mon Sep 17 00:00:00 2001
 From: danielzhang130 <37479705+danielzhang130@users.noreply.github.com>
 Date: Fri, 12 Apr 2024 13:01:08 -0400
 Subject: [PATCH 2/2] Fix sepolicy for kernel < 5.10 that doesn't support bpf
@@ -12,10 +12,10 @@ Signed-off-by: Daniel Zhang <danielzhang130@gmail.com>
  1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/private/network_stack.te b/private/network_stack.te
-index 7587c1f46..9e6bd4b12 100644
+index 4450e02ba..d7dda3aed 100644
 --- a/private/network_stack.te
 +++ b/private/network_stack.te
-@@ -61,8 +61,8 @@ hal_client_domain(network_stack, hal_tetheroffload)
+@@ -62,8 +62,8 @@ hal_client_domain(network_stack, hal_tetheroffload)
  allow network_stack self:netlink_netfilter_socket create_socket_perms_no_ioctl;
  allow network_stack network_stack_service:service_manager find;
  # allow Tethering(network_stack process) to run/update/read the eBPF maps to offload tethering traffic by eBPF.
@@ -23,9 +23,9 @@ index 7587c1f46..9e6bd4b12 100644
 -allow network_stack { fs_bpf_net_private fs_bpf_net_shared fs_bpf_netd_readonly fs_bpf_netd_shared fs_bpf_tethering }:file { getattr read write };
 +allow network_stack { fs_bpf fs_bpf_net_private fs_bpf_net_shared fs_bpf_netd_readonly fs_bpf_netd_shared fs_bpf_tethering }:dir search;
 +allow network_stack { fs_bpf fs_bpf_net_private fs_bpf_net_shared fs_bpf_netd_readonly fs_bpf_netd_shared fs_bpf_tethering }:file { getattr read write };
- allow network_stack bpfloader:bpf { map_read map_write prog_run };
- # allow Tethering(network_stack process) to read flag value in tethering_u_or_later_native namespace
- get_prop(network_stack, device_config_tethering_u_or_later_native_prop)
+ allow network_stack bpfloader:bpf prog_run;
+ allow network_stack self:bpf map_create;
+ allow network_stack { bpfloader netd network_stack system_server }:bpf { map_read map_write };
 -- 
 2.34.1
 

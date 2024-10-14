@@ -1,7 +1,7 @@
-From 784380fdc01f9dddf0ac222f9b7fbfceee6cee1a Mon Sep 17 00:00:00 2001
+From f73414f0397932e94d9169f2e43116aebe13b7ba Mon Sep 17 00:00:00 2001
 From: ExactExampl <exactxmpl@pixelexperience.org>
 Date: Tue, 11 Oct 2022 12:38:00 +0300
-Subject: [PATCH 11/16] Conditionally revert "Block Binder thread until
+Subject: [PATCH 06/10] Conditionally revert "Block Binder thread until
  incoming call process completes"
 
 * Legacy IMS packages handling incoming calls in such a way that
@@ -17,7 +17,7 @@ Change-Id: I55a8f3bbca4a2b9a6bc7511e9fe2d0884a8818e5
  1 file changed, 14 insertions(+), 1 deletion(-)
 
 diff --git a/src/java/com/android/internal/telephony/imsphone/ImsPhoneCallTracker.java b/src/java/com/android/internal/telephony/imsphone/ImsPhoneCallTracker.java
-index dcb3b207af..5d234e29ae 100644
+index e73eafd7e1..2cf59c71a6 100644
 --- a/src/java/com/android/internal/telephony/imsphone/ImsPhoneCallTracker.java
 +++ b/src/java/com/android/internal/telephony/imsphone/ImsPhoneCallTracker.java
 @@ -70,6 +70,7 @@ import android.os.Registrant;
