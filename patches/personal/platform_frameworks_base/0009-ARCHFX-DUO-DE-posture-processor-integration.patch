@@ -1,9 +1,9 @@
-From 4e0f0133957864d4e4502b92ad42e3d0fc754bd7 Mon Sep 17 00:00:00 2001
+From b9c27e955cd166cd574ecb7ee2a620bfbd3e1763 Mon Sep 17 00:00:00 2001
 From: Archfx <cybx@live.com>
-Date: Fri, 7 Jun 2024 09:30:15 -0400
-Subject: [PATCH] Surface duo specifics with posture processor
+Date: Mon, 14 Oct 2024 22:39:30 -0400
+Subject: [PATCH] ARCHFX/DUO-DE posture processor integration
 
-Change-Id: I473dab093a325391b4d0a0ef88a6273465c2fb12
+Change-Id: I4525b14c3cd6944547a7e3dc800642016c674c95
 ---
  .../display/DisplayManagerGlobal.java         | 17 +++++++++++++++++
  .../hardware/display/IDisplayManager.aidl     |  3 +++
@@ -14,20 +14,19 @@ Change-Id: I473dab093a325391b4d0a0ef88a6273465c2fb12
  6 files changed, 61 insertions(+), 1 deletion(-)
 
 diff --git a/core/java/android/hardware/display/DisplayManagerGlobal.java b/core/java/android/hardware/display/DisplayManagerGlobal.java
-index 75f0ceb7e651..fef861be3f0d 100644
+index 85197221e651..d5a7eb19ff71 100644
 --- a/core/java/android/hardware/display/DisplayManagerGlobal.java
 +++ b/core/java/android/hardware/display/DisplayManagerGlobal.java
-@@ -34,7 +34,9 @@ import android.content.res.Resources;
+@@ -34,6 +34,8 @@ import android.content.res.Resources;
  import android.graphics.ColorSpace;
  import android.graphics.Point;
  import android.hardware.OverlayProperties;
 +import android.hardware.display.IDisplayManager;
- import android.hardware.display.DisplayManager.DisplayListener;
 +import android.hardware.display.DisplayManagerInternal;
+ import android.hardware.display.DisplayManager.DisplayListener;
  import android.hardware.graphics.common.DisplayDecorationSupport;
  import android.media.projection.IMediaProjection;
- import android.media.projection.MediaProjection;
-@@ -118,6 +120,9 @@ public final class DisplayManagerGlobal {
+@@ -119,6 +121,9 @@ public final class DisplayManagerGlobal {
      @UnsupportedAppUsage
      private static DisplayManagerGlobal sInstance;
  
@@ -37,7 +36,7 @@ index 75f0ceb7e651..fef861be3f0d 100644
      // Guarded by mLock
      private boolean mDispatchNativeCallbacks = false;
      private float mNativeCallbackReportedRefreshRate;
-@@ -186,6 +191,18 @@ public final class DisplayManagerGlobal {
+@@ -189,6 +194,18 @@ public final class DisplayManagerGlobal {
          }
      }
  
@@ -57,7 +56,7 @@ index 75f0ceb7e651..fef861be3f0d 100644
       * Get information about a particular logical display.
       *
 diff --git a/core/java/android/hardware/display/IDisplayManager.aidl b/core/java/android/hardware/display/IDisplayManager.aidl
-index 83de4e45cf2f..4651eb106271 100644
+index b7c02b0d0720..527a232e742e 100644
 --- a/core/java/android/hardware/display/IDisplayManager.aidl
 +++ b/core/java/android/hardware/display/IDisplayManager.aidl
 @@ -220,6 +220,9 @@ interface IDisplayManager {
@@ -71,7 +70,7 @@ index 83de4e45cf2f..4651eb106271 100644
      // to set the layerStack after the display was created, which is not something we support in
      // DMS. This should be deleted in V release.
 diff --git a/libs/WindowManager/Jetpack/src/androidx/window/common/CommonFoldingFeature.java b/libs/WindowManager/Jetpack/src/androidx/window/common/CommonFoldingFeature.java
-index 65955b1d9bcc..b06bf4bf5e51 100644
+index e37dea4dfd69..9803ba1f0af8 100644
 --- a/libs/WindowManager/Jetpack/src/androidx/window/common/CommonFoldingFeature.java
 +++ b/libs/WindowManager/Jetpack/src/androidx/window/common/CommonFoldingFeature.java
 @@ -213,7 +213,7 @@ public final class CommonFoldingFeature {
@@ -84,12 +83,12 @@ index 65955b1d9bcc..b06bf4bf5e51 100644
          this.mState = state;
          if (rect.width() == 0 && rect.height() == 0) {
 diff --git a/services/core/java/com/android/server/display/DisplayManagerService.java b/services/core/java/com/android/server/display/DisplayManagerService.java
-index 2ab15e639d68..0920951e9f60 100644
+index 670d59c09e06..940dccfd4c1c 100644
 --- a/services/core/java/com/android/server/display/DisplayManagerService.java
 +++ b/services/core/java/com/android/server/display/DisplayManagerService.java
-@@ -4504,6 +4504,25 @@ public final class DisplayManagerService extends SystemService {
-             disableConnectedDisplay_enforcePermission();
-             DisplayManagerService.this.enableConnectedDisplay(displayId, false);
+@@ -4667,6 +4667,25 @@ public final class DisplayManagerService extends SystemService {
+             DisplayManagerService.this.mDisplayModeDirector.requestDisplayModes(
+                     token, displayId, modeIds);
          }
 +
 +        @Override
@@ -109,15 +108,15 @@ index 2ab15e639d68..0920951e9f60 100644
 +                    scheduleTraversalLocked(false);
 +                }
 +            }
-+        }
++        }    
      }
  
      private static boolean isValidBrightness(float brightness) {
 diff --git a/services/core/java/com/android/server/policy/DeviceStateProviderImpl.java b/services/core/java/com/android/server/policy/DeviceStateProviderImpl.java
-index 3644054e3b78..71335da742dc 100644
+index 453c6ef41437..ec7fcecdf573 100644
 --- a/services/core/java/com/android/server/policy/DeviceStateProviderImpl.java
 +++ b/services/core/java/com/android/server/policy/DeviceStateProviderImpl.java
-@@ -655,6 +655,12 @@ public final class DeviceStateProviderImpl implements DeviceStateProvider,
+@@ -765,6 +765,12 @@ public final class DeviceStateProviderImpl implements DeviceStateProvider,
              return configFileFromDataDir;
          }
  
@@ -131,10 +130,10 @@ index 3644054e3b78..71335da742dc 100644
                  VENDOR_CONFIG_FILE_PATH, CONFIG_FILE_NAME);
          if (configFileFromVendorDir.exists()) {
 diff --git a/services/java/com/android/server/SystemServer.java b/services/java/com/android/server/SystemServer.java
-index 59e95e7571d0..475997f3649e 100644
+index 107c2947c550..92e85837b8de 100644
 --- a/services/java/com/android/server/SystemServer.java
 +++ b/services/java/com/android/server/SystemServer.java
-@@ -2922,6 +2922,14 @@ public final class SystemServer implements Dumpable {
+@@ -2951,6 +2951,14 @@ public final class SystemServer implements Dumpable {
          }
          t.traceEnd();
  
@@ -147,9 +146,9 @@ index 59e95e7571d0..475997f3649e 100644
 +        t.traceEnd();
 +
          t.traceBegin("GameManagerService");
-         mSystemServiceManager.startService(GAME_MANAGER_SERVICE_CLASS);
+         mSystemServiceManager.startService(GameManagerService.Lifecycle.class);
          t.traceEnd();
-@@ -3410,6 +3418,13 @@ public final class SystemServer implements Dumpable {
+@@ -3460,6 +3468,13 @@ public final class SystemServer implements Dumpable {
          t.traceEnd();
      }
  
@@ -158,7 +157,7 @@ index 59e95e7571d0..475997f3649e 100644
 +        Intent intent = new Intent();
 +        intent.setComponent(ComponentName.unflattenFromString("com.thain.duo/.PostureProcessorService"));
 +        context.startServiceAsUser(intent, UserHandle.SYSTEM);
-+    }
++    }    
 +
      private static void startSystemUi(Context context, WindowManagerService windowManager) {
          PackageManagerInternal pm = LocalServices.getService(PackageManagerInternal.class);
