@@ -1,4 +1,4 @@
-From 4fba4c104a5bd0245c97d9100fa905681c234f3f Mon Sep 17 00:00:00 2001
+From e8c47e8ff1024bfd4e7133cdd2b448dfacee98d3 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sat, 16 Apr 2022 14:30:14 -0400
 Subject: [PATCH 18/24] Add a prop to change Samsung flash strength

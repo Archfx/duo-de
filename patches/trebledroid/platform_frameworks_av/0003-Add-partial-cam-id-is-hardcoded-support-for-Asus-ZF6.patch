@@ -1,4 +1,4 @@
-From ba9fca67366545ccff5105d00d047be14c126558 Mon Sep 17 00:00:00 2001
+From 6e73c8e862320d12d3447380224e85d093c12ba8 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Tue, 1 Oct 2019 13:35:49 +0200
 Subject: [PATCH 03/24] Add (partial, cam id is hardcoded) support for Asus ZF6
@@ -11,7 +11,7 @@ Change-Id: Iea6e1370780a1d16f728748d1d948d092532d8fe
  2 files changed, 29 insertions(+)
 
 diff --git a/services/camera/libcameraservice/CameraService.cpp b/services/camera/libcameraservice/CameraService.cpp
-index acc3b32813..e2193c6c76 100644
+index acc3b32813..376e68f5e3 100644
 --- a/services/camera/libcameraservice/CameraService.cpp
 +++ b/services/camera/libcameraservice/CameraService.cpp
 @@ -28,6 +28,7 @@
@@ -22,14 +22,14 @@ index acc3b32813..e2193c6c76 100644
  #include <inttypes.h>
  #include <pthread.h>
  #include <poll.h>
-@@ -173,6 +174,7 @@ static std::set<std::string> sServiceErrorEventSet;
- 
- CameraService::CameraService(
-         std::shared_ptr<CameraServiceProxyWrapper> cameraServiceProxyWrapper,
-+        mPhysicalFrontCamStatus(false),
-         std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils) :
+@@ -177,6 +178,7 @@ CameraService::CameraService(
          AttributionAndPermissionUtilsEncapsulator(attributionAndPermissionUtils == nullptr ?
                  std::make_shared<AttributionAndPermissionUtils>()\
+                 : attributionAndPermissionUtils),
++        mPhysicalFrontCamStatus(false),
+         mCameraServiceProxyWrapper(cameraServiceProxyWrapper == nullptr ?
+                 std::make_shared<CameraServiceProxyWrapper>() : cameraServiceProxyWrapper),
+         mEventLog(DEFAULT_EVENT_LOG_LENGTH),
 @@ -2698,6 +2700,7 @@ Status CameraService::connectHelper(const sp<CALLBACK>& cameraCb, const std::str
              mServiceLock.lock();
          } else {
