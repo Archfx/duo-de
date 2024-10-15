@@ -1,4 +1,4 @@
-From 356782a29b3207409069beaf9a08158c63656ead Mon Sep 17 00:00:00 2001
+From 7fb849c1e7811b6f9a8b9926d612c0cfd71002f5 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Wed, 15 May 2024 05:56:59 -0400
 Subject: [PATCH 6/7] More bpf errors ignore -- there are some 4.14 without the
@@ -9,7 +9,7 @@ Subject: [PATCH 6/7] More bpf errors ignore -- there are some 4.14 without the
  1 file changed, 3 insertions(+), 4 deletions(-)
 
 diff --git a/netbpfload/NetBpfLoad.cpp b/netbpfload/NetBpfLoad.cpp
-index 7c8186d8c9..faf73b08ce 100644
+index 4778c84dbd..8c471e5975 100644
 --- a/netbpfload/NetBpfLoad.cpp
 +++ b/netbpfload/NetBpfLoad.cpp
 @@ -420,8 +420,7 @@ static int doLoad(char** argv, char * const envp[]) {
