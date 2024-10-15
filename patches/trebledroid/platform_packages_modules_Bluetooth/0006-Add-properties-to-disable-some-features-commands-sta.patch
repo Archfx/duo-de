@@ -1,4 +1,4 @@
-From 42040d59b73a7d1c9f593d23b0e6b77af8347074 Mon Sep 17 00:00:00 2001
+From 1d9d15cfa0c5dc91aa8603d7a55d8f7cb7a0ab89 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sat, 27 May 2023 06:41:32 -0400
 Subject: [PATCH 6/8] Add properties to disable some features/commands/states
@@ -9,7 +9,7 @@ Subject: [PATCH 6/8] Add properties to disable some features/commands/states
  1 file changed, 69 insertions(+), 4 deletions(-)
 
 diff --git a/system/gd/hci/controller.cc b/system/gd/hci/controller.cc
-index 328babd385..1cf453d16b 100644
+index 328babd385..3d46c46d6b 100644
 --- a/system/gd/hci/controller.cc
 +++ b/system/gd/hci/controller.cc
 @@ -19,6 +19,7 @@
@@ -43,7 +43,7 @@ index 328babd385..1cf453d16b 100644
 +        auto s = base::SplitString(ignored_commands, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
 +        for(auto command: s) {
 +            int index = std::stoi(command);
-+            LOG_WARN("Ignoring local supported command %d", index);
++            log::warn("Ignoring local supported command {}", index);
 +            uint16_t byte_index = index / 10;
 +            uint16_t bit_index = index % 10;
 +            local_commands[byte_index] &= ~(1 << bit_index);
@@ -71,7 +71,7 @@ index 328babd385..1cf453d16b 100644
 +        for(auto feature: s) {
 +            int index = std::stoi(feature) - offset;
 +            if(index >= 0 && index < 64) {
-+                LOG_WARN("Ignoring local supported feature %d", index);
++                log::warn("Ignoring local supported feature {}", index);
 +                lmp_features &= ~(1ULL << index);
 +            }
 +        }
@@ -95,7 +95,7 @@ index 328babd385..1cf453d16b 100644
 +        auto s = base::SplitString(ignored_features, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
 +        for(auto feature: s) {
 +            int index = std::stoi(feature);
-+            LOG_WARN("Ignoring local supported feature %d", index);
++            log::warn("Ignoring local supported feature {}", index);
 +            local_features &= ~(1ULL << index);
 +        }
 +    }
@@ -118,7 +118,7 @@ index 328babd385..1cf453d16b 100644
 +        auto s = base::SplitString(ignored_states, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
 +        for(auto state: s) {
 +            int index = std::stoi(state);
-+            LOG_WARN("Ignoring local supported state %d", index);
++            log::warn("Ignoring local supported state {}", index);
 +            local_states &= ~(1ULL << index);
 +        }
 +    }

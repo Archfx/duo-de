@@ -1,4 +1,4 @@
-From c80741ece55c724d9c7bd6fc28a18aee37294d1e Mon Sep 17 00:00:00 2001
+From cf33ad128805fa0cfeac51d337714ebadd9cadfc Mon Sep 17 00:00:00 2001
 From: ChonDoit <thphantomblog@gmail.com>
 Date: Thu, 24 Aug 2023 15:58:15 -0300
 Subject: [PATCH 39/52] Fix brightness slider curve for some devices
@@ -6,7 +6,8 @@ Subject: [PATCH 39/52] Fix brightness slider curve for some devices
 Some devices report max brightness as 2047 or 4095
 ---
  .../settingslib/display/BrightnessUtils.java      | 15 ++++++++++-----
- 1 file changed, 10 insertions(+), 5 deletions(-)
+ .../brightness/shared/model/GammaBrightness.kt    | 14 +++++++-------
+ 2 files changed, 17 insertions(+), 12 deletions(-)
 
 diff --git a/packages/SettingsLib/DisplayUtils/src/com/android/settingslib/display/BrightnessUtils.java b/packages/SettingsLib/DisplayUtils/src/com/android/settingslib/display/BrightnessUtils.java
 index 66ed10433459..f6820b4436fc 100644
@@ -53,6 +54,31 @@ index 66ed10433459..f6820b4436fc 100644
 +                       MathUtils.constrain(val, min, max)) : Math.round(MathUtils.lerp(GAMMA_SPACE_MIN, GAMMA_SPACE_MAX, ret));
      }
  }
+diff --git a/packages/SystemUI/src/com/android/systemui/brightness/shared/model/GammaBrightness.kt b/packages/SystemUI/src/com/android/systemui/brightness/shared/model/GammaBrightness.kt
+index 7eba6268869c..b7a9d5f535b4 100644
+--- a/packages/SystemUI/src/com/android/systemui/brightness/shared/model/GammaBrightness.kt
++++ b/packages/SystemUI/src/com/android/systemui/brightness/shared/model/GammaBrightness.kt
+@@ -23,13 +23,13 @@ import com.android.systemui.util.kotlin.pairwiseBy
+ import kotlinx.coroutines.flow.Flow
+ 
+ @JvmInline
+-value class GammaBrightness(
+-    @IntRange(
+-        from = BrightnessUtils.GAMMA_SPACE_MIN.toLong(),
+-        to = BrightnessUtils.GAMMA_SPACE_MAX.toLong()
+-    )
+-    val value: Int
+-)
++value class GammaBrightness(val value: Int) {
++    init {
++        require(value in BrightnessUtils.GAMMA_SPACE_MIN..BrightnessUtils.GAMMA_SPACE_MAX) {
++            "Value must be in range ${BrightnessUtils.GAMMA_SPACE_MIN} to ${BrightnessUtils.GAMMA_SPACE_MAX}"
++        }
++    }
++}
+ 
+ internal fun Flow<GammaBrightness>.logDiffForTable(
+     tableLogBuffer: TableLogBuffer,
 -- 
 2.34.1
 

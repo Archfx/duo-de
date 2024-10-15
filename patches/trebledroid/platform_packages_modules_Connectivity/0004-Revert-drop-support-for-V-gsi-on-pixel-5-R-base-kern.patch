@@ -1,4 +1,4 @@
-From e2dbfb1b30b92b053140136aa984e3ee6d74e292 Mon Sep 17 00:00:00 2001
+From 27a6a00503c7e1d38e8cdbfe739564c9ab54c457 Mon Sep 17 00:00:00 2001
 From: Peter Cai <peter@typeblog.net>
 Date: Sat, 16 Mar 2024 15:27:27 -0400
 Subject: [PATCH 4/7] Revert "drop support for V gsi on pixel 5 R base kernel"

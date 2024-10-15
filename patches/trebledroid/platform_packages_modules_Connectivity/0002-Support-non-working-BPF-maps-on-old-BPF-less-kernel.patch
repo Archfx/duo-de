@@ -1,4 +1,4 @@
-From 55171d033de1903922231f0c0e67e202e57f5309 Mon Sep 17 00:00:00 2001
+From 8c8e3920659a1f9cdeda10f6114fb6c2b23058fc Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Wed, 26 Oct 2022 18:11:10 -0400
 Subject: [PATCH 2/7] Support non-working BPF maps on old BPF-less kernel
@@ -84,7 +84,7 @@ index b7c4e34fad..750490ad24 100644
          }
      }
 diff --git a/netbpfload/NetBpfLoad.cpp b/netbpfload/NetBpfLoad.cpp
-index e9c6d8a2d4..7c8186d8c9 100644
+index e9c6d8a2d4..4778c84dbd 100644
 --- a/netbpfload/NetBpfLoad.cpp
 +++ b/netbpfload/NetBpfLoad.cpp
 @@ -282,6 +282,7 @@ static int doLoad(char** argv, char * const envp[]) {
@@ -159,7 +159,7 @@ index e9c6d8a2d4..7c8186d8c9 100644
 -        ALOGE("Critical kernel bug - failure to write into index 1 of 2 element bpf map array.");
 -        return 1;
 +    if (failed) {
-+        ALOGE("=== CRITICAL FAILURE LOADING BPF PROGRAMS FROM %s ===", location.dir);
++        ALOGE("=== CRITICAL FAILURE LOADING BPF PROGRAMS ===");
 +        ALOGE("If this triggers reliably, you're probably missing kernel options or patches.");
 +        ALOGE("If this triggers randomly, you might be hitting some memory allocation "
 +              "problems or startup script race.");
