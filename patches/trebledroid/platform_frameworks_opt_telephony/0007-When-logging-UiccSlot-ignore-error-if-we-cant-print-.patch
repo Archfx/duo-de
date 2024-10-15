@@ -1,4 +1,4 @@
-From 84a27041b29ecd460c9ce763fc7eeaa879960fa7 Mon Sep 17 00:00:00 2001
+From 215096ecdd6fa17702aef3df57bbb5948389f0f2 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Tue, 17 Oct 2023 11:08:06 -0400
 Subject: [PATCH 07/10] When logging UiccSlot, ignore error if we cant print
