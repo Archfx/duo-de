@@ -1,4 +1,4 @@
-From abf977cf6be6a881c951b0933fcd75c71661c169 Mon Sep 17 00:00:00 2001
+From 55171d033de1903922231f0c0e67e202e57f5309 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Wed, 26 Oct 2022 18:11:10 -0400
 Subject: [PATCH 2/7] Support non-working BPF maps on old BPF-less kernel
@@ -14,7 +14,7 @@ Subject: [PATCH 2/7] Support non-working BPF maps on old BPF-less kernel
  7 files changed, 90 insertions(+), 45 deletions(-)
 
 diff --git a/framework/src/android/net/BpfNetMapsUtils.java b/framework/src/android/net/BpfNetMapsUtils.java
-index 282a11e03c..9ef8aecc54 100644
+index 282a11e03c..874a1f8af4 100644
 --- a/framework/src/android/net/BpfNetMapsUtils.java
 +++ b/framework/src/android/net/BpfNetMapsUtils.java
 @@ -213,6 +213,8 @@ public class BpfNetMapsUtils {
@@ -39,7 +39,7 @@ index 282a11e03c..9ef8aecc54 100644
      ) {
          throwIfPreT("isUidBlockedByFirewallChains is not available on pre-T devices");
  
-+        if (mConfigurationMap == null) return false;
++        if (configurationMap == null) return false;
 +
          // System uids are not blocked by firewall chains, see bpf_progs/netd.c
          // TODO: b/348513058 - use UserHandle.isCore() once it is accessible
@@ -48,7 +48,7 @@ index 282a11e03c..9ef8aecc54 100644
      public static boolean getDataSaverEnabled(IBpfMap<S32, U8> dataSaverEnabledMap) {
          throwIfPreT("getDataSaverEnabled is not available on pre-T devices");
  
-+        if (mDataSaverEnabledMap == null) return false;
++        if (dataSaverEnabledMap == null) return false;
          try {
              return dataSaverEnabledMap.getValue(DATA_SAVER_ENABLED_KEY).val == DATA_SAVER_ENABLED;
          } catch (ErrnoException e) {

@@ -1,4 +1,4 @@
-From 09d6d299bafdc76fd0db7de57943276d7246da44 Mon Sep 17 00:00:00 2001
+From 356e7c297496583c4f8bddb3e80d742a4adbd6cb Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Mon, 27 Dec 2021 18:00:43 -0500
 Subject: [PATCH 07/14] powermanager: Add support Samsung miscpower HAL
@@ -55,7 +55,7 @@ index ab66336738..32cc39b76b 100644
      static sp<hardware::power::V1_0::IPower> loadHidlV1_0Locked()
              EXCLUSIVE_LOCKS_REQUIRED(gHalMutex);
 diff --git a/include/powermanager/PowerHalWrapper.h b/include/powermanager/PowerHalWrapper.h
-index 6e347a9ce9..eac8644d44 100644
+index 6e347a9ce9..cd55e584e3 100644
 --- a/include/powermanager/PowerHalWrapper.h
 +++ b/include/powermanager/PowerHalWrapper.h
 @@ -30,6 +30,7 @@
@@ -103,7 +103,7 @@ index 6e347a9ce9..eac8644d44 100644
 +
 +    HalResult<void> setBoost(aidl::android::hardware::power::Boost boost, int32_t durationMs) override;
 +    HalResult<void> setMode(aidl::android::hardware::power::Mode mode, bool enabled) override;
-+    HalResult<std::shared_ptr<aidl::android::hardware::power::IPowerHintSession>> createHintSession(
++    HalResult<std::shared_ptr<PowerHintSessionWrapper>> createHintSession(
 +            int32_t tgid, int32_t uid, const std::vector<int32_t>& threadIds,
 +            int64_t durationNanos) override;
 +    HalResult<int64_t> getHintSessionPreferredRate() override;
@@ -229,20 +229,20 @@ index ea284c36d8..2f5a857a18 100644
  
  int32_t PowerHalLoader::getAidlVersion() {
 diff --git a/services/powermanager/PowerHalWrapper.cpp b/services/powermanager/PowerHalWrapper.cpp
-index bd6685cbad..b9c6ffc007 100644
+index bd6685cbad..82a623dd8b 100644
 --- a/services/powermanager/PowerHalWrapper.cpp
 +++ b/services/powermanager/PowerHalWrapper.cpp
-@@ -190,6 +190,10 @@ HalResult<void> AidlHalWrapper::setBoost(Aidl::Boost boost, int32_t durationMs)
-     std::unique_lock<std::mutex> lock(mBoostMutex);
-     size_t idx = static_cast<size_t>(boost);
+@@ -222,6 +222,10 @@ HalResult<void> AidlHalWrapper::setMode(Aidl::Mode mode, bool enabled) {
+     std::unique_lock<std::mutex> lock(mModeMutex);
+     size_t idx = static_cast<size_t>(mode);
  
 +    if (mHandleSeh != nullptr && mode == Aidl::Mode::INTERACTIVE) {
 +        mHandleSeh->setInteractiveAsync(enabled, false);
 +    }
 +
-     // Quick return if boost is not supported by HAL
-     if (idx >= mBoostSupportedArray.size() || mBoostSupportedArray[idx] == HalSupport::OFF) {
-         ALOGV("Skipped setBoost %s because %s", toString(boost).c_str(), getUnsupportedMessage());
+     // Quick return if mode is not supported by HAL
+     if (idx >= mModeSupportedArray.size() || mModeSupportedArray[idx] == HalSupport::OFF) {
+         ALOGV("Skipped setMode %s because %s", toString(mode).c_str(), getUnsupportedMessage());
 @@ -284,6 +288,72 @@ const char* AidlHalWrapper::getUnsupportedMessage() {
      return "Power HAL doesn't support it";
  }
@@ -301,11 +301,11 @@ index bd6685cbad..b9c6ffc007 100644
 +    return HalResult<void>::fromReturn(ret);
 +}
 +
-+HalResult<std::shared_ptr<Aidl::IPowerHintSession>> HidlHalWrapperSeh::createHintSession(
++HalResult<std::shared_ptr<PowerHintSessionWrapper>> HidlHalWrapperSeh::createHintSession(
 +        int32_t, int32_t, const std::vector<int32_t>& threadIds, int64_t) {
 +    ALOGV("Skipped createHintSession(task num=%zu) because Power HAL not available",
 +          threadIds.size());
-+    return HalResult<std::shared_ptr<Aidl::IPowerHintSession>>::unsupported();
++    return HalResult<std::shared_ptr<PowerHintSessionWrapper>>::unsupported();
 +}
 +
 +HalResult<int64_t> HidlHalWrapperSeh::getHintSessionPreferredRate() {
