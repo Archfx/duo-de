@@ -1,0 +1,25 @@
+From f570cd2c9660455e86b6e2e97ee68aa6cc123e14 Mon Sep 17 00:00:00 2001
+From: Michael Bestas <mkbestas@lineageos.org>
+Date: Sun, 16 Jun 2024 23:07:27 +0300
+Subject: [PATCH] Fix Trebuchet tests
+
+Change-Id: I88830b39a758359445821e2d38a5b27f82a547d7
+---
+ Android.bp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/Android.bp b/Android.bp
+index ef8c34716..621fc82dd 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -205,7 +205,7 @@ java_host_for_device {
+         "//frameworks/base/packages/SettingsLib:__subpackages__",
+         "//frameworks/base/packages/SystemUI:__pkg__",
+         "//frameworks/libs/systemui:__subpackages__",
+-        "//packages/apps/Launcher3/tests:__pkg__",
++        "//packages/apps/Trebuchet/tests:__pkg__",
+         "//frameworks/base/tests/InputScreenshotTest:__subpackages__",
+         "//frameworks/opt/car/setupwizard/library/main/tests/robotests:__pkg__",
+         "//frameworks/opt/localepicker/tests:__pkg__",
+-- 
+2.34.1

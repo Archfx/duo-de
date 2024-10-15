@@ -1,33 +1,33 @@
-From 8048cee6ad85dfe3cc5dcd30005ffbeff4d9c0b4 Mon Sep 17 00:00:00 2001
+From 90656ad2f9c863998ec85541008a3fd03d7dab40 Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
-Date: Tue, 26 Mar 2024 16:32:07 +0000
+Date: Mon, 14 Oct 2024 19:59:48 +0100
 Subject: [PATCH] Revert "Add support for toggling taskbar"
 
-This reverts commit 5a0709789f1665a9f3b3c843865c90d5dda53c7f.
+This reverts commit efc06a3b2a172d3d99c258cb1f83eb304661448e.
 ---
  Android.bp                                    |  1 -
  .../launcher3/taskbar/TaskbarManager.java     | 23 ++-----------------
  .../com/android/quickstep/SystemUiProxy.java  | 12 ----------
- src/com/android/launcher3/DeviceProfile.java  |  6 +----
- 4 files changed, 3 insertions(+), 39 deletions(-)
+ src/com/android/launcher3/DeviceProfile.java  |  7 +-----
+ 4 files changed, 3 insertions(+), 40 deletions(-)
 
 diff --git a/Android.bp b/Android.bp
-index 8c1298c52b..d987f16bea 100644
+index 1434eb5b0a..4c8b8f899b 100644
 --- a/Android.bp
 +++ b/Android.bp
-@@ -213,7 +213,6 @@ android_library {
-         "com_android_wm_shell_flags_lib",
+@@ -173,7 +173,6 @@ android_library {
          "android.appwidget.flags-aconfig-java",
          "com.android.window.flags.window-aconfig-java",
--        "org.lineageos.platform"
+         "libGoogleFeed",
+-        "org.lineageos.platform",
      ],
+     manifest: "AndroidManifest-common.xml",
      sdk_version: "current",
-     min_sdk_version: min_launcher3_sdk_version,
 diff --git a/quickstep/src/com/android/launcher3/taskbar/TaskbarManager.java b/quickstep/src/com/android/launcher3/taskbar/TaskbarManager.java
-index d7baf50cda..ecbc7e7fdc 100644
+index f78b235842..2a58db25df 100644
 --- a/quickstep/src/com/android/launcher3/taskbar/TaskbarManager.java
 +++ b/quickstep/src/com/android/launcher3/taskbar/TaskbarManager.java
-@@ -77,8 +77,6 @@ import com.android.systemui.shared.system.QuickStepContract;
+@@ -77,8 +77,6 @@ import com.android.systemui.shared.system.QuickStepContract.SystemUiStateFlags;
  import com.android.systemui.unfold.UnfoldTransitionProgressProvider;
  import com.android.systemui.unfold.util.ScopedUnfoldTransitionProgressProvider;
  
@@ -45,8 +45,8 @@ index d7baf50cda..ecbc7e7fdc 100644
 -
      private final Context mContext;
      private final @Nullable Context mNavigationBarPanelContext;
-     private final DeviceStateManager mDeviceStateManager;
-@@ -157,7 +152,6 @@ public class TaskbarManager {
+     private WindowManager mWindowManager;
+@@ -156,7 +151,6 @@ public class TaskbarManager {
          }
      }
      private final SettingsCache.OnChangeListener mOnSettingsChangeListener = c -> recreateTaskbar();
@@ -54,7 +54,7 @@ index d7baf50cda..ecbc7e7fdc 100644
  
      private boolean mUserUnlocked = false;
  
-@@ -330,18 +324,6 @@ public class TaskbarManager {
+@@ -308,18 +302,6 @@ public class TaskbarManager {
                  .register(USER_SETUP_COMPLETE_URI, mOnSettingsChangeListener);
          SettingsCache.INSTANCE.get(mContext)
                  .register(NAV_BAR_KIDS_MODE, mOnSettingsChangeListener);
@@ -73,7 +73,7 @@ index d7baf50cda..ecbc7e7fdc 100644
          Log.d(TASKBAR_NOT_DESTROYED_TAG, "registering component callbacks from constructor.");
          mContext.registerComponentCallbacks(mComponentCallbacks);
          mShutdownReceiver.register(mContext, Intent.ACTION_SHUTDOWN);
-@@ -500,10 +482,9 @@ public class TaskbarManager {
+@@ -476,10 +458,9 @@ public class TaskbarManager {
                  + " [dp != null (i.e. mUserUnlocked)]=" + (dp != null)
                  + " FLAG_HIDE_NAVBAR_WINDOW=" + ENABLE_TASKBAR_NAVBAR_UNIFICATION
                  + " dp.isTaskbarPresent=" + (dp == null ? "null" : dp.isTaskbarPresent));
@@ -87,10 +87,10 @@ index d7baf50cda..ecbc7e7fdc 100644
              }
  
 diff --git a/quickstep/src/com/android/quickstep/SystemUiProxy.java b/quickstep/src/com/android/quickstep/SystemUiProxy.java
-index 24db2edc78..72f67fc544 100644
+index a741f1284a..433baa9581 100644
 --- a/quickstep/src/com/android/quickstep/SystemUiProxy.java
 +++ b/quickstep/src/com/android/quickstep/SystemUiProxy.java
-@@ -498,18 +498,6 @@ public class SystemUiProxy implements ISystemUiProxy, NavHandle {
+@@ -518,18 +518,6 @@ public class SystemUiProxy implements ISystemUiProxy, NavHandle, SafeCloseable {
          }
      }
  
@@ -110,29 +110,29 @@ index 24db2edc78..72f67fc544 100644
      public void notifyTaskbarStatus(boolean visible, boolean stashed) {
          if (mSystemUiProxy != null) {
 diff --git a/src/com/android/launcher3/DeviceProfile.java b/src/com/android/launcher3/DeviceProfile.java
-index b666ac1883..f96d59ebba 100644
+index fc26085e5d..00db3a3886 100644
 --- a/src/com/android/launcher3/DeviceProfile.java
 +++ b/src/com/android/launcher3/DeviceProfile.java
-@@ -70,8 +70,6 @@ import com.android.launcher3.util.IconSizeSteps;
- import com.android.launcher3.util.ResourceHelper;
+@@ -72,8 +72,6 @@ import com.android.launcher3.util.ResourceHelper;
  import com.android.launcher3.util.WindowBounds;
+ import com.android.launcher3.util.window.WindowManagerProxy;
  
 -import lineageos.providers.LineageSettings;
 -
  import java.io.PrintWriter;
  import java.util.Locale;
  import java.util.function.Consumer;
-@@ -350,9 +348,7 @@ public class DeviceProfile {
+@@ -355,10 +353,7 @@ public class DeviceProfile {
          isTablet = info.isTablet(windowBounds);
          isPhone = !isTablet;
          isTwoPanels = isTablet && isMultiDisplay;
 -        boolean isTaskBarEnabled = LineageSettings.System.getInt(context.getContentResolver(),
--                LineageSettings.System.ENABLE_TASKBAR, isTablet ? 1 : 0) == 1;
--        isTaskbarPresent = isTaskBarEnabled && ApiWrapper.TASKBAR_DRAWN_IN_PROCESS;
-+        isTaskbarPresent = isTablet && ApiWrapper.TASKBAR_DRAWN_IN_PROCESS;
+-                LineageSettings.System.ENABLE_TASKBAR,
+-                (isTablet || (enableTinyTaskbar() && isGestureMode)) ? 1 : 0) == 1;
+-        isTaskbarPresent = isTaskBarEnabled
++        isTaskbarPresent = (isTablet || (enableTinyTaskbar() && isGestureMode))
+                 && WindowManagerProxy.INSTANCE.get(context).isTaskbarDrawnInProcess();
  
          // Some more constants.
-         context = getContext(context, info, isVerticalBarLayout() || (isTablet && isLandscape)
 -- 
 2.34.1
-

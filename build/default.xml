@@ -16,14 +16,16 @@
   <project name="ponces/vendor_ponces" path="vendor/ponces" remote="github" revision="android-15.0" />
   <project name="ponces/vendor_gapps" path="vendor/gapps" remote="gitlab" revision="android-15.0" clone-depth="1" />
   <project name="ponces/treble_adapter" path="treble_adapter" remote="github" revision="master" />
-  <project name="ponces/packages_apps_ParanoidSense" path="packages/apps/ParanoidSense" remote="github" revision="uvite" />
+  <!-- <project name="ponces/packages_apps_ParanoidSense" path="packages/apps/ParanoidSense" remote="github" revision="uvite" /> -->
   <project name="ponces/packages_services_OmniJaws" path="packages/services/OmniJaws" remote="github" revision="15.0" />
 
   <!-- LineageOS -->
   <remove-project name="platform/packages/apps/Launcher3" />
   <remove-project name="platform/packages/apps/ThemePicker" />
-  <project name="LineageOS/android_packages_apps_Trebuchet" path="packages/apps/Trebuchet" remote="github" revision="lineage-21.0" />
-  <project name="LineageOS/android_packages_apps_ThemePicker" path="packages/apps/ThemePicker" remote="github" revision="lineage-21.0" />
+  <!-- <project name="LineageOS/android_packages_apps_Trebuchet" path="packages/apps/Trebuchet" remote="github" revision="lineage-21.0" />
+  <project name="LineageOS/android_packages_apps_ThemePicker" path="packages/apps/ThemePicker" remote="github" revision="lineage-21.0" /> -->
+  <project name="ponces/android_packages_apps_Trebuchet" path="packages/apps/Trebuchet" remote="github" revision="lineage-22.0" />
+  <project name="ponces/android_packages_apps_ThemePicker" path="packages/apps/ThemePicker" remote="github" revision="lineage-22.0" />
 
   <!-- duo specifics -->
   <project name="Archfx/duoOverlays" path="packages/thain/rro_overlays" remote="github" revision="main" />
