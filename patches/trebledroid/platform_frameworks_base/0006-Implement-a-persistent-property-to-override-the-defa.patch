@@ -1,4 +1,4 @@
-From 2c2feee706e475c51175a605cf767b448d58638f Mon Sep 17 00:00:00 2001
+From 29c9343a54993464a2cfaed5c3c001d6c88f75f4 Mon Sep 17 00:00:00 2001
 From: Peter Cai <peter@typeblog.net>
 Date: Wed, 1 Jun 2022 16:56:20 -0400
 Subject: [PATCH 06/52] Implement a persistent property to override the default
@@ -11,7 +11,7 @@ Change-Id: I49b45d00bf71d7932591b3516d49a680e1b6568b
  2 files changed, 15 insertions(+)
 
 diff --git a/core/java/android/hardware/Camera.java b/core/java/android/hardware/Camera.java
-index 32d2a6f803d6..5e05fbbf459e 100644
+index 32d2a6f803d6..45710c9070ca 100644
 --- a/core/java/android/hardware/Camera.java
 +++ b/core/java/android/hardware/Camera.java
 @@ -48,6 +48,7 @@ import android.os.Message;
@@ -28,7 +28,7 @@ index 32d2a6f803d6..5e05fbbf459e 100644
      public static Camera open() {
 +        int altPrimaryCamera = SystemProperties.getInt("persist.sys.alt_primary_camera", -1);
 +        if (altPrimaryCamera > 0) {
-+            return new Camera(altPrimaryCamera);
++            return open(altPrimaryCamera);
 +        }
 +
          int numberOfCameras = getNumberOfCameras();

@@ -1,4 +1,4 @@
-From 4b869cf9dbbdee5ef5cd0f267452001664fb204a Mon Sep 17 00:00:00 2001
+From fee96d972060da97e212e613610d0bbef8b3b3b1 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Wed, 21 Feb 2024 16:21:51 -0500
 Subject: [PATCH 09/10] Initialize Samsung HIDL ISehRadio. Fixes 5G on S20
@@ -45,7 +45,7 @@ index bb4ff4f486..16051c0a22 100644
                          break;
                      case HAL_SERVICE_SIM:
 diff --git a/src/java/com/android/internal/telephony/RadioNetworkProxy.java b/src/java/com/android/internal/telephony/RadioNetworkProxy.java
-index b8f5164680..38eeb22af5 100644
+index b8f5164680..ff937454cd 100644
 --- a/src/java/com/android/internal/telephony/RadioNetworkProxy.java
 +++ b/src/java/com/android/internal/telephony/RadioNetworkProxy.java
 @@ -32,6 +32,7 @@ import java.util.ArrayList;
@@ -99,7 +99,7 @@ index b8f5164680..38eeb22af5 100644
      }
  
 +    @Override
-+    public void setHidl(HalVersion halVersion, android.hardware.radio.V1_0.IRadio radio) {
++    public void setHidl(HalVersion halVersion, android.hardware.radio.V1_4.IRadio radio) {
 +        super.setHidl(halVersion, radio);
 +        try {
 +            var samsungResponse = new vendor.samsung.hardware.radio.V2_2.ISehRadioResponse.Stub() {

@@ -1,4 +1,4 @@
-From ad49b5cd02a63bb2361b4e7ff416ffecfc5cd75c Mon Sep 17 00:00:00 2001
+From 356782a29b3207409069beaf9a08158c63656ead Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Wed, 15 May 2024 05:56:59 -0400
 Subject: [PATCH 6/7] More bpf errors ignore -- there are some 4.14 without the
