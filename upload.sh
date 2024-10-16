@@ -2,7 +2,7 @@
 
 echo
 echo "--------------------------------------"
-echo "         AOSP 14.0 Uploadbot          "
+echo "         AOSP 15.0 Uploadbot          "
 echo "                  by                  "
 echo "                ArchFX                "
 echo "--------------------------------------"
@@ -41,7 +41,7 @@ updateOta() {
     echo "--> Updating OTA file"
     git add config/ota.json
     git commit -m "build: Bump OTA to $TAG"
-    git push --set-upstream origin main-14
+    git push --set-upstream origin main-15
     echo
     cd ..
 }
