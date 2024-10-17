@@ -1,4 +1,4 @@
-# Surface-duo Dual Experience [duo-de]
+# Surface-duo Dual Experience [duo-de][A15]
 
 
 
@@ -13,9 +13,6 @@ Before you proceed, please take a moment to read [this announcement](https://git
 
 ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/archfx/duo-de/total?style=for-the-badge&label=duo-de%20Downloads&color=%2333cc33)
 ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/archfx/duo-de/sync.yml?style=for-the-badge&label=TrebleDroid%20Sync)
-
-<p align="center">
-<img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&pause=1000&color=F72E0E&center=true&vCenter=true&width=435&lines=DUO-DE+Android+15+in+Beta+Testing!!!" alt="Android 15 is here!" /> </p>
 
 <p align="center">
 <img src="images/src-duo.png" alt="drawing" style="width:600px;"/> </p>
@@ -67,14 +64,14 @@ Following are the steps to flash this image to your surface duo.
 
 1. Download the release. 
 ```shell
-wget https://github.com/Archfx/duo-de/releases/download/[[version]]/aosp-arm64-ab-gapps-14.0-[[version]].img.xz
+wget https://github.com/Archfx/duo-de/releases/download/[[version]]/aosp-arm64-ab-gapps-15.0-[[version]].img.xz
 ```
 2. Extract the compressed `*.xz` file to obtain the `*.img`. (Windows users can use something like 7-zip, Linux and Mac users can use either of following commands with respective commandline utilities).
 ```shell
-tar -xf aosp-arm64-ab-gapps-14.0-[[version]].img.xz #tar utility
+tar -xf aosp-arm64-ab-gapps-15.0-[[version]].img.xz #tar utility
 ```
 ```shell
-gunzip aosp-arm64-ab-gapps-14.0-[[version]].img.xz #gunzip utility
+gunzip aosp-arm64-ab-gapps-15.0-[[version]].img.xz #gunzip utility
 ```
 3. If you are migrating from Android 12L (stock) follow this step. You need to unlock the bootloader before proceeding. Please pay attention to commands, do not copy and execute the commands blindly.
 ```shell
@@ -89,13 +86,13 @@ fastboot delete-logical-partition system_b
 # if current slot is b, delete the system_a
 fastboot delete-logical-partition system_a
 
-fastboot flash system aosp-arm64-ab-gapps-14.0-[[version]].img
+fastboot flash system aosp-arm64-ab-gapps-15.0-[[version]].img
 fastboot reboot 
 ```
 4. Migrating from 13/14 pixel experience, follow the below steps 
 ```shell
 adb reboot fastboot
-fastboot flash system aosp-arm64-ab-gapps-14.0-[[version]].img
+fastboot flash system aosp-arm64-ab-gapps-15.0-[[version]].img
 fastboot reboot 
 ```
 5. Enable the following settings from the developer options and perform a manual reboot.  
