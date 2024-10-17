@@ -29,7 +29,7 @@ createRelease() {
 
 uploadAssets() {
     buildDate="$(date +%Y%m%d)"
-    find $BD/ -name "aosp-*-14.0-$buildDate.img.xz" | while read file; do
+    find $BD/ -name "aosp-*-15.0-$buildDate.img.xz" | while read file; do
         echo "--> Uploading $(basename $file)"
         gh release upload "$TAG" "$file" --repo "$GUSER/$GREPO"
         echo

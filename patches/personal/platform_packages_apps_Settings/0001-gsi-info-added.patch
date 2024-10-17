@@ -1,0 +1,44 @@
+From 7dab583ea5da7fab4acb0afd7085f6b2b88b6d45 Mon Sep 17 00:00:00 2001
+From: Archfx <cybx@live.com>
+Date: Thu, 17 Oct 2024 14:30:30 -0400
+Subject: [PATCH] gsi info added
+
+Change-Id: Ia98d7988a7b2cbbcc7eec7608121cdfab0570df5
+---
+ res/values/strings.xml     | 3 +++
+ res/xml/my_device_info.xml | 7 +++++++
+ 2 files changed, 10 insertions(+)
+
+diff --git a/res/values/strings.xml b/res/values/strings.xml
+index dc506de64db..203c4641ad7 100644
+--- a/res/values/strings.xml
++++ b/res/values/strings.xml
+@@ -13597,4 +13597,7 @@
+ 
+     <!-- url for learning more about bluetooth audio sharing -->
+     <string name="help_url_audio_sharing" translatable="false"></string>
++    
++    <string name="gsi_info">System Image</string>
++    <string name="gsi_info_summary">ARCHFX/DUO-DE A15 (archfx.github.io/duo-de)</string>
+ </resources>
+diff --git a/res/xml/my_device_info.xml b/res/xml/my_device_info.xml
+index aec064b599f..21a1b22b1f7 100644
+--- a/res/xml/my_device_info.xml
++++ b/res/xml/my_device_info.xml
+@@ -234,6 +234,13 @@
+             android:summary="@string/summary_placeholder"
+             settings:enableCopying="true"
+             settings:controller="com.android.settings.deviceinfo.BuildNumberPreferenceController"/>
++
++        <Preference
++            android:key="gsi_info"
++            android:order="54"
++            android:title="@string/gsi_info"
++            android:summary="@string/gsi_info_summary"
++            settings:enableCopying="true"/>
+     </PreferenceCategory>
+ 
+ </PreferenceScreen>
+-- 
+2.34.1
+
