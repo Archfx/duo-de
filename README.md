@@ -1,11 +1,7 @@
 # Surface-duo Dual Experience [duo-de][A15]
 
 
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="images/duo-light.svg" />
-  <img align="left" src="images/duo-dark.svg" />
-</picture>
+<img align="left" width="120" height="auto" alt="" src="images/delogo.svg"/>
 The Surface Duo, Microsoft's dual-screen Android device, aimed to redefine mobile productivity by offering a unique form factor that combined the versatility of two screens with the familiarity of the Android operating system. Although Microsoft officially ceased updates and support for the Surface Duo line in early 2023, with AOSP GSI and the help of the open-source community, it is time to give a second life to this awesome, capable, and unique hardware.
 
 DUO-DE is a GSI variant Android ROM created for Microsoft Surface Duo devices, offering a clean AOSP experience. This build combines gapps/vanila variants of the GSI ROM from [ponces](https://github.com/ponces/treble_aosp) with desktop mode enabled + various tweaks to make it nice and smooth with the help of [thain](https://github.com/thai-ng) tweaks. All credits go to respective developers. The latest version is stable and secure for daily usage.
