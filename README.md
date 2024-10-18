@@ -26,7 +26,8 @@ This ROM switches between tablet mode (first image) and phone mode (second image
 <img src="images/tabletmode.png" alt="drawing" style="height:300px;" /> 
 <img src="images/phonemode.png" alt="drawing" style="height:300px;"/> </p>
 
-> Note: In case your device does not react to tent or ramp mode (landscaped phone mode) by default, you have to enable it from the `Home settings`. When you are in Phone mode, click and hold on the desktop, click `Home settings` on the popup menu, and enable the `Allow home screen rotation` feature. This will enable the launcher to serve the Tent mode and Ramp modes.
+> [!TIP]
+> In case your device does not react to tent or ramp mode (landscaped phone mode) by default, you have to enable it from the `Home settings`. When you are in Phone mode, click and hold on the desktop, click `Home settings` on the popup menu, and enable the `Allow home screen rotation` feature. This will enable the launcher to serve the Tent mode and Ramp modes.
 
 ### Floating Windows
 Floating windowed mode can be enabled/disabled for tablet mode and phone mode separately. To do that, click and hold the desktop, click `Home settings`, and find the settings `Tablet Mode Floating Windows` and `Phone Mode Floating Windows`. 
@@ -54,7 +55,8 @@ These results are just for reference (for people who enjoy numbers) to compare t
 
 
 ## Flashing steps
-**Try this at your own risk and proceed with caution!**
+> [!WARNING]
+> **Try this at your own risk and proceed with caution!**
 
 Following are the steps to flash this image to your surface duo.
 
@@ -62,7 +64,7 @@ Following are the steps to flash this image to your surface duo.
 ```shell
 wget https://github.com/Archfx/duo-de/releases/download/[[version]]/aosp-arm64-ab-gapps-15.0-[[version]].img.xz
 ```
-2. Extract the compressed `*.xz` file to obtain the `*.img`. (Windows users can use something like 7-zip, Linux and Mac users can use either of following commands with respective commandline utilities).
+2. Extract the compressed `*.xz` file to obtain the `*.img`. (Windows users can use something like 7-zip, Linux and Mac users can use either of the following commands with respective commandline utilities).
 ```shell
 tar -xf aosp-arm64-ab-gapps-15.0-[[version]].img.xz #tar utility
 ```
