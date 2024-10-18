@@ -15,7 +15,7 @@ Before you proceed, please take a moment to read [this announcement](https://git
 ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/archfx/duo-de/sync.yml?style=for-the-badge&label=TrebleDroid%20Sync)
 
 <p align="center">
-<img src="images/duo-15.gif" alt="drawing" style="width:600px;"/> </p>
+<img src="images/duo-15.gif" alt="drawing" style="width:640px;"/> </p>
 
 ## Posture Engine and Dual Modes
 
