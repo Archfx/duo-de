@@ -1,0 +1,40 @@
+From 4c45094df17ebe642117458c3de88f6adbe8a090 Mon Sep 17 00:00:00 2001
+From: Pierre-Hugues Husson <phh@phh.me>
+Date: Fri, 18 Oct 2024 17:35:01 -0400
+Subject: [PATCH 2/2] If ADnsHelper_init failed, let's never block
+
+---
+ DnsProxyListener.cpp | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/DnsProxyListener.cpp b/DnsProxyListener.cpp
+index 3d260966..0a1f233c 100644
+--- a/DnsProxyListener.cpp
++++ b/DnsProxyListener.cpp
+@@ -669,6 +669,7 @@ typedef int (*InitFn)();
+ typedef int (*IsUidBlockedFn)(uid_t, bool);
+ 
+ IsUidBlockedFn ADnsHelper_isUidNetworkingBlocked;
++static int init_failed = 0;
+ 
+ IsUidBlockedFn resolveIsUidNetworkingBlockedFn() {
+     // Related BPF maps were mainlined from T.
+@@ -691,6 +692,7 @@ IsUidBlockedFn resolveIsUidNetworkingBlockedFn() {
+     const int ret = (*ADnsHelper_init)();
+     if (ret) {
+         LOG(ERROR) << __func__ << ": ADnsHelper_init failed " << strerror(-ret);
++        init_failed = 1;
+     }
+ 
+     IsUidBlockedFn f =
+@@ -704,6 +706,7 @@ IsUidBlockedFn resolveIsUidNetworkingBlockedFn() {
+ }
+ 
+ bool isUidNetworkingBlocked(uid_t uid, unsigned netId) {
++    if (init_failed) return true;
+     if (!ADnsHelper_isUidNetworkingBlocked) return false;
+ 
+     // The enforceDnsUid is an OEM feature that sets DNS packet with AID_DNS instead of the
+-- 
+2.34.1
+

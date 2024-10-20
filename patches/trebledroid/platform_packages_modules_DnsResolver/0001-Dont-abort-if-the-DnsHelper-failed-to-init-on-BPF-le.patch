@@ -1,7 +1,8 @@
 From 231447df3b3c36e45410bbcf7f79aca05c69cfbe Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Tue, 7 May 2024 22:44:25 +0000
-Subject: [PATCH] Dont abort if the DnsHelper failed to init on BPF-less kernel
+Subject: [PATCH 1/2] Dont abort if the DnsHelper failed to init on BPF-less
+ kernel
 
 ---
  DnsProxyListener.cpp | 1 -
