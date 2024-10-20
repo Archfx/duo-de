@@ -1,7 +1,7 @@
 From 5f15a6cb9f69eeb5f51605a904a7aa5f80c676da Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Tue, 16 Jan 2024 10:30:57 -0500
-Subject: [PATCH 23/26] Keep capex when there are vendor apexes
+Subject: [PATCH 23/27] Keep capex when there are vendor apexes
 
 When disabling APEX on Linux < 5, we might break some vendor APEXes
 For instance Pixel 4a on Linux 4.14.
