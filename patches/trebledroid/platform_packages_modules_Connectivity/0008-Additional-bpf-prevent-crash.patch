@@ -1,0 +1,64 @@
+From 9d559ab362f860716a98082597921bf248a8bd8e Mon Sep 17 00:00:00 2001
+From: Pierre-Hugues Husson <phh@phh.me>
+Date: Thu, 17 Oct 2024 06:59:48 -0400
+Subject: [PATCH 8/8] Additional bpf prevent-crash
+
+---
+ framework/src/android/net/BpfNetMapsUtils.java           | 9 ++++-----
+ .../src/com/android/server/net/NetworkStatsService.java  | 3 ++-
+ service/src/com/android/server/BpfNetMaps.java           | 1 +
+ 3 files changed, 7 insertions(+), 6 deletions(-)
+
+diff --git a/framework/src/android/net/BpfNetMapsUtils.java b/framework/src/android/net/BpfNetMapsUtils.java
+index 874a1f8af4..db13b14333 100644
+--- a/framework/src/android/net/BpfNetMapsUtils.java
++++ b/framework/src/android/net/BpfNetMapsUtils.java
+@@ -265,15 +265,14 @@ public class BpfNetMapsUtils {
+             IBpfMap<S32, UidOwnerValue> uidOwnerMap,
+             IBpfMap<S32, U8> dataSaverEnabledMap
+     ) {
+-        final long uidRuleConfig;
+-        final long uidMatch;
++        long uidRuleConfig = 0;
++        long uidMatch = 0;
+         try {
+             uidRuleConfig = configurationMap.getValue(UID_RULES_CONFIGURATION_KEY).val;
+             final UidOwnerValue value = uidOwnerMap.getValue(new Struct.S32(uid));
+             uidMatch = (value != null) ? value.rule : 0L;
+-        } catch (ErrnoException e) {
+-            throw new ServiceSpecificException(e.errno,
+-                    "Unable to get firewall chain status: " + Os.strerror(e.errno));
++        } catch (Throwable e) {
++            android.util.Log.e("BpfNetMapsUtils", "Unable to get firewall chain status");
+         }
+         final long blockingMatches = (uidRuleConfig & ~uidMatch & sMaskDropIfUnset)
+                 | (uidRuleConfig & uidMatch & sMaskDropIfSet);
+diff --git a/service-t/src/com/android/server/net/NetworkStatsService.java b/service-t/src/com/android/server/net/NetworkStatsService.java
+index f7097de6c8..45b2e01a3b 100644
+--- a/service-t/src/com/android/server/net/NetworkStatsService.java
++++ b/service-t/src/com/android/server/net/NetworkStatsService.java
+@@ -3274,7 +3274,8 @@ public class NetworkStatsService extends INetworkStatsService.Stub {
+         try {
+             return mStatsFactory.readNetworkStatsDetail(uid, ifaces, tag);
+         } catch (IOException e) {
+-            throw new IllegalStateException(e);
++            android.util.Log.e("NetworkStatsService", "Failed grabbing network stats");
++            return new NetworkStats(1, 0);
+         }
+     }
+ 
+diff --git a/service/src/com/android/server/BpfNetMaps.java b/service/src/com/android/server/BpfNetMaps.java
+index 7193ec24b3..d701ee1722 100644
+--- a/service/src/com/android/server/BpfNetMaps.java
++++ b/service/src/com/android/server/BpfNetMaps.java
+@@ -838,6 +838,7 @@ public class BpfNetMaps {
+     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+     public int getNetPermForUid(final int uid) {
+         final int appId = UserHandle.getAppId(uid);
++        if (sUidPermissionMap == null) return PERMISSION_INTERNET;
+         try {
+             // Key of uid permission map is appId
+             // TODO: Rename map name
+-- 
+2.34.1
+
