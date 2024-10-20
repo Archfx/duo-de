@@ -1,0 +1,286 @@
+From b0dcacebec5727ccf1954488a8f3da0266383e39 Mon Sep 17 00:00:00 2001
+From: Pierre-Hugues Husson <phh@phh.me>
+Date: Fri, 18 Oct 2024 17:26:04 -0400
+Subject: [PATCH 6/6] Revert "vold: remove session keyring workaround for old
+ kernels"
+
+This reverts commit 0e87a83cbacd7ccb47873df1b555598f94e6a287.
+---
+ Android.bp  |   1 +
+ FsCrypt.cpp |  24 +++++++++++
+ KeyUtil.cpp | 115 ++++++++++++++++++++++++++++++++++++++++++++++++++++
+ KeyUtil.h   |  13 ++++++
+ 4 files changed, 153 insertions(+)
+
+diff --git a/Android.bp b/Android.bp
+index ba3267ca..ffa63af9 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -62,6 +62,7 @@ cc_defaults {
+         "libincfs",
+         "libhidlbase",
+         "libkeymint_support",
++        "libkeyutils",
+         "liblog",
+         "liblogwrap",
+         "libselinux",
+diff --git a/FsCrypt.cpp b/FsCrypt.cpp
+index 758ec9dc..7baf5cc5 100644
+--- a/FsCrypt.cpp
++++ b/FsCrypt.cpp
+@@ -48,6 +48,7 @@
+ #include <cutils/properties.h>
+ 
+ #include <fscrypt/fscrypt.h>
++#include <keyutils.h>
+ #include <libdm/dm.h>
+ 
+ #include <android-base/file.h>
+@@ -73,6 +74,7 @@ using android::vold::retrieveOrGenerateKey;
+ using android::vold::SetDefaultAcl;
+ using android::vold::SetQuotaInherit;
+ using android::vold::SetQuotaProjectId;
++using android::vold::writeStringToFile;
+ using namespace android::fscrypt;
+ using namespace android::dm;
+ 
+@@ -629,6 +631,27 @@ bool fscrypt_create_user_keys(userid_t user_id, bool ephemeral) {
+     return true;
+ }
+ 
++// "Lock" all encrypted directories whose key has been removed.  This is needed
++// in the case where the keys are being put in the session keyring (rather in
++// the newer filesystem-level keyrings), because removing a key from the session
++// keyring doesn't affect inodes in the kernel's inode cache whose per-file key
++// was already set up.  So to remove the per-file keys and make the files
++// "appear encrypted", these inodes must be evicted.
++//
++// To do this, sync() to clean all dirty inodes, then drop all reclaimable slab
++// objects systemwide.  This is overkill, but it's the best available method
++// currently.  Don't use drop_caches mode "3" because that also evicts pagecache
++// for in-use files; all files relevant here are already closed and sync'ed.
++static void drop_caches_if_needed() {
++    if (android::vold::isFsKeyringSupported()) {
++        return;
++    }
++    sync();
++    if (!writeStringToFile("2", "/proc/sys/vm/drop_caches")) {
++        PLOG(ERROR) << "Failed to drop caches during key eviction";
++    }
++}
++
+ // Evicts all the user's keys of one type from all volumes (internal and adoptable).
+ // This evicts either CE keys or DE keys, depending on which map is passed.
+ static bool evict_user_keys(std::map<userid_t, UserPolicies>& policy_map, userid_t user_id) {
+@@ -641,6 +664,7 @@ static bool evict_user_keys(std::map<userid_t, UserPolicies>& policy_map, userid
+             success &= android::vold::evictKey(BuildDataPath(volume_uuid), policy);
+         }
+         policy_map.erase(it);
++        drop_caches_if_needed();
+     }
+     return success;
+ }
+diff --git a/KeyUtil.cpp b/KeyUtil.cpp
+index bd2ccddd..9e8920d1 100644
+--- a/KeyUtil.cpp
++++ b/KeyUtil.cpp
+@@ -28,6 +28,7 @@
+ 
+ #include <android-base/file.h>
+ #include <android-base/logging.h>
++#include <keyutils.h>
+ 
+ #include "KeyStorage.h"
+ #include "Utils.h"
+@@ -74,6 +75,39 @@ bool generateStorageKey(const KeyGeneration& gen, KeyBuffer* key) {
+     }
+ }
+ 
++static bool isFsKeyringSupportedImpl() {
++    android::base::unique_fd fd(open("/data", O_RDONLY | O_DIRECTORY | O_CLOEXEC));
++
++    // FS_IOC_ADD_ENCRYPTION_KEY with a NULL argument will fail with ENOTTY if
++    // the ioctl isn't supported.  Otherwise it will fail with another error
++    // code such as EFAULT.
++    //
++    // Note that there's no need to check for FS_IOC_REMOVE_ENCRYPTION_KEY,
++    // since it's guaranteed to be available if FS_IOC_ADD_ENCRYPTION_KEY is.
++    // There's also no need to check for support on external volumes separately
++    // from /data, since either the kernel supports the ioctls on all
++    // fscrypt-capable filesystems or it doesn't.
++    errno = 0;
++    (void)ioctl(fd, FS_IOC_ADD_ENCRYPTION_KEY, NULL);
++    if (errno == ENOTTY) {
++        LOG(INFO) << "Kernel doesn't support FS_IOC_ADD_ENCRYPTION_KEY.  Falling back to "
++                     "session keyring";
++        return false;
++    }
++    if (errno != EFAULT) {
++        PLOG(WARNING) << "Unexpected error from FS_IOC_ADD_ENCRYPTION_KEY";
++    }
++    LOG(DEBUG) << "Detected support for FS_IOC_ADD_ENCRYPTION_KEY";
++    return true;
++}
++
++// Return true if the kernel supports the ioctls to add/remove fscrypt keys
++// directly to/from the filesystem.
++bool isFsKeyringSupported(void) {
++    static bool supported = isFsKeyringSupportedImpl();
++    return supported;
++}
++
+ // Get raw keyref - used to make keyname and to pass to ioctl
+ static std::string generateKeyRef(const uint8_t* key, int length) {
+     SHA512_CTX c;
+@@ -93,6 +127,20 @@ static std::string generateKeyRef(const uint8_t* key, int length) {
+     return std::string((char*)key_ref2, FSCRYPT_KEY_DESCRIPTOR_SIZE);
+ }
+ 
++static bool fillKey(const KeyBuffer& key, fscrypt_key* fs_key) {
++    if (key.size() != FSCRYPT_MAX_KEY_SIZE) {
++        LOG(ERROR) << "Wrong size key " << key.size();
++        return false;
++    }
++    static_assert(FSCRYPT_MAX_KEY_SIZE == sizeof(fs_key->raw), "Mismatch of max key sizes");
++    fs_key->mode = 0;  // unused by kernel
++    memcpy(fs_key->raw, key.data(), key.size());
++    fs_key->size = key.size();
++    return true;
++}
++
++static char const* const NAME_PREFIXES[] = {"ext4", "f2fs", "fscrypt", nullptr};
++
+ static std::string keyrefstring(const std::string& raw_ref) {
+     std::ostringstream o;
+     for (unsigned char i : raw_ref) {
+@@ -101,6 +149,44 @@ static std::string keyrefstring(const std::string& raw_ref) {
+     return o.str();
+ }
+ 
++static std::string buildLegacyKeyName(const std::string& prefix, const std::string& raw_ref) {
++    return prefix + ":" + keyrefstring(raw_ref);
++}
++
++// Get the ID of the keyring we store all fscrypt keys in when the kernel is too
++// old to support FS_IOC_ADD_ENCRYPTION_KEY and FS_IOC_REMOVE_ENCRYPTION_KEY.
++static bool fscryptKeyring(key_serial_t* device_keyring) {
++    *device_keyring = keyctl_search(KEY_SPEC_SESSION_KEYRING, "keyring", "fscrypt", 0);
++    if (*device_keyring == -1) {
++        PLOG(ERROR) << "Unable to find device keyring";
++        return false;
++    }
++    return true;
++}
++
++// Add an encryption key to the legacy global session keyring.
++static bool installKeyLegacy(const KeyBuffer& key, const std::string& raw_ref) {
++    // Place fscrypt_key into automatically zeroing buffer.
++    KeyBuffer fsKeyBuffer(sizeof(fscrypt_key));
++    fscrypt_key& fs_key = *reinterpret_cast<fscrypt_key*>(fsKeyBuffer.data());
++
++    if (!fillKey(key, &fs_key)) return false;
++    key_serial_t device_keyring;
++    if (!fscryptKeyring(&device_keyring)) return false;
++    for (char const* const* name_prefix = NAME_PREFIXES; *name_prefix != nullptr; name_prefix++) {
++        auto ref = buildLegacyKeyName(*name_prefix, raw_ref);
++        key_serial_t key_id =
++            add_key("logon", ref.c_str(), (void*)&fs_key, sizeof(fs_key), device_keyring);
++        if (key_id == -1) {
++            PLOG(ERROR) << "Failed to insert key into keyring " << device_keyring;
++            return false;
++        }
++        LOG(DEBUG) << "Added key " << key_id << " (" << ref << ") to keyring " << device_keyring
++                   << " in process " << getpid();
++    }
++    return true;
++}
++
+ // Build a struct fscrypt_key_specifier for use in the key management ioctls.
+ static bool buildKeySpecifier(fscrypt_key_specifier* spec, const EncryptionPolicy& policy) {
+     switch (policy.options.version) {
+@@ -144,6 +230,9 @@ bool installKey(const std::string& mountpoint, const EncryptionOptions& options,
+             // "descriptor", which must be provided by userspace.  We use the
+             // first 8 bytes from the double SHA-512 of the key itself.
+             policy->key_raw_ref = generateKeyRef((const uint8_t*)key.data(), key.size());
++            if (!isFsKeyringSupported()) {
++                return installKeyLegacy(key, policy->key_raw_ref);
++            }
+             if (!buildKeySpecifier(&arg->key_spec, *policy)) {
+                 return false;
+             }
+@@ -187,6 +276,29 @@ bool installKey(const std::string& mountpoint, const EncryptionOptions& options,
+     return true;
+ }
+ 
++// Remove an encryption key from the legacy global session keyring.
++static bool evictKeyLegacy(const std::string& raw_ref) {
++    key_serial_t device_keyring;
++    if (!fscryptKeyring(&device_keyring)) return false;
++    bool success = true;
++    for (char const* const* name_prefix = NAME_PREFIXES; *name_prefix != nullptr; name_prefix++) {
++        auto ref = buildLegacyKeyName(*name_prefix, raw_ref);
++        auto key_serial = keyctl_search(device_keyring, "logon", ref.c_str(), 0);
++
++        // Unlink the key from the keyring.  Prefer unlinking to revoking or
++        // invalidating, since unlinking is actually no less secure currently, and
++        // it avoids bugs in certain kernel versions where the keyring key is
++        // referenced from places it shouldn't be.
++        if (keyctl_unlink(key_serial, device_keyring) != 0) {
++            PLOG(ERROR) << "Failed to unlink key with serial " << key_serial << " ref " << ref;
++            success = false;
++        } else {
++            LOG(DEBUG) << "Unlinked key with serial " << key_serial << " ref " << ref;
++        }
++    }
++    return success;
++}
++
+ static void waitForBusyFiles(const struct fscrypt_key_specifier key_spec, const std::string ref,
+                              const std::string mountpoint) {
+     android::base::unique_fd fd(open(mountpoint.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+@@ -247,6 +359,9 @@ static void waitForBusyFiles(const struct fscrypt_key_specifier key_spec, const
+ 
+ bool evictKey(const std::string& mountpoint, const EncryptionPolicy& policy) {
+     const std::lock_guard<std::mutex> lock(fscrypt_keyring_mutex);
++    if (policy.options.version == 1 && !isFsKeyringSupported()) {
++        return evictKeyLegacy(policy.key_raw_ref);
++    }
+ 
+     android::base::unique_fd fd(open(mountpoint.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+     if (fd == -1) {
+diff --git a/KeyUtil.h b/KeyUtil.h
+index cc1a1f98..17a234e6 100644
+--- a/KeyUtil.h
++++ b/KeyUtil.h
+@@ -43,15 +43,28 @@ bool generateStorageKey(const KeyGeneration& gen, KeyBuffer* key);
+ // be generated.
+ const KeyGeneration neverGen();
+ 
++bool isFsKeyringSupported(void);
++
+ // Install a file-based encryption key to the kernel, for use by encrypted files
+ // on the specified filesystem using the specified encryption policy version.
+ //
++// For v1 policies, we use FS_IOC_ADD_ENCRYPTION_KEY if the kernel supports it.
++// Otherwise we add the key to the legacy global session keyring.
++//
++// For v2 policies, we always use FS_IOC_ADD_ENCRYPTION_KEY; it's the only way
++// the kernel supports.
++//
+ // Returns %true on success, %false on failure.  On success also sets *policy
+ // to the EncryptionPolicy used to refer to this key.
+ bool installKey(const std::string& mountpoint, const android::fscrypt::EncryptionOptions& options,
+                 const KeyBuffer& key, android::fscrypt::EncryptionPolicy* policy);
+ 
+ // Evict a file-based encryption key from the kernel.
++//
++// We use FS_IOC_REMOVE_ENCRYPTION_KEY if the kernel supports it.  Otherwise we
++// remove the key from the legacy global session keyring.
++//
++// In the latter case, the caller is responsible for dropping caches.
+ bool evictKey(const std::string& mountpoint, const android::fscrypt::EncryptionPolicy& policy);
+ 
+ // Retrieves the key from the named directory, or generates it if it doesn't
+-- 
+2.34.1
+

@@ -1,7 +1,7 @@
 From 63c86aab356c14412f1ac5a6b543ba6634e35aea Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Mon, 29 Nov 2021 17:49:13 -0500
-Subject: [PATCH 3/5] Don't unmount rw-system.sh binds
+Subject: [PATCH 3/6] Don't unmount rw-system.sh binds
 
 Change-Id: If9132c21defa8b09879b79a70794c5275d6852d0
 ---
