@@ -1,7 +1,7 @@
-From 2bf82017a069a3f440919cbc1dee8d24911d3d13 Mon Sep 17 00:00:00 2001
+From 1a91e1f8b1b6d3a4114363eda168a9c78548d78d Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Sun, 12 Nov 2023 11:24:17 +0000
-Subject: [PATCH] feat: Add Lockscreen Weather with OmniJaws (2/2)
+Subject: [PATCH 1/2] feat: Add Lockscreen Weather with OmniJaws (2/2)
 
 Based on OmniROM's implementation, updated by @maxwen and adapted by @neobuddy89.
 
@@ -17,10 +17,10 @@ Co-authored-by: Pranav Vashi <neobuddy89@gmail.com>
  create mode 100644 src/com/android/settings/omnijaws/LockScreenWeatherPreferenceController.java
 
 diff --git a/res/values/strings.xml b/res/values/strings.xml
-index f92fd2a..39e8134 100644
+index 866acda..dc506de 100644
 --- a/res/values/strings.xml
 +++ b/res/values/strings.xml
-@@ -12411,6 +12411,11 @@
+@@ -12415,6 +12415,11 @@
          <item quantity="other"><xliff:g id="first">%1$s</xliff:g>, <xliff:g id="second">%2$s</xliff:g></item>
      </plurals>
  
@@ -205,4 +205,3 @@ index 2e4a1f2..499fc2c 100644
  }
 -- 
 2.34.1
-
