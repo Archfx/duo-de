@@ -1,7 +1,7 @@
 From bd5a8cfc7a1e1bcc462e2d6a54de560b1bc94e17 Mon Sep 17 00:00:00 2001
 From: ponces <ponces26@gmail.com>
 Date: Mon, 7 Nov 2022 16:14:20 +0000
-Subject: [PATCH 08/10] Improve SELinux policy workaround on device/phh/treble
+Subject: [PATCH 08/11] Improve SELinux policy workaround on device/phh/treble
  conflict to exit with SEPOL_OK instead of SEPOL_EEXIST
 
 This fixes boot on many Samsung devices as exiting with SEPOL_EEXIST will prevent them to boot
