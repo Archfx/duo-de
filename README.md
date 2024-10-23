@@ -4,7 +4,7 @@
 <img align="left" width="120" height="auto" alt="" src="images/delogo.svg"/>
 The Surface Duo, Microsoft's dual-screen Android device, aimed to redefine mobile productivity by offering a unique form factor that combined the versatility of two screens with the familiarity of the Android operating system. Although Microsoft officially ceased updates and support for the Surface Duo line in early 2023, with AOSP GSI and the help of the open-source community, it is time to give a second life to this awesome and unique hardware.
 
-DUO-DE is a GSI variant Android ROM created for Microsoft Surface Duo devices, offering a clean AOSP experience. This build combines gapps/vanila variants of the GSI ROM from [ponces](https://github.com/ponces/treble_aosp) with desktop mode enabled + various tweaks to make it nice and smooth with the help of [thain](https://github.com/thai-ng) tweaks. All credits go to respective developers. The latest version is stable and secure for daily usage.
+DUO-DE is a GSI variant Android ROM created for Microsoft Surface Duo devices, offering a clean AOSP experience. This build combines gapps/vanila variants of the GSI ROM from [ponces](https://github.com/ponces/treble_aosp) with desktop mode enabled + various tweaks to make it nice and smooth with the help of [thain](https://github.com/thai-ng) tweaks. All credits go to respective developers. The latest Android 14 version is stable and secure for daily usage. Android 15 version is slowly getting there!!!.
 Before you proceed, please take a moment to read [this announcement](https://github.com/Archfx/duo-de/discussions/52) regarding this project. By using this ROM, you are agreeing to the [`DISCLAIMER`](#disclaimer).
 
 ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/archfx/duo-de/total?style=for-the-badge&label=duo-de%20Downloads&color=%2333cc33)
@@ -58,6 +58,9 @@ These results are just for reference (for people who enjoy numbers) to compare t
 > [!WARNING]
 > **Try this at your own risk and proceed with caution!**
 
+> [!CAUTION]
+> Backup your user data before proceeding, at it might prompt you to wipe the user data depending on your current setup.
+
 Following are the steps to flash this image to your surface duo.
 
 1. Download the release. 
@@ -87,6 +90,7 @@ fastboot delete-logical-partition system_a
 fastboot flash system aosp-arm64-ab-gapps-15.0-[[version]].img
 fastboot reboot 
 ```
+upon reboot, it will prompt to wipe the user data partition.
 4. Migrating from 13/14 pixel experience, follow the below steps 
 ```shell
 adb reboot fastboot
