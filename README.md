@@ -59,7 +59,7 @@ These results are just for reference (for people who enjoy numbers) to compare t
 > **Try this at your own risk and proceed with caution!**
 
 > [!CAUTION]
-> Backup your user data before proceeding, at it might prompt you to wipe the user data depending on your current setup.
+> **BACKUP** your user data before proceeding, it might prompt you to wipe the user data partition depending on your current setup.
 
 Following are the steps to flash this image to your surface duo.
 
@@ -89,8 +89,8 @@ fastboot delete-logical-partition system_a
 
 fastboot flash system aosp-arm64-ab-gapps-15.0-[[version]].img
 fastboot reboot 
+# upon reboot, it will prompt to wipe the user data partition.
 ```
-upon reboot, it will prompt to wipe the user data partition.
 4. Migrating from 13/14 pixel experience, follow the below steps 
 ```shell
 adb reboot fastboot
