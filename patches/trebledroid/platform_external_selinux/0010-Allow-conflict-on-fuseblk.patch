@@ -1,7 +1,7 @@
 From 6e9938dde831f0a2d4066d32fbcda592b3abbdaf Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Fri, 6 Oct 2023 08:49:59 -0400
-Subject: [PATCH 10/10] Allow conflict on fuseblk
+Subject: [PATCH 10/11] Allow conflict on fuseblk
 
 ---
  libsepol/cil/src/cil_post.c | 2 +-
