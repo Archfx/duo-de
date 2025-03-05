@@ -1,0 +1,38 @@
+From 26a6e9743138f18f8ab3db6607816d6602b2d67c Mon Sep 17 00:00:00 2001
+From: Archfx <cybx@live.com>
+Date: Tue, 4 Mar 2025 20:31:11 -0500
+Subject: [PATCH] Add permission to posture processor to send broadcasts
+
+---
+ aosp.mk | 2 +-
+ base.mk | 5 +++++
+ 2 files changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/aosp.mk b/aosp.mk
+index 6493ba4..c34d6c1 100644
+--- a/aosp.mk
++++ b/aosp.mk
+@@ -1,4 +1,4 @@
+ $(call inherit-product, vendor/ponces/config/common.mk)
+ 
+ PRODUCT_SYSTEM_DEFAULT_PROPERTIES += \
+-    ro.system.ota.json_url=https://raw.githubusercontent.com/ponces/treble_aosp/android-14.0/config/ota.json
++    ro.system.ota.json_url=https://raw.githubusercontent.com/Archfx/duo-de/main-15/config/ota.json
+diff --git a/base.mk b/base.mk
+index 3fd0ce3..77692de 100644
+--- a/base.mk
++++ b/base.mk
+@@ -292,4 +292,9 @@ PRODUCT_PACKAGES += \
+ 	SurfaceDuoAppHintingOverlay \
+ 	libms_pen_charger
+ 
++# Privapp-permissions whitelist for postureProcessor
++PRODUCT_COPY_FILES += \
++	vendor/surface/privapp-permissions-duo.xml:system/system_ext/etc/permissions/privapp-permissions-com.thain.duo.xml
++
++
+ $(call inherit-product-if-exists, vendor/surface/prebuilts/bootanimation/bootanimation.mk)
+\ No newline at end of file
+-- 
+2.34.1
+

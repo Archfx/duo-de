@@ -14,9 +14,9 @@ BL=$PWD/treble_aosp
 BD=$PWD/duo-de/builds
 TAG="$(date +v%Y.%m.%d)"
 GUSER="archfx"
-# GREPO="duoPosture"
+GREPO="duoPosture"
 # GREPO="duoTreble"
-GREPO="duo-de"
+# GREPO="duo-de"
 
 SKIPOTA=false
 if [ "$1" == "--skip-ota" ]; then
