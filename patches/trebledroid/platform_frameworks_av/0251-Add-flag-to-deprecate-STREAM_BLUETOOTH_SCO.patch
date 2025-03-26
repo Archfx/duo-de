@@ -1,0 +1,37 @@
+From b719a9687bd2bec78ab90153e41084345ac89c6a Mon Sep 17 00:00:00 2001
+From: Vlad Popa <pvlad@google.com>
+Date: Thu, 31 Oct 2024 17:10:25 -0700
+Subject: [PATCH 251/436] Add flag to deprecate STREAM_BLUETOOTH_SCO
+
+Flag: android.media.audio.deprecate_stream_bt_sco
+Test: make
+Bug: 376756660
+
+Merged-In: Ia2133445bcaa094708039697f9033f3c7fd8393c
+Change-Id: Ia2133445bcaa094708039697f9033f3c7fd8393c
+---
+ media/audio/aconfig/audio_framework.aconfig | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/media/audio/aconfig/audio_framework.aconfig b/media/audio/aconfig/audio_framework.aconfig
+index ea5f26daa4..b155bac203 100644
+--- a/media/audio/aconfig/audio_framework.aconfig
++++ b/media/audio/aconfig/audio_framework.aconfig
+@@ -22,6 +22,14 @@ flag {
+     bug: "302323921"
+ }
+ 
++flag {
++    name: "deprecate_stream_bt_sco"
++    namespace: "media_audio"
++    description: "Deprecate STREAM_BLUETOOTH_SCO"
++    is_exported: true
++    bug: "376756660"
++}
++
+ flag {
+     name: "feature_spatial_audio_headtracking_low_latency"
+     is_exported: true
+-- 
+2.43.0
+

@@ -1,0 +1,26 @@
+From 932e957a19ecee1165c6d530dce0f8247d8db6a0 Mon Sep 17 00:00:00 2001
+From: Atneya Nair <atneya@google.com>
+Date: Fri, 8 Nov 2024 04:57:34 +0000
+Subject: [PATCH 237/436] Add audiopolicy OWNERS
+
+Bug: trival
+Change-Id: I37c1c47fc23ddff7a1d80d568858da17ee7ce782
+Flag: EXEMPT docs_only
+Test: nothing
+---
+ services/audiopolicy/OWNERS | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/services/audiopolicy/OWNERS b/services/audiopolicy/OWNERS
+index 50ceadfc6c..4a65069873 100644
+--- a/services/audiopolicy/OWNERS
++++ b/services/audiopolicy/OWNERS
+@@ -1,4 +1,5 @@
+ # Bug component: 48436
++atneya@google.com
+ elaurent@google.com
+ jiabin@google.com
+ jmtrivi@google.com
+-- 
+2.43.0
+

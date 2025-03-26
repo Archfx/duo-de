@@ -1,0 +1,139 @@
+From 7baca0639f87ca7f383ffaa6ea133c3da2384126 Mon Sep 17 00:00:00 2001
+From: Biswarup Pal <biswarupp@google.com>
+Date: Tue, 26 Nov 2024 15:57:23 +0000
+Subject: [PATCH 358/436] Don't rely on GLConsumer frame number in virtual
+ camera
+
+Sometimes the GLConsumer frame number is not set correctly
+(depending on how one writes into the Surface) causing the virtual
+camera render thread to get stuck. This change maintains an atomic
+bool within the virtual camera service itself to check if the
+first frame has been drawn.
+
+Test: VdmHost + VdmClient
+Test: CtsVirtualDevicesCameraTestCases
+Bug: 381074653
+Flag: EXEMPT minor bugfix
+Change-Id: If108f4d8da4f52c9bea550d27f34c927d7622737
+---
+ .../VirtualCameraRenderThread.cc              | 21 ++-------------
+ .../virtualcamera/util/EglSurfaceTexture.cc   | 26 ++++++++++++++++---
+ .../virtualcamera/util/EglSurfaceTexture.h    |  5 ++--
+ 3 files changed, 28 insertions(+), 24 deletions(-)
+
+diff --git a/services/camera/virtualcamera/VirtualCameraRenderThread.cc b/services/camera/virtualcamera/VirtualCameraRenderThread.cc
+index 58c6549e05..4c243e3ae6 100644
+--- a/services/camera/virtualcamera/VirtualCameraRenderThread.cc
++++ b/services/camera/virtualcamera/VirtualCameraRenderThread.cc
+@@ -223,21 +223,6 @@ std::chrono::nanoseconds getMaxFrameDuration(
+       static_cast<uint64_t>(1e9 / VirtualCameraDevice::kMinFps));
+ }
+ 
+-class FrameAvailableListenerProxy : public ConsumerBase::FrameAvailableListener {
+- public:
+-  FrameAvailableListenerProxy(std::function<void()> callback)
+-      : mOnFrameAvailableCallback(callback) {
+-  }
+-
+-  virtual void onFrameAvailable(const BufferItem&) override {
+-    ALOGV("%s: onFrameAvailable", __func__);
+-    mOnFrameAvailableCallback();
+-  }
+-
+- private:
+-  std::function<void()> mOnFrameAvailableCallback;
+-};
+-
+ }  // namespace
+ 
+ CaptureRequestBuffer::CaptureRequestBuffer(int streamId, int bufferId,
+@@ -383,10 +368,8 @@ void VirtualCameraRenderThread::threadLoop() {
+       EglTextureProgram::TextureFormat::RGBA);
+   mEglSurfaceTexture = std::make_unique<EglSurfaceTexture>(
+       mInputSurfaceSize.width, mInputSurfaceSize.height);
+-  sp<FrameAvailableListenerProxy> frameAvailableListener =
+-      sp<FrameAvailableListenerProxy>::make(
+-          [this]() { requestTextureUpdate(); });
+-  mEglSurfaceTexture->setFrameAvailableListener(frameAvailableListener);
++  mEglSurfaceTexture->setFrameAvailableListener(
++      [this]() { requestTextureUpdate(); });
+ 
+   mInputSurfacePromise.set_value(mEglSurfaceTexture->getSurface());
+ 
+diff --git a/services/camera/virtualcamera/util/EglSurfaceTexture.cc b/services/camera/virtualcamera/util/EglSurfaceTexture.cc
+index fc469a0d3a..f99b965d31 100644
+--- a/services/camera/virtualcamera/util/EglSurfaceTexture.cc
++++ b/services/camera/virtualcamera/util/EglSurfaceTexture.cc
+@@ -40,6 +40,21 @@ namespace {
+ // Maximal number of buffers producer can dequeue without blocking.
+ constexpr int kBufferProducerMaxDequeueBufferCount = 64;
+ 
++class FrameAvailableListenerProxy : public ConsumerBase::FrameAvailableListener {
++ public:
++  FrameAvailableListenerProxy(const std::function<void()>& callback)
++      : mOnFrameAvailableCallback(callback) {
++  }
++
++  virtual void onFrameAvailable(const BufferItem&) override {
++    ALOGV("%s: onFrameAvailable", __func__);
++    mOnFrameAvailableCallback();
++  }
++
++ private:
++  std::function<void()> mOnFrameAvailableCallback;
++};
++
+ }  // namespace
+ 
+ EglSurfaceTexture::EglSurfaceTexture(const uint32_t width, const uint32_t height)
+@@ -92,8 +107,13 @@ sp<GraphicBuffer> EglSurfaceTexture::getCurrentBuffer() {
+ }
+ 
+ void EglSurfaceTexture::setFrameAvailableListener(
+-    const wp<ConsumerBase::FrameAvailableListener>& listener) {
+-  mGlConsumer->setFrameAvailableListener(listener);
++    const std::function<void()>& listener) {
++  mFrameAvailableListener =
++      sp<FrameAvailableListenerProxy>::make([this, listener]() {
++        mIsFirstFrameDrawn.store(true);
++        listener();
++      });
++  mGlConsumer->setFrameAvailableListener(mFrameAvailableListener);
+ }
+ 
+ bool EglSurfaceTexture::waitForNextFrame(const std::chrono::nanoseconds timeout) {
+@@ -106,7 +126,7 @@ std::chrono::nanoseconds EglSurfaceTexture::getTimestamp() {
+ }
+ 
+ bool EglSurfaceTexture::isFirstFrameDrawn() {
+-  return mGlConsumer->getFrameNumber() > 0;
++  return mIsFirstFrameDrawn.load();
+ }
+ 
+ GLuint EglSurfaceTexture::updateTexture() {
+diff --git a/services/camera/virtualcamera/util/EglSurfaceTexture.h b/services/camera/virtualcamera/util/EglSurfaceTexture.h
+index 9f753153db..8b4d45e832 100644
+--- a/services/camera/virtualcamera/util/EglSurfaceTexture.h
++++ b/services/camera/virtualcamera/util/EglSurfaceTexture.h
+@@ -62,8 +62,7 @@ class EglSurfaceTexture {
+   // Returns false on timeout, true if new frame was received before timeout.
+   bool waitForNextFrame(std::chrono::nanoseconds timeout);
+ 
+-  void setFrameAvailableListener(
+-      const wp<ConsumerBase::FrameAvailableListener>& listener);
++  void setFrameAvailableListener(const std::function<void()>& listener);
+ 
+   // Update the texture with the most recent submitted buffer.
+   // Most be called on thread with EGL context.
+@@ -99,6 +98,8 @@ class EglSurfaceTexture {
+   GLuint mTextureId;
+   const uint32_t mWidth;
+   const uint32_t mHeight;
++  std::atomic_bool mIsFirstFrameDrawn = false;
++  sp<ConsumerBase::FrameAvailableListener> mFrameAvailableListener;
+ };
+ 
+ }  // namespace virtualcamera
+-- 
+2.43.0
+

@@ -1,0 +1,27 @@
+From bafaff5815fcb3807313c3073e1e15b89410673d Mon Sep 17 00:00:00 2001
+From: Yihan Dong <slotus@google.com>
+Date: Sat, 12 Oct 2024 09:16:25 +0000
+Subject: [PATCH 090/436] Add proposed trendy teams for VTS modules
+
+Change-Id: Iae40e192be158bdfa092b284e820981d82a588a4
+Test: build locally
+Bug: 368362374
+---
+ media/libmedia/xsd/vts/Android.bp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/media/libmedia/xsd/vts/Android.bp b/media/libmedia/xsd/vts/Android.bp
+index 83ab977239..add7b5194c 100644
+--- a/media/libmedia/xsd/vts/Android.bp
++++ b/media/libmedia/xsd/vts/Android.bp
+@@ -15,6 +15,7 @@
+ //
+ 
+ package {
++    default_team: "trendy_team_android_kernel",
+     // See: http://go/android-license-faq
+     // A large-scale-change added 'default_applicable_licenses' to import
+     // all of the 'license_kinds' from "frameworks_av_media_libmedia_license"
+-- 
+2.43.0
+

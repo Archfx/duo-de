@@ -1,0 +1,207 @@
+From 4cded70c0774dc891eb8d7f2b4fef6f1042a0af7 Mon Sep 17 00:00:00 2001
+From: Harish Mahendrakar <hmahendrakar@google.com>
+Date: Wed, 14 Aug 2024 17:56:57 +0530
+Subject: [PATCH 182/436] amrnb: Fix Android.bp formatting issues
+
+And also add trendy team for these
+Bug: 357558004
+Test: Builds
+
+Change-Id: I992f862d55e3d9f42cef9c82f64a180016559516
+---
+ media/module/codecs/amrnb/common/Android.bp    |  7 ++++---
+ media/module/codecs/amrnb/dec/Android.bp       | 18 +++++++++++-------
+ media/module/codecs/amrnb/enc/Android.bp       | 10 +++++++---
+ .../module/codecs/amrnb/enc/fuzzer/Android.bp  |  3 ++-
+ media/module/codecs/amrnb/fuzzer/Android.bp    |  5 +++--
+ 5 files changed, 27 insertions(+), 16 deletions(-)
+
+diff --git a/media/module/codecs/amrnb/common/Android.bp b/media/module/codecs/amrnb/common/Android.bp
+index 0bc6ed266a..35937cb43d 100644
+--- a/media/module/codecs/amrnb/common/Android.bp
++++ b/media/module/codecs/amrnb/common/Android.bp
+@@ -1,4 +1,5 @@
+ package {
++    default_team: "trendy_team_media_codec_framework",
+     default_applicable_licenses: [
+         "frameworks_av_media_codecs_amrnb_common_license",
+     ],
+@@ -42,8 +43,8 @@ cc_library {
+         "src/gains_tbl.cpp",
+         "src/gc_pred.cpp",
+         "src/gmed_n.cpp",
+-        "src/grid_tbl.cpp",
+         "src/gray_tbl.cpp",
++        "src/grid_tbl.cpp",
+         "src/int_lpc.cpp",
+         "src/inv_sqrt.cpp",
+         "src/inv_sqrt_tbl.cpp",
+@@ -91,9 +92,9 @@ cc_library {
+     export_include_dirs: ["include"],
+ 
+     cflags: [
+-        "-DOSCL_UNUSED_ARG(x)=(void)(x)",
+-        "-DOSCL_IMPORT_REF=",
+         "-DOSCL_EXPORT_REF=",
++        "-DOSCL_IMPORT_REF=",
++        "-DOSCL_UNUSED_ARG(x)=(void)(x)",
+ 
+         "-Werror",
+     ],
+diff --git a/media/module/codecs/amrnb/dec/Android.bp b/media/module/codecs/amrnb/dec/Android.bp
+index 70741d25aa..a28500a4d3 100644
+--- a/media/module/codecs/amrnb/dec/Android.bp
++++ b/media/module/codecs/amrnb/dec/Android.bp
+@@ -1,4 +1,5 @@
+ package {
++    default_team: "trendy_team_media_codec_framework",
+     default_applicable_licenses: [
+         "frameworks_av_media_codecs_amrnb_dec_license",
+     ],
+@@ -47,12 +48,12 @@ cc_library_static {
+         "src/b_cn_cod.cpp",
+         "src/bgnscd.cpp",
+         "src/c_g_aver.cpp",
+-        "src/d1035pf.cpp",
+-        "src/d2_11pf.cpp",
+         "src/d2_9pf.cpp",
++        "src/d2_11pf.cpp",
+         "src/d3_14pf.cpp",
+         "src/d4_17pf.cpp",
+         "src/d8_31pf.cpp",
++        "src/d1035pf.cpp",
+         "src/d_gain_c.cpp",
+         "src/d_gain_p.cpp",
+         "src/d_plsf.cpp",
+@@ -81,8 +82,8 @@ cc_library_static {
+     export_include_dirs: ["src"],
+ 
+     cflags: [
+-        "-DOSCL_UNUSED_ARG(x)=(void)(x)",
+         "-DOSCL_IMPORT_REF=",
++        "-DOSCL_UNUSED_ARG(x)=(void)(x)",
+ 
+         "-Werror",
+     ],
+@@ -94,8 +95,8 @@ cc_library_static {
+     //},
+ 
+     shared_libs: [
+-        "libstagefright_amrnb_common",
+         "liblog",
++        "libstagefright_amrnb_common",
+     ],
+ 
+     target: {
+@@ -113,19 +114,22 @@ cc_test {
+ 
+     srcs: ["test/amrnbdec_test.cpp"],
+ 
+-    cflags: ["-Wall", "-Werror"],
++    cflags: [
++        "-Wall",
++        "-Werror",
++    ],
+ 
+     local_include_dirs: ["src"],
+ 
+     static_libs: [
+-        "libstagefright_amrnbdec",
+         "libsndfile",
++        "libstagefright_amrnbdec",
+     ],
+ 
+     shared_libs: [
+-        "libstagefright_amrnb_common",
+         "libaudioutils",
+         "liblog",
++        "libstagefright_amrnb_common",
+     ],
+ 
+     target: {
+diff --git a/media/module/codecs/amrnb/enc/Android.bp b/media/module/codecs/amrnb/enc/Android.bp
+index 3c6566e8c8..13bb29c588 100644
+--- a/media/module/codecs/amrnb/enc/Android.bp
++++ b/media/module/codecs/amrnb/enc/Android.bp
+@@ -1,4 +1,5 @@
+ package {
++    default_team: "trendy_team_media_codec_framework",
+     default_applicable_licenses: [
+         "frameworks_av_media_codecs_amrnb_enc_license",
+     ],
+@@ -42,12 +43,12 @@ cc_library_static {
+     srcs: [
+         "src/amrencode.cpp",
+         "src/autocorr.cpp",
+-        "src/c1035pf.cpp",
+-        "src/c2_11pf.cpp",
+         "src/c2_9pf.cpp",
++        "src/c2_11pf.cpp",
+         "src/c3_14pf.cpp",
+         "src/c4_17pf.cpp",
+         "src/c8_31pf.cpp",
++        "src/c1035pf.cpp",
+         "src/calc_cor.cpp",
+         "src/calc_en.cpp",
+         "src/cbsearch.cpp",
+@@ -132,7 +133,10 @@ cc_test {
+ 
+     srcs: ["test/amrnb_enc_test.cpp"],
+ 
+-    cflags: ["-Wall", "-Werror"],
++    cflags: [
++        "-Wall",
++        "-Werror",
++    ],
+ 
+     local_include_dirs: ["src"],
+ 
+diff --git a/media/module/codecs/amrnb/enc/fuzzer/Android.bp b/media/module/codecs/amrnb/enc/fuzzer/Android.bp
+index bcbcee27a1..1b2ec875b6 100644
+--- a/media/module/codecs/amrnb/enc/fuzzer/Android.bp
++++ b/media/module/codecs/amrnb/enc/fuzzer/Android.bp
+@@ -19,6 +19,7 @@
+  */
+ 
+ package {
++    default_team: "trendy_team_media_codec_framework",
+     // See: http://go/android-license-faq
+     // A large-scale-change added 'default_applicable_licenses' to import
+     // all of the 'license_kinds' from "frameworks_av_media_codecs_amrnb_enc_license"
+@@ -39,8 +40,8 @@ cc_fuzz {
+ 
+     static_libs: [
+         "liblog",
+-        "libstagefright_amrnbenc",
+         "libstagefright_amrnb_common",
++        "libstagefright_amrnbenc",
+     ],
+ 
+     fuzz_config: {
+diff --git a/media/module/codecs/amrnb/fuzzer/Android.bp b/media/module/codecs/amrnb/fuzzer/Android.bp
+index 3f292675ce..c5cbbe2eda 100644
+--- a/media/module/codecs/amrnb/fuzzer/Android.bp
++++ b/media/module/codecs/amrnb/fuzzer/Android.bp
+@@ -19,6 +19,7 @@
+  */
+ 
+ package {
++    default_team: "trendy_team_media_codec_framework",
+     // See: http://go/android-license-faq
+     // A large-scale-change added 'default_applicable_licenses' to import
+     // all of the 'license_kinds' from "frameworks_av_license"
+@@ -34,9 +35,9 @@ cc_fuzz {
+         "amrnb_dec_fuzzer.cpp",
+     ],
+     static_libs: [
+-        "libstagefright_amrnbdec",
+-        "libstagefright_amrnb_common",
+         "liblog",
++        "libstagefright_amrnb_common",
++        "libstagefright_amrnbdec",
+     ],
+     target: {
+         darwin: {
+-- 
+2.43.0
+

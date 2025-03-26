@@ -1,0 +1,43 @@
+From 6d66b3718e197236d1cade6ace9e69ffc93fadc2 Mon Sep 17 00:00:00 2001
+From: jiabin <jiabin@google.com>
+Date: Mon, 25 Nov 2024 20:04:29 +0000
+Subject: [PATCH 347/436] Do not include selected output in secondary output
+ list.
+
+Bug: 380006470
+Test: repro steps in bug
+Flag: EXEMPT bugfix
+(cherry picked from https://googleplex-android-review.googlesource.com/q/commit:6838cdade7dd8fdd410ae97234503f1d2a3df24d)
+Merged-In: I629303ad5ee2e2ddf3f65edc9875e310d8048b21
+Change-Id: I629303ad5ee2e2ddf3f65edc9875e310d8048b21
+---
+ services/audiopolicy/managerdefault/AudioPolicyManager.cpp | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index 354c59caff..74e77e81f9 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -1492,7 +1492,8 @@ status_t AudioPolicyManager::getOutputForAttr(const audio_attributes_t *attr,
+         for (auto &secondaryMix : secondaryMixes) {
+             sp<SwAudioOutputDescriptor> outputDesc = secondaryMix->getOutput();
+             if (outputDesc != nullptr &&
+-                outputDesc->mIoHandle != AUDIO_IO_HANDLE_NONE) {
++                outputDesc->mIoHandle != AUDIO_IO_HANDLE_NONE &&
++                outputDesc->mIoHandle != *output) {
+                 secondaryOutputs->push_back(outputDesc->mIoHandle);
+                 weakSecondaryOutputDescs.push_back(outputDesc);
+             }
+@@ -7432,7 +7433,8 @@ void AudioPolicyManager::checkSecondaryOutputs() {
+             for (auto &secondaryMix : secondaryMixes) {
+                 sp<SwAudioOutputDescriptor> outputDesc = secondaryMix->getOutput();
+                 if (outputDesc != nullptr &&
+-                    outputDesc->mIoHandle != AUDIO_IO_HANDLE_NONE) {
++                    outputDesc->mIoHandle != AUDIO_IO_HANDLE_NONE &&
++                    outputDesc != outputDescriptor) {
+                     secondaryDescs.push_back(outputDesc);
+                 }
+             }
+-- 
+2.43.0
+

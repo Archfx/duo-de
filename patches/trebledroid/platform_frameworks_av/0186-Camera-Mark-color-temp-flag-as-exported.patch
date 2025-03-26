@@ -1,0 +1,28 @@
+From be7e9e5f5bba9d1e0c3268e90bd4d5c45a80f450 Mon Sep 17 00:00:00 2001
+From: Ravneet Dhanjal <rdhanjal@google.com>
+Date: Fri, 1 Nov 2024 01:51:16 +0000
+Subject: [PATCH 186/436] Camera: Mark color temp flag as exported
+
+Test: m
+Flag: com.android.internal.camera.flags.color_temperature
+Bug: 359409044
+Change-Id: I69c6a0fde6e901254f0a0183bdb70b28bab7904b
+---
+ camera/camera_platform.aconfig | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/camera/camera_platform.aconfig b/camera/camera_platform.aconfig
+index 323b23a1cc..2d0a364428 100644
+--- a/camera/camera_platform.aconfig
++++ b/camera/camera_platform.aconfig
+@@ -197,6 +197,7 @@ flag {
+ 
+ flag {
+     namespace: "camera_platform"
++    is_exported: true
+     name: "color_temperature"
+     description: "Add keys to manually set color temperature and color tint"
+     bug: "359409044"
+-- 
+2.43.0
+

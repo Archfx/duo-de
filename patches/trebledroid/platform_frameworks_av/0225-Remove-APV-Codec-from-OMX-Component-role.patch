@@ -1,0 +1,30 @@
+From e52adcf936fb05db258fd396462afa3bba764a7d Mon Sep 17 00:00:00 2001
+From: Fyodor Kyslov <kyslov@google.com>
+Date: Thu, 7 Nov 2024 16:49:33 +0000
+Subject: [PATCH 225/436] Remove APV Codec from OMX Component role
+
+We don't need it because APV Codec is not OMX.
+Bug: 376688746
+
+Test: CodecEncoderTest, CodecDecoderTest
+Change-Id: Ia450708be4ace4761f22356ca7aac07ddd578d46
+---
+ media/libstagefright/omx/OMXUtils.cpp | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/media/libstagefright/omx/OMXUtils.cpp b/media/libstagefright/omx/OMXUtils.cpp
+index d62e1edfcd..49b2dec80e 100644
+--- a/media/libstagefright/omx/OMXUtils.cpp
++++ b/media/libstagefright/omx/OMXUtils.cpp
+@@ -140,8 +140,6 @@ const char *GetComponentRole(bool isEncoder, const char *mime) {
+             "audio_decoder.g711alaw", "audio_encoder.g711alaw" },
+         { MEDIA_MIMETYPE_VIDEO_AVC,
+             "video_decoder.avc", "video_encoder.avc" },
+-        { MEDIA_MIMETYPE_VIDEO_APV,
+-            "video_decoder.apv", "video_encoder.apv" },
+         { MEDIA_MIMETYPE_VIDEO_HEVC,
+             "video_decoder.hevc", "video_encoder.hevc" },
+         { MEDIA_MIMETYPE_VIDEO_MPEG4,
+-- 
+2.43.0
+

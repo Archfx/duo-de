@@ -1,0 +1,52 @@
+From 8d38533b9aa285fca2f6b1c6b1cf7b0498b53311 Mon Sep 17 00:00:00 2001
+From: "Priyanka Advani (xWF)" <padvani@google.com>
+Date: Tue, 1 Oct 2024 16:53:02 +0000
+Subject: [PATCH 049/436] Revert "Sync with new drm common aidl interface"
+
+Revert submission 3283232-cherrypicker-L65300030006744043:N33800030107981038
+
+Reason for revert: Droidmonitor created revert due to b/370755706. Will be verifying through ABTD before submission.
+
+Reverted changes: /q/submissionid:3283232-cherrypicker-L65300030006744043:N33800030107981038
+
+Change-Id: I151f439282c18dd8b8e7f7741faf210638e88dee
+---
+ drm/libmediadrmrkp/Android.bp                 | 2 --
+ drm/mediadrm/plugins/clearkey/aidl/Android.bp | 1 -
+ 2 files changed, 3 deletions(-)
+
+diff --git a/drm/libmediadrmrkp/Android.bp b/drm/libmediadrmrkp/Android.bp
+index 88f0571c97..b1a01e48f6 100644
+--- a/drm/libmediadrmrkp/Android.bp
++++ b/drm/libmediadrmrkp/Android.bp
+@@ -14,7 +14,6 @@ cc_library {
+     ],
+     static_libs: [
+         "android.hardware.common-V2-ndk",
+-        "android.hardware.drm.common-V1-ndk",
+         "android.hardware.drm-V1-ndk",
+         "android.hardware.security.rkp-V3-ndk",
+         "libbase",
+@@ -40,7 +39,6 @@ cc_binary {
+     ],
+     static_libs: [
+         "android.hardware.common-V2-ndk",
+-        "android.hardware.drm.common-V1-ndk",
+         "android.hardware.drm-V1-ndk",
+         "android.hardware.security.rkp-V3-ndk",
+         "libbase",
+diff --git a/drm/mediadrm/plugins/clearkey/aidl/Android.bp b/drm/mediadrm/plugins/clearkey/aidl/Android.bp
+index d22be78a7f..9a06bd263c 100644
+--- a/drm/mediadrm/plugins/clearkey/aidl/Android.bp
++++ b/drm/mediadrm/plugins/clearkey/aidl/Android.bp
+@@ -40,7 +40,6 @@ cc_defaults {
+ 
+     static_libs: [
+         "android.hardware.common-V2-ndk",
+-        "android.hardware.drm.common-V1-ndk",
+         "android.hardware.drm-V1-ndk",
+         "libbase",
+         "libclearkeybase",
+-- 
+2.43.0
+

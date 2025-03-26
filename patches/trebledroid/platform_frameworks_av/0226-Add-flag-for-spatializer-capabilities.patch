@@ -1,0 +1,34 @@
+From 4adad26538a5a2eb06ee31bc86f51b05577081d5 Mon Sep 17 00:00:00 2001
+From: Jean-Michel Trivi <jmtrivi@google.com>
+Date: Thu, 7 Nov 2024 10:39:04 -0800
+Subject: [PATCH 226/436] Add flag for spatializer capabilities
+
+Flag: android.media.audio.spatializer_capabilities
+Test: compile
+Bug: 377582613
+Change-Id: I0f7c1f5f9cb46504bf45274506b1a42cf112c40e
+---
+ media/audio/aconfig/audio_framework.aconfig | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/media/audio/aconfig/audio_framework.aconfig b/media/audio/aconfig/audio_framework.aconfig
+index 9ca38a27df..7ee1360501 100644
+--- a/media/audio/aconfig/audio_framework.aconfig
++++ b/media/audio/aconfig/audio_framework.aconfig
+@@ -198,6 +198,13 @@ flag {
+     bug: "367816690"
+ }
+ 
++flag {
++    name: "spatializer_capabilities"
++    namespace: "media_audio"
++    description: "spatializer reports effective channel masks"
++    bug: "377582613"
++}
++
+ flag {
+     name: "speaker_cleanup_usage"
+     namespace: "media_audio"
+-- 
+2.43.0
+

@@ -1,0 +1,34 @@
+From b64cf0161afcaaf08e64d0b00069fcda49cc0419 Mon Sep 17 00:00:00 2001
+From: Arun Johnson <arunjohnson@google.com>
+Date: Wed, 23 Oct 2024 21:04:10 +0000
+Subject: [PATCH 133/436] Fix for inputsize calculation
+
+Bug: 361349204
+Flag: EXEMPT does not affect framework behaviour
+
+Change-Id: Ic479198ace2954df1cecc269139968468ef4309c
+---
+ .../library/MultiAccessUnitBlockModelDecoder.java          | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/MultiAccessUnitBlockModelDecoder.java b/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/MultiAccessUnitBlockModelDecoder.java
+index ed2defe1e6..d1a5d79719 100644
+--- a/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/MultiAccessUnitBlockModelDecoder.java
++++ b/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/MultiAccessUnitBlockModelDecoder.java
+@@ -72,8 +72,11 @@ public class MultiAccessUnitBlockModelDecoder extends BlockModelDecoder {
+         final String mime = format.getString(MediaFormat.KEY_MIME);
+         final int maxOutputSize = format.getNumber(
+             MediaFormat.KEY_BUFFER_BATCH_MAX_OUTPUT_SIZE, 0).intValue();
+-        final int maxInputSizeInBytes = format.getInteger(
+-                MediaFormat.KEY_MAX_INPUT_SIZE);
++        int maxInputSizeInBytes = 0;
++        if (format.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
++            maxInputSizeInBytes = format.getNumber(
++                    MediaFormat.KEY_MAX_INPUT_SIZE, 0).intValue();
++        }
+         mMaxInputSize = Math.max(maxInputSizeInBytes,
+                 (int) (maxOutputSize * CodecUtils.getCompressionRatio(mime)));
+     }
+-- 
+2.43.0
+

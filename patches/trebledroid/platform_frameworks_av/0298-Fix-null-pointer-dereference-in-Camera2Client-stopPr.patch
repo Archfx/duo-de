@@ -1,0 +1,79 @@
+From f170fcc7298018d29ca91ee27052799bd658b437 Mon Sep 17 00:00:00 2001
+From: Austin Borger <borgera@google.com>
+Date: Tue, 19 Nov 2024 14:48:40 -0800
+Subject: [PATCH 298/436] Fix null pointer dereference in
+ Camera2Client::stopPreviewL
+
+stopPreviewL may in rare cases be called before initializeImpl. This is
+highly unusual and should not happen, however when it does happen
+crashing the server is not a good way to recover. Check if we've
+initialized or not, and if not early out of topPreviewL given there's
+no stream to stop.
+
+Bug: 290086710
+Test: Built locally
+Flag: EXEMPT no significant behavior change
+Change-Id: I19bf2e1737c507081be4d3222d532f46b539087c
+---
+ services/camera/libcameraservice/api1/Camera2Client.cpp | 8 ++++++++
+ services/camera/libcameraservice/api1/Camera2Client.h   | 4 ++++
+ 2 files changed, 12 insertions(+)
+
+diff --git a/services/camera/libcameraservice/api1/Camera2Client.cpp b/services/camera/libcameraservice/api1/Camera2Client.cpp
+index 1d29462676..9b916bf7b1 100644
+--- a/services/camera/libcameraservice/api1/Camera2Client.cpp
++++ b/services/camera/libcameraservice/api1/Camera2Client.cpp
+@@ -73,6 +73,7 @@ Camera2Client::Camera2Client(
+                         overrideForPerfClass, rotationOverride, sharedMode,
+                         /*legacyClient*/ true),
+       mParameters(api1CameraId, cameraFacing),
++      mInitialized(false),
+       mLatestRequestIds(kMaxRequestIds),
+       mLatestFailedRequestIds(kMaxRequestIds) {
+     ATRACE_CALL();
+@@ -194,6 +195,7 @@ status_t Camera2Client::initializeImpl(TProviderPtr providerPtr, const std::stri
+         ALOGD("%s", l.mParameters.paramsFlattened.c_str());
+     }
+ 
++    mInitialized = true;
+     return OK;
+ }
+ 
+@@ -1040,6 +1042,12 @@ void Camera2Client::stopPreview() {
+ 
+ void Camera2Client::stopPreviewL() {
+     ATRACE_CALL();
++
++    if (!mInitialized) {
++        // If we haven't initialized yet, there's no stream to stop (b/379558387)
++        return;
++    }
++
+     status_t res;
+     const nsecs_t kStopCaptureTimeout = 3000000000LL; // 3 seconds
+     Parameters::State state;
+diff --git a/services/camera/libcameraservice/api1/Camera2Client.h b/services/camera/libcameraservice/api1/Camera2Client.h
+index 51d8d54161..a90e8cc139 100644
+--- a/services/camera/libcameraservice/api1/Camera2Client.h
++++ b/services/camera/libcameraservice/api1/Camera2Client.h
+@@ -17,6 +17,8 @@
+ #ifndef ANDROID_SERVERS_CAMERA_CAMERA2CLIENT_H
+ #define ANDROID_SERVERS_CAMERA_CAMERA2CLIENT_H
+ 
++#include <atomic>
++
+ #include <gui/Flags.h>
+ #include <gui/view/Surface.h>
+ #include <media/RingBuffer.h>
+@@ -236,6 +238,8 @@ private:
+     sp<camera2::JpegProcessor> mJpegProcessor;
+     sp<camera2::ZslProcessor> mZslProcessor;
+ 
++    std::atomic<bool> mInitialized;
++
+     /** Utility members */
+     bool mLegacyMode;
+ 
+-- 
+2.43.0
+

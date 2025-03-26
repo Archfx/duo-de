@@ -1,0 +1,57 @@
+From b67cf9e0635a9b41ccf2e21a319c87f345da7d50 Mon Sep 17 00:00:00 2001
+From: Robert Wu <robertwu@google.com>
+Date: Fri, 22 Nov 2024 22:45:06 +0000
+Subject: [PATCH 335/436] Address comments with getDeviceIds
+
+Addressing the following comments from NDK API council.
+1. Available since API level 36 should not be the first line.
+2. Comments about stream being Nonnull are not needed.
+3. Both ids and numIds should be marked with Nullable.
+
+Bug: 380300288
+Test: atest AAudioTests
+Flag: EXEMPT NDK
+Change-Id: I0e2c00d46ceeb1039a016b4684013778f2fcef32
+---
+ media/libaaudio/include/aaudio/AAudio.h | 11 +++++------
+ 1 file changed, 5 insertions(+), 6 deletions(-)
+
+diff --git a/media/libaaudio/include/aaudio/AAudio.h b/media/libaaudio/include/aaudio/AAudio.h
+index 136edcc446..73cbdc42ce 100644
+--- a/media/libaaudio/include/aaudio/AAudio.h
++++ b/media/libaaudio/include/aaudio/AAudio.h
+@@ -1909,18 +1909,17 @@ AAUDIO_API int32_t AAudioStream_getSamplesPerFrame(AAudioStream* _Nonnull stream
+  * Available since API level 26.
+  *
+  * @param stream reference provided by AAudioStreamBuilder_openStream()
+- * @return actual device id. If there are multiple device ids used, the first device picked by
+- *         the audio policy engine will be returned.
++ * @return actual device id. If there are multiple device ids used,
++ *         this will return the first device id from AAudioStream_getDeviceIds().
+  */
+ AAUDIO_API int32_t AAudioStream_getDeviceId(AAudioStream* _Nonnull stream) __INTRODUCED_IN(26);
+ 
+ /**
+- * Available since API level 36.
+- *
+  * Call this function after AAudioStreamBuilder_openStream().
+- * This function will crash if stream is null.
+  * An array of size 16 should generally be large enough to fit all device identifiers.
+  *
++ * Available since API level 36.
++ *
+  * @param stream reference provided by AAudioStreamBuilder_openStream().
+  * @param ids reference to an array of ids.
+  * @params numIds size allocated to the array of ids.
+@@ -1933,7 +1932,7 @@ AAUDIO_API int32_t AAudioStream_getDeviceId(AAudioStream* _Nonnull stream) __INT
+  *         Otherwise, if ids is null, return {@link #AAUDIO_ERROR_ILLEGAL_ARGUMENT}.
+  */
+ AAUDIO_API aaudio_result_t AAudioStream_getDeviceIds(AAudioStream* _Nonnull stream,
+-        int32_t* _Nonnull ids, int32_t* _Nonnull numIds) __INTRODUCED_IN(36);
++        int32_t* _Nullable ids, int32_t* _Nullable numIds) __INTRODUCED_IN(36);
+ 
+ /**
+  * Available since API level 26.
+-- 
+2.43.0
+

@@ -1,0 +1,92 @@
+From c86a3e1001e16d38aa175e8d4303535311b48c0f Mon Sep 17 00:00:00 2001
+From: Eric Laurent <elaurent@google.com>
+Date: Thu, 10 Oct 2024 14:26:43 +0000
+Subject: [PATCH 083/436] Audio Policy Engine: remove recurrent warning in
+ getDevicesForStrategyInt()
+
+The legacy routing strategy STRATEGY_PATCH is reserved for internal use
+when creating software audio patches and should never be passed to
+getDevicesForStrategyInt() to get an output device.
+Fixed call sites where this should happen.
+Did not getDevicesForStrategyInt() because this method is supposed to
+always return a valid device.
+
+Test: basic manual audio regression tests
+Flag: EXEMPT, bug fix.
+(cherry picked from https://googleplex-android-review.googlesource.com/q/commit:b0d986eaf3507b1f4e231d1ab11cc1901ae34cf5)
+Merged-In: Ibd3998b461468bc52e0b23711a7aa97e621b1f5b
+Change-Id: Ibd3998b461468bc52e0b23711a7aa97e621b1f5b
+---
+ .../audiopolicy/engine/common/include/ProductStrategy.h  | 4 ++++
+ services/audiopolicy/engine/common/src/EngineBase.cpp    | 9 +++++++++
+ .../audiopolicy/managerdefault/AudioPolicyManager.cpp    | 5 +++++
+ 3 files changed, 18 insertions(+)
+
+diff --git a/services/audiopolicy/engine/common/include/ProductStrategy.h b/services/audiopolicy/engine/common/include/ProductStrategy.h
+index 8162720a23..9b1125d6cf 100644
+--- a/services/audiopolicy/engine/common/include/ProductStrategy.h
++++ b/services/audiopolicy/engine/common/include/ProductStrategy.h
+@@ -92,6 +92,10 @@ public:
+ 
+     bool isDefault() const;
+ 
++    bool isPatchStrategy() const {
++        return getVolumeGroupForStreamType(AUDIO_STREAM_PATCH) != VOLUME_GROUP_NONE;
++    }
++
+     void dump(String8 *dst, int spaces = 0) const;
+ 
+ private:
+diff --git a/services/audiopolicy/engine/common/src/EngineBase.cpp b/services/audiopolicy/engine/common/src/EngineBase.cpp
+index 976791f64b..fb8379edee 100644
+--- a/services/audiopolicy/engine/common/src/EngineBase.cpp
++++ b/services/audiopolicy/engine/common/src/EngineBase.cpp
+@@ -311,6 +311,9 @@ StrategyVector EngineBase::getOrderedProductStrategies() const
+     }
+     StrategyVector orderedStrategies;
+     for (const auto &iter : strategies) {
++        if (iter.second->isPatchStrategy()) {
++            continue;
++        }
+         orderedStrategies.push_back(iter.second->getId());
+     }
+     return orderedStrategies;
+@@ -742,6 +745,9 @@ void EngineBase::initializeDeviceSelectionCache() {
+     auto defaultDevices = DeviceVector(getApmObserver()->getDefaultOutputDevice());
+     for (const auto &iter : getProductStrategies()) {
+         const auto &strategy = iter.second;
++        if (strategy->isPatchStrategy()) {
++            continue;
++        }
+         mDevicesForStrategies[strategy->getId()] = defaultDevices;
+         setStrategyDevices(strategy, defaultDevices);
+     }
+@@ -750,6 +756,9 @@ void EngineBase::initializeDeviceSelectionCache() {
+ void EngineBase::updateDeviceSelectionCache() {
+     for (const auto &iter : getProductStrategies()) {
+         const auto& strategy = iter.second;
++        if (strategy->isPatchStrategy()) {
++            continue;
++        }
+         auto devices = getDevicesForProductStrategy(strategy->getId());
+         mDevicesForStrategies[strategy->getId()] = devices;
+         setStrategyDevices(strategy, devices);
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index 3ec3fb336c..354c59caff 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -3496,6 +3496,11 @@ status_t AudioPolicyManager::setVolumeIndexForAttributes(const audio_attributes_
+     }
+     ALOGV("%s: group %d matching with %s index %d",
+             __FUNCTION__, group, toString(attributes).c_str(), index);
++    if (mEngine->getStreamTypeForAttributes(attributes) == AUDIO_STREAM_PATCH) {
++        ALOGV("%s: cannot change volume for PATCH stream, attrs: %s",
++                __FUNCTION__, toString(attributes).c_str());
++        return NO_ERROR;
++    }
+     status_t status = NO_ERROR;
+     IVolumeCurves &curves = getVolumeCurves(attributes);
+     VolumeSource vs = toVolumeSource(group);
+-- 
+2.43.0
+

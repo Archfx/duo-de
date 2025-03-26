@@ -1,0 +1,31 @@
+From ca3a5c296a7fde45d3059092a1153b959cad8187 Mon Sep 17 00:00:00 2001
+From: Ian Baker <ibaker@google.com>
+Date: Mon, 4 Nov 2024 14:45:03 +0000
+Subject: [PATCH 195/436] Update namespace for
+ extractor_sniff_midi_optimizations flag
+
+The media_extractor namespace doesn't exist, media_solutions is the
+namespace associated with the Android Media Solutions team.
+
+Bug: 377219120
+Change-Id: Ifc34c55db8dc1146f3acf4a17436b248ca9f37e6
+---
+ media/module/extractors/extractor.aconfig | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/media/module/extractors/extractor.aconfig b/media/module/extractors/extractor.aconfig
+index c9bf6945be..7bf8bc1d9c 100644
+--- a/media/module/extractors/extractor.aconfig
++++ b/media/module/extractors/extractor.aconfig
+@@ -8,7 +8,7 @@ flag {
+     name: "extractor_sniff_midi_optimizations"
+     is_exported: true
+     is_fixed_read_only: true
+-    namespace: "media_extractor"
++    namespace: "media_solutions"
+     description: "Enable SniffMidi optimizations."
+     bug: "359920208"
+ }
+-- 
+2.43.0
+

@@ -1,0 +1,50 @@
+From 064697a2f965a135e7b1cd68c7d54a0e1939eb84 Mon Sep 17 00:00:00 2001
+From: David Li <dvdli@google.com>
+Date: Thu, 8 Aug 2024 03:14:33 +0000
+Subject: [PATCH 222/436] add support more PCM encoding and avoid overwriting
+ audio format
+
+ - add 32 bit PCM and 24 bit packed PCM format conversion.
+ - avoid overwriting audio format in the PCM offloading case
+
+Bug: 357483620
+Test: PCM offload playback
+Flag: EXEMPT bugfix
+Merged-In: Ia93aebb192b5ed6b3e315dbc962cfb11a1cb66b5
+Change-Id: Ia93aebb192b5ed6b3e315dbc962cfb11a1cb66b5
+---
+ .../nuplayer/NuPlayerRenderer.cpp                     | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/media/libmediaplayerservice/nuplayer/NuPlayerRenderer.cpp b/media/libmediaplayerservice/nuplayer/NuPlayerRenderer.cpp
+index cc8e3f97d2..e434a3ddb3 100644
+--- a/media/libmediaplayerservice/nuplayer/NuPlayerRenderer.cpp
++++ b/media/libmediaplayerservice/nuplayer/NuPlayerRenderer.cpp
+@@ -102,6 +102,10 @@ static audio_format_t constexpr audioFormatFromEncoding(int32_t pcmEncoding) {
+     switch (pcmEncoding) {
+     case kAudioEncodingPcmFloat:
+         return AUDIO_FORMAT_PCM_FLOAT;
++    case kAudioEncodingPcm32bit:
++        return AUDIO_FORMAT_PCM_32_BIT;
++    case kAudioEncodingPcm24bitPacked:
++        return AUDIO_FORMAT_PCM_24_BIT_PACKED;
+     case kAudioEncodingPcm16bit:
+         return AUDIO_FORMAT_PCM_16_BIT;
+     case kAudioEncodingPcm8bit:
+@@ -2028,7 +2032,12 @@ status_t NuPlayer::Renderer::onOpenAudioSink(
+     if (offloadingAudio()) {
+         AString mime;
+         CHECK(format->findString("mime", &mime));
+-        status_t err = mapMimeToAudioFormat(audioFormat, mime.c_str());
++        status_t err = OK;
++        if (audioFormat == AUDIO_FORMAT_PCM_16_BIT) {
++            // If there is probably no pcm-encoding in the format message, try to get the format by
++            // its mimetype.
++            err = mapMimeToAudioFormat(audioFormat, mime.c_str());
++        }
+ 
+         if (err != OK) {
+             ALOGE("Couldn't map mime \"%s\" to a valid "
+-- 
+2.43.0
+

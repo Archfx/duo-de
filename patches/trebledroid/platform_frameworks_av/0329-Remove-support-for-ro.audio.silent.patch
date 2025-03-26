@@ -1,0 +1,77 @@
+From a502cee1177dd3842cd0b2e9818e35a1eb7883e1 Mon Sep 17 00:00:00 2001
+From: Atneya Nair <atneya@google.com>
+Date: Thu, 21 Nov 2024 23:41:22 +0000
+Subject: [PATCH 329/436] Remove support for ro.audio.silent
+
+Tradefed doesn't handle ro properties well, and test devices can be
+left in unexpected states.
+
+Remove and see what happens.
+
+Bug: 375939958
+Test: Manual
+Flag: EXEMPT trivial
+(cherry picked from https://googleplex-android-review.googlesource.com/q/commit:967c85fe01ab6acf8ab2ae54569ab90ef7737424)
+Merged-In: Ibf16b8653a9fdf1e3f49b62b1247939b88620e43
+Change-Id: Ibf16b8653a9fdf1e3f49b62b1247939b88620e43
+---
+ services/audioflinger/Threads.cpp | 36 ++++---------------------------
+ 1 file changed, 4 insertions(+), 32 deletions(-)
+
+diff --git a/services/audioflinger/Threads.cpp b/services/audioflinger/Threads.cpp
+index b7c0bb3811..776775b576 100644
+--- a/services/audioflinger/Threads.cpp
++++ b/services/audioflinger/Threads.cpp
+@@ -3520,26 +3520,8 @@ void PlaybackThread::threadLoop_removeTracks(
+ 
+ void PlaybackThread::checkSilentMode_l()
+ {
+-    if (!mMasterMute) {
+-        char value[PROPERTY_VALUE_MAX];
+-        if (mOutDeviceTypeAddrs.empty()) {
+-            ALOGD("ro.audio.silent is ignored since no output device is set");
+-            return;
+-        }
+-        if (isSingleDeviceType(outDeviceTypes_l(), AUDIO_DEVICE_OUT_REMOTE_SUBMIX)) {
+-            ALOGD("ro.audio.silent will be ignored for threads on AUDIO_DEVICE_OUT_REMOTE_SUBMIX");
+-            return;
+-        }
+-        if (property_get("ro.audio.silent", value, "0") > 0) {
+-            char *endptr;
+-            unsigned long ul = strtoul(value, &endptr, 0);
+-            if (*endptr == '\0' && ul != 0) {
+-                ALOGW("%s: mute from ro.audio.silent. Silence is golden", __func__);
+-                // The setprop command will not allow a property to be changed after
+-                // the first time it is set, so we don't have to worry about un-muting.
+-                setMasterMute_l(true);
+-            }
+-        }
++    if (property_get_bool("ro.audio.silent", false)) {
++        ALOGW("ro.audio.silent is now ignored");
+     }
+ }
+ 
+@@ -11201,18 +11183,8 @@ ThreadBase::MetadataUpdate MmapPlaybackThread::updateMetadata_l()
+ 
+ void MmapPlaybackThread::checkSilentMode_l()
+ {
+-    if (!mMasterMute) {
+-        char value[PROPERTY_VALUE_MAX];
+-        if (property_get("ro.audio.silent", value, "0") > 0) {
+-            char *endptr;
+-            unsigned long ul = strtoul(value, &endptr, 0);
+-            if (*endptr == '\0' && ul != 0) {
+-                ALOGW("%s: mute from ro.audio.silent. Silence is golden", __func__);
+-                // The setprop command will not allow a property to be changed after
+-                // the first time it is set, so we don't have to worry about un-muting.
+-                setMasterMute_l(true);
+-            }
+-        }
++    if (property_get_bool("ro.audio.silent", false)) {
++        ALOGW("ro.audio.silent is now ignored");
+     }
+ }
+ 
+-- 
+2.43.0
+

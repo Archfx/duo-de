@@ -1,0 +1,69 @@
+From 65e831c2c6e8a1d35596cb8bcbc81a79af835149 Mon Sep 17 00:00:00 2001
+From: Richard Folke Tullberg <richardfolke.tullberg@sony.com>
+Date: Tue, 5 Nov 2024 14:08:44 +0100
+Subject: [PATCH 380/436] Check if non offloadable effect is enabled with uuid
+
+Flag: EXEMPT bugfix
+Test: atest audiopolicy_tests
+Test: atest audio_effects_utils_tests
+Bug: 380470315
+Change-Id: Ia2e5e21066b47eb42bd490af00d0b4abb9c2a78d
+Merged-In: Ia2e5e21066b47eb42bd490af00d0b4abb9c2a78d
+---
+ .../managerdefinitions/include/EffectDescriptor.h |  3 ++-
+ .../managerdefinitions/src/EffectDescriptor.cpp   | 15 ++++++++++-----
+ 2 files changed, 12 insertions(+), 6 deletions(-)
+
+diff --git a/services/audiopolicy/common/managerdefinitions/include/EffectDescriptor.h b/services/audiopolicy/common/managerdefinitions/include/EffectDescriptor.h
+index f7b9b333b3..9107e2afa8 100644
+--- a/services/audiopolicy/common/managerdefinitions/include/EffectDescriptor.h
++++ b/services/audiopolicy/common/managerdefinitions/include/EffectDescriptor.h
+@@ -75,7 +75,8 @@ public:
+     bool     isEffectEnabled(int id) const;
+     uint32_t getMaxEffectsCpuLoad() const;
+     uint32_t getMaxEffectsMemory() const;
+-    bool isNonOffloadableEffectEnabled() const;
++    bool isNonOffloadableEffectEnabled(
++            const std::optional<const effect_uuid_t>& uuid = std::nullopt) const;
+ 
+     void moveEffects(audio_session_t session,
+                      audio_io_handle_t srcOutput,
+diff --git a/services/audiopolicy/common/managerdefinitions/src/EffectDescriptor.cpp b/services/audiopolicy/common/managerdefinitions/src/EffectDescriptor.cpp
+index 090da6ca1d..6d6678148b 100644
+--- a/services/audiopolicy/common/managerdefinitions/src/EffectDescriptor.cpp
++++ b/services/audiopolicy/common/managerdefinitions/src/EffectDescriptor.cpp
+@@ -21,6 +21,7 @@
+ 
+ #include "AudioInputDescriptor.h"
+ #include "EffectDescriptor.h"
++#include <system/audio_effects/audio_effects_utils.h>
+ #include <utils/String8.h>
+ 
+ #include <AudioPolicyInterface.h>
+@@ -157,14 +158,18 @@ status_t EffectDescriptorCollection::setEffectEnabled(const sp<EffectDescriptor>
+     return NO_ERROR;
+ }
+ 
+-bool EffectDescriptorCollection::isNonOffloadableEffectEnabled() const
++bool EffectDescriptorCollection::isNonOffloadableEffectEnabled(
++        const std::optional<const effect_uuid_t>& uuid) const
+ {
++    using namespace android::effect::utils;
+     for (size_t i = 0; i < size(); i++) {
+         sp<EffectDescriptor> effectDesc = valueAt(i);
+-        if (effectDesc->mEnabled && (effectDesc->isMusicEffect()) &&
+-                ((effectDesc->mDesc.flags & EFFECT_FLAG_OFFLOAD_SUPPORTED) == 0)) {
+-            ALOGV("isNonOffloadableEffectEnabled() non offloadable effect %s enabled on session %d",
+-                  effectDesc->mDesc.name, effectDesc->mSession);
++        if ((effectDesc->mEnabled && (effectDesc->isMusicEffect()) &&
++             ((effectDesc->mDesc.flags & EFFECT_FLAG_OFFLOAD_SUPPORTED) == 0)) &&
++            (uuid == std::nullopt || uuid.value() == effectDesc->mDesc.uuid)) {
++            ALOGE("%s: non offloadable effect %s, uuid %s, enabled on session %d", __func__,
++                  effectDesc->mDesc.name, ToString(effectDesc->mDesc.uuid).c_str(),
++                  effectDesc->mSession);
+             return true;
+         }
+     }
+-- 
+2.43.0
+

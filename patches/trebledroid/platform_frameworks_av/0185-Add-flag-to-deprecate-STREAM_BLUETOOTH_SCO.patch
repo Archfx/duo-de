@@ -1,0 +1,35 @@
+From a16e713c8d369ca370a577b901d9018837d955eb Mon Sep 17 00:00:00 2001
+From: Vlad Popa <pvlad@google.com>
+Date: Thu, 31 Oct 2024 17:10:25 -0700
+Subject: [PATCH 185/436] Add flag to deprecate STREAM_BLUETOOTH_SCO
+
+Flag: android.media.audio.deprecate_stream_bt_sco
+Test: make
+Bug: 376756660
+Change-Id: Ia2133445bcaa094708039697f9033f3c7fd8393c
+---
+ media/audio/aconfig/audio_framework.aconfig | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/media/audio/aconfig/audio_framework.aconfig b/media/audio/aconfig/audio_framework.aconfig
+index f6b84e10e3..c6479d03d6 100644
+--- a/media/audio/aconfig/audio_framework.aconfig
++++ b/media/audio/aconfig/audio_framework.aconfig
+@@ -32,6 +32,14 @@ flag {
+     bug: "374751406"
+ }
+ 
++flag {
++    name: "deprecate_stream_bt_sco"
++    namespace: "media_audio"
++    description: "Deprecate STREAM_BLUETOOTH_SCO"
++    is_exported: true
++    bug: "376756660"
++}
++
+ flag {
+     name: "enable_multichannel_group_device"
+     namespace: "media_audio"
+-- 
+2.43.0
+

@@ -1,0 +1,44 @@
+From 10018da97b55fb9c00147c1c928eca969d6546ff Mon Sep 17 00:00:00 2001
+From: Vlad Popa <pvlad@google.com>
+Date: Tue, 15 Oct 2024 16:10:36 -0700
+Subject: [PATCH 098/436] Avoid calling virtual method in constructor
+
+setPortMute is a virtual function and should not be called in the
+constructor. Use a simplified logic since at track constructions there
+are not active patch tracks.
+
+Flag: EXEMPT bugfix
+Test: manual
+Bug: 28835785
+Change-Id: I14411735ee4a5e61be78018ca1bb2b3d6e60f634
+---
+ services/audioflinger/Tracks.cpp | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/services/audioflinger/Tracks.cpp b/services/audioflinger/Tracks.cpp
+index 980ef2293b..0ddbaecab4 100644
+--- a/services/audioflinger/Tracks.cpp
++++ b/services/audioflinger/Tracks.cpp
+@@ -863,14 +863,17 @@ Track::Track(
+     }
+ 
+     populateUsageAndContentTypeFromStreamType();
+-    setPortMute(muted);
++
++    mute_state_t newMuteState = mMuteState.load();
++    newMuteState.muteFromPortVolume = muted;
+ 
+     // Audio patch and call assistant volume are always max
+     if (mAttr.usage == AUDIO_USAGE_CALL_ASSISTANT
+             || mAttr.usage == AUDIO_USAGE_VIRTUAL_SOURCE) {
+         mVolume = 1.0f;
+-        setPortMute(false);
++        newMuteState.muteFromPortVolume = false;
+     }
++    mMuteState.store(newMuteState);
+ 
+     mServerLatencySupported = checkServerLatencySupported(format, flags);
+ #ifdef TEE_SINK
+-- 
+2.43.0
+

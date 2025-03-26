@@ -1,0 +1,157 @@
+From 7582af8bd53b39f901251dd7060945c49e0bac68 Mon Sep 17 00:00:00 2001
+From: Atneya Nair <atneya@google.com>
+Date: Wed, 20 Nov 2024 18:24:29 -0800
+Subject: [PATCH 326/436] [audio] Pull service permissions into libaudioperm
+
+Test: compiles
+Bug: 355498020
+Flag: EXEMPT safe build change
+Change-Id: Idf516a36596c3f5d3cd52745c951189c83264e2b
+---
+ media/libaudioclient/aidl/fuzzer/Android.bp               | 2 +-
+ .../permission => media/libaudiopermission}/Android.bp    | 8 ++++----
+ .../libaudiopermission}/NativePermissionController.cpp    | 0
+ .../ValidatedAttributionSourceState.cpp                   | 0
+ .../include/media/IPermissionProvider.h                   | 0
+ .../include/media/NativePermissionController.h            | 0
+ .../include/media/ValidatedAttributionSourceState.h       | 0
+ .../tests/NativePermissionControllerTest.cpp              | 0
+ .../tests/ValidatedAttributionSourceStateTest.cpp         | 0
+ services/audioflinger/Android.bp                          | 2 +-
+ services/audiopolicy/service/Android.bp                   | 6 +++---
+ 11 files changed, 9 insertions(+), 9 deletions(-)
+ rename {services/audiopolicy/permission => media/libaudiopermission}/Android.bp (93%)
+ rename {services/audiopolicy/permission => media/libaudiopermission}/NativePermissionController.cpp (100%)
+ rename {services/audiopolicy/permission => media/libaudiopermission}/ValidatedAttributionSourceState.cpp (100%)
+ rename {services/audiopolicy/permission => media/libaudiopermission}/include/media/IPermissionProvider.h (100%)
+ rename {services/audiopolicy/permission => media/libaudiopermission}/include/media/NativePermissionController.h (100%)
+ rename {services/audiopolicy/permission => media/libaudiopermission}/include/media/ValidatedAttributionSourceState.h (100%)
+ rename {services/audiopolicy/permission => media/libaudiopermission}/tests/NativePermissionControllerTest.cpp (100%)
+ rename {services/audiopolicy/permission => media/libaudiopermission}/tests/ValidatedAttributionSourceStateTest.cpp (100%)
+
+diff --git a/media/libaudioclient/aidl/fuzzer/Android.bp b/media/libaudioclient/aidl/fuzzer/Android.bp
+index 14e528fad1..05db9e5e65 100644
+--- a/media/libaudioclient/aidl/fuzzer/Android.bp
++++ b/media/libaudioclient/aidl/fuzzer/Android.bp
+@@ -22,7 +22,7 @@ cc_defaults {
+     name: "libaudioclient_aidl_fuzzer_defaults",
+     static_libs: [
+         "android.hardware.audio.common@7.0-enums",
+-        "audiopermissioncontroller",
++        "libaudiopermission",
+         "libaudiomockhal",
+         "libfakeservicemanager",
+         "libjsoncpp",
+diff --git a/services/audiopolicy/permission/Android.bp b/media/libaudiopermission/Android.bp
+similarity index 93%
+rename from services/audiopolicy/permission/Android.bp
+rename to media/libaudiopermission/Android.bp
+index cfbeaae363..7275fd7fcc 100644
+--- a/services/audiopolicy/permission/Android.bp
++++ b/media/libaudiopermission/Android.bp
+@@ -4,13 +4,13 @@ package {
+ }
+ 
+ cc_library_headers {
+-    name: "audiopermissioncontroller_headers",
++    name: "libaudiopermission_headers",
+     host_supported: true,
+     export_include_dirs: ["include"],
+ }
+ 
+ cc_library {
+-    name: "audiopermissioncontroller",
++    name: "libaudiopermission",
+ 
+     srcs: [
+         "NativePermissionController.cpp",
+@@ -83,14 +83,14 @@ cc_library {
+ }
+ 
+ cc_test {
+-    name: "audiopermissioncontroller_test",
++    name: "libaudiopermission_test",
+     host_supported: true,
+     defaults: [
+         "libmediautils_tests_config",
+     ],
+     static_libs: [
+         "audio-permission-aidl-cpp",
+-        "audiopermissioncontroller",
++        "libaudiopermission",
+         "framework-permission-aidl-cpp",
+         "libgmock",
+     ],
+diff --git a/services/audiopolicy/permission/NativePermissionController.cpp b/media/libaudiopermission/NativePermissionController.cpp
+similarity index 100%
+rename from services/audiopolicy/permission/NativePermissionController.cpp
+rename to media/libaudiopermission/NativePermissionController.cpp
+diff --git a/services/audiopolicy/permission/ValidatedAttributionSourceState.cpp b/media/libaudiopermission/ValidatedAttributionSourceState.cpp
+similarity index 100%
+rename from services/audiopolicy/permission/ValidatedAttributionSourceState.cpp
+rename to media/libaudiopermission/ValidatedAttributionSourceState.cpp
+diff --git a/services/audiopolicy/permission/include/media/IPermissionProvider.h b/media/libaudiopermission/include/media/IPermissionProvider.h
+similarity index 100%
+rename from services/audiopolicy/permission/include/media/IPermissionProvider.h
+rename to media/libaudiopermission/include/media/IPermissionProvider.h
+diff --git a/services/audiopolicy/permission/include/media/NativePermissionController.h b/media/libaudiopermission/include/media/NativePermissionController.h
+similarity index 100%
+rename from services/audiopolicy/permission/include/media/NativePermissionController.h
+rename to media/libaudiopermission/include/media/NativePermissionController.h
+diff --git a/services/audiopolicy/permission/include/media/ValidatedAttributionSourceState.h b/media/libaudiopermission/include/media/ValidatedAttributionSourceState.h
+similarity index 100%
+rename from services/audiopolicy/permission/include/media/ValidatedAttributionSourceState.h
+rename to media/libaudiopermission/include/media/ValidatedAttributionSourceState.h
+diff --git a/services/audiopolicy/permission/tests/NativePermissionControllerTest.cpp b/media/libaudiopermission/tests/NativePermissionControllerTest.cpp
+similarity index 100%
+rename from services/audiopolicy/permission/tests/NativePermissionControllerTest.cpp
+rename to media/libaudiopermission/tests/NativePermissionControllerTest.cpp
+diff --git a/services/audiopolicy/permission/tests/ValidatedAttributionSourceStateTest.cpp b/media/libaudiopermission/tests/ValidatedAttributionSourceStateTest.cpp
+similarity index 100%
+rename from services/audiopolicy/permission/tests/ValidatedAttributionSourceStateTest.cpp
+rename to media/libaudiopermission/tests/ValidatedAttributionSourceStateTest.cpp
+diff --git a/services/audioflinger/Android.bp b/services/audioflinger/Android.bp
+index 01bde420c0..add8a43f83 100644
+--- a/services/audioflinger/Android.bp
++++ b/services/audioflinger/Android.bp
+@@ -149,7 +149,7 @@ cc_defaults {
+         "audio-permission-aidl-cpp",
+         "audioclient-types-aidl-cpp",
+         "audioflinger-aidl-cpp",
+-        "audiopermissioncontroller",
++        "libaudiopermission",
+         "av-types-aidl-cpp",
+         "com.android.media.audio-aconfig-cc",
+         "com.android.media.audioserver-aconfig-cc",
+diff --git a/services/audiopolicy/service/Android.bp b/services/audiopolicy/service/Android.bp
+index 79e328e370..f415a41c47 100644
+--- a/services/audiopolicy/service/Android.bp
++++ b/services/audiopolicy/service/Android.bp
+@@ -25,7 +25,6 @@ cc_defaults {
+         "audio-permission-aidl-cpp",
+         "audioclient-types-aidl-cpp",
+         "audioflinger-aidl-cpp",
+-        "audiopermissioncontroller",
+         "audiopolicy-aidl-cpp",
+         "audiopolicy-types-aidl-cpp",
+         "capture_state_listener-aidl-cpp",
+@@ -37,6 +36,7 @@ cc_defaults {
+         "libaudioclient_aidl_conversion",
+         "libaudiofoundation",
+         "libaudiohal",
++        "libaudiopermission",
+         "libaudiopolicy",
+         "libaudiopolicycomponents",
+         "libaudiopolicymanagerdefault",
+@@ -118,6 +118,6 @@ cc_library_headers {
+     name: "audiopolicyservicelocal_headers",
+     host_supported: true,
+     export_include_dirs: ["include"],
+-    header_libs: ["audiopermissioncontroller_headers"],
+-    export_header_lib_headers: ["audiopermissioncontroller_headers"],
++    header_libs: ["libaudiopermission_headers"],
++    export_header_lib_headers: ["libaudiopermission_headers"],
+ }
+-- 
+2.43.0
+

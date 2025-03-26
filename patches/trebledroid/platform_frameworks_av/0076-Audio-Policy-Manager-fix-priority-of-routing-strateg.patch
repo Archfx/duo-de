@@ -1,0 +1,54 @@
+From 30477836852730d00649a328009abeac9c616333 Mon Sep 17 00:00:00 2001
+From: Eric Laurent <elaurent@google.com>
+Date: Wed, 9 Oct 2024 17:31:03 +0000
+Subject: [PATCH 076/436] Audio Policy Manager: fix priority of routing
+ strategies
+
+The priority ordered list of routing strategies in the default
+engine was modified unintentionally by commit ad3dce95.
+This CL restores the order by redefining the legacy strategies
+enum values in the desired order.
+
+Flag: EXEMPT bug fix
+Test: repro steps in bug
+Bug: 371082808
+(cherry picked from https://googleplex-android-review.googlesource.com/q/commit:c8b63c83e1c2f962d4ad5a2748d93f57a6c95a54)
+Merged-In: I4355603dcab7034f59a8f4e7796d5823ad14646c
+Change-Id: I4355603dcab7034f59a8f4e7796d5823ad14646c
+---
+ services/audiopolicy/common/include/policy.h | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/services/audiopolicy/common/include/policy.h b/services/audiopolicy/common/include/policy.h
+index 3b7cae367a..d499222463 100644
+--- a/services/audiopolicy/common/include/policy.h
++++ b/services/audiopolicy/common/include/policy.h
+@@ -29,19 +29,21 @@ using StreamTypeVector = std::vector<audio_stream_type_t>;
+ /**
+  * Legacy audio policy product strategies IDs. These strategies are supported by the default
+  * policy engine.
++ * IMPORTANT NOTE: the order of this enum is important as it determines the priority
++ * between active strategies for routing decisions: lower enum value => higher prioriy
+  */
+ enum legacy_strategy {
+     STRATEGY_NONE = -1,
+-    STRATEGY_MEDIA,
+     STRATEGY_PHONE,
+     STRATEGY_SONIFICATION,
++    STRATEGY_ENFORCED_AUDIBLE,
++    STRATEGY_ACCESSIBILITY,
+     STRATEGY_SONIFICATION_RESPECTFUL,
++    STRATEGY_MEDIA,
+     STRATEGY_DTMF,
+-    STRATEGY_ENFORCED_AUDIBLE,
++    STRATEGY_CALL_ASSISTANT,
+     STRATEGY_TRANSMITTED_THROUGH_SPEAKER,
+-    STRATEGY_ACCESSIBILITY,
+     STRATEGY_REROUTING,
+-    STRATEGY_CALL_ASSISTANT,
+     STRATEGY_PATCH,
+ };
+ 
+-- 
+2.43.0
+

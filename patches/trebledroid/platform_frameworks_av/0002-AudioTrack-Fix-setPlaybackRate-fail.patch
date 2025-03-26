@@ -1,0 +1,30 @@
+From 86b54d3ab9b335bd48946526f1d4af70c3382dec Mon Sep 17 00:00:00 2001
+From: Kuowei Li <kuowei.li@mediatek.com>
+Date: Wed, 28 Aug 2024 22:25:55 +0800
+Subject: [PATCH 002/436] AudioTrack: Fix setPlaybackRate fail
+
+Check isAfTrackOffloadedOrDirect_l instead of isOffloadedOrDirect_l.
+
+Bug: 350969334
+Test: Manual
+Change-Id: I3af23012652420ecfb5249f9dc03d2db6db5828d
+---
+ media/libaudioclient/AudioTrack.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/media/libaudioclient/AudioTrack.cpp b/media/libaudioclient/AudioTrack.cpp
+index 1a575a721d..203661d575 100644
+--- a/media/libaudioclient/AudioTrack.cpp
++++ b/media/libaudioclient/AudioTrack.cpp
+@@ -1262,7 +1262,7 @@ status_t AudioTrack::setPlaybackRate(const AudioPlaybackRate &playbackRate)
+     if (isAudioPlaybackRateEqual(playbackRate, mPlaybackRate)) {
+         return NO_ERROR;
+     }
+-    if (isOffloadedOrDirect_l()) {
++    if (isAfTrackOffloadedOrDirect_l()) {
+         const status_t status = statusTFromBinderStatus(mAudioTrack->setPlaybackRateParameters(
+                 VALUE_OR_RETURN_STATUS(
+                         legacy2aidl_audio_playback_rate_t_AudioPlaybackRate(playbackRate))));
+-- 
+2.43.0
+

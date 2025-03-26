@@ -1,0 +1,28 @@
+From ce222b5c0a2f196ed9381f463ce272d0195280f8 Mon Sep 17 00:00:00 2001
+From: Santiago Seifert <aquilescanta@google.com>
+Date: Thu, 21 Nov 2024 13:46:49 +0000
+Subject: [PATCH 324/436] Create OWNERS file for better_together
+
+Change-Id: I4add5dcf790e41bcb644c5667f4a8879a996413d
+Test: N/A. Owners change only.
+Flag: EXEMPT OWNERS only
+Bug: b/379821116
+---
+ media/janitors/better_together_OWNERS | 5 +++++
+ 1 file changed, 5 insertions(+)
+ create mode 100644 media/janitors/better_together_OWNERS
+
+diff --git a/media/janitors/better_together_OWNERS b/media/janitors/better_together_OWNERS
+new file mode 100644
+index 0000000000..70723cb49e
+--- /dev/null
++++ b/media/janitors/better_together_OWNERS
+@@ -0,0 +1,5 @@
++# Bug component: 137631
++
++aquilescanta@google.com
++asapperstein@google.com
++halliwell@google.com
+-- 
+2.43.0
+

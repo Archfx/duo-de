@@ -1,0 +1,71 @@
+From 401aa509eeeb123a85287dcbee12cae9fbf523de Mon Sep 17 00:00:00 2001
+From: Robin Lee <rgl@google.com>
+Date: Mon, 7 Oct 2024 14:09:16 +0000
+Subject: [PATCH 061/436] Check AID_RADIO correctly
+
+AID_RADIO is just an appId. It has a different UID assigned
+for each user on the device. When checking if the caller is
+radio, extract the AID first and just check that.
+
+This is a followup to some earlier targeted fixes to these
+checks that partially/fully missed multiuser cases:
+
+ - Ide5e9218811e110997fed19f43eb6a5fdc5812ec
+ - I740b4f5acb88821197e3c4023a4032babd48ec5a
+ - If5c721c9acfc78f1cbc35c3056adad95a4604f8b
+
+This fixes a 10 second black screen caused by the dialer app
+timing out while it waits, futilely, for media.metrics to become
+visible to its process.
+
+Repro as follows (must be on a secondary user):
+
+ - adb shell am switch-user 10
+ - adb shell pm clear com.android.phone
+ - adb shell am start -n com.android.phone/.EmergencyDialer
+
+Flag: EXEMPT trivial bugfix
+Fix: 352390759
+Test: Manual invocation of emergency dialer per above instructions
+Change-Id: I2c8a6cc0459a6b46f482797e1456e30a70a43622
+---
+ media/libmediametrics/MediaMetricsItem.cpp | 16 ++++++++--------
+ 1 file changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/media/libmediametrics/MediaMetricsItem.cpp b/media/libmediametrics/MediaMetricsItem.cpp
+index ecb248d3ae..2c58461223 100644
+--- a/media/libmediametrics/MediaMetricsItem.cpp
++++ b/media/libmediametrics/MediaMetricsItem.cpp
+@@ -334,21 +334,21 @@ bool BaseItem::isEnabled() {
+ 
+     // This is checked only once in the lifetime of the process.
+     const uid_t uid = getuid();
+-    switch (uid) {
+-    case AID_RADIO:     // telephony subsystem, RIL
++    const uid_t appid = multiuser_get_app_id(uid);
++
++    if (appid == AID_RADIO) {
++        // telephony subsystem, RIL
+         return false;
+-    default:
++    }
++
++    if (appid >= AID_ISOLATED_START && appid <= AID_ISOLATED_END) {
+         // Some isolated processes can access the audio system; see
+         // AudioSystem::setAudioFlingerBinder (currently only the HotwordDetectionService). Instead
+         // of also allowing access to the MediaMetrics service, it's simpler to just disable it for
+         // now.
+         // TODO(b/190151205): Either allow the HotwordDetectionService to access MediaMetrics or
+         // make this disabling specific to that process.
+-        uid_t appid = multiuser_get_app_id(uid);
+-        if (appid >= AID_ISOLATED_START && appid <= AID_ISOLATED_END) {
+-            return false;
+-        }
+-        break;
++        return false;
+     }
+ 
+     int enabled = property_get_int32(Item::EnabledProperty, -1);
+-- 
+2.43.0
+

@@ -1,0 +1,170 @@
+From e2c8776510c831d0d9792c536fca2bfa9114b209 Mon Sep 17 00:00:00 2001
+From: Andy Hung <hunga@google.com>
+Date: Thu, 26 Sep 2024 11:17:36 -0700
+Subject: [PATCH 038/436] SpatializerPoseController: Add thread safety
+ annotations
+
+Flag: EXEMPT bugfix
+Test: validate head tracking
+Bug: 369245010
+Change-Id: I794c4817841132eabd2c2bc4a225a5640b7e7341
+---
+ .../service/SpatializerPoseController.cpp     | 42 +++++++++++--------
+ .../service/SpatializerPoseController.h       | 33 ++++++++-------
+ 2 files changed, 41 insertions(+), 34 deletions(-)
+
+diff --git a/services/audiopolicy/service/SpatializerPoseController.cpp b/services/audiopolicy/service/SpatializerPoseController.cpp
+index 874bde4e4d..368dde06d1 100644
+--- a/services/audiopolicy/service/SpatializerPoseController.cpp
++++ b/services/audiopolicy/service/SpatializerPoseController.cpp
+@@ -22,6 +22,7 @@
+ 
+ #define LOG_TAG "SpatializerPoseController"
+ //#define LOG_NDEBUG 0
++#include <audio_utils/mutex.h>
+ #include <cutils/properties.h>
+ #include <sensor/Sensor.h>
+ #include <media/MediaMetricsItem.h>
+@@ -131,20 +132,22 @@ SpatializerPoseController::SpatializerPoseController(Listener* listener,
+               Pose3f headToStage;
+               std::optional<HeadTrackingMode> modeIfChanged;
+               {
+-                  std::unique_lock lock(mMutex);
+-                  if (maxUpdatePeriod.has_value()) {
+-                      mCondVar.wait_for(lock, maxUpdatePeriod.value(),
+-                                        [this] { return mShouldExit || mShouldCalculate; });
+-                  } else {
+-                      mCondVar.wait(lock, [this] { return mShouldExit || mShouldCalculate; });
+-                  }
+-                  if (mShouldExit) {
+-                      ALOGV("Exiting thread");
+-                      return;
++                  audio_utils::unique_lock ul(mMutex);
++                  while (true) {
++                      if (mShouldExit) {
++                          ALOGV("Exiting thread");
++                          return;
++                      }
++                      if (mShouldCalculate) {
++                          std::tie(headToStage, modeIfChanged) = calculate_l();
++                          break;
++                      }
++                      if (maxUpdatePeriod.has_value()) {
++                          mCondVar.wait_for(ul, maxUpdatePeriod.value());
++                      } else {
++                          mCondVar.wait(ul);
++                      }
+                   }
+-
+-                  // Calculate.
+-                  std::tie(headToStage, modeIfChanged) = calculate_l();
+               }
+ 
+               // Invoke the callbacks outside the lock.
+@@ -173,7 +176,7 @@ SpatializerPoseController::SpatializerPoseController(Listener* listener,
+ 
+ SpatializerPoseController::~SpatializerPoseController() {
+     {
+-        std::unique_lock lock(mMutex);
++        std::lock_guard lock(mMutex);
+         mShouldExit = true;
+         mCondVar.notify_all();
+     }
+@@ -278,8 +281,10 @@ void SpatializerPoseController::calculateAsync() {
+ }
+ 
+ void SpatializerPoseController::waitUntilCalculated() {
+-    std::unique_lock lock(mMutex);
+-    mCondVar.wait(lock, [this] { return mCalculated; });
++    audio_utils::unique_lock ul(mMutex);
++    while (!mCalculated) {
++        mCondVar.wait(ul);
++    }
+ }
+ 
+ std::tuple<media::Pose3f, std::optional<media::HeadTrackingMode>>
+@@ -358,14 +363,15 @@ void SpatializerPoseController::onPose(int64_t timestamp, int32_t sensor, const
+     }
+ }
+ 
+-std::string SpatializerPoseController::toString(unsigned level) const {
++std::string SpatializerPoseController::toString(unsigned level) const NO_THREAD_SAFETY_ANALYSIS {
+     std::string prefixSpace(level, ' ');
+     std::string ss = prefixSpace + "SpatializerPoseController:\n";
+     bool needUnlock = false;
+ 
+     prefixSpace += ' ';
+     auto now = std::chrono::steady_clock::now();
+-    if (!mMutex.try_lock_until(now + media::kSpatializerDumpSysTimeOutInSecond)) {
++    if (!audio_utils::std_mutex_timed_lock(mMutex, std::chrono::nanoseconds(
++            media::kSpatializerDumpSysTimeOutInSecond).count())) {
+         ss.append(prefixSpace).append("try_lock failed, dumpsys maybe INACCURATE!\n");
+     } else {
+         needUnlock = true;
+diff --git a/services/audiopolicy/service/SpatializerPoseController.h b/services/audiopolicy/service/SpatializerPoseController.h
+index 7fa4f86ddd..9955cd859e 100644
+--- a/services/audiopolicy/service/SpatializerPoseController.h
++++ b/services/audiopolicy/service/SpatializerPoseController.h
+@@ -118,34 +118,34 @@ class SpatializerPoseController : private media::SensorPoseProvider::Listener {
+     std::string toString(unsigned level) const;
+ 
+   private:
+-    mutable std::timed_mutex mMutex;
++    mutable std::mutex mMutex;
+     Listener* const mListener;
+     const std::chrono::microseconds mSensorPeriod;
+-    std::unique_ptr<media::HeadTrackingProcessor> mProcessor;
+-    int32_t mHeadSensor = media::SensorPoseProvider::INVALID_HANDLE;
+-    int32_t mScreenSensor = media::SensorPoseProvider::INVALID_HANDLE;
+-    std::optional<media::HeadTrackingMode> mActualMode;
+-    std::condition_variable_any mCondVar;
+-    bool mShouldCalculate = true;
+-    bool mShouldExit = false;
+-    bool mCalculated = false;
+-
+-    media::VectorRecorder mHeadSensorRecorder{
++    std::unique_ptr<media::HeadTrackingProcessor> mProcessor GUARDED_BY(mMutex);
++    int32_t mHeadSensor GUARDED_BY(mMutex) = media::SensorPoseProvider::INVALID_HANDLE;
++    int32_t mScreenSensor GUARDED_BY(mMutex) = media::SensorPoseProvider::INVALID_HANDLE;
++    std::optional<media::HeadTrackingMode> mActualMode GUARDED_BY(mMutex);
++    std::condition_variable mCondVar GUARDED_BY(mMutex);
++    bool mShouldCalculate GUARDED_BY(mMutex) = true;
++    bool mShouldExit GUARDED_BY(mMutex) = false;
++    bool mCalculated GUARDED_BY(mMutex) = false;
++
++    media::VectorRecorder mHeadSensorRecorder GUARDED_BY(mMutex) {
+         8 /* vectorSize */, std::chrono::seconds(1), 10 /* maxLogLine */,
+         { 3, 6, 7 } /* delimiterIdx */};
+-    media::VectorRecorder mHeadSensorDurableRecorder{
++    media::VectorRecorder mHeadSensorDurableRecorder GUARDED_BY(mMutex) {
+         8 /* vectorSize */, std::chrono::minutes(1), 10 /* maxLogLine */,
+         { 3, 6, 7 } /* delimiterIdx */};
+ 
+-    media::VectorRecorder mScreenSensorRecorder{
++    media::VectorRecorder mScreenSensorRecorder GUARDED_BY(mMutex) {
+         4 /* vectorSize */, std::chrono::seconds(1), 10 /* maxLogLine */,
+         { 3 } /* delimiterIdx */};
+-    media::VectorRecorder mScreenSensorDurableRecorder{
++    media::VectorRecorder mScreenSensorDurableRecorder GUARDED_BY(mMutex) {
+         4 /* vectorSize */, std::chrono::minutes(1), 10 /* maxLogLine */,
+         { 3 } /* delimiterIdx */};
+ 
+     // Next to last variable as releasing this stops the callbacks
+-    std::unique_ptr<media::SensorPoseProvider> mPoseProvider;
++    std::unique_ptr<media::SensorPoseProvider> mPoseProvider GUARDED_BY(mMutex);
+ 
+     // It's important that mThread is the last variable in this class
+     // since we starts mThread in initializer list
+@@ -158,7 +158,8 @@ class SpatializerPoseController : private media::SensorPoseProvider::Listener {
+      * Calculates the new outputs and updates internal state. Must be called with the lock held.
+      * Returns values that should be passed to the respective callbacks.
+      */
+-    std::tuple<media::Pose3f, std::optional<media::HeadTrackingMode>> calculate_l();
++    std::tuple<media::Pose3f, std::optional<media::HeadTrackingMode>> calculate_l()
++            REQUIRES(mMutex);
+ };
+ 
+ }  // namespace android
+-- 
+2.43.0
+

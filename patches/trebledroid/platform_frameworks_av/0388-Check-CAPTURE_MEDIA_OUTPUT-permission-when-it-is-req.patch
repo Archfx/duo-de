@@ -1,0 +1,30 @@
+From 500b67f48ab228dd1c80259567c9cb59f651d4ab Mon Sep 17 00:00:00 2001
+From: Jiabin Huang <jiabin@google.com>
+Date: Wed, 4 Dec 2024 17:56:43 +0000
+Subject: [PATCH 388/436] Check CAPTURE_MEDIA_OUTPUT permission when it is
+ required.
+
+Bug: 382270587
+Change-Id: I7d3c13bda55fce8f0e4396e6ee93aa3d0150f0fa
+Test: TH
+Flag: EXEMPT bugfix
+---
+ services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+index 802ebeb318..683e1f9203 100644
+--- a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
++++ b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+@@ -2015,7 +2015,7 @@ Status AudioPolicyService::registerPolicyMixes(const std::vector<media::AudioMix
+ 
+     if (needCaptureMediaOutput && !(audioserver_permissions() ?
+                 CHECK_PERM(CAPTURE_MEDIA_OUTPUT, attributionSource.uid)
+-                : modifyAudioRoutingAllowed())) {
++                : captureMediaOutputAllowed(attributionSource))) {
+         return binderStatusFromStatusT(PERMISSION_DENIED);
+     }
+ 
+-- 
+2.43.0
+

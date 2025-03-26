@@ -1,0 +1,80 @@
+From 6a7420fd8fbe8c070ae1a3619c7b954d0918ea90 Mon Sep 17 00:00:00 2001
+From: Ray Chin <raychin@google.com>
+Date: Wed, 2 Oct 2024 19:14:22 +0800
+Subject: [PATCH 053/436] Fix Tuner CTS test deadlock issue
+
+When closing filter, the lock order will be FilterClient::mLock and then
+TunerFilter::FilterCallback::mCallbackLock. The onFilterEvent callback
+lock order is TunerFilter::FilterCallback::mCallbackLock and then
+FilterClient::mLock when releasing av handle. Thus the deadlock can happen
+when an application try to release av handle while closing the filter.
+
+The solution is to release the lock after copy the callback pointer to a
+local variable to release the callback lock when deliver events back to
+java layer by onFilterEvent.
+
+Flag: TEST_ONLY
+Bug: 369726603
+Test: atest android.media.tv.tuner.cts.TunerTest --iteration 10
+Change-Id: I517d7ab50c9156c315431e58a7e6886b5d42b765
+---
+ services/tuner/TunerFilter.cpp | 32 +++++++++++++++++++++++---------
+ 1 file changed, 23 insertions(+), 9 deletions(-)
+
+diff --git a/services/tuner/TunerFilter.cpp b/services/tuner/TunerFilter.cpp
+index 84a2b4e9aa..e393c4417d 100644
+--- a/services/tuner/TunerFilter.cpp
++++ b/services/tuner/TunerFilter.cpp
+@@ -335,26 +335,40 @@ shared_ptr<IFilter> TunerFilter::getHalFilter() {
+ 
+ /////////////// FilterCallback ///////////////////////
+ ::ndk::ScopedAStatus TunerFilter::FilterCallback::onFilterStatus(DemuxFilterStatus status) {
+-    Mutex::Autolock _l(mCallbackLock);
+-    if (mTunerFilterCallback != nullptr) {
+-        mTunerFilterCallback->onFilterStatus(status);
++    shared_ptr<ITunerFilterCallback> cb(nullptr);
++    {
++        Mutex::Autolock _l(mCallbackLock);
++        cb = mTunerFilterCallback;
++    }
++    if (cb != nullptr) {
++        cb->onFilterStatus(status);
+     }
+     return ::ndk::ScopedAStatus::ok();
+ }
+ 
+ ::ndk::ScopedAStatus TunerFilter::FilterCallback::onFilterEvent(
+         const vector<DemuxFilterEvent>& events) {
+-    Mutex::Autolock _l(mCallbackLock);
+-    if (mTunerFilterCallback != nullptr) {
+-        mTunerFilterCallback->onFilterEvent(events);
++    shared_ptr<ITunerFilterCallback> cb(nullptr);
++    {
++        Mutex::Autolock _l(mCallbackLock);
++        cb = mTunerFilterCallback;
++    }
++    if (cb != nullptr) {
++        cb->onFilterEvent(events);
+     }
+     return ::ndk::ScopedAStatus::ok();
+ }
+ 
+ void TunerFilter::FilterCallback::sendSharedFilterStatus(int32_t status) {
+-    Mutex::Autolock _l(mCallbackLock);
+-    if (mTunerFilterCallback != nullptr && mOriginalCallback != nullptr) {
+-        mTunerFilterCallback->onFilterStatus(static_cast<DemuxFilterStatus>(status));
++    shared_ptr<ITunerFilterCallback> cb(nullptr);
++    shared_ptr<ITunerFilterCallback> orig_cb(nullptr);
++    {
++        Mutex::Autolock _l(mCallbackLock);
++        cb = mTunerFilterCallback;
++        orig_cb = mOriginalCallback;
++    }
++    if (cb != nullptr && orig_cb != nullptr) {
++        cb->onFilterStatus(static_cast<DemuxFilterStatus>(status));
+     }
+ }
+ 
+-- 
+2.43.0
+

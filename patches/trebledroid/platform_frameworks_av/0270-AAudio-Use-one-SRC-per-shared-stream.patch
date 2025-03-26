@@ -1,0 +1,69 @@
+From 5fbadc89493d6e8a9f199f0cc8d110e5b8e029bf Mon Sep 17 00:00:00 2001
+From: Robert Wu <robertwu@google.com>
+Date: Wed, 13 Nov 2024 01:02:57 +0000
+Subject: [PATCH 270/436] AAudio: Use one SRC per shared stream.
+
+In ag/23541584, SRC was added to AAudio.
+This caused issues with timestamps in shared streams.
+
+We should use the default sample rate for the shared MMAP endpoint.
+This way, each shared stream can use its own SRC.
+
+Bug: 378766408
+Test: atest AAudioTests
+Test: OboeTester Test Output with shared stream and SRC
+Flag: EXEMPT bugfix
+Change-Id: I15c31630e770fb9ba75bfb30d41af568d386041f
+---
+ .../oboeservice/AAudioServiceEndpointShared.cpp     |  3 +++
+ services/oboeservice/AAudioServiceStreamShared.cpp  | 13 +++----------
+ 2 files changed, 6 insertions(+), 10 deletions(-)
+
+diff --git a/services/oboeservice/AAudioServiceEndpointShared.cpp b/services/oboeservice/AAudioServiceEndpointShared.cpp
+index 5e1e594fed..be7ab37418 100644
+--- a/services/oboeservice/AAudioServiceEndpointShared.cpp
++++ b/services/oboeservice/AAudioServiceEndpointShared.cpp
+@@ -75,6 +75,9 @@ aaudio_result_t AAudioServiceEndpointShared::open(const aaudio::AAudioStreamRequ
+ 
+     builder.setBufferCapacity(DEFAULT_BUFFER_CAPACITY);
+ 
++    // Each shared stream will use its own SRC.
++    builder.setSampleRate(AAUDIO_UNSPECIFIED);
++
+     result = mStreamInternal->open(builder);
+ 
+     setSampleRate(mStreamInternal->getSampleRate());
+diff --git a/services/oboeservice/AAudioServiceStreamShared.cpp b/services/oboeservice/AAudioServiceStreamShared.cpp
+index 04fcd6df25..bd58fa23db 100644
+--- a/services/oboeservice/AAudioServiceStreamShared.cpp
++++ b/services/oboeservice/AAudioServiceStreamShared.cpp
+@@ -144,6 +144,9 @@ aaudio_result_t AAudioServiceStreamShared::open(const aaudio::AAudioStreamReques
+         goto error;
+     }
+ 
++    // Use the sample rate of the endpoint as each shared stream should use its own SRC.
++    setSampleRate(endpoint->getSampleRate());
++
+     // Is the request compatible with the shared endpoint?
+     setFormat(configurationInput.getFormat());
+     if (getFormat() == AUDIO_FORMAT_DEFAULT) {
+@@ -154,16 +157,6 @@ aaudio_result_t AAudioServiceStreamShared::open(const aaudio::AAudioStreamReques
+         goto error;
+     }
+ 
+-    setSampleRate(configurationInput.getSampleRate());
+-    if (getSampleRate() == AAUDIO_UNSPECIFIED) {
+-        setSampleRate(endpoint->getSampleRate());
+-    } else if (getSampleRate() != endpoint->getSampleRate()) {
+-        ALOGD("%s() mSampleRate = %d, need %d",
+-              __func__, getSampleRate(), endpoint->getSampleRate());
+-        result = AAUDIO_ERROR_INVALID_RATE;
+-        goto error;
+-    }
+-
+     setChannelMask(configurationInput.getChannelMask());
+     if (getChannelMask() == AAUDIO_UNSPECIFIED) {
+         setChannelMask(endpoint->getChannelMask());
+-- 
+2.43.0
+

@@ -1,0 +1,49 @@
+From 684180bbdfc3e93b0ee42840f786930437550cff Mon Sep 17 00:00:00 2001
+From: Shunkai Yao <yaoshunkai@google.com>
+Date: Sat, 5 Oct 2024 00:18:33 +0000
+Subject: [PATCH 059/436] EffectBundle: update lvm control parameters with AIDL
+ parameters
+
+Flag: EXEMPT bugfix
+Bug: 365703305
+Test: reproduce steps in the bug
+Test: atest audioeffect_analysis CtsMediaAudioTestCases
+Change-Id: I0c07c9c4e1653649c5328d411dfb0043170a49a3
+---
+ media/libeffects/lvm/wrapper/Aidl/BundleContext.cpp | 6 ++++++
+ media/libeffects/lvm/wrapper/Aidl/BundleContext.h   | 2 ++
+ 2 files changed, 8 insertions(+)
+
+diff --git a/media/libeffects/lvm/wrapper/Aidl/BundleContext.cpp b/media/libeffects/lvm/wrapper/Aidl/BundleContext.cpp
+index d5e3cf78f2..53d43118ea 100644
+--- a/media/libeffects/lvm/wrapper/Aidl/BundleContext.cpp
++++ b/media/libeffects/lvm/wrapper/Aidl/BundleContext.cpp
+@@ -90,6 +90,12 @@ void BundleContext::deInit() {
+     }
+ }
+ 
++RetCode BundleContext::setCommon(const Parameter::Common& common) {
++    RetCode ret = EffectContext::setCommon(common);
++    RETURN_VALUE_IF(ret != RetCode::SUCCESS, ret, " setCommonFailed");
++    return init();
++}
++
+ RetCode BundleContext::enable() {
+     if (mEnabled) return RetCode::ERROR_ILLEGAL_PARAMETER;
+     // Bass boost or Virtualizer can be temporarily disabled if playing over device speaker due to
+diff --git a/media/libeffects/lvm/wrapper/Aidl/BundleContext.h b/media/libeffects/lvm/wrapper/Aidl/BundleContext.h
+index e5ab40d725..d5de5bd50e 100644
+--- a/media/libeffects/lvm/wrapper/Aidl/BundleContext.h
++++ b/media/libeffects/lvm/wrapper/Aidl/BundleContext.h
+@@ -35,6 +35,8 @@ class BundleContext final : public EffectContext {
+     void deInit();
+     lvm::BundleEffectType getBundleType() const { return mType; }
+ 
++    RetCode setCommon(const Parameter::Common& common) override;
++
+     RetCode enable() override;
+     RetCode enableOperatingMode();
+     RetCode disable() override;
+-- 
+2.43.0
+

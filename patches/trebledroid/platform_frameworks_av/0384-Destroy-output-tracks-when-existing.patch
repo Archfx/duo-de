@@ -1,0 +1,32 @@
+From 082099212e807f3c76136b6ddd143de095e3e25f Mon Sep 17 00:00:00 2001
+From: jiabin <jiabin@google.com>
+Date: Wed, 4 Dec 2024 00:17:41 +0000
+Subject: [PATCH 384/436] Destroy output tracks when existing.
+
+Bug: 364404031
+Test: manually
+Flag: EXEMPT bugfix
+(cherry picked from https://googleplex-android-review.googlesource.com/q/commit:c62d60305b1b674960a2628e01d1f3d3f509d405)
+Merged-In: I4e83ee6d7cca38c62448ccb3019a7d2275cc664e
+Change-Id: I4e83ee6d7cca38c62448ccb3019a7d2275cc664e
+---
+ services/audioflinger/Threads.cpp | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/services/audioflinger/Threads.cpp b/services/audioflinger/Threads.cpp
+index b82a9af888..1cb9ea4028 100644
+--- a/services/audioflinger/Threads.cpp
++++ b/services/audioflinger/Threads.cpp
+@@ -7760,6 +7760,9 @@ void DuplicatingThread::threadLoop_exit()
+         audio_utils::lock_guard l(mutex());
+         localTracks = std::move(mOutputTracks);
+         mOutputTracks.clear();
++        for (size_t i = 0; i < localTracks.size(); ++i) {
++            localTracks[i]->destroy();
++        }
+     }
+     localTracks.clear();
+     outputTracks.clear();
+-- 
+2.43.0
+

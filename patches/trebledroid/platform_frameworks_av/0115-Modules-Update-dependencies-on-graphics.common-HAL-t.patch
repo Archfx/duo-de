@@ -1,0 +1,61 @@
+From 2234d04be1af6132b741913db5640c8bcb6db052 Mon Sep 17 00:00:00 2001
+From: Eino-Ville Talvala <etalvala@google.com>
+Date: Thu, 19 Sep 2024 18:27:23 -0700
+Subject: [PATCH 115/436] Modules: Update dependencies on graphics.common HAL
+ to use defaults
+
+In preparation for migrating graphics.common HAL to v6.
+
+Bug: 368395888
+Flag: EXEMPT build file changes only
+Test: Builds
+Change-Id: I647df2b1c9421a153148256e84cdd3d07b4b73dd
+---
+ media/module/aidlpersistentsurface/Android.bp | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/media/module/aidlpersistentsurface/Android.bp b/media/module/aidlpersistentsurface/Android.bp
+index 5c1a010d89..8b273f3fbc 100644
+--- a/media/module/aidlpersistentsurface/Android.bp
++++ b/media/module/aidlpersistentsurface/Android.bp
+@@ -3,6 +3,9 @@ aidl_interface {
+     unstable: true,
+     local_include_dir: "aidl",
+     min_sdk_version: "29",
++    defaults: [
++        "android.hardware.graphics.common-latest"
++    ],
+     srcs: [
+         "aidl/android/media/AidlColorAspects.aidl",
+         "aidl/android/media/IAidlGraphicBufferSource.aidl",
+@@ -12,9 +15,6 @@ aidl_interface {
+     headers: [
+         "HardwareBuffer_aidl",
+     ],
+-    imports: [
+-        "android.hardware.graphics.common-V5",
+-    ],
+     include_dirs: [
+         "frameworks/native/aidl/gui",
+     ],
+@@ -41,6 +41,9 @@ aidl_interface {
+ cc_library_shared {
+     name: "libstagefright_graphicbuffersource_aidl",
+     min_sdk_version: "29",
++    defaults: [
++        "android.hardware.graphics.common-ndk_shared",
++    ],
+     srcs: [
+         "AidlGraphicBufferSource.cpp",
+         "wrapper/WAidlGraphicBufferSource.cpp",
+@@ -56,7 +59,6 @@ cc_library_shared {
+         "media_plugin_headers",
+     ],
+     shared_libs: [
+-        "android.hardware.graphics.common-V5-ndk",
+         "graphicbuffersource-aidl-ndk",
+         "libbinder_ndk",
+         "libcutils",
+-- 
+2.43.0
+

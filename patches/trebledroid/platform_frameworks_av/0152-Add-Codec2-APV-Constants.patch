@@ -1,0 +1,115 @@
+From f0c7bffc7a030f22d51f8ef2db72a02cc8869db7 Mon Sep 17 00:00:00 2001
+From: Fyodor Kyslov <kyslov@google.com>
+Date: Tue, 22 Oct 2024 02:06:39 +0000
+Subject: [PATCH 152/436] Add Codec2 APV Constants
+
+Add APV Profile/Level/Band constants
+
+Test: CodecInfoTest#testCodecProfileSupport passes for C2 SW APV codec
+Bug: 363333555
+Flag: android.media.codec.apv_support
+Change-Id: I45789076d450cab30403af9884323ab2b9d22152
+---
+ media/codec2/core/include/C2Config.h | 72 ++++++++++++++++++++++++++++
+ 1 file changed, 72 insertions(+)
+
+diff --git a/media/codec2/core/include/C2Config.h b/media/codec2/core/include/C2Config.h
+index e6782a969d..069d6adf34 100644
+--- a/media/codec2/core/include/C2Config.h
++++ b/media/codec2/core/include/C2Config.h
+@@ -430,6 +430,7 @@ enum : uint32_t {
+     _C2_PL_AV1_BASE  = 0x9000,
+     _C2_PL_VP8_BASE  = 0xA000,
+     _C2_PL_MPEGH_BASE = 0xB000,     // MPEG-H 3D Audio
++    _C2_PL_APV_BASE = 0xC000,     // APV
+ 
+     C2_PROFILE_LEVEL_VENDOR_START = 0x70000000,
+ };
+@@ -597,6 +598,15 @@ enum C2Config::profile_t : uint32_t {
+     PROFILE_MPEGH_HIGH,                         ///< MPEG-H High
+     PROFILE_MPEGH_LC,                           ///< MPEG-H Low-complexity
+     PROFILE_MPEGH_BASELINE,                     ///< MPEG-H Baseline
++
++    // Advanced Professional VideoCodec (APV)
++    PROFILE_APV_422_10 = _C2_PL_APV_BASE,       ///< APV 422-10 Profile
++    PROFILE_APV_422_12,                         ///< APV 422-12 Profile
++    PROFILE_APV_444_10,                         ///< APV 444-10 Profile
++    PROFILE_APV_444_12,                         ///< APV 444-12 Profile
++    PROFILE_APV_4444_10,                        ///< APV 4444-10 Profile
++    PROFILE_APV_4444_12,                        ///< APV 4444-12 Profile
++    PROFILE_APV_400_10,                         ///< APV 400-10 Profile
+ };
+ 
+ enum C2Config::level_t : uint32_t {
+@@ -752,6 +762,68 @@ enum C2Config::level_t : uint32_t {
+     LEVEL_MPEGH_3,                              ///< MPEG-H L3
+     LEVEL_MPEGH_4,                              ///< MPEG-H L4
+     LEVEL_MPEGH_5,                              ///< MPEG-H L5
++
++    // Advanced Professional VideoCodec(APV) levels/bands
++    LEVEL_APV_1_BAND_0 = _C2_PL_APV_BASE,            ///< APV L 1, BAND 0
++    LEVEL_APV_1_1_BAND_0,                            ///< APV L 1.1, BAND 0
++    LEVEL_APV_2_BAND_0,                              ///< APV L 2, BAND 0
++    LEVEL_APV_2_1_BAND_0,                            ///< APV L 2.1, BAND 0
++    LEVEL_APV_3_BAND_0,                              ///< APV L 3, BAND 0
++    LEVEL_APV_3_1_BAND_0,                            ///< APV L 3.1, BAND 0
++    LEVEL_APV_4_BAND_0,                              ///< APV L 4, BAND 0
++    LEVEL_APV_4_1_BAND_0,                            ///< APV L 4.1, BAND 0
++    LEVEL_APV_5_BAND_0,                              ///< APV L 5, BAND 0
++    LEVEL_APV_5_1_BAND_0,                            ///< APV L 5.1, BAND 0
++    LEVEL_APV_6_BAND_0,                              ///< APV L 6, BAND 0
++    LEVEL_APV_6_1_BAND_0,                            ///< APV L 6.1, BAND 0
++    LEVEL_APV_7_BAND_0,                              ///< APV L 7, BAND 0
++    LEVEL_APV_7_1_BAND_0,                            ///< APV L 7.1, BAND 0
++
++    LEVEL_APV_1_BAND_1 = _C2_PL_APV_BASE + 0x100,    ///< APV L 1, BAND 1
++    LEVEL_APV_1_1_BAND_1,                            ///< APV L 1.1, BAND 1
++    LEVEL_APV_2_BAND_1,                              ///< APV L 2, BAND 1
++    LEVEL_APV_2_1_BAND_1,                            ///< APV L 2.1, BAND 1
++    LEVEL_APV_3_BAND_1,                              ///< APV L 3, BAND 1
++    LEVEL_APV_3_1_BAND_1,                            ///< APV L 3.1, BAND 1
++    LEVEL_APV_4_BAND_1,                              ///< APV L 4, BAND 1
++    LEVEL_APV_4_1_BAND_1,                            ///< APV L 4.1, BAND 1
++    LEVEL_APV_5_BAND_1,                              ///< APV L 5, BAND 1
++    LEVEL_APV_5_1_BAND_1,                            ///< APV L 5.1, BAND 1
++    LEVEL_APV_6_BAND_1,                              ///< APV L 6, BAND 1
++    LEVEL_APV_6_1_BAND_1,                            ///< APV L 6.1, BAND 1
++    LEVEL_APV_7_BAND_1,                              ///< APV L 7, BAND 1
++    LEVEL_APV_7_1_BAND_1,                            ///< APV L 7.1, BAND 1
++
++    LEVEL_APV_1_BAND_2 = _C2_PL_APV_BASE + 0x200,    ///< APV L 1, BAND 2
++    LEVEL_APV_1_1_BAND_2,                            ///< APV L 1.1, BAND 2
++    LEVEL_APV_2_BAND_2,                              ///< APV L 2, BAND 2
++    LEVEL_APV_2_1_BAND_2,                            ///< APV L 2.1, BAND 2
++    LEVEL_APV_3_BAND_2,                              ///< APV L 3, BAND 2
++    LEVEL_APV_3_1_BAND_2,                            ///< APV L 3.1, BAND 2
++    LEVEL_APV_4_BAND_2,                              ///< APV L 4, BAND 2
++    LEVEL_APV_4_1_BAND_2,                            ///< APV L 4.1, BAND 2
++    LEVEL_APV_5_BAND_2,                              ///< APV L 5, BAND 2
++    LEVEL_APV_5_1_BAND_2,                            ///< APV L 5.1, BAND 2
++    LEVEL_APV_6_BAND_2,                              ///< APV L 6, BAND 2
++    LEVEL_APV_6_1_BAND_2,                            ///< APV L 6.1, BAND 2
++    LEVEL_APV_7_BAND_2,                              ///< APV L 7, BAND 2
++    LEVEL_APV_7_1_BAND_2,                            ///< APV L 7.1, BAND 2
++
++    LEVEL_APV_1_BAND_3 = _C2_PL_APV_BASE + 0x300,    ///< APV L 1, BAND 3
++    LEVEL_APV_1_1_BAND_3,                            ///< APV L 1.1, BAND 3
++    LEVEL_APV_2_BAND_3,                              ///< APV L 2, BAND 3
++    LEVEL_APV_2_1_BAND_3,                            ///< APV L 2.1, BAND 3
++    LEVEL_APV_3_BAND_3,                              ///< APV L 3, BAND 3
++    LEVEL_APV_3_1_BAND_3,                            ///< APV L 3.1, BAND 3
++    LEVEL_APV_4_BAND_3,                              ///< APV L 4, BAND 3
++    LEVEL_APV_4_1_BAND_3,                            ///< APV L 4.1, BAND 3
++    LEVEL_APV_5_BAND_3,                              ///< APV L 5, BAND 3
++    LEVEL_APV_5_1_BAND_3,                            ///< APV L 5.1, BAND 3
++    LEVEL_APV_6_BAND_3,                              ///< APV L 6, BAND 3
++    LEVEL_APV_6_1_BAND_3,                            ///< APV L 6.1, BAND 3
++    LEVEL_APV_7_BAND_3,                              ///< APV L 7, BAND 3
++    LEVEL_APV_7_1_BAND_3,                            ///< APV L 7.1, BAND 3
++
+ };
+ 
+ struct C2ProfileLevelStruct {
+-- 
+2.43.0
+

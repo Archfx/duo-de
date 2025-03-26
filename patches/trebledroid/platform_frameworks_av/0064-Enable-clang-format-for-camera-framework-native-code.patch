@@ -1,0 +1,30 @@
+From 00526b660e152947ae167ec077a5c68f6b72ce1b Mon Sep 17 00:00:00 2001
+From: Shuzhen Wang <shuzhenwang@google.com>
+Date: Mon, 7 Oct 2024 16:57:23 -0700
+Subject: [PATCH 064/436] Enable clang-format for camera framework native code
+
+Test: repo upload --dry-run .
+Flag: EXEMPT add git hooks
+Change-Id: I4eff5f7aa927e05a43cc7d6c2f0a0b63e2c40a09
+---
+ PREUPLOAD.cfg | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/PREUPLOAD.cfg b/PREUPLOAD.cfg
+index e9b757bb4b..34ff367d6b 100644
+--- a/PREUPLOAD.cfg
++++ b/PREUPLOAD.cfg
+@@ -30,8 +30,10 @@ bpfmt = -s
+ 
+ # Only turn on clang-format check for the following subfolders.
+ clang_format = --commit ${PREUPLOAD_COMMIT} --style file --extensions c,h,cc,cpp
++               camera/
+                media/libaudioclient/tests/
+                media/libaudiohal/tests/
+                media/libmediatranscoding/
+                services/camera/virtualcamera/
+                services/mediatranscoding/
++               services/camera/libcameraservice/
+-- 
+2.43.0
+

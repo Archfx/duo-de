@@ -1,0 +1,65 @@
+From 1fe8a63cdc9b008022c86332cf71e07555eaf054 Mon Sep 17 00:00:00 2001
+From: Ravneet Dhanjal <rdhanjal@google.com>
+Date: Tue, 12 Nov 2024 23:20:32 +0000
+Subject: [PATCH 265/436] Camera: Fix use-after-free issue with provider
+ instance
+
+- Use copy of removed provider instance in case it is erased
+when accessing mProviderPidMap
+
+Test: Reproduced on oriole hwasan target and tested change
+Bug: 366671893
+Flag: EXEMPT bugfix
+Change-Id: I01e9ca6c080269732c5409d34726473e0268bb47
+---
+ .../camera/libcameraservice/common/aidl/AidlProviderInfo.cpp  | 4 ++--
+ .../camera/libcameraservice/common/hidl/HidlProviderInfo.cpp  | 4 ++--
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/services/camera/libcameraservice/common/aidl/AidlProviderInfo.cpp b/services/camera/libcameraservice/common/aidl/AidlProviderInfo.cpp
+index 3a0cfa1f70..7ae02cded3 100644
+--- a/services/camera/libcameraservice/common/aidl/AidlProviderInfo.cpp
++++ b/services/camera/libcameraservice/common/aidl/AidlProviderInfo.cpp
+@@ -202,7 +202,7 @@ status_t AidlProviderInfo::initializeAidlProvider(
+ void AidlProviderInfo::binderDied(void *cookie) {
+     AidlProviderInfo *provider = reinterpret_cast<AidlProviderInfo *>(cookie);
+     ALOGI("Camera provider '%s' has died; removing it", provider->mProviderInstance.c_str());
+-    provider->mManager->removeProvider(provider->mProviderInstance);
++    provider->mManager->removeProvider(std::string(provider->mProviderInstance));
+ }
+ 
+ status_t AidlProviderInfo::setUpVendorTags() {
+@@ -320,7 +320,7 @@ const std::shared_ptr<ICameraProvider> AidlProviderInfo::startProviderInterface(
+     if (link != STATUS_OK) {
+         ALOGW("%s: Unable to link to provider '%s' death notifications",
+                 __FUNCTION__, mProviderName.c_str());
+-        mManager->removeProvider(mProviderInstance);
++        mManager->removeProvider(std::string(mProviderInstance));
+         return nullptr;
+     }
+ 
+diff --git a/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp b/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp
+index 756c255596..27ae766e1b 100644
+--- a/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp
++++ b/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp
+@@ -391,7 +391,7 @@ HidlProviderInfo::startProviderInterface() {
+                   __FUNCTION__,
+                   mProviderName.c_str(),
+                   linked.description().c_str());
+-              mManager->removeProvider(mProviderInstance);
++              mManager->removeProvider(std::string(mProviderInstance));
+               return nullptr;
+             } else if (!linked) {
+               ALOGW("%s: Unable to link to provider '%s' death notifications",
+@@ -451,7 +451,7 @@ void HidlProviderInfo::serviceDied(uint64_t cookie,
+         ALOGW("%s: Unexpected serviceDied cookie %" PRIu64 ", expected %" PRIu32,
+                 __FUNCTION__, cookie, mId);
+     }
+-    mManager->removeProvider(mProviderInstance);
++    mManager->removeProvider(std::string(mProviderInstance));
+ }
+ 
+ std::unique_ptr<CameraProviderManager::ProviderInfo::DeviceInfo>
+-- 
+2.43.0
+

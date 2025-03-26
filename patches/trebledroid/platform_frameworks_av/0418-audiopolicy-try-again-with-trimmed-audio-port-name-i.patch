@@ -1,0 +1,55 @@
+From aa65f87c30cb385e747ea5cdf994d1c53902cf66 Mon Sep 17 00:00:00 2001
+From: Peter Cai <peter@typeblog.net>
+Date: Thu, 23 Jan 2020 11:13:43 +0800
+Subject: [PATCH 418/436] audiopolicy: try again with trimmed audio port name
+ if not found
+
+* In Spreadtrum BSP, some audio routes may contain ports with extra
+  spaces at the beginning and the end, causing audiopolicy to refuse to
+  load and leading to broken audio.
+
+* Fix this by retrying with trimmed port name when not found. Do not
+  use trimmed name all the time because a white space is a valid
+  character in port name, and we cannot be sure nobody is using it for
+  legitimite purposes.
+
+Change-Id: I993708b28e8404bc8c483d71a850ac69382231bd
+---
+ .../common/managerdefinitions/src/Serializer.cpp   | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp b/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp
+index 839974b9d3..21d3282134 100644
+--- a/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp
++++ b/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp
+@@ -593,6 +593,17 @@ std::variant<status_t, DevicePortTraits::Element> PolicySerializer::deserialize<
+     return deviceDesc;
+ }
+ 
++char* trim(char * s) {
++    int l = strlen(s);
++
++    if (l > 0) {
++      while (isspace(s[l - 1])) --l;
++      while (*s && isspace(*s)) ++s, --l;
++    }
++
++    return strndup(s, l);
++}
++
+ template<>
+ std::variant<status_t, RouteTraits::Element> PolicySerializer::deserialize<RouteTraits>(
+         const xmlNode *cur, RouteTraits::PtrSerializingCtx ctx)
+@@ -642,6 +653,9 @@ std::variant<status_t, RouteTraits::Element> PolicySerializer::deserialize<Route
+     while (devTag != NULL) {
+         if (strlen(devTag) != 0) {
+             sp<PolicyAudioPort> source = ctx->findPortByTagName(devTag);
++            if (source == NULL) {
++                source = ctx->findPortByTagName(trim(devTag));
++            }
+             if (source == NULL) {
+                 if (!mIgnoreVendorExtensions) {
+                     ALOGE("%s: no source found with name \"%s\"", __func__, devTag);
+-- 
+2.43.0
+

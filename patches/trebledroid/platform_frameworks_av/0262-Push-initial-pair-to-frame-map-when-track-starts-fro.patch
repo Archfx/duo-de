@@ -1,0 +1,41 @@
+From 30cce6a979e3ecc047740e2b1a0e99e74de26555 Mon Sep 17 00:00:00 2001
+From: Tang Lee <tanglee@google.com>
+Date: Wed, 13 Nov 2024 14:29:41 +0800
+Subject: [PATCH 262/436] Push initial pair to frame map when track starts from
+ PAUSED state
+
+This makes the findX() return constant trackframe when the sinkframe
+is between the pause and resumption. The application will not see
+unexpected incrementing trackframe from getTimestamp() before the time
+elapses by "output latency" after resumption.
+
+This fixes AV desync observed in the first 10 seconds after resumption
+in ExoPlayer demo app.
+
+See go/exoplayer-resume-desync for more details.
+Bug: 377842501
+Test: observe no desync when resuming from ExoPlayer demo app
+Flag: EXEMPT bugfix
+
+Change-Id: Ic5cda8f8e06f1cc9a6f6494989f6c62b61127162
+---
+ services/audioflinger/Tracks.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/services/audioflinger/Tracks.cpp b/services/audioflinger/Tracks.cpp
+index 867561ac70..5fbe48c235 100644
+--- a/services/audioflinger/Tracks.cpp
++++ b/services/audioflinger/Tracks.cpp
+@@ -1327,7 +1327,8 @@ status_t Track::start(AudioSystem::sync_event_t event __unused,
+ 
+         // states to reset position info for pcm tracks
+         if (audio_is_linear_pcm(mFormat)
+-                && (state == IDLE || state == STOPPED || state == FLUSHED)) {
++                && (state == IDLE || state == STOPPED || state == FLUSHED
++                        || state == PAUSED)) {
+             mFrameMap.reset();
+ 
+             if (!isFastTrack()) {
+-- 
+2.43.0
+

@@ -1,0 +1,36 @@
+From c3e3eced45ce32111a9e873875383ffc4f86feae Mon Sep 17 00:00:00 2001
+From: Jiabin Huang <jiabin@google.com>
+Date: Thu, 7 Nov 2024 19:36:12 +0000
+Subject: [PATCH 227/436] Add offload_support flag to aaudio.aconfig
+
+This flag will be used to enable offload support in AAudio.
+
+Bug: 372041799
+Test: TH
+Flag: com.android.media.aaudio.offload_support
+Change-Id: Ic14adea7a896409d4d967c54725595f77f32cb91
+---
+ media/audio/aconfig/aaudio.aconfig | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/media/audio/aconfig/aaudio.aconfig b/media/audio/aconfig/aaudio.aconfig
+index f9fb4c7a36..7896a75ca1 100644
+--- a/media/audio/aconfig/aaudio.aconfig
++++ b/media/audio/aconfig/aaudio.aconfig
+@@ -5,6 +5,13 @@
+ package: "com.android.media.aaudio"
+ container: "system"
+ 
++flag {
++    name: "offload_support"
++    namespace: "media_audio"
++    description: "Enable offload support in AAudio."
++    bug: "372041799"
++}
++
+ flag {
+     name: "sample_rate_conversion"
+     namespace: "media_audio"
+-- 
+2.43.0
+

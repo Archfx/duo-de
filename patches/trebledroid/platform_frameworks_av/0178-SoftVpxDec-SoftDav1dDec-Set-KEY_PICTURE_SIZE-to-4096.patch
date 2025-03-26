@@ -1,0 +1,63 @@
+From fe3d1f5a07601d4f1a40600cb4c1cbe05986a9ff Mon Sep 17 00:00:00 2001
+From: Hirokazu Honda <hiroh@google.com>
+Date: Thu, 31 Oct 2024 12:31:04 +0900
+Subject: [PATCH 178/436] SoftVpxDec/SoftDav1dDec: Set KEY_PICTURE_SIZE to
+ 4096x4096
+
+This CL enables 4k video decoding with the c2 components of software
+libvpx decoder and dav1 decoder.
+
+Bug: 361390685
+Test: Play 4k video in native Files app
+Flag: EXEMPT bugfix
+
+Change-Id: I79fabbde9098b35c57e3925a8e62c5a4012714f2
+---
+ media/codec2/components/dav1d/C2SoftDav1dDec.cpp | 4 ++--
+ media/codec2/components/vpx/C2SoftVpxDec.cpp     | 8 ++++----
+ 2 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/media/codec2/components/dav1d/C2SoftDav1dDec.cpp b/media/codec2/components/dav1d/C2SoftDav1dDec.cpp
+index 4ec26d6251..44a8dd1748 100644
+--- a/media/codec2/components/dav1d/C2SoftDav1dDec.cpp
++++ b/media/codec2/components/dav1d/C2SoftDav1dDec.cpp
+@@ -139,8 +139,8 @@ class C2SoftDav1dDec::IntfImpl : public SimpleInterface<void>::BaseParams {
+         addParameter(DefineParam(mMaxSize, C2_PARAMKEY_MAX_PICTURE_SIZE)
+                              .withDefault(new C2StreamMaxPictureSizeTuning::output(0u, 320, 240))
+                              .withFields({
+-                                     C2F(mSize, width).inRange(2, 2048, 2),
+-                                     C2F(mSize, height).inRange(2, 2048, 2),
++                                     C2F(mSize, width).inRange(2, 4096, 2),
++                                     C2F(mSize, height).inRange(2, 4096, 2),
+                              })
+                              .withSetter(MaxPictureSizeSetter, mSize)
+                              .build());
+diff --git a/media/codec2/components/vpx/C2SoftVpxDec.cpp b/media/codec2/components/vpx/C2SoftVpxDec.cpp
+index 318f093aff..83cbe477c5 100644
+--- a/media/codec2/components/vpx/C2SoftVpxDec.cpp
++++ b/media/codec2/components/vpx/C2SoftVpxDec.cpp
+@@ -69,8 +69,8 @@ public:
+                 DefineParam(mSize, C2_PARAMKEY_PICTURE_SIZE)
+                 .withDefault(new C2StreamPictureSizeInfo::output(0u, 320, 240))
+                 .withFields({
+-                    C2F(mSize, width).inRange(2, 2048),
+-                    C2F(mSize, height).inRange(2, 2048),
++                    C2F(mSize, width).inRange(2, 4096),
++                    C2F(mSize, height).inRange(2, 4096),
+                 })
+                 .withSetter(SizeSetter)
+                 .build());
+@@ -167,8 +167,8 @@ public:
+                 DefineParam(mMaxSize, C2_PARAMKEY_MAX_PICTURE_SIZE)
+                 .withDefault(new C2StreamMaxPictureSizeTuning::output(0u, 320, 240))
+                 .withFields({
+-                    C2F(mSize, width).inRange(2, 2048, 2),
+-                    C2F(mSize, height).inRange(2, 2048, 2),
++                    C2F(mSize, width).inRange(2, 4096, 2),
++                    C2F(mSize, height).inRange(2, 4096, 2),
+                 })
+                 .withSetter(MaxPictureSizeSetter, mSize)
+                 .build());
+-- 
+2.43.0
+

@@ -1,0 +1,43 @@
+From d80ed57ee539b1dc62a4c4417fced4ae947a853c Mon Sep 17 00:00:00 2001
+From: Vlad Popa <pvlad@google.com>
+Date: Wed, 6 Nov 2024 18:28:17 -0800
+Subject: [PATCH 220/436] Fix condition for host managed voice SCO volume
+
+After replacing STREAM_BT_SCO and not using the equivalent volume group
+in APM, the flags isVoiceVolSrc and isBtScoVolSrc are not mutual
+exclusive anymore. In order to check whether the voice volume is managed
+by host it is now necessary to check the isBtScoVolSrc is false.
+
+Test: manual
+Flag: EXEMPT bugfix
+Bug: 374151894
+Change-Id: I3e29b86029cc89b3b78da8da2cbd5e1e31940c42
+---
+ services/audiopolicy/managerdefault/AudioPolicyManager.cpp | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index 000b5717e8..61b50b4386 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -3782,7 +3782,7 @@ status_t AudioPolicyManager::setVolumeIndexForAttributes(const audio_attributes_
+         if (isVolumeConsistentForCalls(vs, {mCallRxSourceClient->sinkDevice()->type()},
+                 isVoiceVolSrc, isBtScoVolSrc, __func__)
+                 && (isVoiceVolSrc || isBtScoVolSrc)) {
+-            bool voiceVolumeManagedByHost = isVoiceVolSrc &&
++            bool voiceVolumeManagedByHost = !isBtScoVolSrc &&
+                     !audio_is_ble_out_device(mCallRxSourceClient->sinkDevice()->type());
+             setVoiceVolume(index, curves, voiceVolumeManagedByHost, 0);
+         }
+@@ -8588,7 +8588,7 @@ status_t AudioPolicyManager::checkAndSetVolume(IVolumeCurves &curves,
+             deviceTypes, delayMs, force, isVoiceVolSrc);
+ 
+     if (outputDesc == mPrimaryOutput && (isVoiceVolSrc || isBtScoVolSrc)) {
+-        bool voiceVolumeManagedByHost = isVoiceVolSrc &&
++        bool voiceVolumeManagedByHost = !isBtScoVolSrc &&
+                 !isSingleDeviceType(deviceTypes, audio_is_ble_out_device);
+         setVoiceVolume(index, curves, voiceVolumeManagedByHost, delayMs);
+     }
+-- 
+2.43.0
+

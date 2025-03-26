@@ -1,0 +1,87 @@
+From 05fcd3a1e1c20c7150be34fca1ece9b57269a216 Mon Sep 17 00:00:00 2001
+From: Michael Chan <michael.chan@dolby.com>
+Date: Thu, 4 Jul 2024 15:10:52 +1000
+Subject: [PATCH 026/436] Add support for AC-4 level 4 audio format
+
+Test: atest CtsMediaAudioTestCases:android.media.audio.cts.DolbyAudioFormatsTest
+Bug: 266537650
+Change-Id: I33d2a696096f2a74d067db70dde9a7f34b8abc5b
+---
+ media/audio/aconfig/audio_framework.aconfig               | 8 ++++++++
+ media/audioaidlconversion/AidlConversionCppNdk.cpp        | 2 ++
+ .../common/managerdefinitions/src/AudioPolicyConfig.cpp   | 3 ++-
+ .../config/surround_sound_configuration_5_0.xml           | 1 +
+ .../config/surround_sound_configuration_aidl.xml          | 1 +
+ 5 files changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/media/audio/aconfig/audio_framework.aconfig b/media/audio/aconfig/audio_framework.aconfig
+index 0209e28992..ea5f26daa4 100644
+--- a/media/audio/aconfig/audio_framework.aconfig
++++ b/media/audio/aconfig/audio_framework.aconfig
+@@ -40,6 +40,14 @@ flag {
+     bug: "316414750"
+ }
+ 
++flag {
++    name: "dolby_ac4_level4_encoding_api"
++    namespace: "media_audio"
++    description: "Feature flag for Dolby AC-4 level 4 AudioFormat encoding."
++    is_fixed_read_only: true
++    bug: "266537650"
++}
++
+ # TODO remove
+ flag {
+     name: "foreground_audio_control"
+diff --git a/media/audioaidlconversion/AidlConversionCppNdk.cpp b/media/audioaidlconversion/AidlConversionCppNdk.cpp
+index 01b6e429ce..90996a3a28 100644
+--- a/media/audioaidlconversion/AidlConversionCppNdk.cpp
++++ b/media/audioaidlconversion/AidlConversionCppNdk.cpp
+@@ -741,6 +741,8 @@ const detail::AudioFormatPairs& getAudioFormatPairs() {
+             {// Note: not in the IANA registry.
+              AUDIO_FORMAT_APTX_HD, make_AudioFormatDescription("audio/vnd.qcom.aptx.hd")},
+             {AUDIO_FORMAT_AC4, make_AudioFormatDescription(::android::MEDIA_MIMETYPE_AUDIO_AC4)},
++            {AUDIO_FORMAT_AC4_L4, make_AudioFormatDescription(
++                    std::string(::android::MEDIA_MIMETYPE_AUDIO_AC4) + ";version=02.01.04")},
+             {// Note: not in the IANA registry.
+              AUDIO_FORMAT_LDAC, make_AudioFormatDescription("audio/vnd.sony.ldac")},
+             {AUDIO_FORMAT_MAT,
+diff --git a/services/audiopolicy/common/managerdefinitions/src/AudioPolicyConfig.cpp b/services/audiopolicy/common/managerdefinitions/src/AudioPolicyConfig.cpp
+index f5e135e47a..723887db8f 100644
+--- a/services/audiopolicy/common/managerdefinitions/src/AudioPolicyConfig.cpp
++++ b/services/audiopolicy/common/managerdefinitions/src/AudioPolicyConfig.cpp
+@@ -342,7 +342,8 @@ void AudioPolicyConfig::setDefaultSurroundFormats() {
+                 AUDIO_FORMAT_AAC_XHE}},
+         {AUDIO_FORMAT_DOLBY_TRUEHD, {}},
+         {AUDIO_FORMAT_E_AC3_JOC, {}},
+-        {AUDIO_FORMAT_AC4, {}}};
++        {AUDIO_FORMAT_AC4, {}},     // L0-3
++        {AUDIO_FORMAT_AC4_L4, {}}};
+ }
+ 
+ bool AudioPolicyConfig::useDeepBufferForMedia() const {
+diff --git a/services/audiopolicy/config/surround_sound_configuration_5_0.xml b/services/audiopolicy/config/surround_sound_configuration_5_0.xml
+index 590a1812ec..6a268d8bd5 100644
+--- a/services/audiopolicy/config/surround_sound_configuration_5_0.xml
++++ b/services/audiopolicy/config/surround_sound_configuration_5_0.xml
+@@ -27,5 +27,6 @@
+     <format name="AUDIO_FORMAT_DTS_HD" />
+     <format name="AUDIO_FORMAT_AAC_LC" subformats="AUDIO_FORMAT_AAC_HE_V1 AUDIO_FORMAT_AAC_HE_V2 AUDIO_FORMAT_AAC_ELD AUDIO_FORMAT_AAC_XHE" />
+     <format name="AUDIO_FORMAT_AC4" />
++    <format name="AUDIO_FORMAT_AC4_L4" />
+   </formats>
+ </surroundSound>
+diff --git a/services/audiopolicy/config/surround_sound_configuration_aidl.xml b/services/audiopolicy/config/surround_sound_configuration_aidl.xml
+index cf15711cde..51ccaa94d5 100644
+--- a/services/audiopolicy/config/surround_sound_configuration_aidl.xml
++++ b/services/audiopolicy/config/surround_sound_configuration_aidl.xml
+@@ -30,5 +30,6 @@
+     <format name="AUDIO_FORMAT_DTS_UHD_P2" />
+     <format name="AUDIO_FORMAT_AAC_LC" subformats="AUDIO_FORMAT_AAC_HE_V1 AUDIO_FORMAT_AAC_HE_V2 AUDIO_FORMAT_AAC_ELD AUDIO_FORMAT_AAC_XHE" />
+     <format name="AUDIO_FORMAT_AC4" />
++    <format name="AUDIO_FORMAT_AC4_L4" />
+   </formats>
+ </surroundSound>
+-- 
+2.43.0
+

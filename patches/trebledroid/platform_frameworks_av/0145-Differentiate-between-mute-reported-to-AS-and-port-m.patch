@@ -1,0 +1,135 @@
+From 6e3e81e7cac7bb7e3713d0b1262eceb313818ba8 Mon Sep 17 00:00:00 2001
+From: Vlad Popa <pvlad@google.com>
+Date: Wed, 23 Oct 2024 19:41:59 -0700
+Subject: [PATCH 145/436] Differentiate between mute reported to AS and port
+ mute
+
+The audio tracks now store the mute by port property which will be sent
+to AS together with all the other mute properties. When changing the
+muted by port we need to check whether the new muteState has changed.
+This is why it is easier to have both properties stored within the
+native tracks.
+
+Test: atest AudioPlaybackConfigurationTest
+Flag: EXEMPT bugfix
+Bug: 374483735
+Change-Id: Iba3153f13762bad3f055b0f69cf490e2ccff6d88
+---
+ services/audioflinger/MmapTracks.h     |  5 +++--
+ services/audioflinger/PlaybackTracks.h |  3 ++-
+ services/audioflinger/Tracks.cpp       | 18 +++++++-----------
+ 3 files changed, 12 insertions(+), 14 deletions(-)
+
+diff --git a/services/audioflinger/MmapTracks.h b/services/audioflinger/MmapTracks.h
+index 30bbd5d994..0210bc2a29 100644
+--- a/services/audioflinger/MmapTracks.h
++++ b/services/audioflinger/MmapTracks.h
+@@ -73,10 +73,10 @@ public:
+         mVolume = volume;
+     }
+     void setPortMute(bool muted) override {
+-        mMuteState.muteFromPortVolume = muted;
++        mMutedFromPort = muted;
+     }
+     float getPortVolume() const override { return mVolume; }
+-    bool getPortMute() const override { return mMuteState.muteFromPortVolume; }
++    bool getPortMute() const override { return mMutedFromPort; }
+ 
+ private:
+     DISALLOW_COPY_AND_ASSIGN(MmapTrack);
+@@ -101,6 +101,7 @@ private:
+             /* GUARDED_BY(MmapPlaybackThread::mLock) */;
+     mute_state_t mMuteState
+             /* GUARDED_BY(MmapPlaybackThread::mLock) */;
++    bool mMutedFromPort;
+ 
+     float mVolume = 0.0f;
+ };  // end of Track
+diff --git a/services/audioflinger/PlaybackTracks.h b/services/audioflinger/PlaybackTracks.h
+index 70bab6a167..2c3212cc29 100644
+--- a/services/audioflinger/PlaybackTracks.h
++++ b/services/audioflinger/PlaybackTracks.h
+@@ -229,7 +229,7 @@ public:
+     void setPortVolume(float volume) override;
+     void setPortMute(bool muted) override;
+     float getPortVolume() const override { return mVolume; }
+-    bool getPortMute() const override { return mMuteState.load().muteFromPortVolume; }
++    bool getPortMute() const override { return mMutedFromPort; }
+ 
+ protected:
+ 
+@@ -414,6 +414,7 @@ private:
+     // access these two variables only when holding player thread lock.
+     std::unique_ptr<os::PersistableBundle> mMuteEventExtras;
+     std::atomic<mute_state_t> mMuteState;
++    std::atomic<bool>         mMutedFromPort;
+     bool                      mInternalMute = false;
+     std::atomic<float>        mVolume = 0.0f;
+ };  // end of Track
+diff --git a/services/audioflinger/Tracks.cpp b/services/audioflinger/Tracks.cpp
+index 0ddbaecab4..14cfb40ccc 100644
+--- a/services/audioflinger/Tracks.cpp
++++ b/services/audioflinger/Tracks.cpp
+@@ -864,16 +864,14 @@ Track::Track(
+ 
+     populateUsageAndContentTypeFromStreamType();
+ 
+-    mute_state_t newMuteState = mMuteState.load();
+-    newMuteState.muteFromPortVolume = muted;
++    mMutedFromPort = muted;
+ 
+     // Audio patch and call assistant volume are always max
+     if (mAttr.usage == AUDIO_USAGE_CALL_ASSISTANT
+             || mAttr.usage == AUDIO_USAGE_VIRTUAL_SOURCE) {
+         mVolume = 1.0f;
+-        newMuteState.muteFromPortVolume = false;
++        mMutedFromPort = false;
+     }
+-    mMuteState.store(newMuteState);
+ 
+     mServerLatencySupported = checkServerLatencySupported(format, flags);
+ #ifdef TEE_SINK
+@@ -1630,12 +1628,10 @@ void Track::setPortVolume(float volume) {
+ }
+ 
+ void Track::setPortMute(bool muted) {
+-    mute_state_t newMuteState = mMuteState.load();
+-    if (newMuteState.muteFromPortVolume == muted) {
++    if (mMutedFromPort == muted) {
+         return;
+     }
+-    newMuteState.muteFromPortVolume = muted;
+-    mMuteState.store(newMuteState);
++    mMutedFromPort = muted;
+     if (mType != TYPE_PATCH) {
+         // Do not recursively propagate a PatchTrack setPortVolume to
+         // downstream PatchTracks.
+@@ -3591,14 +3587,14 @@ MmapTrack::MmapTrack(IAfThreadBase* thread,
+         mUid(VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid))),
+             mSilenced(false), mSilencedNotified(false), mVolume(volume)
+ {
+-    mMuteState.muteFromPortVolume = muted;
++    mMutedFromPort = muted;
+     // Once this item is logged by the server, the client can add properties.
+     mTrackMetrics.logConstructor(creatorPid, uid(), id());
+     if (isOut && (attr.usage == AUDIO_USAGE_CALL_ASSISTANT
+             || attr.usage == AUDIO_USAGE_VIRTUAL_SOURCE)) {
+         // Audio patch and call assistant volume are always max
+         mVolume = 1.0f;
+-        mMuteState.muteFromPortVolume = false;
++        mMutedFromPort = false;
+     }
+ }
+ 
+@@ -3696,7 +3692,7 @@ void MmapTrack::appendDump(String8& result, bool active __unused) const
+     if (isOut()) {
+         result.appendFormat("%4x %2x", mAttr.usage, mAttr.content_type);
+         result.appendFormat("%11.2g", 20.0 * log10(mVolume));
+-        result.appendFormat("%12s", mMuteState.muteFromPortVolume ? "true" : "false");
++        result.appendFormat("%12s", mMutedFromPort ? "true" : "false");
+     } else {
+         result.appendFormat("%7x", mAttr.source);
+     }
+-- 
+2.43.0
+

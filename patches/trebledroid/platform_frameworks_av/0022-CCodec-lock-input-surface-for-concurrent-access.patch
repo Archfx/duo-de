@@ -1,0 +1,433 @@
+From 13a0bd45f803650728b4edd852fa447d4bbcb40a Mon Sep 17 00:00:00 2001
+From: Wonsik Kim <wonsik@google.com>
+Date: Fri, 12 Jul 2024 11:05:48 -0700
+Subject: [PATCH 022/436] CCodec: lock input surface for concurrent access
+
+Bug: 351227733
+Test: atest android.hardware.camera2.cts.RecordingTest
+Test: atest android.mediav2.cts.CodecEncoderSurfaceTest
+Merged-In: I552641100999f8efc33d1c6f218f23a77176d1d9
+Change-Id: I552641100999f8efc33d1c6f218f23a77176d1d9
+---
+ media/codec2/sfplugin/CCodec.cpp              | 118 ++++++++++++------
+ media/codec2/sfplugin/CCodecBufferChannel.cpp |  35 +++---
+ media/codec2/sfplugin/CCodecBufferChannel.h   |   2 +-
+ 3 files changed, 102 insertions(+), 53 deletions(-)
+
+diff --git a/media/codec2/sfplugin/CCodec.cpp b/media/codec2/sfplugin/CCodec.cpp
+index ae66a58a64..64d8f07ab9 100644
+--- a/media/codec2/sfplugin/CCodec.cpp
++++ b/media/codec2/sfplugin/CCodec.cpp
+@@ -222,19 +222,20 @@ public:
+     ~HGraphicBufferSourceWrapper() override = default;
+ 
+     status_t connect(const std::shared_ptr<Codec2Client::Component> &comp) override {
+-        mNode = new C2OMXNode(comp);
+-        mOmxNode = new hardware::media::omx::V1_0::utils::TWOmxNode(mNode);
+-        mNode->setFrameSize(mWidth, mHeight);
++        Mutexed<sp<C2OMXNode>>::Locked node(mNode);
++        *node = new C2OMXNode(comp);
++        mOmxNode = new hardware::media::omx::V1_0::utils::TWOmxNode(*node);
++        (*node)->setFrameSize(mWidth, mHeight);
+         // Usage is queried during configure(), so setting it beforehand.
+         // 64 bit set parameter is existing only in C2OMXNode.
+         OMX_U64 usage64 = mConfig.mUsage;
+-        status_t res = mNode->setParameter(
++        status_t res = (*node)->setParameter(
+                 (OMX_INDEXTYPE)OMX_IndexParamConsumerUsageBits64,
+                 &usage64, sizeof(usage64));
+ 
+         if (res != OK) {
+             OMX_U32 usage = mConfig.mUsage & 0xFFFFFFFF;
+-            (void)mNode->setParameter(
++            (void)(*node)->setParameter(
+                     (OMX_INDEXTYPE)OMX_IndexParamConsumerUsageBits,
+                     &usage, sizeof(usage));
+         }
+@@ -244,17 +245,18 @@ public:
+     }
+ 
+     void disconnect() override {
+-        if (mNode == nullptr) {
++        Mutexed<sp<C2OMXNode>>::Locked node(mNode);
++        if ((*node) == nullptr) {
+             return;
+         }
+-        sp<IOMXBufferSource> source = mNode->getSource();
++        sp<IOMXBufferSource> source = (*node)->getSource();
+         if (source == nullptr) {
+             ALOGD("GBSWrapper::disconnect: node is not configured with OMXBufferSource.");
+             return;
+         }
+         source->onOmxIdle();
+         source->onOmxLoaded();
+-        mNode.clear();
++        node->clear();
+         mOmxNode.clear();
+     }
+ 
+@@ -268,7 +270,11 @@ public:
+     }
+ 
+     status_t start() override {
+-        sp<IOMXBufferSource> source = mNode->getSource();
++        Mutexed<sp<C2OMXNode>>::Locked node(mNode);
++        if ((*node) == nullptr) {
++            return NO_INIT;
++        }
++        sp<IOMXBufferSource> source = (*node)->getSource();
+         if (source == nullptr) {
+             return NO_INIT;
+         }
+@@ -278,7 +284,7 @@ public:
+ 
+         OMX_PARAM_PORTDEFINITIONTYPE param;
+         param.nPortIndex = kPortIndexInput;
+-        status_t err = mNode->getParameter(OMX_IndexParamPortDefinition,
++        status_t err = (*node)->getParameter(OMX_IndexParamPortDefinition,
+                                            &param, sizeof(param));
+         if (err == OK) {
+             numSlots = param.nBufferCountActual;
+@@ -297,6 +303,7 @@ public:
+     }
+ 
+     status_t configure(Config &config) {
++        Mutexed<sp<C2OMXNode>>::Locked node(mNode);
+         std::stringstream status;
+         status_t err = OK;
+ 
+@@ -317,7 +324,7 @@ public:
+ 
+         // pts gap
+         if (config.mMinAdjustedFps > 0 || config.mFixedAdjustedFps > 0) {
+-            if (mNode != nullptr) {
++            if ((*node) != nullptr) {
+                 OMX_PARAM_U32TYPE ptrGapParam = {};
+                 ptrGapParam.nSize = sizeof(OMX_PARAM_U32TYPE);
+                 float gap = (config.mMinAdjustedFps > 0)
+@@ -326,7 +333,7 @@ public:
+                 // float -> uint32_t is undefined if the value is negative.
+                 // First convert to int32_t to ensure the expected behavior.
+                 ptrGapParam.nU32 = int32_t(gap);
+-                (void)mNode->setParameter(
++                (void)(*node)->setParameter(
+                         (OMX_INDEXTYPE)OMX_IndexParamMaxFrameDurationForBitrateControl,
+                         &ptrGapParam, sizeof(ptrGapParam));
+             }
+@@ -426,8 +433,8 @@ public:
+ 
+         // priority
+         if (mConfig.mPriority != config.mPriority) {
+-            if (config.mPriority != INT_MAX) {
+-                mNode->setPriority(config.mPriority);
++            if (config.mPriority != INT_MAX && (*node) != nullptr) {
++                (*node)->setPriority(config.mPriority);
+             }
+             mConfig.mPriority = config.mPriority;
+         }
+@@ -441,24 +448,40 @@ public:
+     }
+ 
+     void onInputBufferDone(c2_cntr64_t index) override {
+-        mNode->onInputBufferDone(index);
++        Mutexed<sp<C2OMXNode>>::Locked node(mNode);
++        if ((*node) == nullptr) {
++            return;
++        }
++        (*node)->onInputBufferDone(index);
+     }
+ 
+     void onInputBufferEmptied() override {
+-        mNode->onInputBufferEmptied();
++        Mutexed<sp<C2OMXNode>>::Locked node(mNode);
++        if ((*node) == nullptr) {
++            return;
++        }
++        (*node)->onInputBufferEmptied();
+     }
+ 
+     android_dataspace getDataspace() override {
+-        return mNode->getDataspace();
++        Mutexed<sp<C2OMXNode>>::Locked node(mNode);
++        if ((*node) == nullptr) {
++            return HAL_DATASPACE_UNKNOWN;
++        }
++        return (*node)->getDataspace();
+     }
+ 
+     uint32_t getPixelFormat() override {
+-        return mNode->getPixelFormat();
++        Mutexed<sp<C2OMXNode>>::Locked node(mNode);
++        if ((*node) == nullptr) {
++            return PIXEL_FORMAT_UNKNOWN;
++        }
++        return (*node)->getPixelFormat();
+     }
+ 
+ private:
+     sp<HGraphicBufferSource> mSource;
+-    sp<C2OMXNode> mNode;
++    Mutexed<sp<C2OMXNode>> mNode;
+     sp<hardware::media::omx::V1_0::IOmxNode> mOmxNode;
+     uint32_t mWidth;
+     uint32_t mHeight;
+@@ -479,33 +502,39 @@ public:
+     ~AGraphicBufferSourceWrapper() override = default;
+ 
+     status_t connect(const std::shared_ptr<Codec2Client::Component> &comp) override {
+-        mNode = ::ndk::SharedRefBase::make<C2AidlNode>(comp);
+-        mNode->setFrameSize(mWidth, mHeight);
++        Mutexed<std::shared_ptr<C2AidlNode>>::Locked node(mNode);
++        *node = ::ndk::SharedRefBase::make<C2AidlNode>(comp);
++        (*node)->setFrameSize(mWidth, mHeight);
+         // Usage is queried during configure(), so setting it beforehand.
+         uint64_t usage = mConfig.mUsage;
+-        (void)mNode->setConsumerUsage((int64_t)usage);
++        (void)(*node)->setConsumerUsage((int64_t)usage);
+ 
+         return fromAidlStatus(mSource->configure(
+-                mNode, static_cast<::aidl::android::hardware::graphics::common::Dataspace>(
++                (*node), static_cast<::aidl::android::hardware::graphics::common::Dataspace>(
+                         mDataSpace)));
+     }
+ 
+     void disconnect() override {
+-        if (mNode == nullptr) {
++        Mutexed<std::shared_ptr<C2AidlNode>>::Locked node(mNode);
++        if ((*node) == nullptr) {
+             return;
+         }
+-        std::shared_ptr<IAidlBufferSource> source = mNode->getSource();
++        std::shared_ptr<IAidlBufferSource> source = (*node)->getSource();
+         if (source == nullptr) {
+             ALOGD("GBSWrapper::disconnect: node is not configured with OMXBufferSource.");
+             return;
+         }
+         (void)source->onStop();
+         (void)source->onRelease();
+-        mNode.reset();
++        node->reset();
+     }
+ 
+     status_t start() override {
+-        std::shared_ptr<IAidlBufferSource> source = mNode->getSource();
++        Mutexed<std::shared_ptr<C2AidlNode>>::Locked node(mNode);
++        if ((*node) == nullptr) {
++            return NO_INIT;
++        }
++        std::shared_ptr<IAidlBufferSource> source = (*node)->getSource();
+         if (source == nullptr) {
+             return NO_INIT;
+         }
+@@ -513,7 +542,7 @@ public:
+         size_t numSlots = 16;
+ 
+         IAidlNode::InputBufferParams param;
+-        status_t err = fromAidlStatus(mNode->getInputBufferParams(&param));
++        status_t err = fromAidlStatus((*node)->getInputBufferParams(&param));
+         if (err == OK) {
+             numSlots = param.bufferCountActual;
+         }
+@@ -531,6 +560,7 @@ public:
+     }
+ 
+     status_t configure(Config &config) {
++        Mutexed<std::shared_ptr<C2AidlNode>>::Locked node(mNode);
+         std::stringstream status;
+         status_t err = OK;
+ 
+@@ -551,14 +581,14 @@ public:
+ 
+         // pts gap
+         if (config.mMinAdjustedFps > 0 || config.mFixedAdjustedFps > 0) {
+-            if (mNode != nullptr) {
++            if ((*node) != nullptr) {
+                 float gap = (config.mMinAdjustedFps > 0)
+                         ? c2_min(INT32_MAX + 0., 1e6 / config.mMinAdjustedFps + 0.5)
+                         : c2_max(0. - INT32_MAX, -1e6 / config.mFixedAdjustedFps - 0.5);
+                 // float -> uint32_t is undefined if the value is negative.
+                 // First convert to int32_t to ensure the expected behavior.
+                 int32_t gapUs = int32_t(gap);
+-                (void)mNode->setAdjustTimestampGapUs(gapUs);
++                (void)(*node)->setAdjustTimestampGapUs(gapUs);
+             }
+         }
+ 
+@@ -650,7 +680,7 @@ public:
+         // priority
+         if (mConfig.mPriority != config.mPriority) {
+             if (config.mPriority != INT_MAX) {
+-                mNode->setPriority(config.mPriority);
++                (*node)->setPriority(config.mPriority);
+             }
+             mConfig.mPriority = config.mPriority;
+         }
+@@ -664,24 +694,40 @@ public:
+     }
+ 
+     void onInputBufferDone(c2_cntr64_t index) override {
+-        mNode->onInputBufferDone(index);
++        Mutexed<std::shared_ptr<C2AidlNode>>::Locked node(mNode);
++        if ((*node) == nullptr) {
++            return;
++        }
++        (*node)->onInputBufferDone(index);
+     }
+ 
+     void onInputBufferEmptied() override {
+-        mNode->onInputBufferEmptied();
++        Mutexed<std::shared_ptr<C2AidlNode>>::Locked node(mNode);
++        if ((*node) == nullptr) {
++            return;
++        }
++        (*node)->onInputBufferEmptied();
+     }
+ 
+     android_dataspace getDataspace() override {
+-        return mNode->getDataspace();
++        Mutexed<std::shared_ptr<C2AidlNode>>::Locked node(mNode);
++        if ((*node) == nullptr) {
++            return HAL_DATASPACE_UNKNOWN;
++        }
++        return (*node)->getDataspace();
+     }
+ 
+     uint32_t getPixelFormat() override {
+-        return mNode->getPixelFormat();
++        Mutexed<std::shared_ptr<C2AidlNode>>::Locked node(mNode);
++        if ((*node) == nullptr) {
++            return PIXEL_FORMAT_UNKNOWN;
++        }
++        return (*node)->getPixelFormat();
+     }
+ 
+ private:
+     std::shared_ptr<AGraphicBufferSource> mSource;
+-    std::shared_ptr<C2AidlNode> mNode;
++    Mutexed<std::shared_ptr<C2AidlNode>> mNode;
+     uint32_t mWidth;
+     uint32_t mHeight;
+     Config mConfig;
+diff --git a/media/codec2/sfplugin/CCodecBufferChannel.cpp b/media/codec2/sfplugin/CCodecBufferChannel.cpp
+index 1348ef0f29..c75c5697c4 100644
+--- a/media/codec2/sfplugin/CCodecBufferChannel.cpp
++++ b/media/codec2/sfplugin/CCodecBufferChannel.cpp
+@@ -228,15 +228,17 @@ void CCodecBufferChannel::setComponent(
+ status_t CCodecBufferChannel::setInputSurface(
+         const std::shared_ptr<InputSurfaceWrapper> &surface) {
+     ALOGV("[%s] setInputSurface", mName);
+-    mInputSurface = surface;
+-    return mInputSurface->connect(mComponent);
++    Mutexed<std::shared_ptr<InputSurfaceWrapper>>::Locked inputSurface(mInputSurface);
++    *inputSurface = surface;
++    return (*inputSurface)->connect(mComponent);
+ }
+ 
+ status_t CCodecBufferChannel::signalEndOfInputStream() {
+-    if (mInputSurface == nullptr) {
++    Mutexed<std::shared_ptr<InputSurfaceWrapper>>::Locked inputSurface(mInputSurface);
++    if ((*inputSurface) == nullptr) {
+         return INVALID_OPERATION;
+     }
+-    return mInputSurface->signalEndOfInputStream();
++    return (*inputSurface)->signalEndOfInputStream();
+ }
+ 
+ status_t CCodecBufferChannel::queueInputBufferInternal(
+@@ -1069,9 +1071,11 @@ void CCodecBufferChannel::feedInputBufferIfAvailableInternal() {
+             return;
+         }
+     }
+-    if (android::media::codec::provider_->input_surface_throttle()
+-            && mInputSurface != nullptr) {
+-        mInputSurface->onInputBufferEmptied();
++    if (android::media::codec::provider_->input_surface_throttle()) {
++        Mutexed<std::shared_ptr<InputSurfaceWrapper>>::Locked inputSurface(mInputSurface);
++        if ((*inputSurface) != nullptr) {
++            (*inputSurface)->onInputBufferEmptied();
++        }
+     }
+     size_t numActiveSlots = 0;
+     while (!mPipelineWatcher.lock()->pipelineFull()) {
+@@ -1700,7 +1704,7 @@ status_t CCodecBufferChannel::start(
+                 && (hasCryptoOrDescrambler() || conforming)) {
+             input->buffers.reset(new SlotInputBuffers(mName));
+         } else if (graphic) {
+-            if (mInputSurface) {
++            if (mInputSurface.lock()->get()) {
+                 input->buffers.reset(new DummyInputBuffers(mName));
+             } else if (mMetaMode == MODE_ANW) {
+                 input->buffers.reset(new GraphicMetadataInputBuffers(mName));
+@@ -1983,7 +1987,7 @@ status_t CCodecBufferChannel::start(
+ 
+ status_t CCodecBufferChannel::prepareInitialInputBuffers(
+         std::map<size_t, sp<MediaCodecBuffer>> *clientInputBuffers, bool retry) {
+-    if (mInputSurface) {
++    if (mInputSurface.lock()->get()) {
+         return OK;
+     }
+ 
+@@ -2109,9 +2113,7 @@ void CCodecBufferChannel::stopUseOutputSurface(bool pushBlankBuffer) {
+ 
+ void CCodecBufferChannel::reset() {
+     stop();
+-    if (mInputSurface != nullptr) {
+-        mInputSurface.reset();
+-    }
++    mInputSurface.lock()->reset();
+     mPipelineWatcher.lock()->flush();
+     {
+         Mutexed<Input>::Locked input(mInput);
+@@ -2206,7 +2208,7 @@ void CCodecBufferChannel::onWorkDone(
+ 
+ void CCodecBufferChannel::onInputBufferDone(
+         uint64_t frameIndex, size_t arrayIndex) {
+-    if (mInputSurface) {
++    if (mInputSurface.lock()->get()) {
+         return;
+     }
+     std::shared_ptr<C2Buffer> buffer =
+@@ -2263,7 +2265,8 @@ bool CCodecBufferChannel::handleWork(
+         notifyClient = false;
+     }
+ 
+-    if (mInputSurface == nullptr && (work->worklets.size() != 1u
++    bool hasInputSurface = (mInputSurface.lock()->get() != nullptr);
++    if (!hasInputSurface && (work->worklets.size() != 1u
+             || !work->worklets.front()
+             || !(work->worklets.front()->output.flags &
+                  C2FrameData::FLAG_INCOMPLETE))) {
+@@ -2472,7 +2475,7 @@ bool CCodecBufferChannel::handleWork(
+     c2_cntr64_t timestamp =
+         worklet->output.ordinal.timestamp + work->input.ordinal.customOrdinal
+                 - work->input.ordinal.timestamp;
+-    if (mInputSurface != nullptr) {
++    if (hasInputSurface) {
+         // When using input surface we need to restore the original input timestamp.
+         timestamp = work->input.ordinal.customOrdinal;
+     }
+@@ -2799,7 +2802,7 @@ void CCodecBufferChannel::resetBuffersPixelFormat(bool isEncoder) {
+ }
+ 
+ void CCodecBufferChannel::setInfoBuffer(const std::shared_ptr<C2InfoBuffer> &buffer) {
+-    if (mInputSurface == nullptr) {
++    if (mInputSurface.lock()->get() == nullptr) {
+         mInfoBuffers.push_back(buffer);
+     } else {
+         std::list<std::unique_ptr<C2Work>> items;
+diff --git a/media/codec2/sfplugin/CCodecBufferChannel.h b/media/codec2/sfplugin/CCodecBufferChannel.h
+index e62742ba2d..f5e268aa90 100644
+--- a/media/codec2/sfplugin/CCodecBufferChannel.h
++++ b/media/codec2/sfplugin/CCodecBufferChannel.h
+@@ -391,7 +391,7 @@ private:
+     };
+     Mutexed<BlockPools> mBlockPools;
+ 
+-    std::shared_ptr<InputSurfaceWrapper> mInputSurface;
++    Mutexed<std::shared_ptr<InputSurfaceWrapper>> mInputSurface;
+ 
+     MetaMode mMetaMode;
+ 
+-- 
+2.43.0
+

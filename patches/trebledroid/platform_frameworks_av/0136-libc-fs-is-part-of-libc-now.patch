@@ -1,0 +1,35 @@
+From ac84b61bb9f4b845606778fa475edf316c02d04c Mon Sep 17 00:00:00 2001
+From: Elliott Hughes <enh@google.com>
+Date: Thu, 24 Oct 2024 14:33:21 +0000
+Subject: [PATCH 136/436] libc++fs is part of libc++ now.
+
+Change-Id: I3fe72e7aeb4caf3b0704b7cf4f2f347337e1b9d2
+---
+ drm/drmserver/Android.bp | 4 ----
+ 1 file changed, 4 deletions(-)
+
+diff --git a/drm/drmserver/Android.bp b/drm/drmserver/Android.bp
+index 81c2003457..cee44b9937 100644
+--- a/drm/drmserver/Android.bp
++++ b/drm/drmserver/Android.bp
+@@ -78,9 +78,6 @@ drmserver_cc_binary {
+         "libselinux",
+         "libstagefright_foundation",
+     ],
+-    whole_static_libs: [
+-        "libc++fs",
+-    ],
+ 
+     cflags: [
+         "-Wall",
+@@ -127,7 +124,6 @@ cc_fuzz {
+     ],
+ 
+     static_libs: [
+-        "libc++fs",
+         "libmediautils",
+         "liblog",
+         "libdrmframeworkcommon",
+-- 
+2.43.0
+

@@ -1,0 +1,397 @@
+From 615e16008fd0d897339f95a4a4c4c8615b286230 Mon Sep 17 00:00:00 2001
+From: Jayant Chowdhary <jchowdhary@google.com>
+Date: Wed, 2 Oct 2024 20:22:08 +0000
+Subject: [PATCH 073/436] camera (v)ndk: Setup vendor tags if they're not
+ already, while calling getCameraService()
+
+It is possible that by the time CameraManagerGlobal::getCameraService()
+is called, cameraservice is up, however camera HAL providers haven't
+registered themselves with cameraservice. In this case, the vendor tag
+cache will not be available. As a result, we should check and set it up while
+checking for cameraserver validity for subsequent calls of
+CameraManagerGlobal::getCameraService().
+
+Bug: 368235553
+
+Flag: EXEMPT BUGFIX
+
+Test: Vendor service which comes up before camera HAL registers itself
+      with cameraserver can eventually, retrieve vendor tags.
+
+Change-Id: I51ea31c11692498f1c07d7efdc91e4b176f73f27
+Signed-off-by: Jayant Chowdhary <jchowdhary@google.com>
+---
+ camera/ndk/impl/ACameraManager.cpp            | 192 ++++++++++--------
+ camera/ndk/impl/ACameraManager.h              |   2 +
+ camera/ndk/ndk_vendor/impl/ACameraManager.cpp |  54 +++--
+ camera/ndk/ndk_vendor/impl/ACameraManager.h   |   2 +-
+ 4 files changed, 136 insertions(+), 114 deletions(-)
+
+diff --git a/camera/ndk/impl/ACameraManager.cpp b/camera/ndk/impl/ACameraManager.cpp
+index 6d29ef52e1..53c4489877 100644
+--- a/camera/ndk/impl/ACameraManager.cpp
++++ b/camera/ndk/impl/ACameraManager.cpp
+@@ -170,97 +170,78 @@ sp<hardware::ICameraService> CameraManagerGlobal::getCameraService() {
+ }
+ 
+ sp<hardware::ICameraService> CameraManagerGlobal::getCameraServiceLocked() {
+-    if (mCameraService.get() == nullptr) {
+-        if (CameraUtils::isCameraServiceDisabled()) {
+-            return mCameraService;
+-        }
++    if (mCameraService.get() != nullptr) {
++        return mCameraService;
++    }
++    if (CameraUtils::isCameraServiceDisabled()) {
++        return mCameraService;
++    }
+ 
+-        sp<IServiceManager> sm = defaultServiceManager();
+-        sp<IBinder> binder;
+-        binder = sm->checkService(String16(kCameraServiceName));
+-        if (binder == nullptr) {
+-            ALOGE("%s: Could not get CameraService instance.", __FUNCTION__);
++    sp<IServiceManager> sm = defaultServiceManager();
++    sp<IBinder> binder;
++    binder = sm->checkService(String16(kCameraServiceName));
++    if (binder == nullptr) {
++        ALOGE("%s: Could not get CameraService instance.", __FUNCTION__);
++        return nullptr;
++    }
++    sp<hardware::ICameraService> cameraService = interface_cast<hardware::ICameraService>(binder);
++    if (mDeathNotifier == nullptr) {
++        mDeathNotifier = new DeathNotifier(this);
++        binder->linkToDeath(mDeathNotifier);
++    }
++
++    // Setup looper thread to perform availability callbacks
++    if (mCbLooper == nullptr) {
++        mCbLooper = new ALooper;
++        mCbLooper->setName("C2N-mgr-looper");
++        status_t err = mCbLooper->start(
++                /*runOnCallingThread*/false,
++                /*canCallJava*/       true,
++                PRIORITY_DEFAULT);
++        if (err != OK) {
++            ALOGE("%s: Unable to start camera service listener looper: %s (%d)",
++                    __FUNCTION__, strerror(-err), err);
++            mCbLooper.clear();
+             return nullptr;
+         }
+-        if (mDeathNotifier == nullptr) {
+-            mDeathNotifier = new DeathNotifier(this);
+-        }
+-        binder->linkToDeath(mDeathNotifier);
+-        mCameraService = interface_cast<hardware::ICameraService>(binder);
+-
+-        // Setup looper thread to perfrom availiability callbacks
+-        if (mCbLooper == nullptr) {
+-            mCbLooper = new ALooper;
+-            mCbLooper->setName("C2N-mgr-looper");
+-            status_t err = mCbLooper->start(
+-                    /*runOnCallingThread*/false,
+-                    /*canCallJava*/       true,
+-                    PRIORITY_DEFAULT);
+-            if (err != OK) {
+-                ALOGE("%s: Unable to start camera service listener looper: %s (%d)",
+-                        __FUNCTION__, strerror(-err), err);
+-                mCbLooper.clear();
+-                return nullptr;
+-            }
+-            if (mHandler == nullptr) {
+-                mHandler = new CallbackHandler(this);
+-            }
+-            mCbLooper->registerHandler(mHandler);
++        if (mHandler == nullptr) {
++            mHandler = new CallbackHandler(this);
+         }
++        mCbLooper->registerHandler(mHandler);
++    }
+ 
+-        // register ICameraServiceListener
+-        if (mCameraServiceListener == nullptr) {
+-            mCameraServiceListener = new CameraServiceListener(this);
+-        }
+-        std::vector<hardware::CameraStatus> cameraStatuses{};
+-        mCameraService->addListener(mCameraServiceListener, &cameraStatuses);
+-        for (auto& c : cameraStatuses) {
+-            onStatusChangedLocked(c.status, c.deviceId, c.cameraId);
+-
+-            for (auto& unavailablePhysicalId : c.unavailablePhysicalIds) {
+-                onStatusChangedLocked(hardware::ICameraServiceListener::STATUS_NOT_PRESENT,
+-                                      c.deviceId, c.cameraId, unavailablePhysicalId);
+-            }
++    // register ICameraServiceListener
++    std::vector<hardware::CameraStatus> cameraStatuses{};
++    if (mCameraServiceListener == nullptr) {
++        mCameraServiceListener = new CameraServiceListener(this);
++        cameraService->addListener(mCameraServiceListener, &cameraStatuses);
++    }
++
++    for (auto& c : cameraStatuses) {
++        onStatusChangedLocked(c.status, c.deviceId, c.cameraId);
++
++        for (auto& unavailablePhysicalId : c.unavailablePhysicalIds) {
++            onStatusChangedLocked(hardware::ICameraServiceListener::STATUS_NOT_PRESENT,
++                                    c.deviceId, c.cameraId, unavailablePhysicalId);
+         }
++    }
++    // setup vendor tags
++    if (!setupVendorTags(cameraService)) {
++        ALOGE("%s: Vendor tag descriptor cache couldn't be set up", __FUNCTION__);
++        return nullptr;
++    }
+ 
+-        // setup vendor tags
+-        sp<VendorTagDescriptor> desc = new VendorTagDescriptor();
+-        binder::Status ret = mCameraService->getCameraVendorTagDescriptor(/*out*/desc.get());
++    mCameraService = cameraService;
++    ALOGE_IF(mCameraService == nullptr, "no CameraService!?");
++    return mCameraService;
++}
+ 
+-        if (ret.isOk()) {
+-            if (0 < desc->getTagCount()) {
+-                status_t err = VendorTagDescriptor::setAsGlobalVendorTagDescriptor(desc);
+-                if (err != OK) {
+-                    ALOGE("%s: Failed to set vendor tag descriptors, received error %s (%d)",
+-                            __FUNCTION__, strerror(-err), err);
+-                }
+-            } else {
+-                sp<VendorTagDescriptorCache> cache =
+-                        new VendorTagDescriptorCache();
+-                binder::Status res =
+-                        mCameraService->getCameraVendorTagCache(
+-                                /*out*/cache.get());
+-                if (res.serviceSpecificErrorCode() ==
+-                        hardware::ICameraService::ERROR_DISCONNECTED) {
+-                    // No camera module available, not an error on devices with no cameras
+-                    VendorTagDescriptorCache::clearGlobalVendorTagCache();
+-                } else if (res.isOk()) {
+-                    status_t err =
+-                            VendorTagDescriptorCache::setAsGlobalVendorTagCache(
+-                                    cache);
+-                    if (err != OK) {
+-                        ALOGE("%s: Failed to set vendor tag cache,"
+-                                "received error %s (%d)", __FUNCTION__,
+-                                strerror(-err), err);
+-                    }
+-                } else {
+-                    VendorTagDescriptorCache::clearGlobalVendorTagCache();
+-                    ALOGE("%s: Failed to setup vendor tag cache: %s",
+-                            __FUNCTION__, res.toString8().c_str());
+-                }
+-            }
+-        } else if (ret.serviceSpecificErrorCode() ==
+-                hardware::ICameraService::ERROR_DEPRECATED_HAL) {
++bool CameraManagerGlobal::setupVendorTags(sp<hardware::ICameraService> &cameraService) {
++    sp<VendorTagDescriptor> desc = new VendorTagDescriptor();
++    binder::Status ret = cameraService->getCameraVendorTagDescriptor(/*out*/desc.get());
++    if (!ret.isOk()) {
++        if (ret.serviceSpecificErrorCode() ==
++            hardware::ICameraService::ERROR_DEPRECATED_HAL) {
+             ALOGW("%s: Camera HAL too old; does not support vendor tags",
+                     __FUNCTION__);
+             VendorTagDescriptor::clearGlobalVendorTagDescriptor();
+@@ -268,9 +249,45 @@ sp<hardware::ICameraService> CameraManagerGlobal::getCameraServiceLocked() {
+             ALOGE("%s: Failed to get vendor tag descriptors: %s",
+                     __FUNCTION__, ret.toString8().c_str());
+         }
++        return false;
+     }
+-    ALOGE_IF(mCameraService == nullptr, "no CameraService!?");
+-    return mCameraService;
++
++    if (0 < desc->getTagCount()) {
++        status_t err = VendorTagDescriptor::setAsGlobalVendorTagDescriptor(desc);
++        if (err != OK) {
++            ALOGE("%s: Failed to set vendor tag descriptors, received error %s (%d)",
++                    __FUNCTION__, strerror(-err), err);
++            return false;
++        }
++    } else {
++        sp<VendorTagDescriptorCache> cache =
++                new VendorTagDescriptorCache();
++        binder::Status res =
++                cameraService->getCameraVendorTagCache(
++                        /*out*/cache.get());
++        if (res.serviceSpecificErrorCode() ==
++                hardware::ICameraService::ERROR_DISCONNECTED) {
++            // No camera module available, not an error on devices with no cameras
++            VendorTagDescriptorCache::clearGlobalVendorTagCache();
++        } else if (res.isOk()) {
++            status_t err =
++                    VendorTagDescriptorCache::setAsGlobalVendorTagCache(
++                            cache);
++            if (err != OK) {
++                ALOGE("%s: Failed to set vendor tag cache,"
++                        "received error %s (%d)", __FUNCTION__,
++                        strerror(-err), err);
++                return false;
++            }
++        } else {
++            VendorTagDescriptorCache::clearGlobalVendorTagCache();
++            ALOGE("%s: Failed to setup vendor tag cache: %s",
++                    __FUNCTION__, res.toString8().c_str());
++            return false;
++        }
++    }
++
++    return true;
+ }
+ 
+ void CameraManagerGlobal::DeathNotifier::binderDied(const wp<IBinder>&)
+@@ -290,6 +307,8 @@ void CameraManagerGlobal::DeathNotifier::binderDied(const wp<IBinder>&)
+                                       key.cameraId);
+         }
+         cm->mCameraService.clear();
++        cm->mCameraServiceListener.clear();
++        cm->mDeathNotifier.clear();
+         // TODO: consider adding re-connect call here?
+     }
+ }
+@@ -398,6 +417,9 @@ void CameraManagerGlobal::registerAvailCallback(const DeviceContext& deviceConte
+ bool CameraManagerGlobal::supportsCamera2ApiLocked(const std::string &cameraId) {
+     bool camera2Support = false;
+     auto cs = getCameraServiceLocked();
++    if (cs == nullptr) {
++        return false;
++    }
+     binder::Status serviceRet =
+         cs->supportsCameraApi(cameraId,
+                 hardware::ICameraService::API_VERSION_2, &camera2Support);
+diff --git a/camera/ndk/impl/ACameraManager.h b/camera/ndk/impl/ACameraManager.h
+index f4124efb7c..cb7a4ffd36 100644
+--- a/camera/ndk/impl/ACameraManager.h
++++ b/camera/ndk/impl/ACameraManager.h
+@@ -105,6 +105,8 @@ class CameraManagerGlobal final : public RefBase {
+     template <class T>
+     void registerAvailCallback(const DeviceContext& deviceContext, const T* callback);
+ 
++    bool setupVendorTags(sp<hardware::ICameraService> &cameraService);
++
+     class DeathNotifier : public IBinder::DeathRecipient {
+       public:
+         explicit DeathNotifier(CameraManagerGlobal* cm) : mCameraManager(cm) {}
+diff --git a/camera/ndk/ndk_vendor/impl/ACameraManager.cpp b/camera/ndk/ndk_vendor/impl/ACameraManager.cpp
+index cdba8ff3a7..5b69f5cf95 100644
+--- a/camera/ndk/ndk_vendor/impl/ACameraManager.cpp
++++ b/camera/ndk/ndk_vendor/impl/ACameraManager.cpp
+@@ -194,11 +194,11 @@ static bool isCameraServiceDisabled() {
+     return (strncmp(value, "0", 2) != 0 && strncasecmp(value, "false", 6) != 0);
+ }
+ 
+-bool CameraManagerGlobal::setupVendorTags() {
++bool CameraManagerGlobal::setupVendorTags(std::shared_ptr<ICameraService> &cameraService) {
+     sp<VendorTagDescriptorCache> tagCache = new VendorTagDescriptorCache();
+     Status status = Status::NO_ERROR;
+     std::vector<ProviderIdAndVendorTagSections> providerIdsAndVts;
+-    ScopedAStatus remoteRet = mCameraService->getCameraVendorTagSections(&providerIdsAndVts);
++    ScopedAStatus remoteRet = cameraService->getCameraVendorTagSections(&providerIdsAndVts);
+ 
+     if (!remoteRet.isOk()) {
+         if (remoteRet.getExceptionCode() == EX_SERVICE_SPECIFIC) {
+@@ -261,15 +261,12 @@ std::shared_ptr<ICameraService> CameraManagerGlobal::getCameraService() {
+         ALOGE("%s: Could not get ICameraService instance.", __FUNCTION__);
+         return nullptr;
+     }
+-
+     if (mDeathRecipient.get() == nullptr) {
+         mDeathRecipient = ndk::ScopedAIBinder_DeathRecipient(
+                 AIBinder_DeathRecipient_new(CameraManagerGlobal::binderDeathCallback));
++        AIBinder_linkToDeath(cameraService->asBinder().get(),
++                             mDeathRecipient.get(), /*cookie=*/ this);
+     }
+-    AIBinder_linkToDeath(cameraService->asBinder().get(),
+-                         mDeathRecipient.get(), /*cookie=*/ this);
+-
+-    mCameraService = cameraService;
+ 
+     // Setup looper thread to perform availability callbacks
+     if (mCbLooper == nullptr) {
+@@ -291,33 +288,25 @@ std::shared_ptr<ICameraService> CameraManagerGlobal::getCameraService() {
+         mCbLooper->registerHandler(mHandler);
+     }
+ 
++    std::vector<CameraStatusAndId> cameraStatuses;
+     // register ICameraServiceListener
+     if (mCameraServiceListener == nullptr) {
+         mCameraServiceListener = ndk::SharedRefBase::make<CameraServiceListener>(weak_from_this());
+-    }
+-
+-    std::vector<CameraStatusAndId> cameraStatuses;
+-    Status status = Status::NO_ERROR;
+-    ScopedAStatus remoteRet = mCameraService->addListener(mCameraServiceListener,
+-                                                          &cameraStatuses);
+-
+-    if (!remoteRet.isOk()) {
+-        if (remoteRet.getExceptionCode() == EX_SERVICE_SPECIFIC) {
+-            Status errStatus = static_cast<Status>(remoteRet.getServiceSpecificError());
+-            ALOGE("%s: Failed to add listener to camera service: %s", __FUNCTION__,
+-                toString(errStatus).c_str());
+-        } else {
+-            ALOGE("%s: Transaction failed when adding listener to camera service: %d",
+-                __FUNCTION__, remoteRet.getExceptionCode());
++        ScopedAStatus remoteRet = cameraService->addListener(mCameraServiceListener,
++                                                            &cameraStatuses);
++        if (!remoteRet.isOk()) {
++            if (remoteRet.getExceptionCode() == EX_SERVICE_SPECIFIC) {
++                Status errStatus = static_cast<Status>(remoteRet.getServiceSpecificError());
++                ALOGE("%s: Failed to add listener to camera service: %s", __FUNCTION__,
++                    toString(errStatus).c_str());
++            } else {
++                ALOGE("%s: Transaction failed when adding listener to camera service: %d",
++                    __FUNCTION__, remoteRet.getExceptionCode());
++            }
++            return nullptr;
+         }
+     }
+ 
+-    // Setup vendor tags
+-    if (!setupVendorTags()) {
+-        ALOGE("Unable to set up vendor tags");
+-        return nullptr;
+-    }
+-
+     for (auto& csi: cameraStatuses){
+         onStatusChangedLocked(csi.deviceStatus, csi.cameraId);
+ 
+@@ -326,6 +315,13 @@ std::shared_ptr<ICameraService> CameraManagerGlobal::getCameraService() {
+                                   csi.cameraId, unavailablePhysicalId);
+         }
+     }
++
++   // Setup vendor tags
++    if (!setupVendorTags(cameraService)) {
++        ALOGE("Unable to set up vendor tags");
++        return nullptr;
++    }
++    mCameraService = cameraService;
+     return mCameraService;
+ }
+ 
+@@ -346,6 +342,8 @@ void CameraManagerGlobal::binderDeathCallback(void* /*cookie*/) {
+         instance->onStatusChangedLocked(deviceStatus, cameraId);
+     }
+     instance->mCameraService.reset();
++    instance->mDeathRecipient.release();
++    instance->mCameraServiceListener.reset();
+     // TODO: consider adding re-connect call here?
+ }
+ 
+diff --git a/camera/ndk/ndk_vendor/impl/ACameraManager.h b/camera/ndk/ndk_vendor/impl/ACameraManager.h
+index 2d8eefa768..5688e76d02 100644
+--- a/camera/ndk/ndk_vendor/impl/ACameraManager.h
++++ b/camera/ndk/ndk_vendor/impl/ACameraManager.h
+@@ -188,7 +188,7 @@ class CameraManagerGlobal final: public std::enable_shared_from_this<CameraManag
+                          const std::string &physicalCameraId);
+     void onStatusChangedLocked(const CameraDeviceStatus &status, const std::string &cameraId,
+                                const std::string &physicalCameraId);
+-    bool setupVendorTags();
++    bool setupVendorTags(std::shared_ptr<ICameraService> &cameraService);
+ 
+     // Utils for status
+     static bool validStatus(CameraDeviceStatus status);
+-- 
+2.43.0
+

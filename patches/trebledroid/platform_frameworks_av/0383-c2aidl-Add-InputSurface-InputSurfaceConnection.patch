@@ -1,0 +1,326 @@
+From 4efd3ed021fca536316ee3e08357599e5f23c9cc Mon Sep 17 00:00:00 2001
+From: Sungtak Lee <taklee@google.com>
+Date: Tue, 12 Nov 2024 05:17:20 +0000
+Subject: [PATCH 383/436] c2aidl: Add InputSurface & InputSurfaceConnection
+
+Test: m
+Bug: 201479783
+Change-Id: I78fb29e384963b066afdf2e52ea9eddb7964a0a4
+---
+ media/codec2/hal/aidl/Android.bp              |  3 +
+ .../codec2/aidl/inputsurface/InputSurface.h   | 61 ++++++++++++++
+ .../inputsurface/InputSurfaceConnection.h     | 56 +++++++++++++
+ .../hal/aidl/inputsurface/InputSurface.cpp    | 81 +++++++++++++++++++
+ .../inputsurface/InputSurfaceConnection.cpp   | 60 ++++++++++++++
+ 5 files changed, 261 insertions(+)
+ create mode 100644 media/codec2/hal/aidl/include/codec2/aidl/inputsurface/InputSurface.h
+ create mode 100644 media/codec2/hal/aidl/include/codec2/aidl/inputsurface/InputSurfaceConnection.h
+ create mode 100644 media/codec2/hal/aidl/inputsurface/InputSurface.cpp
+ create mode 100644 media/codec2/hal/aidl/inputsurface/InputSurfaceConnection.cpp
+
+diff --git a/media/codec2/hal/aidl/Android.bp b/media/codec2/hal/aidl/Android.bp
+index e16e2b1726..eaabc33e58 100644
+--- a/media/codec2/hal/aidl/Android.bp
++++ b/media/codec2/hal/aidl/Android.bp
+@@ -78,6 +78,8 @@ cc_library {
+         "Configurable.cpp",
+         "InputBufferManager.cpp",
+         "ParamTypes.cpp",
++        "inputsurface/InputSurface.cpp",
++        "inputsurface/InputSurfaceConnection.cpp",
+     ],
+ 
+     header_libs: [
+@@ -98,6 +100,7 @@ cc_library {
+         "libhidlbase",
+         "liblog",
+         "libnativewindow",
++        "libmediandk",
+         "libstagefright_aidl_bufferpool2",
+         "libstagefright_bufferpool@2.0.1",
+         "libui",
+diff --git a/media/codec2/hal/aidl/include/codec2/aidl/inputsurface/InputSurface.h b/media/codec2/hal/aidl/include/codec2/aidl/inputsurface/InputSurface.h
+new file mode 100644
+index 0000000000..5c2cc2e903
+--- /dev/null
++++ b/media/codec2/hal/aidl/include/codec2/aidl/inputsurface/InputSurface.h
+@@ -0,0 +1,61 @@
++/*
++ * Copyright 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#pragma once
++
++#include <aidl/android/hardware/media/c2/BnInputSurface.h>
++
++#include <codec2/aidl/Configurable.h>
++#include <util/C2InterfaceHelper.h>
++
++#include <C2.h>
++
++#include <memory>
++
++namespace aidl::android::hardware::media::c2::utils {
++
++struct InputSurface : public BnInputSurface {
++    InputSurface();
++    c2_status_t status() const;
++
++    // Methods from IInputSurface follow.
++    ::ndk::ScopedAStatus getSurface(
++            ::aidl::android::view::Surface* surface) override;
++    ::ndk::ScopedAStatus getConfigurable(
++            std::shared_ptr<IConfigurable>* configurable) override;
++    ::ndk::ScopedAStatus connect(
++            const std::shared_ptr<IInputSink>& sink,
++            std::shared_ptr<IInputSurfaceConnection>* connection) override;
++
++protected:
++    class Interface;
++    class ConfigurableIntf;
++
++    c2_status_t mInit;
++    std::shared_ptr<Interface> mIntf;
++    std::shared_ptr<CachedConfigurable> mConfigurable;
++
++    virtual ~InputSurface() override;
++
++
++    ::ndk::ScopedAIBinder_DeathRecipient mDeathRecipient;
++    static void OnBinderDied(void *cookie);
++    static void OnBinderUnlinked(void *cookie);
++    struct DeathContext;
++    DeathContext *mDeathContext;
++};
++
++}  // namespace aidl::android::hardware::media::c2::utils
+diff --git a/media/codec2/hal/aidl/include/codec2/aidl/inputsurface/InputSurfaceConnection.h b/media/codec2/hal/aidl/include/codec2/aidl/inputsurface/InputSurfaceConnection.h
+new file mode 100644
+index 0000000000..59361e1f9a
+--- /dev/null
++++ b/media/codec2/hal/aidl/include/codec2/aidl/inputsurface/InputSurfaceConnection.h
+@@ -0,0 +1,56 @@
++/*
++ * Copyright 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#pragma once
++
++#include <aidl/android/hardware/media/c2/BnInputSurfaceConnection.h>
++#include <media/NdkImage.h>
++
++#include <C2.h>
++
++#include <memory>
++
++namespace aidl::android::hardware::media::c2::utils {
++
++struct InputSurfaceConnection : public BnInputSurfaceConnection {
++    InputSurfaceConnection();
++    c2_status_t status() const;
++
++    // Methods from IInputSurfaceConnection follow.
++    ::ndk::ScopedAStatus disconnect() override;
++    ::ndk::ScopedAStatus signalEndOfStream() override;
++
++    // implementation specific interface.
++
++    // Submit a buffer to the connected component.
++    c2_status_t submitBuffer(
++            int32_t bufferId,
++            const AImage *buffer = nullptr,
++            int64_t timestamp = 0,
++            int fenceFd = -1);
++
++    // Submit eos to the connected component.
++    c2_status_t submitEos(int32_t bufferId);
++
++    // notify dataspace being changed to the component.
++    void dispatchDataSpaceChanged(
++            int32_t dataSpace, int32_t aspects, int32_t pixelFormat);
++
++protected:
++    virtual ~InputSurfaceConnection() override;
++};
++
++}  // namespace aidl::android::hardware::media::c2::utils
+diff --git a/media/codec2/hal/aidl/inputsurface/InputSurface.cpp b/media/codec2/hal/aidl/inputsurface/InputSurface.cpp
+new file mode 100644
+index 0000000000..5f6d17616f
+--- /dev/null
++++ b/media/codec2/hal/aidl/inputsurface/InputSurface.cpp
+@@ -0,0 +1,81 @@
++/*
++ * Copyright 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++//#define LOG_NDEBUG 0
++#define LOG_TAG "Codec2-InputSurface"
++#include <android-base/logging.h>
++
++#include <codec2/aidl/inputsurface/InputSurface.h>
++
++namespace aidl::android::hardware::media::c2::utils {
++
++// Derived class of C2InterfaceHelper
++class InputSurface::Interface : public C2InterfaceHelper {
++public:
++    explicit Interface(
++            const std::shared_ptr<C2ReflectorHelper> &helper)
++        : C2InterfaceHelper(helper) {
++
++        setDerivedInstance(this);
++
++    }
++
++private:
++};
++
++class InputSurface::ConfigurableIntf : public ConfigurableC2Intf {
++public:
++};
++
++struct InputSurface::DeathContext {
++    // TODO;
++};
++
++void InputSurface::OnBinderDied(void *cookie) {
++    (void) cookie;
++}
++
++void InputSurface::OnBinderUnlinked(void *cookie) {
++    (void) cookie;
++}
++
++InputSurface::InputSurface() : mDeathContext(nullptr) {
++    mInit = C2_OK;
++}
++
++InputSurface::~InputSurface() {
++}
++
++::ndk::ScopedAStatus InputSurface::getSurface(::aidl::android::view::Surface* surface) {
++    (void) surface;
++    return ::ndk::ScopedAStatus::ok();
++}
++
++::ndk::ScopedAStatus InputSurface::getConfigurable(
++        std::shared_ptr<IConfigurable>* configurable) {
++    *configurable = mConfigurable;
++    return ::ndk::ScopedAStatus::ok();
++}
++
++::ndk::ScopedAStatus InputSurface::connect(
++        const std::shared_ptr<IInputSink>& sink,
++        std::shared_ptr<IInputSurfaceConnection>* connection) {
++    (void) sink;
++    (void) connection;
++    return ::ndk::ScopedAStatus::ok();
++}
++
++}  // namespace aidl::android::hardware::media::c2::utils
+diff --git a/media/codec2/hal/aidl/inputsurface/InputSurfaceConnection.cpp b/media/codec2/hal/aidl/inputsurface/InputSurfaceConnection.cpp
+new file mode 100644
+index 0000000000..44ca92486d
+--- /dev/null
++++ b/media/codec2/hal/aidl/inputsurface/InputSurfaceConnection.cpp
+@@ -0,0 +1,60 @@
++/*
++ * Copyright 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++//#define LOG_NDEBUG 0
++#define LOG_TAG "Codec2-InputSurface"
++#include <android-base/logging.h>
++
++#include <codec2/aidl/inputsurface/InputSurfaceConnection.h>
++
++namespace aidl::android::hardware::media::c2::utils {
++
++InputSurfaceConnection::InputSurfaceConnection() {
++}
++
++InputSurfaceConnection::~InputSurfaceConnection() {
++}
++
++::ndk::ScopedAStatus InputSurfaceConnection::disconnect() {
++    return ::ndk::ScopedAStatus::ok();
++}
++
++::ndk::ScopedAStatus InputSurfaceConnection::signalEndOfStream() {
++    return ::ndk::ScopedAStatus::ok();
++}
++
++c2_status_t InputSurfaceConnection::submitBuffer(
++        int32_t bufferId, const AImage *buffer, int64_t timestamp, int fenceFd) {
++    (void)bufferId;
++    (void)buffer;
++    (void)timestamp;
++    (void)fenceFd;
++    return C2_OK;
++}
++
++c2_status_t InputSurfaceConnection::submitEos(int32_t bufferId) {
++    (void)bufferId;
++    return C2_OK;
++}
++
++void InputSurfaceConnection::dispatchDataSpaceChanged(
++            int32_t dataSpace, int32_t aspects, int32_t pixelFormat) {
++    (void)dataSpace;
++    (void)aspects;
++    (void)pixelFormat;
++}
++
++}  // namespace aidl::android::hardware::media::c2::utils
+-- 
+2.43.0
+

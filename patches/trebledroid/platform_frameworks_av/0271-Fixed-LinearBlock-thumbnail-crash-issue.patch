@@ -1,0 +1,37 @@
+From d8548a3560df065a21e1dd33d3f1e1a8e03c42a1 Mon Sep 17 00:00:00 2001
+From: mtk17381 <fangmao.wu@mediatek.com>
+Date: Thu, 14 Nov 2024 14:53:26 +0800
+Subject: [PATCH 271/436] Fixed LinearBlock thumbnail crash issue
+
+issue tracker id b/222071096
+not to send csd with size 0
+
+Test:
+Thumbnail preview OK
+MMP playback OK
+
+Bug: 222071096
+Change-Id: I09e84a4b4d6b37948268225fc7d1fdced75e05f8
+---
+ media/libstagefright/MediaCodec.cpp | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/media/libstagefright/MediaCodec.cpp b/media/libstagefright/MediaCodec.cpp
+index eea5242758..c0c8e5dbc5 100644
+--- a/media/libstagefright/MediaCodec.cpp
++++ b/media/libstagefright/MediaCodec.cpp
+@@ -5956,9 +5956,9 @@ void MediaCodec::extractCSD(const sp<AMessage> &format) {
+         }
+         if (csd->size() == 0) {
+             ALOGW("csd-%zu size is 0", i);
++        } else {
++            mCSD.push_back(csd);
+         }
+-
+-        mCSD.push_back(csd);
+         ++i;
+     }
+ 
+-- 
+2.43.0
+

@@ -1,0 +1,45 @@
+From 1e85eda7550a81ba96a476af1e3500a316b291cf Mon Sep 17 00:00:00 2001
+From: Pierre-Hugues Husson <phh@phh.me>
+Date: Tue, 19 May 2020 14:01:14 +0200
+Subject: [PATCH 422/436] Add a property to force camera timestamp source
+
+Some devices wrongly report their timesource
+Camera's timesource can either be CLOCK_MONOTONIC, or CLOCK_BOOTTIME
+The former doesn't increment in sleep, while the later does.
+There is a camera HAL property for that, though some devices don't
+report it properly.
+
+This issue happens on Xiaomi Redmi 7A, it needs to force the value to 1
+
+Add a property persist.sys.phh.camera.force_timestampsource to force
+timestamp source.
+---
+ .../libcameraservice/device3/Camera3Device.cpp       | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/services/camera/libcameraservice/device3/Camera3Device.cpp b/services/camera/libcameraservice/device3/Camera3Device.cpp
+index fb8e5d0a8b..63cd753086 100644
+--- a/services/camera/libcameraservice/device3/Camera3Device.cpp
++++ b/services/camera/libcameraservice/device3/Camera3Device.cpp
+@@ -219,8 +219,16 @@ status_t Camera3Device::initializeCommonLocked(sp<CameraProviderManager> manager
+     mTimestampOffset = getMonoToBoottimeOffset();
+     camera_metadata_entry timestampSource =
+             mDeviceInfo.find(ANDROID_SENSOR_INFO_TIMESTAMP_SOURCE);
+-    if (timestampSource.count > 0 && timestampSource.data.u8[0] ==
+-            ANDROID_SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME) {
++    int timestampSourceValue = 0;
++    if ((timestampSource.count > 0 && timestampSource.data.u8[0] ==
++            ANDROID_SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME)) {
++        timestampSourceValue = 1;
++    }
++    int forceTimestampSource = property_get_int32("persist.sys.phh.camera.force_timestampsource", -1);
++    //Don't override if it's -1, default value
++    if(forceTimestampSource == 0) timestampSourceValue = 0;
++    if(forceTimestampSource == 1) timestampSourceValue = 1;
++    if (timestampSourceValue == 1) {
+         mDeviceTimeBaseIsRealtime = true;
+     }
+ 
+-- 
+2.43.0
+

@@ -1,0 +1,40 @@
+From 808dccf251bce32ab3fdad3a1fd74aafdef8788a Mon Sep 17 00:00:00 2001
+From: Atneya Nair <atneya@google.com>
+Date: Tue, 5 Nov 2024 15:54:39 -0800
+Subject: [PATCH 209/436] Update flag docs
+
+Fixes: 377376962
+Test: none, docs only
+Flag: EXEMPT DOCS_ONLY
+Change-Id: I2e51b2e669ef3d3d5e21db5b191209632965c26a
+---
+ media/audio/aconfig/README.md | 14 ++++++++------
+ 1 file changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/media/audio/aconfig/README.md b/media/audio/aconfig/README.md
+index 8ce12593e5..83370fe847 100644
+--- a/media/audio/aconfig/README.md
++++ b/media/audio/aconfig/README.md
+@@ -126,11 +126,13 @@ included in the Sdk, and the @FlaggedApi annotation is stripped.
+ 
+ 
+ ### TestApis
+-TestApis do not require flagging, since their existence in the tree implies that they should
+-be accessible to callers (xTS not building on trunk enables this).
+-
++TestApis do not require flagging, unless they are API additions associated with new features.
++For testing existing features, we have full control over the set of callers.
+ 
+ ### Api Changes
+-Currently, the flag infra does not support any type of Api modification (arguments, annotation,
+-renaming, deletion, etc.) In any of these cases (including for SystemApi), exceptions will need to
+-be granted.
++There is partial (work ongoing) support for modifying API surfaces. 
++ - SystemApi -> public is supported
++ - UAU -> SystemApi is supported, but the @UAU must remain until the flag is in next
++Other modifications involving moving between surfaces, or annotation changes may not be supported:
++check the [FAQ](https://g3doc.corp.google.com/company/teams/android-api-council/guidelines/faq.md?cl=head#i-cannot-use-flaggedapi-with-data-classes-generated-by-codegen)
++for the up to date list of support.
+-- 
+2.43.0
+

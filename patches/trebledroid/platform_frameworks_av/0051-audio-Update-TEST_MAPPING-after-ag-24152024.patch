@@ -1,0 +1,36 @@
+From 657b59056cb90eaca4e546c05c68bdd12cddaeb8 Mon Sep 17 00:00:00 2001
+From: Mikhail Naganov <mnaganov@google.com>
+Date: Tue, 1 Oct 2024 16:00:33 -0700
+Subject: [PATCH 051/436] audio: Update TEST_MAPPING after ag/24152024
+
+The CtsVirtualDevicesTestCases suite was split into
+tests per sub-system, need to update our mapping.
+
+Bug: 316017930
+Test: atest CtsVirtualDevicesAudioTestCases
+Change-Id: Ic6e294ce30a8087138f6c4e4263c71e1278f54e2
+---
+ media/libaudioclient/TEST_MAPPING | 7 +------
+ 1 file changed, 1 insertion(+), 6 deletions(-)
+
+diff --git a/media/libaudioclient/TEST_MAPPING b/media/libaudioclient/TEST_MAPPING
+index 68dba34538..29b876c0d7 100644
+--- a/media/libaudioclient/TEST_MAPPING
++++ b/media/libaudioclient/TEST_MAPPING
+@@ -47,12 +47,7 @@
+       "name": "audioeffect_analysis"
+     },
+     {
+-      "name": "CtsVirtualDevicesTestCases",
+-      "options" : [
+-        {
+-          "include-filter": "android.virtualdevice.cts.VirtualAudioTest"
+-        }
+-      ]
++      "name": "CtsVirtualDevicesAudioTestCases"
+     }
+   ]
+ }
+-- 
+2.43.0
+

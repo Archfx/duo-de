@@ -1,0 +1,131 @@
+From de1883b3ae1ffd3e4c3df1985e6153d3e2d5643a Mon Sep 17 00:00:00 2001
+From: Jag Saund <jagsaund@google.com>
+Date: Mon, 14 Oct 2024 23:45:33 +0000
+Subject: [PATCH 221/436] Night Mode Indicator
+
+- adds a night mode indicator API for Camera2
+- add aconfig flag night_mode_indicator
+- auto generated files
+
+Flag: com.android.internal.camera.flags.night_mode_indicator
+Test: atest -c -d cts/tests/camera/src/android/hardware/camera2/cts/CameraExtensionSessionTest.java
+Bug: 335902696
+Change-Id: I08b9b7b95d93eee69720164132e8425f1c91d0e9
+---
+ camera/camera_platform.aconfig                |  7 +++
+ .../include/camera/NdkCameraMetadataTags.h    | 54 +++++++++++++++++++
+ .../aidl/ExtensionMetadataTags.h              |  1 +
+ .../aidl/VndkVersionMetadataTags.h            |  1 +
+ 4 files changed, 63 insertions(+)
+
+diff --git a/camera/camera_platform.aconfig b/camera/camera_platform.aconfig
+index 4e36e01232..a03ccf5e98 100644
+--- a/camera/camera_platform.aconfig
++++ b/camera/camera_platform.aconfig
+@@ -211,3 +211,10 @@ flag {
+     bug: "359409044"
+ }
+ 
++flag {
++    namespace: "camera_platform"
++    name: "night_mode_indicator"
++    is_exported: true
++    description: "Indicates when to activate Night Mode Camera Extension"
++    bug: "335902696"
++}
+diff --git a/camera/ndk/include/camera/NdkCameraMetadataTags.h b/camera/ndk/include/camera/NdkCameraMetadataTags.h
+index 15b165fdf9..6c88288aae 100644
+--- a/camera/ndk/include/camera/NdkCameraMetadataTags.h
++++ b/camera/ndk/include/camera/NdkCameraMetadataTags.h
+@@ -8181,6 +8181,33 @@ typedef enum acamera_metadata_tag {
+             ACAMERA_AUTOMOTIVE_LENS_START,
+     ACAMERA_AUTOMOTIVE_LENS_END,
+ 
++    /**
++     * <p>Indicates when to activate Night Mode Camera Extension for high-quality
++     * still captures in low-light conditions.</p>
++     *
++     * <p>Type: int32 (acamera_metadata_enum_android_extension_night_mode_indicator_t)</p>
++     *
++     * <p>This tag may appear in:
++     * <ul>
++     *   <li>ACameraMetadata from ACameraCaptureSession_captureCallback_result callbacks</li>
++     * </ul></p>
++     *
++     * <p>Provides awareness to the application when the current scene can benefit from using a
++     * Night Mode Camera Extension to take a high-quality photo.</p>
++     * <p>Support for this capture result can be queried via
++     * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraCharacteristics.html#getAvailableCaptureResultKeys">CameraCharacteristics#getAvailableCaptureResultKeys</a>.</p>
++     * <p>If the device supports this capability then it will also support
++     * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraExtensionCharacteristics.html#EXTENSION_NIGHT">NIGHT</a>
++     * and will be available in both
++     * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraCaptureSession.html">sessions</a> and
++     * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraExtensionSession.html">sessions</a>.</p>
++     * <p>The value will be {@code UNKNOWN} in the following auto exposure modes: ON_AUTO_FLASH,
++     * ON_ALWAYS_FLASH, ON_AUTO_FLASH_REDEYE, or ON_EXTERNAL_FLASH.</p>
++     */
++    ACAMERA_EXTENSION_NIGHT_MODE_INDICATOR =                    // int32 (acamera_metadata_enum_android_extension_night_mode_indicator_t)
++            ACAMERA_EXTENSION_START + 2,
++    ACAMERA_EXTENSION_END,
++
+     /**
+      * <p>The available Jpeg/R stream
+      * configurations that this camera device supports
+@@ -11848,6 +11875,33 @@ typedef enum acamera_metadata_enum_acamera_automotive_lens_facing {
+ } acamera_metadata_enum_android_automotive_lens_facing_t;
+ 
+ 
++// ACAMERA_EXTENSION_NIGHT_MODE_INDICATOR
++typedef enum acamera_metadata_enum_acamera_extension_night_mode_indicator {
++    /**
++     * <p>The camera can't accurately assess the scene's lighting to determine if a Night Mode
++     * Camera Extension capture would improve the photo. This can happen when the current
++     * camera configuration doesn't support night mode indicator detection, such as when
++     * the auto exposure mode is ON_AUTO_FLASH, ON_ALWAYS_FLASH, ON_AUTO_FLASH_REDEYE, or
++     * ON_EXTERNAL_FLASH.</p>
++     */
++    ACAMERA_EXTENSION_NIGHT_MODE_INDICATOR_UNKNOWN                   = 0,
++
++    /**
++     * <p>The camera has detected lighting conditions that are sufficiently bright. Night
++     * Mode Camera Extensions is available but may not be able to optimize the camera
++     * settings to take a higher quality photo.</p>
++     */
++    ACAMERA_EXTENSION_NIGHT_MODE_INDICATOR_OFF                       = 1,
++
++    /**
++     * <p>The camera has detected low-light conditions. It is recommended to use Night Mode
++     * Camera Extension to optimize the camera settings to take a high-quality photo in
++     * the dark.</p>
++     */
++    ACAMERA_EXTENSION_NIGHT_MODE_INDICATOR_ON                        = 2,
++
++} acamera_metadata_enum_android_extension_night_mode_indicator_t;
++
+ 
+ // ACAMERA_JPEGR_AVAILABLE_JPEG_R_STREAM_CONFIGURATIONS
+ typedef enum acamera_metadata_enum_acamera_jpegr_available_jpeg_r_stream_configurations {
+diff --git a/services/camera/libcameraservice/aidl/ExtensionMetadataTags.h b/services/camera/libcameraservice/aidl/ExtensionMetadataTags.h
+index 61b150d514..550b3ab2ad 100644
+--- a/services/camera/libcameraservice/aidl/ExtensionMetadataTags.h
++++ b/services/camera/libcameraservice/aidl/ExtensionMetadataTags.h
+@@ -30,4 +30,5 @@
+ std::vector<camera_metadata_tag> extension_metadata_keys{
+             ANDROID_EXTENSION_STRENGTH,
+             ANDROID_EXTENSION_CURRENT_TYPE,
++            ANDROID_EXTENSION_NIGHT_MODE_INDICATOR,
+ };
+diff --git a/services/camera/libcameraservice/aidl/VndkVersionMetadataTags.h b/services/camera/libcameraservice/aidl/VndkVersionMetadataTags.h
+index 2030c6802c..24473f74f8 100644
+--- a/services/camera/libcameraservice/aidl/VndkVersionMetadataTags.h
++++ b/services/camera/libcameraservice/aidl/VndkVersionMetadataTags.h
+@@ -138,5 +138,6 @@ std::map<int, std::vector<camera_metadata_tag>> dynamic_api_level_to_keys{
+       {36, {
+           ANDROID_COLOR_CORRECTION_COLOR_TEMPERATURE,
+           ANDROID_COLOR_CORRECTION_COLOR_TINT,
++          ANDROID_EXTENSION_NIGHT_MODE_INDICATOR,
+         }  },
+ };
+-- 
+2.43.0
+

@@ -1,0 +1,34 @@
+From 66674a1648bee1dad7a762efe5b5728f7e88f668 Mon Sep 17 00:00:00 2001
+From: Eino-Ville Talvala <etalvala@google.com>
+Date: Tue, 29 Oct 2024 20:24:45 -0700
+Subject: [PATCH 167/436] Camera: Add flag for MultiResolutionImageReader
+ public usage
+
+Flag: com.android.internal.camera.flags.multiresolution_imagereader_usage_public
+Bug: 338621560
+Test: New tests pass
+Change-Id: I200d4ac2061175257cf69f060d14e76d7595b4a8
+---
+ camera/camera_platform.aconfig | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/camera/camera_platform.aconfig b/camera/camera_platform.aconfig
+index cabfbc4152..c9e8ffde50 100644
+--- a/camera/camera_platform.aconfig
++++ b/camera/camera_platform.aconfig
+@@ -186,3 +186,12 @@ flag {
+     description: "Support setting and getting mirror mode for shared surfaces"
+     bug: "298899993"
+ }
++
++flag {
++    namespace: "camera_platform"
++    is_exported: true
++    name: "multiresolution_imagereader_usage_public"
++    description: "Make constructor for MultiResolutionImageReader with usage public"
++    bug: "338621560"
++}
++
+-- 
+2.43.0
+

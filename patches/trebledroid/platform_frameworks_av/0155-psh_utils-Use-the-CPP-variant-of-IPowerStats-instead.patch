@@ -1,0 +1,131 @@
+From d9567a3fe8e5ebb9310ec9b42a5a95cc7a25ecc8 Mon Sep 17 00:00:00 2001
+From: Andy Hung <hunga@google.com>
+Date: Fri, 20 Sep 2024 13:30:42 -0700
+Subject: [PATCH 155/436] psh_utils: Use the CPP variant of IPowerStats instead
+ of NDK for efficiency.
+
+Flag: EXEMPT Bugfix
+Test: atest service_singleton_tests
+Test: power stats show when enabled, after stats service killed
+Test: atest powerstats_collector_tests
+Test: atest audio_powerstatscollector_benchmark
+Bug: 350114693
+Change-Id: I37c9035c0a1e9f5647c241a2108f9c0fd56ba0c0
+---
+ media/psh_utils/Android.bp             |  2 +-
+ media/psh_utils/PowerStats.cpp         |  8 ++++----
+ media/psh_utils/PowerStatsProvider.cpp | 14 +++++++-------
+ 3 files changed, 12 insertions(+), 12 deletions(-)
+
+diff --git a/media/psh_utils/Android.bp b/media/psh_utils/Android.bp
+index 920f6a236f..803de94aa3 100644
+--- a/media/psh_utils/Android.bp
++++ b/media/psh_utils/Android.bp
+@@ -10,7 +10,7 @@ package {
+ // libraries that are included whole_static for test apps
+ ndk_libs = [
+     "android.hardware.health-V3-ndk",
+-    "android.hardware.power.stats-V1-ndk",
++    "android.hardware.power.stats-V1-cpp",
+ ]
+ 
+ // Power, System, Health utils
+diff --git a/media/psh_utils/PowerStats.cpp b/media/psh_utils/PowerStats.cpp
+index f8f87c5433..89e36e2903 100644
+--- a/media/psh_utils/PowerStats.cpp
++++ b/media/psh_utils/PowerStats.cpp
+@@ -233,14 +233,14 @@ PowerStats PowerStats::operator+=(const PowerStats& other) {
+     health_stats += other.health_stats;
+     if (power_entity_state_residency.empty()) {
+         power_entity_state_residency = other.power_entity_state_residency;
+-    } else {
++    } else if (power_entity_state_residency.size() == other.power_entity_state_residency.size()) {
+         for (size_t i = 0; i < power_entity_state_residency.size(); ++i) {
+             power_entity_state_residency[i] += other.power_entity_state_residency[i];
+         }
+     }
+     if (rail_energy.empty()) {
+         rail_energy = other.rail_energy;
+-    } else {
++    } else if (rail_energy.size() == other.rail_energy.size()) {
+         for (size_t i = 0; i < rail_energy.size(); ++i) {
+             rail_energy[i] += other.rail_energy[i];
+         }
+@@ -253,14 +253,14 @@ PowerStats PowerStats::operator-=(const PowerStats& other) {
+     health_stats -= other.health_stats;
+     if (power_entity_state_residency.empty()) {
+         power_entity_state_residency = other.power_entity_state_residency;
+-    } else {
++    } else if (power_entity_state_residency.size() == other.power_entity_state_residency.size()) {
+         for (size_t i = 0; i < power_entity_state_residency.size(); ++i) {
+             power_entity_state_residency[i] -= other.power_entity_state_residency[i];
+         }
+     }
+     if (rail_energy.empty()) {
+         rail_energy = other.rail_energy;
+-    } else {
++    } else if (rail_energy.size() == other.rail_energy.size()) {
+         for (size_t i = 0; i < rail_energy.size(); ++i) {
+             rail_energy[i] -= other.rail_energy[i];
+         }
+diff --git a/media/psh_utils/PowerStatsProvider.cpp b/media/psh_utils/PowerStatsProvider.cpp
+index f43b6e9541..033ad95886 100644
+--- a/media/psh_utils/PowerStatsProvider.cpp
++++ b/media/psh_utils/PowerStatsProvider.cpp
+@@ -15,12 +15,12 @@
+  */
+ 
+ #include "PowerStatsProvider.h"
+-#include <aidl/android/hardware/power/stats/IPowerStats.h>
++#include <android/hardware/power/stats/IPowerStats.h>
+ #include <android-base/logging.h>
+ #include <mediautils/ServiceSingleton.h>
+ #include <unordered_map>
+ 
+-using ::aidl::android::hardware::power::stats::IPowerStats;
++using ::android::hardware::power::stats::IPowerStats;
+ 
+ namespace android::media::psh_utils {
+ 
+@@ -35,9 +35,9 @@ status_t RailEnergyDataProvider::fill(PowerStats *stat) const {
+         return NO_INIT;
+     }
+ 
+-    std::unordered_map<int32_t, ::aidl::android::hardware::power::stats::Channel> channelMap;
++    std::unordered_map<int32_t, ::android::hardware::power::stats::Channel> channelMap;
+     {
+-        std::vector<::aidl::android::hardware::power::stats::Channel> channels;
++        std::vector<::android::hardware::power::stats::Channel> channels;
+         if (!powerStatsService->getEnergyMeterInfo(&channels).isOk()) {
+             LOG(ERROR) << "unable to get energy meter info";
+             return INVALID_OPERATION;
+@@ -47,7 +47,7 @@ status_t RailEnergyDataProvider::fill(PowerStats *stat) const {
+         }
+     }
+ 
+-    std::vector<::aidl::android::hardware::power::stats::EnergyMeasurement> measurements;
++    std::vector<::android::hardware::power::stats::EnergyMeasurement> measurements;
+     if (!powerStatsService->readEnergyMeter({}, &measurements).isOk()) {
+         LOG(ERROR) << "unable to get energy measurements";
+         return INVALID_OPERATION;
+@@ -86,7 +86,7 @@ status_t PowerEntityResidencyDataProvider::fill(PowerStats* stat) const {
+     std::vector<int32_t> powerEntityIds; // ids to use
+ 
+     {
+-        std::vector<::aidl::android::hardware::power::stats::PowerEntity> entities;
++        std::vector<::android::hardware::power::stats::PowerEntity> entities;
+         if (!powerStatsService->getPowerEntityInfo(&entities).isOk()) {
+             LOG(ERROR) << __func__ << ": unable to get entity info";
+             return INVALID_OPERATION;
+@@ -108,7 +108,7 @@ status_t PowerEntityResidencyDataProvider::fill(PowerStats* stat) const {
+         }
+     }
+ 
+-    std::vector<::aidl::android::hardware::power::stats::StateResidencyResult> results;
++    std::vector<::android::hardware::power::stats::StateResidencyResult> results;
+     if (!powerStatsService->getStateResidency(powerEntityIds, &results).isOk()) {
+         LOG(ERROR) << __func__ << ": Unable to get state residency";
+         return INVALID_OPERATION;
+-- 
+2.43.0
+

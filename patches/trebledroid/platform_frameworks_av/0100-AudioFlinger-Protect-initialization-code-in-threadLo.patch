@@ -1,0 +1,46 @@
+From efea6c5b8be9cfcaaf97d313cca542e0b7fa84a4 Mon Sep 17 00:00:00 2001
+From: Andy Hung <hunga@google.com>
+Date: Tue, 17 Sep 2024 14:17:15 -0700
+Subject: [PATCH 100/436] AudioFlinger: Protect initialization code in
+ threadLoop with mutex
+
+Flag: EXEMPT bugfix
+Test: atest CtsMediaAudioTestCases
+Bug: 364243966
+Merged-In: Ia87be0b9240f3da3c06f38cae9b6039cf0a7246e
+Change-Id: Ia87be0b9240f3da3c06f38cae9b6039cf0a7246e
+---
+ services/audioflinger/Threads.cpp | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/services/audioflinger/Threads.cpp b/services/audioflinger/Threads.cpp
+index 90d3ef99cb..147a5d6874 100644
+--- a/services/audioflinger/Threads.cpp
++++ b/services/audioflinger/Threads.cpp
+@@ -4017,7 +4017,13 @@ NO_THREAD_SAFETY_ANALYSIS  // manual locking of AudioFlinger
+     // FIXME could this be made local to while loop?
+     writeFrames = 0;
+ 
+-    cacheParameters_l();
++    {
++        audio_utils::lock_guard l(mutex());
++
++        cacheParameters_l();
++        checkSilentMode_l();
++    }
++
+     mSleepTimeUs = mIdleSleepTimeUs;
+ 
+     if (mType == MIXER || mType == SPATIALIZER) {
+@@ -4042,8 +4048,6 @@ NO_THREAD_SAFETY_ANALYSIS  // manual locking of AudioFlinger
+     // suspended mode (for now) to help schedule the wait time until next iteration.
+     nsecs_t timeLoopNextNs = 0;
+ 
+-    checkSilentMode_l();
+-
+     audio_patch_handle_t lastDownstreamPatchHandle = AUDIO_PATCH_HANDLE_NONE;
+ 
+     sendCheckOutputStageEffectsEvent();
+-- 
+2.43.0
+

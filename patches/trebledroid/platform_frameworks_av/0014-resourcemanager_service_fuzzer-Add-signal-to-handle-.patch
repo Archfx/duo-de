@@ -1,0 +1,33 @@
+From 1b6e71c7a4a3d75664b2c262e6e63bfa6189866e Mon Sep 17 00:00:00 2001
+From: Akhilesh Sanikop <akhilesh.sanikop@ittiam.com>
+Date: Thu, 19 Sep 2024 14:54:20 +0530
+Subject: [PATCH 014/436] resourcemanager_service_fuzzer: Add signal() to
+ handle SIGPIPE
+
+Since media.resource_manager service handles SIGPIPE,
+adding signal handler to avoid abort() due to
+broken pipe.
+
+Test: ./resourcemanager_service_fuzzer
+Bug: 300081809
+
+Change-Id: I7392ff77351e672801908699c7eb4effc742f4cb
+---
+ .../fuzzer/resourcemanager_service_fuzzer.cpp                    | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/services/mediaresourcemanager/fuzzer/resourcemanager_service_fuzzer.cpp b/services/mediaresourcemanager/fuzzer/resourcemanager_service_fuzzer.cpp
+index 6253df7228..1cad4827d2 100644
+--- a/services/mediaresourcemanager/fuzzer/resourcemanager_service_fuzzer.cpp
++++ b/services/mediaresourcemanager/fuzzer/resourcemanager_service_fuzzer.cpp
+@@ -26,6 +26,7 @@ using android::ResourceManagerService;
+ using ndk::SharedRefBase;
+ 
+ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
++   signal(SIGPIPE, SIG_IGN);
+    std::shared_ptr<ResourceManagerService> service = ResourceManagerService::Create();
+    fuzzService(service->asBinder().get(), FuzzedDataProvider(data, size));
+    return 0;
+-- 
+2.43.0
+

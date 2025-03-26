@@ -1,0 +1,122 @@
+From e60fb412ea011cc6e930fb86a52f625471067f52 Mon Sep 17 00:00:00 2001
+From: Cong Lin <conglin@google.com>
+Date: Mon, 9 Sep 2024 19:36:24 +0000
+Subject: [PATCH 007/436] DRM RKP interface to collect BCC signature (UdsCerts)
+ and add to CSR
+
+Flag: NONE Incremental updates for adding an optional field
+Test: Manual test on Pixel 9
+Bug: 355160637
+Change-Id: I59e2485878b5e9f148ace501e315c747014fc0d4
+---
+ .../include/DrmRemotelyProvisionedComponent.h |  4 +++-
+ .../src/DrmRemotelyProvisionedComponent.cpp   | 24 ++++++++++++-------
+ drm/libmediadrmrkp/src/DrmRkpAdapter.cpp      | 12 ++++++++--
+ 3 files changed, 28 insertions(+), 12 deletions(-)
+
+diff --git a/drm/libmediadrmrkp/include/DrmRemotelyProvisionedComponent.h b/drm/libmediadrmrkp/include/DrmRemotelyProvisionedComponent.h
+index f046785116..97a8cc427c 100644
+--- a/drm/libmediadrmrkp/include/DrmRemotelyProvisionedComponent.h
++++ b/drm/libmediadrmrkp/include/DrmRemotelyProvisionedComponent.h
+@@ -35,7 +35,8 @@ using ::ndk::ScopedAStatus;
+ class DrmRemotelyProvisionedComponent : public BnRemotelyProvisionedComponent {
+   public:
+     DrmRemotelyProvisionedComponent(std::shared_ptr<IDrmPlugin> drm, std::string drmVendor,
+-                                    std::string drmDesc, std::vector<uint8_t> bcc);
++                                    std::string drmDesc, std::vector<uint8_t> bcc,
++                                    std::vector<uint8_t> bcc_signature);
+     ScopedAStatus getHardwareInfo(RpcHardwareInfo* info) override;
+ 
+     ScopedAStatus generateEcdsaP256KeyPair(bool testMode, MacedPublicKey* macedPublicKey,
+@@ -60,6 +61,7 @@ class DrmRemotelyProvisionedComponent : public BnRemotelyProvisionedComponent {
+     std::string mDrmVendor;
+     std::string mDrmDesc;
+     std::vector<uint8_t> mBcc;
++    std::vector<uint8_t> mBccSignature;
+ };
+ }  // namespace android::mediadrm
+ 
+diff --git a/drm/libmediadrmrkp/src/DrmRemotelyProvisionedComponent.cpp b/drm/libmediadrmrkp/src/DrmRemotelyProvisionedComponent.cpp
+index 440be79123..65054b0d48 100644
+--- a/drm/libmediadrmrkp/src/DrmRemotelyProvisionedComponent.cpp
++++ b/drm/libmediadrmrkp/src/DrmRemotelyProvisionedComponent.cpp
+@@ -28,11 +28,13 @@ namespace android::mediadrm {
+ DrmRemotelyProvisionedComponent::DrmRemotelyProvisionedComponent(std::shared_ptr<IDrmPlugin> drm,
+                                                                  std::string drmVendor,
+                                                                  std::string drmDesc,
+-                                                                 std::vector<uint8_t> bcc)
++                                                                 std::vector<uint8_t> bcc,
++                                                                 std::vector<uint8_t> bcc_signature)
+     : mDrm(std::move(drm)),
+       mDrmVendor(std::move(drmVendor)),
+       mDrmDesc(std::move(drmDesc)),
+-      mBcc(std::move(bcc)) {}
++      mBcc(std::move(bcc)),
++      mBccSignature(std::move(bcc_signature)) {}
+ 
+ ScopedAStatus DrmRemotelyProvisionedComponent::getHardwareInfo(RpcHardwareInfo* info) {
+     info->versionNumber = 3;
+@@ -107,7 +109,7 @@ ScopedAStatus DrmRemotelyProvisionedComponent::getDeviceInfo(std::vector<uint8_t
+     for (auto i : keyToProp) {
+         auto key = i.first;
+         auto prop = i.second;
+-        const auto& val= deviceInfoMap.get(key);
++        const auto& val = deviceInfoMap.get(key);
+         if (val == nullptr || val->asTstr()->value().empty()) {
+             std::string propValue = android::base::GetProperty(prop, "");
+             if (propValue.empty()) {
+@@ -161,12 +163,16 @@ ScopedAStatus DrmRemotelyProvisionedComponent::generateCertificateRequestV2(
+     }
+ 
+     // assemble AuthenticatedRequest (definition in IRemotelyProvisionedComponent.aidl)
+-    *out = cppbor::Array()
+-                   .add(1 /* version */)
+-                   .add(cppbor::Map() /* UdsCerts */)
+-                   .add(cppbor::EncodedItem(mBcc))
+-                   .add(cppbor::EncodedItem(std::move(deviceSignedCsrPayload)))
+-                   .encode();
++    cppbor::Array request_array = cppbor::Array().add(1 /* version */);
++    if (!mBccSignature.empty()) {
++        request_array.add(cppbor::EncodedItem(mBccSignature) /* UdsCerts */);
++    } else {
++        request_array.add(cppbor::Map() /* empty UdsCerts */);
++    }
++    request_array.add(cppbor::EncodedItem(mBcc))
++            .add(cppbor::EncodedItem(std::move(deviceSignedCsrPayload)));
++    *out = request_array.encode();
++
+     return ScopedAStatus::ok();
+ }
+ }  // namespace android::mediadrm
+\ No newline at end of file
+diff --git a/drm/libmediadrmrkp/src/DrmRkpAdapter.cpp b/drm/libmediadrmrkp/src/DrmRkpAdapter.cpp
+index 515d157278..750b51e2fa 100644
+--- a/drm/libmediadrmrkp/src/DrmRkpAdapter.cpp
++++ b/drm/libmediadrmrkp/src/DrmRkpAdapter.cpp
+@@ -87,13 +87,21 @@ getDrmRemotelyProvisionedComponents() {
+                           status.getDescription().c_str());
+                     return;
+                 }
+-
++                std::vector<uint8_t> bcc_signature;
++                status =
++                        mDrm->getPropertyByteArray("bootCertificateChainSignature", &bcc_signature);
++                if (!status.isOk()) {
++                    ALOGW("mDrm->getPropertyByteArray(\"bootCertificateChainSignature\") failed."
++                          "Detail: [%s].",
++                          status.getDescription().c_str());
++                    // bcc signature is optional, no need to return when it is unavailable.
++                }
+                 std::string compName(instance);
+                 auto comps = static_cast<
+                         std::map<std::string, std::shared_ptr<IRemotelyProvisionedComponent>>*>(
+                         context);
+                 (*comps)[compName] = ::ndk::SharedRefBase::make<DrmRemotelyProvisionedComponent>(
+-                        mDrm, drmVendor, drmDesc, bcc);
++                        mDrm, drmVendor, drmDesc, bcc, bcc_signature);
+             });
+     return comps;
+ }
+-- 
+2.43.0
+

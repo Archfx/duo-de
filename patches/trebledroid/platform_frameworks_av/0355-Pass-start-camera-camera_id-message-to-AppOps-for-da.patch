@@ -1,0 +1,87 @@
+From 7688a417889ee20b772bf32e29fcafb9a880936c Mon Sep 17 00:00:00 2001
+From: Austin Borger <borgera@google.com>
+Date: Tue, 26 Nov 2024 18:05:06 -0800
+Subject: [PATCH 355/436] Pass "start camera <camera_id>" message to AppOps for
+ data delivery.
+
+AppOpsLoggingTest#openCameraWithDefaultAttribution looks at the message
+sent to AppOps when starting data delivery, and expects the camera id
+to be present. The old path (noteOp) passes the correct message. Update
+the PermissionChecker calls to use the same message.
+
+Bug: 380583796
+Test: Ran test on physical device.
+Flag: com.android.internal.camera.flags.data_delivery_permission_checks
+Change-Id: Ice28d0e0d7bbbdac0c6a70f707f551c3b9458ad6
+---
+ .../utils/AttributionAndPermissionUtils.cpp   | 32 ++++++++++++-------
+ 1 file changed, 20 insertions(+), 12 deletions(-)
+
+diff --git a/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.cpp b/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.cpp
+index 80af1404d0..85a5afc17e 100644
+--- a/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.cpp
++++ b/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.cpp
+@@ -58,6 +58,10 @@ static std::string getAttributionString(const AttributionSourceState& attributio
+     return ret.str();
+ }
+ 
++static std::string getAppOpsMessage(const std::string& cameraId) {
++    return cameraId.empty() ? std::string() : std::string("start camera ") + cameraId;
++}
++
+ } // namespace
+ 
+ namespace android {
+@@ -298,33 +302,37 @@ bool AttributionAndPermissionUtils::isCallerCameraServerNotDelegating() {
+ bool AttributionAndPermissionUtils::hasPermissionsForCamera(
+         const std::string& cameraId, const AttributionSourceState& attributionSource,
+         bool forDataDelivery, bool checkAutomotive) {
+-    return checkPermission(cameraId, sCameraPermission, attributionSource, std::string(),
+-                           AppOpsManager::OP_NONE, forDataDelivery, /* startDataDelivery */ false,
+-                           checkAutomotive) != PermissionChecker::PERMISSION_HARD_DENIED;
++    return checkPermission(cameraId, sCameraPermission, attributionSource,
++                           getAppOpsMessage(cameraId), AppOpsManager::OP_NONE, forDataDelivery,
++                           /* startDataDelivery */ false, checkAutomotive)
++            != PermissionChecker::PERMISSION_HARD_DENIED;
+ }
+ 
+ PermissionChecker::PermissionResult
+ AttributionAndPermissionUtils::checkPermissionsForCameraForPreflight(
+         const std::string& cameraId, const AttributionSourceState& attributionSource) {
+-    return checkPermission(cameraId, sCameraPermission, attributionSource, std::string(),
+-                           AppOpsManager::OP_NONE, /* forDataDelivery */ false,
+-                           /* startDataDelivery */ false, /* checkAutomotive */ false);
++    return checkPermission(cameraId, sCameraPermission, attributionSource,
++                           getAppOpsMessage(cameraId), AppOpsManager::OP_NONE,
++                           /* forDataDelivery */ false, /* startDataDelivery */ false,
++                           /* checkAutomotive */ false);
+ }
+ 
+ PermissionChecker::PermissionResult
+ AttributionAndPermissionUtils::checkPermissionsForCameraForDataDelivery(
+         const std::string& cameraId, const AttributionSourceState& attributionSource) {
+-    return checkPermission(cameraId, sCameraPermission, attributionSource, std::string(),
+-                           AppOpsManager::OP_NONE, /* forDataDelivery */ true,
+-                           /* startDataDelivery */ false, /* checkAutomotive */ false);
++    return checkPermission(cameraId, sCameraPermission, attributionSource,
++                           getAppOpsMessage(cameraId), AppOpsManager::OP_NONE,
++                           /* forDataDelivery */ true, /* startDataDelivery */ false,
++                           /* checkAutomotive */ false);
+ }
+ 
+ PermissionChecker::PermissionResult
+ AttributionAndPermissionUtils::checkPermissionsForCameraForStartDataDelivery(
+         const std::string& cameraId, const AttributionSourceState& attributionSource) {
+-    return checkPermission(cameraId, sCameraPermission, attributionSource, std::string(),
+-                           AppOpsManager::OP_NONE, /* forDataDelivery */ true,
+-                           /* startDataDelivery */ true, /* checkAutomotive */ false);
++    return checkPermission(cameraId, sCameraPermission, attributionSource,
++                           getAppOpsMessage(cameraId), AppOpsManager::OP_NONE,
++                           /* forDataDelivery */ true, /* startDataDelivery */ true,
++                           /* checkAutomotive */ false);
+ }
+ 
+ bool AttributionAndPermissionUtils::hasPermissionsForSystemCamera(
+-- 
+2.43.0
+

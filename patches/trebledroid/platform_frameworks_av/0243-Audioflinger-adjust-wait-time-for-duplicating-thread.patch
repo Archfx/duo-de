@@ -1,0 +1,32 @@
+From 48e8f0c1236ef97680f5b1c41aa12c2953c76d93 Mon Sep 17 00:00:00 2001
+From: Jiabin Huang <jiabin@google.com>
+Date: Tue, 29 Oct 2024 00:03:42 +0000
+Subject: [PATCH 243/436] Audioflinger: adjust wait time for duplicating thread
+
+When the downstream thread has a larger frame count than duplicating thread, lower the wait time to avoid underrun on the downstream thread.
+
+Bug: 361029363
+Change-Id: I1a9b64e363748ab9d1c0b16ebaef2f0022e1d3ec
+Test: TH
+Flag: EXEMPT bugfix
+---
+ services/audioflinger/Threads.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/services/audioflinger/Threads.cpp b/services/audioflinger/Threads.cpp
+index b7c0bb3811..4aab996afd 100644
+--- a/services/audioflinger/Threads.cpp
++++ b/services/audioflinger/Threads.cpp
+@@ -7881,7 +7881,8 @@ void DuplicatingThread::removeOutputTrack(IAfPlaybackThread* thread)
+ // caller must hold mutex()
+ void DuplicatingThread::updateWaitTime_l()
+ {
+-    mWaitTimeMs = UINT_MAX;
++    // Initialize mWaitTimeMs according to the mixer buffer size.
++    mWaitTimeMs = mNormalFrameCount * 2 * 1000 / mSampleRate;
+     for (size_t i = 0; i < mOutputTracks.size(); i++) {
+         const auto strong = mOutputTracks[i]->thread().promote();
+         if (strong != 0) {
+-- 
+2.43.0
+

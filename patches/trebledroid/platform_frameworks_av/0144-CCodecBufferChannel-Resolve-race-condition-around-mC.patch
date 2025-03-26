@@ -1,0 +1,237 @@
+From 368452b64d653eab2cce0c39d88e59f9a1a10fe0 Mon Sep 17 00:00:00 2001
+From: Sungtak Lee <taklee@google.com>
+Date: Thu, 17 Oct 2024 01:16:29 +0000
+Subject: [PATCH 144/436] CCodecBufferChannel: Resolve race condition around
+ mComponent
+
+mComponent may be accessed from SurfaceListener after
+CCodecBufferChannel::release() being called.
+Handle the race condition of mComponent regarding std::shared_ptr, by
+using atomic access.
+
+Flag: EXEMPT bugfix
+Bug: 356734093
+Test: presubmit
+Change-Id: Id2cb7e5455e281e58814e4b6ab3582678c161539
+---
+ media/codec2/sfplugin/CCodecBufferChannel.cpp | 50 ++++++++++---------
+ 1 file changed, 27 insertions(+), 23 deletions(-)
+
+diff --git a/media/codec2/sfplugin/CCodecBufferChannel.cpp b/media/codec2/sfplugin/CCodecBufferChannel.cpp
+index 5c46d9926c..e254af1130 100644
+--- a/media/codec2/sfplugin/CCodecBufferChannel.cpp
++++ b/media/codec2/sfplugin/CCodecBufferChannel.cpp
+@@ -231,7 +231,7 @@ CCodecBufferChannel::~CCodecBufferChannel() {
+ 
+ void CCodecBufferChannel::setComponent(
+         const std::shared_ptr<Codec2Client::Component> &component) {
+-    mComponent = component;
++    std::atomic_store(&mComponent, component);
+     mComponentName = component->getName() + StringPrintf("#%d", int(uintptr_t(component.get()) % 997));
+     mName = mComponentName.c_str();
+ }
+@@ -247,7 +247,7 @@ status_t CCodecBufferChannel::setInputSurface(
+     inputSurface->numProcessingBuffersBalance = 0;
+     inputSurface->surface = surface;
+     mHasInputSurface = true;
+-    return inputSurface->surface->connect(mComponent);
++    return inputSurface->surface->connect(std::atomic_load(&mComponent));
+ }
+ 
+ status_t CCodecBufferChannel::signalEndOfInputStream() {
+@@ -443,7 +443,7 @@ status_t CCodecBufferChannel::queueInputBufferInternal(
+                         now);
+             }
+         }
+-        err = mComponent->queue(&items);
++        err = std::atomic_load(&mComponent)->queue(&items);
+     }
+     if (err != C2_OK) {
+         Mutexed<PipelineWatcher>::Locked watcher(mPipelineWatcher);
+@@ -1353,7 +1353,7 @@ status_t CCodecBufferChannel::renderOutputBuffer(
+     qbi.setSurfaceDamage(Region::INVALID_REGION); // we don't have dirty regions
+     qbi.getFrameTimestamps = true; // we need to know when a frame is rendered
+     IGraphicBufferProducer::QueueBufferOutput qbo;
+-    status_t result = mComponent->queueToOutputSurface(block, qbi, &qbo);
++    status_t result = std::atomic_load(&mComponent)->queueToOutputSurface(block, qbi, &qbo);
+     if (result != OK) {
+         ALOGI("[%s] queueBuffer failed: %d", mName, result);
+         if (result == NO_INIT) {
+@@ -1492,7 +1492,7 @@ int64_t CCodecBufferChannel::getRenderTimeNs(const TrackedFrame& frame) {
+ 
+ void CCodecBufferChannel::pollForRenderedBuffers() {
+     FrameEventHistoryDelta delta;
+-    mComponent->pollForRenderedFrames(&delta);
++    std::atomic_load(&mComponent)->pollForRenderedFrames(&delta);
+     processRenderedFrames(delta);
+ }
+ 
+@@ -1501,7 +1501,7 @@ void CCodecBufferChannel::onBufferReleasedFromOutputSurface(uint32_t generation)
+     // knowing the internal state of CCodec/CCodecBufferChannel,
+     // prevent mComponent from being destroyed by holding the shared reference
+     // during this interface being executed.
+-    std::shared_ptr<Codec2Client::Component> comp = mComponent;
++    std::shared_ptr<Codec2Client::Component> comp = std::atomic_load(&mComponent);
+     if (comp) {
+         comp->onBufferReleasedFromOutputSurface(generation);
+     }
+@@ -1512,7 +1512,7 @@ void CCodecBufferChannel::onBufferAttachedToOutputSurface(uint32_t generation) {
+     // knowing the internal state of CCodec/CCodecBufferChannel,
+     // prevent mComponent from being destroyed by holding the shared reference
+     // during this interface being executed.
+-    std::shared_ptr<Codec2Client::Component> comp = mComponent;
++    std::shared_ptr<Codec2Client::Component> comp = std::atomic_load(&mComponent);
+     if (comp) {
+         comp->onBufferAttachedToOutputSurface(generation);
+     }
+@@ -1585,7 +1585,7 @@ status_t CCodecBufferChannel::start(
+     C2ActualPipelineDelayTuning pipelineDelay(0);
+     C2SecureModeTuning secureMode(C2Config::SM_UNPROTECTED);
+ 
+-    c2_status_t err = mComponent->query(
++    c2_status_t err = std::atomic_load(&mComponent)->query(
+             {
+                 &iStreamFormat,
+                 &oStreamFormat,
+@@ -1616,7 +1616,7 @@ status_t CCodecBufferChannel::start(
+     size_t numOutputSlots = outputDelayValue + kSmoothnessFactor;
+ 
+     // TODO: get this from input format
+-    bool secure = mComponent->getName().find(".secure") != std::string::npos;
++    bool secure = std::atomic_load(&mComponent)->getName().find(".secure") != std::string::npos;
+ 
+     // secure mode is a static parameter (shall not change in the executing state)
+     mSendEncryptedInfoBuffer = secureMode.value == C2Config::SM_READ_PROTECTED_WITH_ENCRYPTED;
+@@ -1662,7 +1662,7 @@ status_t CCodecBufferChannel::start(
+                 channelCount.invalidate();
+                 pcmEncoding.invalidate();
+             }
+-            err = mComponent->query(stackParams,
++            err = std::atomic_load(&mComponent)->query(stackParams,
+                                     { C2PortAllocatorsTuning::input::PARAM_TYPE },
+                                     C2_DONT_BLOCK,
+                                     &params);
+@@ -1822,7 +1822,7 @@ status_t CCodecBufferChannel::start(
+             // query C2PortAllocatorsTuning::output from component, or use default allocator if
+             // unsuccessful.
+             std::vector<std::unique_ptr<C2Param>> params;
+-            err = mComponent->query({ },
++            err = std::atomic_load(&mComponent)->query({ },
+                                     { C2PortAllocatorsTuning::output::PARAM_TYPE },
+                                     C2_DONT_BLOCK,
+                                     &params);
+@@ -1850,7 +1850,7 @@ status_t CCodecBufferChannel::start(
+             // if unsuccessful.
+             if (outputSurface) {
+                 params.clear();
+-                err = mComponent->query({ },
++                err = std::atomic_load(&mComponent)->query({ },
+                                         { C2PortSurfaceAllocatorTuning::output::PARAM_TYPE },
+                                         C2_DONT_BLOCK,
+                                         &params);
+@@ -1881,7 +1881,7 @@ status_t CCodecBufferChannel::start(
+             }
+ 
+             if ((poolMask >> pools->outputAllocatorId) & 1) {
+-                err = mComponent->createBlockPool(
++                err = std::atomic_load(&mComponent)->createBlockPool(
+                         pools->outputAllocatorId, &pools->outputPoolId, &pools->outputPoolIntf);
+                 ALOGI("[%s] Created output block pool with allocatorID %u => poolID %llu - %s",
+                         mName, pools->outputAllocatorId,
+@@ -1902,7 +1902,8 @@ status_t CCodecBufferChannel::start(
+                     C2PortBlockPoolsTuning::output::AllocUnique({ pools->outputPoolId });
+ 
+             std::vector<std::unique_ptr<C2SettingResult>> failures;
+-            err = mComponent->config({ poolIdsTuning.get() }, C2_MAY_BLOCK, &failures);
++            err = std::atomic_load(&mComponent)->config(
++                    { poolIdsTuning.get() }, C2_MAY_BLOCK, &failures);
+             ALOGD("[%s] Configured output block pool ids %llu => %s",
+                     mName, (unsigned long long)poolIdsTuning->m.values[0], asString(err));
+             outputPoolId_ = pools->outputPoolId;
+@@ -1910,7 +1911,7 @@ status_t CCodecBufferChannel::start(
+ 
+         if (prevOutputPoolId != C2BlockPool::BASIC_LINEAR
+                 && prevOutputPoolId != C2BlockPool::BASIC_GRAPHIC) {
+-            c2_status_t err = mComponent->destroyBlockPool(prevOutputPoolId);
++            c2_status_t err = std::atomic_load(&mComponent)->destroyBlockPool(prevOutputPoolId);
+             if (err != C2_OK) {
+                 ALOGW("Failed to clean up previous block pool %llu - %s (%d)\n",
+                         (unsigned long long) prevOutputPoolId, asString(err), err);
+@@ -1942,7 +1943,7 @@ status_t CCodecBufferChannel::start(
+ 
+         // Try to set output surface to created block pool if given.
+         if (outputSurface) {
+-            mComponent->setOutputSurface(
++            std::atomic_load(&mComponent)->setOutputSurface(
+                     outputPoolId_,
+                     outputSurface,
+                     outputGeneration,
+@@ -1951,7 +1952,7 @@ status_t CCodecBufferChannel::start(
+             // configure CPU read consumer usage
+             C2StreamUsageTuning::output outputUsage{0u, C2MemoryUsage::CPU_READ};
+             std::vector<std::unique_ptr<C2SettingResult>> failures;
+-            err = mComponent->config({ &outputUsage }, C2_MAY_BLOCK, &failures);
++            err = std::atomic_load(&mComponent)->config({ &outputUsage }, C2_MAY_BLOCK, &failures);
+             // do not print error message for now as most components may not yet
+             // support this setting
+             ALOGD_IF(err != C2_BAD_INDEX, "[%s] Configured output usage [%#llx]",
+@@ -2073,7 +2074,8 @@ status_t CCodecBufferChannel::requestInitialInputBuffers(
+     }
+     C2StreamBufferTypeSetting::output oStreamFormat(0u);
+     C2PrependHeaderModeSetting prepend(PREPEND_HEADER_TO_NONE);
+-    c2_status_t err = mComponent->query({ &oStreamFormat, &prepend }, {}, C2_DONT_BLOCK, nullptr);
++    c2_status_t err = std::atomic_load(&mComponent)->query(
++            { &oStreamFormat, &prepend }, {}, C2_DONT_BLOCK, nullptr);
+     if (err != C2_OK && err != C2_BAD_INDEX) {
+         return UNKNOWN_ERROR;
+     }
+@@ -2091,7 +2093,7 @@ status_t CCodecBufferChannel::requestInitialInputBuffers(
+                         now);
+             }
+         }
+-        err = mComponent->queue(&flushedConfigs);
++        err = std::atomic_load(&mComponent)->queue(&flushedConfigs);
+         if (err != C2_OK) {
+             ALOGW("[%s] Error while queueing a flushed config", mName);
+             return UNKNOWN_ERROR;
+@@ -2142,7 +2144,8 @@ void CCodecBufferChannel::stopUseOutputSurface(bool pushBlankBuffer) {
+             Mutexed<BlockPools>::Locked pools(mBlockPools);
+             outputPoolId = pools->outputPoolId;
+         }
+-        if (mComponent) mComponent->stopUsingOutputSurface(outputPoolId);
++        std::shared_ptr<Codec2Client::Component> comp = std::atomic_load(&mComponent);
++        if (comp) comp->stopUsingOutputSurface(outputPoolId);
+ 
+         if (pushBlankBuffer) {
+             sp<ANativeWindow> anw = static_cast<ANativeWindow *>(surface.get());
+@@ -2176,7 +2179,8 @@ void CCodecBufferChannel::reset() {
+ 
+ void CCodecBufferChannel::release() {
+     mInfoBuffers.clear();
+-    mComponent.reset();
++    std::shared_ptr<Codec2Client::Component> nullComp;
++    std::atomic_store(&mComponent, nullComp);
+     mInputAllocator.reset();
+     mOutputSurface.lock()->surface.clear();
+     {
+@@ -2498,7 +2502,7 @@ bool CCodecBufferChannel::handleWork(
+             }
+         }
+         if (maxDequeueCount > 0) {
+-            mComponent->setOutputSurfaceMaxDequeueCount(maxDequeueCount);
++            std::atomic_load(&mComponent)->setOutputSurfaceMaxDequeueCount(maxDequeueCount);
+         }
+     }
+ 
+@@ -2745,7 +2749,7 @@ status_t CCodecBufferChannel::setSurface(const sp<Surface> &newSurface,
+     }
+ 
+     if (outputPoolIntf) {
+-        if (mComponent->setOutputSurface(
++        if (std::atomic_load(&mComponent)->setOutputSurface(
+                 outputPoolId,
+                 producer,
+                 generation,
+-- 
+2.43.0
+

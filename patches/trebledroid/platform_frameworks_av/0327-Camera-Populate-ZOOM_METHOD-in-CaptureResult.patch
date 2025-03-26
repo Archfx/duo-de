@@ -1,0 +1,142 @@
+From 517d0eef60bd39db4ce4fea127a9676314065529 Mon Sep 17 00:00:00 2001
+From: Shuzhen Wang <shuzhenwang@google.com>
+Date: Thu, 21 Nov 2024 11:03:31 -0800
+Subject: [PATCH 327/436] Camera: Populate ZOOM_METHOD in CaptureResult
+
+The tag is now stripped before sending to the HAL. So on the return
+path, it needs to be put back in CaptureResult.
+
+Flag: EXEMPT bug fix
+Test: atest CaptureResultTest
+Bug: 379333302
+Change-Id: Ic4086157db466ebac14f66f65e3a17bf76b4629f
+---
+ .../libcameraservice/device3/Camera3OutputUtils.cpp  |  6 +++---
+ .../libcameraservice/device3/ZoomRatioMapper.cpp     | 11 ++++++++++-
+ .../libcameraservice/device3/ZoomRatioMapper.h       |  4 +++-
+ .../camera/libcameraservice/tests/ZoomRatioTest.cpp  | 12 ++++++++----
+ 4 files changed, 24 insertions(+), 9 deletions(-)
+
+diff --git a/services/camera/libcameraservice/device3/Camera3OutputUtils.cpp b/services/camera/libcameraservice/device3/Camera3OutputUtils.cpp
+index 78f16989a6..ed11a96111 100644
+--- a/services/camera/libcameraservice/device3/Camera3OutputUtils.cpp
++++ b/services/camera/libcameraservice/device3/Camera3OutputUtils.cpp
+@@ -385,9 +385,8 @@ void sendCaptureResult(
+     // Fix up result metadata to account for zoom ratio availabilities between
+     // HAL and app.
+     bool zoomRatioIs1 = cameraIdsWithZoom.find(states.cameraId) == cameraIdsWithZoom.end();
+-    bool appUsesZoomRatio = !zoomRatioIs1 || useZoomRatio;
+     res = states.zoomRatioMappers[states.cameraId].updateCaptureResult(
+-            &captureResult.mMetadata, appUsesZoomRatio);
++            &captureResult.mMetadata, useZoomRatio, zoomRatioIs1);
+     if (res != OK) {
+         SET_ERR("Failed to update capture result zoom ratio metadata for frame %d: %s (%d)",
+                 frameNumber, strerror(-res), res);
+@@ -456,7 +455,8 @@ void sendCaptureResult(
+         // Note: Physical camera continues to use SCALER_CROP_REGION to reflect
+         // zoom levels.
+         res = states.zoomRatioMappers[cameraId].updateCaptureResult(
+-                &physicalMetadata.mPhysicalCameraMetadata, /*appUsesZoomRatio*/ false);
++                &physicalMetadata.mPhysicalCameraMetadata, /*zoomMethodIsRatio*/false,
++                /*zoomRatioIs1*/false);
+         if (res != OK) {
+             SET_ERR("Failed to update camera %s's physical zoom ratio metadata for "
+                     "frame %d: %s(%d)", cameraId.c_str(), frameNumber, strerror(-res), res);
+diff --git a/services/camera/libcameraservice/device3/ZoomRatioMapper.cpp b/services/camera/libcameraservice/device3/ZoomRatioMapper.cpp
+index 5260ad348e..ef2109adf9 100644
+--- a/services/camera/libcameraservice/device3/ZoomRatioMapper.cpp
++++ b/services/camera/libcameraservice/device3/ZoomRatioMapper.cpp
+@@ -290,7 +290,8 @@ status_t ZoomRatioMapper::updateCaptureRequest(CameraMetadata* request) {
+     return res;
+ }
+ 
+-status_t ZoomRatioMapper::updateCaptureResult(CameraMetadata* result, bool useZoomRatio) {
++status_t ZoomRatioMapper::updateCaptureResult(
++        CameraMetadata* result, bool zoomMethodIsRatio, bool zoomRatioIs1) {
+     if (!mIsValid) return INVALID_OPERATION;
+ 
+     status_t res = OK;
+@@ -300,6 +301,8 @@ status_t ZoomRatioMapper::updateCaptureResult(CameraMetadata* result, bool useZo
+     if (res != OK) {
+         return res;
+     }
++
++    bool useZoomRatio = !zoomRatioIs1 || zoomMethodIsRatio;
+     if (mHalSupportsZoomRatio && !useZoomRatio) {
+         res = combineZoomAndCropLocked(result, true/*isResult*/, arrayWidth, arrayHeight);
+     } else if (!mHalSupportsZoomRatio && useZoomRatio) {
+@@ -312,6 +315,12 @@ status_t ZoomRatioMapper::updateCaptureResult(CameraMetadata* result, bool useZo
+         }
+     }
+ 
++    if (flags::zoom_method()) {
++        uint8_t zoomMethod = zoomMethodIsRatio ?  ANDROID_CONTROL_ZOOM_METHOD_ZOOM_RATIO :
++                ANDROID_CONTROL_ZOOM_METHOD_AUTO;
++        result->update(ANDROID_CONTROL_ZOOM_METHOD, &zoomMethod, 1);
++    }
++
+     return res;
+ }
+ 
+diff --git a/services/camera/libcameraservice/device3/ZoomRatioMapper.h b/services/camera/libcameraservice/device3/ZoomRatioMapper.h
+index 0ac2e09b4c..2ae20105c4 100644
+--- a/services/camera/libcameraservice/device3/ZoomRatioMapper.h
++++ b/services/camera/libcameraservice/device3/ZoomRatioMapper.h
+@@ -64,7 +64,9 @@ class ZoomRatioMapper : public CoordinateMapper {
+     /**
+      * Update capture result to handle both cropRegion and zoomRatio.
+      */
+-    status_t updateCaptureResult(CameraMetadata *request, bool useZoomRatio);
++    status_t updateCaptureResult(CameraMetadata *request,
++                                 bool zoomMethodIsRatio,
++                                 bool zoomRatioIs1);
+ 
+   public: // Visible for testing. Do not use concurently.
+     void scaleCoordinates(int32_t* coordPairs, int coordCount,
+diff --git a/services/camera/libcameraservice/tests/ZoomRatioTest.cpp b/services/camera/libcameraservice/tests/ZoomRatioTest.cpp
+index a531e10a35..f00d1e76e0 100644
+--- a/services/camera/libcameraservice/tests/ZoomRatioTest.cpp
++++ b/services/camera/libcameraservice/tests/ZoomRatioTest.cpp
+@@ -296,7 +296,8 @@ void subCropOverMaxDigitalZoomTest(bool usePreCorrectArray) {
+     }
+ 
+     metadata.update(ANDROID_SCALER_CROP_REGION, test2xCropRegion[index], 4);
+-    res = mapper.updateCaptureResult(&metadata, false/*useZoomRatio*/);
++    res = mapper.updateCaptureResult(&metadata, false /*zoomMethodIsRatio*/,
++                                     true/*requestedZoomRatioIs1*/);
+     ASSERT_EQ(res, OK);
+     entry = metadata.find(ANDROID_SCALER_CROP_REGION);
+     ASSERT_EQ(entry.count, 4U);
+@@ -340,7 +341,8 @@ void subCropOverZoomRangeTest(bool usePreCorrectArray) {
+     entry = metadata.find(ANDROID_CONTROL_ZOOM_RATIO);
+     EXPECT_NEAR(entry.data.f[0], 2.0f, kMaxAllowedRatioError);
+ 
+-    res = mapper.updateCaptureResult(&metadata, false/*useZoomRatio*/);
++    res = mapper.updateCaptureResult(&metadata, false/*useZoomMethod*/,
++                                     true/*requestedZoomRatioIs1*/);
+     ASSERT_EQ(res, OK);
+     entry = metadata.find(ANDROID_CONTROL_ZOOM_RATIO);
+     EXPECT_NEAR(entry.data.f[0], 1.0f, kMaxAllowedRatioError);
+@@ -364,7 +366,8 @@ void subCropOverZoomRangeTest(bool usePreCorrectArray) {
+     entry = metadata.find(ANDROID_CONTROL_ZOOM_RATIO);
+     EXPECT_NEAR(entry.data.f[0], 1.0f, kMaxAllowedRatioError);
+ 
+-    res = mapper.updateCaptureResult(&metadata, false/*useZoomRatio*/);
++    res = mapper.updateCaptureResult(&metadata, false/*zoomMethodIsRatio*/,
++                                     true/*requestedZoomRatioIs1*/);
+     ASSERT_EQ(res, OK);
+     entry = metadata.find(ANDROID_SCALER_CROP_REGION);
+     ASSERT_EQ(entry.count, 4U);
+@@ -452,7 +455,8 @@ void subZoomOverZoomRangeTest(bool usePreCorrectArray) {
+     entry = metadata.find(ANDROID_CONTROL_ZOOM_RATIO);
+     ASSERT_EQ(entry.data.f[0], zoomRatio);
+ 
+-    res = mapper.updateCaptureResult(&metadata, true/*useZoomRatio*/);
++    res = mapper.updateCaptureResult(&metadata, false/*zoomMethodIsRatio*/,
++                                     false/*requestedZoomRatioIs1*/);
+     ASSERT_EQ(res, OK);
+     entry = metadata.find(ANDROID_SCALER_CROP_REGION);
+     ASSERT_EQ(entry.count, 4U);
+-- 
+2.43.0
+

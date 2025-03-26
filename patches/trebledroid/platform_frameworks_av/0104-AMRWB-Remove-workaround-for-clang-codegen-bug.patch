@@ -1,0 +1,31 @@
+From 2d815b9399abf25d6552bc5dd58211a92f82c71e Mon Sep 17 00:00:00 2001
+From: Sushant <sushant@ittiam.com>
+Date: Wed, 9 Oct 2024 16:58:47 +0530
+Subject: [PATCH 104/436] AMRWB: Remove workaround for clang codegen bug
+
+Bug: 331935767
+Test: atest CtsMediaV2TestCases
+Test: atest MctsMediaV2TestCases
+Test: atest AmrwbEncoderTest
+
+Change-Id: I5b6c32e9daf2849b689220a963772b8a8c2eb2e1
+---
+ media/module/codecs/amrwb/enc/Android.bp | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/media/module/codecs/amrwb/enc/Android.bp b/media/module/codecs/amrwb/enc/Android.bp
+index 04f36b5493..6ca3b6e527 100644
+--- a/media/module/codecs/amrwb/enc/Android.bp
++++ b/media/module/codecs/amrwb/enc/Android.bp
+@@ -96,8 +96,6 @@ cc_library_static {
+                 "-DARM",
+                 "-DARMV7",
+                 "-DASM_OPT",
+-                // don't actually generate neon instructions, see bug 26932980
+-                "-mfpu=vfpv3",
+             ],
+             local_include_dirs: [
+                 "src/asm/ARMV7",
+-- 
+2.43.0
+

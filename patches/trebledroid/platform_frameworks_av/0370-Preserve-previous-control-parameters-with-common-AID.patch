@@ -1,0 +1,81 @@
+From 64265c82123216636547292e579ceb76560b24ab Mon Sep 17 00:00:00 2001
+From: Shunkai Yao <yaoshunkai@google.com>
+Date: Wed, 27 Nov 2024 06:21:59 +0000
+Subject: [PATCH 370/436] Preserve previous control parameters with common AIDL
+ parameter setting
+
+make sure the initial volume setting not lost
+
+Flag: EXEMPT bugfix
+Bug: 374157658
+Test: HapticGenerator testing app
+Test: atest CtsMediaAudioTestCases
+Change-Id: I20ab2e878a3bb6ef422a2021150a9b7b7f5ee110
+Merged-In: I20ab2e878a3bb6ef422a2021150a9b7b7f5ee110
+---
+ .../lvm/wrapper/Aidl/BundleContext.cpp        | 22 +++++++++++++++++--
+ .../lvm/wrapper/Aidl/BundleContext.h          |  1 +
+ 2 files changed, 21 insertions(+), 2 deletions(-)
+
+diff --git a/media/libeffects/lvm/wrapper/Aidl/BundleContext.cpp b/media/libeffects/lvm/wrapper/Aidl/BundleContext.cpp
+index 53d43118ea..5574ea1059 100644
+--- a/media/libeffects/lvm/wrapper/Aidl/BundleContext.cpp
++++ b/media/libeffects/lvm/wrapper/Aidl/BundleContext.cpp
+@@ -93,7 +93,18 @@ void BundleContext::deInit() {
+ RetCode BundleContext::setCommon(const Parameter::Common& common) {
+     RetCode ret = EffectContext::setCommon(common);
+     RETURN_VALUE_IF(ret != RetCode::SUCCESS, ret, " setCommonFailed");
+-    return init();
++    if (mInstance) {
++        LVM_ControlParams_t params;
++        RETURN_VALUE_IF(LVM_SUCCESS != LVM_GetControlParameters(mInstance, &params),
++                        RetCode::ERROR_EFFECT_LIB_ERROR, "failGetControlParams");
++        RETURN_VALUE_IF(RetCode::SUCCESS != applyCommonParameter(params),
++                        RetCode::ERROR_EFFECT_LIB_ERROR, " applyCommonParameterFailed");
++        RETURN_VALUE_IF(LVM_SUCCESS != LVM_SetControlParameters(mInstance, &params),
++                        RetCode::ERROR_EFFECT_LIB_ERROR, "failSetControlParams");
++    } else {
++        RETURN_VALUE_IF(RetCode::SUCCESS != init(), RetCode::ERROR_EFFECT_LIB_ERROR, " initFailed");
++    }
++    return RetCode::SUCCESS;
+ }
+ 
+ RetCode BundleContext::enable() {
+@@ -605,7 +616,7 @@ RetCode BundleContext::setForcedDevice(
+     return ret;
+ }
+ 
+-RetCode BundleContext::initControlParameter(LVM_ControlParams_t& params) const {
++RetCode BundleContext::applyCommonParameter(LVM_ControlParams_t& params) const {
+     int outputChannelCount = ::aidl::android::hardware::audio::common::getChannelCount(
+             mCommon.output.base.channelMask);
+     auto outputChannelMaskConv = aidl2legacy_AudioChannelLayout_audio_channel_mask_t(
+@@ -627,6 +638,13 @@ RetCode BundleContext::initControlParameter(LVM_ControlParams_t& params) const {
+         params.SourceFormat = LVM_MULTICHANNEL;
+     }
+ 
++    return RetCode::SUCCESS;
++}
++
++RetCode BundleContext::initControlParameter(LVM_ControlParams_t& params) const {
++    RETURN_VALUE_IF(RetCode::SUCCESS != applyCommonParameter(params),
++                    RetCode::ERROR_EFFECT_LIB_ERROR, " applyCommonParameterFailed");
++
+     /* General parameters */
+     params.OperatingMode = LVM_MODE_ON;
+     params.SpeakerType = LVM_HEADPHONES;
+diff --git a/media/libeffects/lvm/wrapper/Aidl/BundleContext.h b/media/libeffects/lvm/wrapper/Aidl/BundleContext.h
+index d5de5bd50e..96f63cdd6b 100644
+--- a/media/libeffects/lvm/wrapper/Aidl/BundleContext.h
++++ b/media/libeffects/lvm/wrapper/Aidl/BundleContext.h
+@@ -135,6 +135,7 @@ class BundleContext final : public EffectContext {
+     bool isBandLevelIndexInRange(const std::vector<Equalizer::BandLevel>& bandLevels) const;
+     static LVM_EQNB_BandDef_t* getDefaultEqualizerBandDefs();
+     static LVM_HeadroomBandDef_t* getDefaultEqualizerHeadroomBanDefs();
++    RetCode applyCommonParameter(LVM_ControlParams_t& params) const;
+ };
+ 
+ }  // namespace aidl::android::hardware::audio::effect
+-- 
+2.43.0
+

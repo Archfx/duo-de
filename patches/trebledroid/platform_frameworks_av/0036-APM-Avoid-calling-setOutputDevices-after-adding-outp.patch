@@ -1,0 +1,120 @@
+From ccd149ce9a5254b1efd2199cde8b01bdbbca7554 Mon Sep 17 00:00:00 2001
+From: Mikhail Naganov <mnaganov@google.com>
+Date: Thu, 26 Sep 2024 14:16:13 -0700
+Subject: [PATCH 036/436] APM: Avoid calling 'setOutputDevices' after adding
+ output for HIDL
+
+Legacy systems suffer from user-perceivable audio dropouts
+during device switching. Since forcing of the patches is only
+necessary on AIDL HALs, skip the call to 'setOutputDevices'
+on previous versions. Since prior to AIDL HAL introduction
+all major SoC vendors used legacy HAL version below '3', a check
+for the primay HAL version should suffice.
+
+Bug: 363105967
+Test: atest audiopolicy_tests
+Change-Id: I5daa8bb62f1073398e25a8f7da5c5ada93962a92
+---
+ .../managerdefinitions/include/HwModule.h     |  1 +
+ .../managerdefinitions/src/HwModule.cpp       | 10 ++++++++++
+ .../managerdefault/AudioPolicyManager.cpp     | 20 +++++++++----------
+ .../tests/audiopolicymanager_tests.cpp        |  5 ++++-
+ 4 files changed, 25 insertions(+), 11 deletions(-)
+
+diff --git a/services/audiopolicy/common/managerdefinitions/include/HwModule.h b/services/audiopolicy/common/managerdefinitions/include/HwModule.h
+index d206637e86..26bb94fed4 100644
+--- a/services/audiopolicy/common/managerdefinitions/include/HwModule.h
++++ b/services/audiopolicy/common/managerdefinitions/include/HwModule.h
+@@ -137,6 +137,7 @@ private:
+ class HwModuleCollection : public Vector<sp<HwModule> >
+ {
+ public:
++    sp<HwModule> getModuleFromHandle(audio_module_handle_t handle) const;
+     sp<HwModule> getModuleFromName(const char *name) const;
+ 
+     /**
+diff --git a/services/audiopolicy/common/managerdefinitions/src/HwModule.cpp b/services/audiopolicy/common/managerdefinitions/src/HwModule.cpp
+index 6696b45f03..2d8231a3e1 100644
+--- a/services/audiopolicy/common/managerdefinitions/src/HwModule.cpp
++++ b/services/audiopolicy/common/managerdefinitions/src/HwModule.cpp
+@@ -283,6 +283,16 @@ void HwModule::dump(String8 *dst, int spaces) const
+     dumpAudioRouteVector(mRoutes, dst, spaces);
+ }
+ 
++sp<HwModule> HwModuleCollection::getModuleFromHandle(audio_module_handle_t handle) const
++{
++    for (const auto& module : *this) {
++        if (module->getHandle() == handle) {
++            return module;
++        }
++    }
++    return nullptr;
++}
++
+ sp <HwModule> HwModuleCollection::getModuleFromName(const char *name) const
+ {
+     for (const auto& module : *this) {
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index 2ff2907d9d..1619237d52 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -1637,11 +1637,11 @@ status_t AudioPolicyManager::openDirectOutput(audio_stream_type_t stream,
+     outputDesc->mDirectClientSession = session;
+ 
+     addOutput(*output, outputDesc);
+-    setOutputDevices(__func__, outputDesc,
+-                     devices,
+-                     true,
+-                     0,
+-                     NULL);
++    // The version check is essentially to avoid making this call in the case of the HIDL HAL.
++    if (auto hwModule = mHwModules.getModuleFromHandle(mPrimaryModuleHandle); hwModule &&
++            hwModule->getHalVersionMajor() >= 3) {
++        setOutputDevices(__func__, outputDesc, devices, true, 0, NULL);
++    }
+     mPreviousOutputs = mOutputs;
+     ALOGV("%s returns new direct output %d", __func__, *output);
+     mpClientInterface->onAudioPortListUpdate();
+@@ -8873,11 +8873,11 @@ sp<SwAudioOutputDescriptor> AudioPolicyManager::openOutputWithProfileAndDevice(
+     }
+ 
+     addOutput(output, desc);
+-    setOutputDevices(__func__, desc,
+-                     devices,
+-                     true,
+-                     0,
+-                     NULL);
++    // The version check is essentially to avoid making this call in the case of the HIDL HAL.
++    if (auto hwModule = mHwModules.getModuleFromHandle(mPrimaryModuleHandle); hwModule &&
++            hwModule->getHalVersionMajor() >= 3) {
++        setOutputDevices(__func__, desc, devices, true, 0, NULL);
++    }
+     sp<DeviceDescriptor> speaker = mAvailableOutputDevices.getDevice(
+             AUDIO_DEVICE_OUT_SPEAKER, String8(""), AUDIO_FORMAT_DEFAULT);
+ 
+diff --git a/services/audiopolicy/tests/audiopolicymanager_tests.cpp b/services/audiopolicy/tests/audiopolicymanager_tests.cpp
+index 08855c95a1..b301e6ad61 100644
+--- a/services/audiopolicy/tests/audiopolicymanager_tests.cpp
++++ b/services/audiopolicy/tests/audiopolicymanager_tests.cpp
+@@ -498,6 +498,9 @@ INSTANTIATE_TEST_CASE_P(
+ void AudioPolicyManagerTestMsd::SetUpManagerConfig() {
+     // TODO: Consider using Serializer to load part of the config from a string.
+     ASSERT_NO_FATAL_FAILURE(AudioPolicyManagerTest::SetUpManagerConfig());
++    mConfig->getHwModules().getModuleFromName(
++            AUDIO_HARDWARE_MODULE_ID_PRIMARY)->setHalVersion(3, 0);
++
+     mMsdOutputDevice = new DeviceDescriptor(AUDIO_DEVICE_OUT_BUS);
+     sp<AudioProfile> pcmOutputProfile = new AudioProfile(
+             AUDIO_FORMAT_PCM_16_BIT, AUDIO_CHANNEL_OUT_STEREO, k48000SamplingRate);
+@@ -529,7 +532,7 @@ void AudioPolicyManagerTestMsd::SetUpManagerConfig() {
+                 addOutputProfile(spdifOutputProfile);
+     }
+ 
+-    sp<HwModule> msdModule = new HwModule(AUDIO_HARDWARE_MODULE_ID_MSD, 2 /*halVersionMajor*/);
++    sp<HwModule> msdModule = new HwModule(AUDIO_HARDWARE_MODULE_ID_MSD, 3 /*halVersionMajor*/);
+     HwModuleCollection modules = mConfig->getHwModules();
+     modules.add(msdModule);
+     mConfig->setHwModules(modules);
+-- 
+2.43.0
+

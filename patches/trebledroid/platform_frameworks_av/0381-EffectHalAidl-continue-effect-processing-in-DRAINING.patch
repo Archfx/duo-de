@@ -1,0 +1,31 @@
+From 632e8b7c0b5c619b63ef647adb5e57d8eaf2da2c Mon Sep 17 00:00:00 2001
+From: Shunkai Yao <yaoshunkai@google.com>
+Date: Mon, 2 Dec 2024 21:59:31 +0000
+Subject: [PATCH 381/436] EffectHalAidl: continue effect processing in DRAINING
+ state
+
+Flag: EXEMPT bugfix
+Bug: 379776482
+Test: YouTubeMusic EQ on Pixel
+Change-Id: I27d9e187e3b3ffe11ee2b43c5d412ec6d8642896
+Merged-In: I27d9e187e3b3ffe11ee2b43c5d412ec6d8642896
+---
+ media/libaudiohal/impl/EffectHalAidl.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/media/libaudiohal/impl/EffectHalAidl.cpp b/media/libaudiohal/impl/EffectHalAidl.cpp
+index 9fdde499ea..658fc18bea 100644
+--- a/media/libaudiohal/impl/EffectHalAidl.cpp
++++ b/media/libaudiohal/impl/EffectHalAidl.cpp
+@@ -184,7 +184,7 @@ status_t EffectHalAidl::setOutBuffer(const sp<EffectBufferHalInterface>& buffer)
+ status_t EffectHalAidl::process() {
+     State state = State::INIT;
+     if (mConversion->isBypassing() || !mEffect->getState(&state).isOk() ||
+-        state != State::PROCESSING) {
++        (state != State::PROCESSING && state != State::DRAINING)) {
+         ALOGI("%s skipping process because it's %s", mEffectName.c_str(),
+               mConversion->isBypassing()
+                       ? "bypassing"
+-- 
+2.43.0
+

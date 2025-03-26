@@ -1,0 +1,45 @@
+From 528181af550bb861d5bfc48dd8ce60a2295c0406 Mon Sep 17 00:00:00 2001
+From: Eric Laurent <elaurent@google.com>
+Date: Wed, 30 Oct 2024 18:32:15 +0000
+Subject: [PATCH 202/436] AudioPolicy: disable usecase validator
+
+disabled by default and added a property to enable when needed
+
+Bug: 362143417
+
+Test: make
+Flag: EXEMPT experiment
+Change-Id: I60a02468808ccbeb2234468499e74fc85d18b87e
+---
+ services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+index 91a5d2d416..8d7432dcbe 100644
+--- a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
++++ b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+@@ -24,6 +24,7 @@
+ #include <android/content/AttributionSourceState.h>
+ #include <android_media_audiopolicy.h>
+ #include <com_android_media_audio.h>
++#include <cutils/properties.h>
+ #include <error/expected_utils.h>
+ #include <media/AidlConversion.h>
+ #include <media/AudioPolicy.h>
+@@ -493,8 +494,11 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
+     }
+ 
+     if (result == NO_ERROR) {
+-        attr = VALUE_OR_RETURN_BINDER_STATUS(
+-                mUsecaseValidator->verifyAudioAttributes(output, attributionSource, attr));
++        // usecase validator is disabled by default
++        if (property_get_bool("ro.audio.usecase_validator_enabled", false /* default */)) {
++                attr = VALUE_OR_RETURN_BINDER_STATUS(
++                        mUsecaseValidator->verifyAudioAttributes(output, attributionSource, attr));
++        }
+ 
+         sp<AudioPlaybackClient> client =
+                 new AudioPlaybackClient(attr, output, attributionSource, session,
+-- 
+2.43.0
+

@@ -1,0 +1,290 @@
+From d6346073e670a0bc606b99062d22940b4fd8df1c Mon Sep 17 00:00:00 2001
+From: Andy Hung <hunga@google.com>
+Date: Mon, 25 Nov 2024 15:23:40 -0800
+Subject: [PATCH 407/436] audioserver: do not prefetch audioserver services
+
+ServiceManager may provide stale audioserver service handles
+to the new audioserver instance when it is reinitializing.
+
+Flag: EXEMPT bugfix
+Test: for run in {1..100}; do (sleep 8; echo $run; adb shell pkill audioserver); done
+Test: atest service_singleton_tests
+Test: atest CtsMediaAudioTestCases
+Bug: 379427790
+Change-Id: Ifc237bdfecca308f8a7c5be1b82612293df8aed9
+---
+ media/libaudioclient/AudioSystem.cpp          | 23 +++--
+ .../include/mediautils/ServiceSingleton.h     | 98 ++++++++++++-------
+ media/utils/tests/service_singleton_tests.cpp | 36 +++++++
+ 3 files changed, 113 insertions(+), 44 deletions(-)
+
+diff --git a/media/libaudioclient/AudioSystem.cpp b/media/libaudioclient/AudioSystem.cpp
+index d511dc2c69..e3a96f551e 100644
+--- a/media/libaudioclient/AudioSystem.cpp
++++ b/media/libaudioclient/AudioSystem.cpp
+@@ -35,6 +35,7 @@
+ #include <media/TypeConverter.h>
+ #include <mediautils/ServiceSingleton.h>
+ #include <math.h>
++#include <private/android_filesystem_config.h>
+ 
+ #include <system/audio.h>
+ #include <android/media/GetInputForAttrResponse.h>
+@@ -169,9 +170,14 @@ public:
+             if (!mDisableThreadPoolStart) {
+                 ProcessState::self()->startThreadPool();
+             }
+-            mediautils::initService<media::IAudioFlingerService, AudioFlingerServiceTraits>();
+-            mWaitMs = std::chrono::milliseconds(
+-                property_get_int32(kServiceWaitProperty, kServiceClientWaitMs));
++            if (multiuser_get_app_id(getuid()) == AID_AUDIOSERVER) {
++                mediautils::skipService<media::IAudioFlingerService>(mediautils::SkipMode::kWait);
++                mWaitMs = std::chrono::milliseconds(INT32_MAX);
++            } else {
++                mediautils::initService<media::IAudioFlingerService, AudioFlingerServiceTraits>();
++                mWaitMs = std::chrono::milliseconds(
++                        property_get_int32(kServiceWaitProperty, kServiceClientWaitMs));
++            }
+             init = true;
+         }
+         if (mValid) return mService;
+@@ -1015,9 +1021,14 @@ public:
+             if (!mDisableThreadPoolStart) {
+                 ProcessState::self()->startThreadPool();
+             }
+-            mediautils::initService<IAudioPolicyService, AudioPolicyServiceTraits>();
+-            mWaitMs = std::chrono::milliseconds(
+-                    property_get_int32(kServiceWaitProperty, kServiceClientWaitMs));
++            if (multiuser_get_app_id(getuid()) == AID_AUDIOSERVER) {
++                mediautils::skipService<IAudioPolicyService>(mediautils::SkipMode::kWait);
++                mWaitMs = std::chrono::milliseconds(INT32_MAX);
++            } else {
++                mediautils::initService<IAudioPolicyService, AudioPolicyServiceTraits>();
++                mWaitMs = std::chrono::milliseconds(
++                        property_get_int32(kServiceWaitProperty, kServiceClientWaitMs));
++            }
+             init = true;
+         }
+         if (mValid) return mService;
+diff --git a/media/utils/include/mediautils/ServiceSingleton.h b/media/utils/include/mediautils/ServiceSingleton.h
+index f3208cb052..177c3bac5f 100644
+--- a/media/utils/include/mediautils/ServiceSingleton.h
++++ b/media/utils/include/mediautils/ServiceSingleton.h
+@@ -57,12 +57,20 @@
+  */
+ namespace android::mediautils {
+ 
+-enum ServiceOptions {
++enum class ServiceOptions {
+     kNone = 0,
+     kNonNull = (1 << 0),  // don't return a null interface unless disabled.
+                           // partially implemented and experimental.
+ };
+ 
++enum class SkipMode {
++    kNone = 0,       // do not skip the cache (normal behavior for caching services).
++    kImmediate = 1,  // do not cache or find the service, return null to the caller immediately,
++                     // which is the normal behavior for skipping the service cache.
++    kWait = 2,       // do not cache or find the service, but block the caller;
++                     // this is used for cases where a local service override is desired.
++};
++
+ // Traits may come through a constexpr static function collection.
+ // This participates in small buffer optimization SBO in std::function impl.
+ template <typename Service>
+@@ -135,7 +143,7 @@ public:
+         std::swap(oldTraits, mTraits);
+         const bool existing = oldTraits != nullptr;
+         mTraits = std::move(traits);
+-        mSkip = false;
++        mSkipMode = SkipMode::kNone;
+         return existing;
+     }
+ 
+@@ -154,7 +162,8 @@ public:
+         audio_utils::unique_lock ul(mMutex);
+         auto& service = std::get<BaseInterfaceType<Service>>(mService);
+ 
+-        if (mSkip || (service && mValid)) return service;  // early check.
++        // early check.
++        if (mSkipMode == SkipMode::kImmediate || (service && mValid)) return service;
+ 
+         // clamp to avoid numeric overflow.  INT64_MAX / 2 is effectively forever for a device.
+         std::chrono::nanoseconds kWaitLimitNs(
+@@ -164,39 +173,44 @@ public:
+ 
+         for (bool first = true; true; first = false) {
+             // we may have released mMutex, so see if service has been obtained.
+-            if (mSkip || (service && mValid))  return service;
+-
+-            const auto traits = getTraits_l<Service>();
+-
+-            // first time or not using callback, check the service.
+-            if (first || !useCallback) {
+-                auto service_new = checkServicePassThrough<Service>(
+-                        traits->getServiceName());
+-                if (service_new) {
+-                    mValid = true;
+-                    service = std::move(service_new);
+-                    // service is a reference, so we copy to service_fixed as
+-                    // we're releasing the mutex.
+-                    const auto service_fixed = service;
+-                    ul.unlock();
+-                    traits->onNewService(interfaceFromBase<Service>(service_fixed));
+-                    ul.lock();
+-                    setDeathNotifier_l<Service>(service_fixed);
+-                    ul.unlock();
+-                    mCv.notify_all();
+-                    return service_fixed;
+-                }
+-            }
++            if (mSkipMode == SkipMode::kImmediate || (service && mValid))  return service;
+ 
+-            // install service callback if needed.
+-            if (useCallback && !mServiceNotificationHandle) {
+-                setServiceNotifier_l<Service>();
++            int options = 0;
++            if (mSkipMode == SkipMode::kNone) {
++                const auto traits = getTraits_l<Service>();
++
++                // first time or not using callback, check the service.
++                if (first || !useCallback) {
++                    auto service_new = checkServicePassThrough<Service>(
++                            traits->getServiceName());
++                    if (service_new) {
++                        mValid = true;
++                        service = std::move(service_new);
++                        // service is a reference, so we copy to service_fixed as
++                        // we're releasing the mutex.
++                        const auto service_fixed = service;
++                        ul.unlock();
++                        traits->onNewService(interfaceFromBase<Service>(service_fixed));
++                        ul.lock();
++                        setDeathNotifier_l<Service>(service_fixed);
++                        ul.unlock();
++                        mCv.notify_all();
++                        return service_fixed;
++                    }
++                }
++                // install service callback if needed.
++                if (useCallback && !mServiceNotificationHandle) {
++                    setServiceNotifier_l<Service>();
++                }
++                options = static_cast<int>(traits->options());
+             }
+ 
+             // check time expiration.
+             const auto now = std::chrono::steady_clock::now();
+-            if (now >= end
+-                && (service || !(traits->options() & ServiceOptions::kNonNull))) {
++            if (now >= end &&
++                    (service
++                    || mSkipMode != SkipMode::kNone  // skip is set.
++                    || !(options & static_cast<int>(ServiceOptions::kNonNull)))) { // null allowed
+                 return service;
+             }
+ 
+@@ -241,11 +255,16 @@ public:
+      *
+      * All notifiers removed.
+      * Service pointer is released.
++     *
++     * If skipMode is kNone,      then cache management is immediately reenabled.
++     * If skipMode is kImmediate, then any new waiters will return null immediately.
++     * If skipMode is kWait,      then any new waiters will be blocked until an update occurs
++     *                            or the timeout expires.
+      */
+     template<typename Service>
+-    void skip() {
++    void skip(SkipMode skipMode) {
+         audio_utils::unique_lock ul(mMutex);
+-        mSkip = true;
++        mSkipMode = skipMode;
+         // remove notifiers.  OK to hold lock as presuming notifications one-way
+         // or manually triggered outside of lock.
+         mDeathNotificationHandle.reset();
+@@ -274,7 +293,8 @@ private:
+         mDeathNotificationHandle.reset();
+         const auto traits = getTraits_l<Service>();
+         mValid = false;
+-        if (!(traits->options() & ServiceOptions::kNonNull) || mSkip) {
++        if (!(static_cast<int>(traits->options()) & static_cast<int>(ServiceOptions::kNonNull))
++                || mSkipMode != SkipMode::kNone) {
+             auto &service = std::get<BaseInterfaceType<Service>>(mService);
+             service = nullptr;
+         }
+@@ -380,8 +400,10 @@ private:
+     // mValid is true iff the service is non-null and alive.
+     bool mValid GUARDED_BY(mMutex) = false;
+ 
+-    // mSkip indicates that the service is not cached.
+-    bool mSkip GUARDED_BY(mMutex) = false;
++    // mSkipMode indicates the service cache state:
++    //
++    // one may either wait (blocked) until the service is reinitialized.
++    SkipMode mSkipMode GUARDED_BY(mMutex) = SkipMode::kNone;
+ };
+ 
+ } // details
+@@ -474,9 +496,9 @@ void setService(const InterfaceType<Service>& service) {
+  * another initService() can be called seamlessly.
+  */
+ template<typename Service>
+-void skipService() {
++void skipService(SkipMode skipMode = SkipMode::kImmediate) {
+     const auto serviceHandler = details::ServiceHandler::getInstance(Service::descriptor);
+-    serviceHandler->template skip<Service>();
++    serviceHandler->template skip<Service>(skipMode);
+ }
+ 
+ } // namespace android::mediautils
+diff --git a/media/utils/tests/service_singleton_tests.cpp b/media/utils/tests/service_singleton_tests.cpp
+index 18d7f3dd73..3e389a4e77 100644
+--- a/media/utils/tests/service_singleton_tests.cpp
++++ b/media/utils/tests/service_singleton_tests.cpp
+@@ -299,6 +299,42 @@ TEST(service_singleton_tests, one_and_only) {
+     EXPECT_EQ(4, sServiceDied);
+     EXPECT_EQ(4, listenerServiceCreated);  // our listener picks it up.
+ 
++    {
++        // in default mode (kNull) a null is returned when the service is skipped and
++        // wait time is ignored.
++
++        const auto ref1 = std::chrono::steady_clock::now();
++        auto service = mediautils::getService<IServiceSingletonTest>(std::chrono::seconds(2));
++        EXPECT_FALSE(service);
++        const auto ref2 = std::chrono::steady_clock::now();
++        EXPECT_LT(ref2 - ref1, std::chrono::seconds(1));
++
++        auto service2 = mediautils::getService<aidl::IServiceSingletonTest>(
++                std::chrono::seconds(2));
++        EXPECT_FALSE(service2);
++        const auto ref3 = std::chrono::steady_clock::now();
++        EXPECT_LT(ref3 - ref2, std::chrono::seconds(1));
++    }
++
++    // Cancel the singleton cache but use wait mode.
++    mediautils::skipService<IServiceSingletonTest>(mediautils::SkipMode::kWait);
++    mediautils::skipService<aidl::IServiceSingletonTest>(mediautils::SkipMode::kWait);
++
++    {
++        // in wait mode, the timeouts are respected
++        const auto ref1 = std::chrono::steady_clock::now();
++        auto service = mediautils::getService<IServiceSingletonTest>(std::chrono::seconds(1));
++        EXPECT_FALSE(service);
++        const auto ref2 = std::chrono::steady_clock::now();
++        EXPECT_GT(ref2 - ref1, std::chrono::seconds(1));
++
++        auto service2 = mediautils::getService<aidl::IServiceSingletonTest>(
++                std::chrono::seconds(1));
++        EXPECT_FALSE(service2);
++        const auto ref3 = std::chrono::steady_clock::now();
++        EXPECT_GT(ref3 - ref2, std::chrono::seconds(1));
++    }
++
+     // remove service
+     remoteWorker->putc('b');
+     EXPECT_EQ('b', remoteWorker->getc());
+-- 
+2.43.0
+

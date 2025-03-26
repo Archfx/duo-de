@@ -1,0 +1,37 @@
+From 40421a1df3a01e2790ff67aec14a962c20de1ad1 Mon Sep 17 00:00:00 2001
+From: Atneya Nair <atneya@google.com>
+Date: Tue, 12 Nov 2024 14:59:47 -0800
+Subject: [PATCH 260/436] Add hardening flag for special app access
+
+Potential changes to the special app access menu requires flag.
+
+Flag: android.media.audio.hardening_spa
+Bug: 376480814
+Test: compile
+Change-Id: Ie35441471469b29e3356d107c88fefb8adde1c74
+---
+ media/audio/aconfig/audio_framework.aconfig | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/media/audio/aconfig/audio_framework.aconfig b/media/audio/aconfig/audio_framework.aconfig
+index ae7eb36644..14504171d4 100644
+--- a/media/audio/aconfig/audio_framework.aconfig
++++ b/media/audio/aconfig/audio_framework.aconfig
+@@ -119,6 +119,14 @@ flag {
+     bug: "376480814"
+ }
+ 
++flag {
++    name: "hardening_permission_spa"
++    is_exported: true
++    namespace: "media_audio"
++    description: "Flag for special app access impl for hardening."
++    bug: "376480814"
++}
++
+ flag {
+     name: "iamf_definitions_api"
+     is_exported: true
+-- 
+2.43.0
+

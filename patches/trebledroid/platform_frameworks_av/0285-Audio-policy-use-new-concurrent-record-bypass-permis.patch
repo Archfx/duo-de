@@ -1,0 +1,254 @@
+From dbb80328f4a2b27c24dec45ecd6ea526ca193129 Mon Sep 17 00:00:00 2001
+From: Eric Laurent <elaurent@google.com>
+Date: Mon, 18 Nov 2024 16:09:51 -0800
+Subject: [PATCH 285/436] Audio policy: use new concurrent record bypass
+ permission
+
+Use either CAPTURE_AUDIO_OUTPUT or
+BYPASS_CONCURRENT_RECORD_AUDIO_RESTRICTION permission to allow
+concurrent capture during calls. Use of CAPTURE_AUDIO_OUTPUT will be
+removed once all system apps are updated.
+
+Bug: 374751406
+Test: make
+Flag: android.media.audio.concurrent_audio_record_bypass_permission
+Change-Id: I1adc9e6fa6b013cfd40e3c3f5559abd6802716ac
+---
+ .../media/permission/PermissionEnum.aidl      |  3 ++-
+ media/utils/ServiceUtilities.cpp              | 15 +++++++++++++
+ .../include/mediautils/ServiceUtilities.h     |  1 +
+ services/audiopolicy/service/Android.bp       |  1 +
+ .../service/AudioPolicyInterfaceImpl.cpp      | 17 +++++++++++++-
+ .../service/AudioPolicyService.cpp            | 22 +++++++++++--------
+ .../audiopolicy/service/AudioRecordClient.h   |  6 ++---
+ 7 files changed, 51 insertions(+), 14 deletions(-)
+
+diff --git a/aidl/com/android/media/permission/PermissionEnum.aidl b/aidl/com/android/media/permission/PermissionEnum.aidl
+index b08db44082..7badb87add 100644
+--- a/aidl/com/android/media/permission/PermissionEnum.aidl
++++ b/aidl/com/android/media/permission/PermissionEnum.aidl
+@@ -37,5 +37,6 @@ enum PermissionEnum {
+     CAPTURE_TUNER_AUDIO_INPUT = 11,
+     CAPTURE_VOICE_COMMUNICATION_OUTPUT = 12,
+     BLUETOOTH_CONNECT = 13,
+-    ENUM_SIZE = 14, // Not for actual usage, used by Java
++    BYPASS_CONCURRENT_RECORD_AUDIO_RESTRICTION = 14,
++    ENUM_SIZE = 15, // Not for actual usage, used by Java
+ }
+diff --git a/media/utils/ServiceUtilities.cpp b/media/utils/ServiceUtilities.cpp
+index ddb93fe9f4..ee0f2bc11a 100644
+--- a/media/utils/ServiceUtilities.cpp
++++ b/media/utils/ServiceUtilities.cpp
+@@ -291,6 +291,21 @@ bool captureVoiceCommunicationOutputAllowed(const AttributionSourceState& attrib
+     return ok;
+ }
+ 
++bool bypassConcurrentPolicyAllowed(const AttributionSourceState& attributionSource) {
++    uid_t uid = VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid));
++    uid_t pid = VALUE_OR_FATAL(aidl2legacy_int32_t_pid_t(attributionSource.pid));
++    if (isAudioServerOrRootUid(uid)) return true;
++    static const String16 sBypassConcurrentPolicy(
++            "android.permission.BYPASS_CONCURRENT_RECORD_AUDIO_RESTRICTION ");
++    // Use PermissionChecker, which includes some logic for allowing the isolated
++    // HotwordDetectionService to hold certain permissions.
++    bool ok = PermissionCache::checkPermission(sBypassConcurrentPolicy, pid, uid);
++    if (!ok) {
++        ALOGV("Request requires android.permission.BYPASS_CONCURRENT_RECORD_AUDIO_RESTRICTION");
++    }
++    return ok;
++}
++
+ bool accessUltrasoundAllowed(const AttributionSourceState& attributionSource) {
+     uid_t uid = VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid));
+     uid_t pid = VALUE_OR_FATAL(aidl2legacy_int32_t_pid_t(attributionSource.pid));
+diff --git a/media/utils/include/mediautils/ServiceUtilities.h b/media/utils/include/mediautils/ServiceUtilities.h
+index 9abdbf1ee3..573cc14ef4 100644
+--- a/media/utils/include/mediautils/ServiceUtilities.h
++++ b/media/utils/include/mediautils/ServiceUtilities.h
+@@ -102,6 +102,7 @@ bool captureAudioOutputAllowed(const AttributionSourceState& attributionSource);
+ bool captureMediaOutputAllowed(const AttributionSourceState& attributionSource);
+ bool captureTunerAudioInputAllowed(const AttributionSourceState& attributionSource);
+ bool captureVoiceCommunicationOutputAllowed(const AttributionSourceState& attributionSource);
++bool bypassConcurrentPolicyAllowed(const AttributionSourceState& attributionSource) ;
+ bool accessUltrasoundAllowed(const AttributionSourceState& attributionSource);
+ bool captureHotwordAllowed(const AttributionSourceState& attributionSource);
+ bool settingsAllowed();
+diff --git a/services/audiopolicy/service/Android.bp b/services/audiopolicy/service/Android.bp
+index e1578089b1..619c924235 100644
+--- a/services/audiopolicy/service/Android.bp
++++ b/services/audiopolicy/service/Android.bp
+@@ -16,6 +16,7 @@ cc_defaults {
+     ],
+ 
+     shared_libs: [
++        "android.media.audio-aconfig-cc",
+         "android.media.audiopolicy-aconfig-cc",
+         "audio-permission-aidl-cpp",
+         "audioclient-types-aidl-cpp",
+diff --git a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+index 3589de1c51..df7077c6f5 100644
+--- a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
++++ b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+@@ -23,6 +23,7 @@
+ 
+ #include <android/content/AttributionSourceState.h>
+ #include <android_media_audiopolicy.h>
++#include <android_media_audio.h>
+ #include <com_android_media_audio.h>
+ #include <cutils/properties.h>
+ #include <error/expected_utils.h>
+@@ -56,6 +57,7 @@ namespace android {
+ namespace audiopolicy_flags = android::media::audiopolicy;
+ using binder::Status;
+ using aidl_utils::binderStatusFromStatusT;
++using android::media::audio::concurrent_audio_record_bypass_permission;
+ using com::android::media::audio::audioserver_permissions;
+ using com::android::media::permission::NativePermissionController;
+ using com::android::media::permission::PermissionEnum::ACCESS_ULTRASOUND;
+@@ -71,6 +73,7 @@ using com::android::media::permission::PermissionEnum::MODIFY_DEFAULT_AUDIO_EFFE
+ using com::android::media::permission::PermissionEnum::MODIFY_PHONE_STATE;
+ using com::android::media::permission::PermissionEnum::RECORD_AUDIO;
+ using com::android::media::permission::PermissionEnum::WRITE_SECURE_SETTINGS;
++using com::android::media::permission::PermissionEnum::BYPASS_CONCURRENT_RECORD_AUDIO_RESTRICTION;
+ using content::AttributionSourceState;
+ using media::audio::common::AudioConfig;
+ using media::audio::common::AudioConfigBase;
+@@ -734,6 +737,17 @@ Status AudioPolicyService::getInputForAttr(const media::audio::common::AudioAttr
+     bool canCaptureOutput = audioserver_permissions() ?
+                         CHECK_PERM(CAPTURE_AUDIO_OUTPUT, attributionSource.uid)
+                         : captureAudioOutputAllowed(attributionSource);
++
++    //TODO(b/374751406): remove forcing canBypassConcurrentPolicy to canCaptureOutput
++    // once all system apps using CAPTURE_AUDIO_OUTPUT to capture during calls
++    // are updated to use the new CONCURRENT_AUDIO_RECORD_BYPASS permission.
++    bool canBypassConcurrentPolicy = canCaptureOutput;
++    if (concurrent_audio_record_bypass_permission()) {
++        canBypassConcurrentPolicy = audioserver_permissions() ?
++                            CHECK_PERM(BYPASS_CONCURRENT_RECORD_AUDIO_RESTRICTION,
++                                       attributionSource.uid)
++                            : bypassConcurrentPolicyAllowed(attributionSource);
++    }
+     bool canInterceptCallAudio = audioserver_permissions() ?
+                         CHECK_PERM(CALL_AUDIO_INTERCEPTION, attributionSource.uid)
+                         : callAudioInterceptionAllowed(attributionSource);
+@@ -874,7 +888,8 @@ Status AudioPolicyService::getInputForAttr(const media::audio::common::AudioAttr
+         sp<AudioRecordClient> client = new AudioRecordClient(attr, input, session, portId,
+                                                              selectedDeviceIds, attributionSource,
+                                                              virtualDeviceId,
+-                                                             canCaptureOutput, canCaptureHotword,
++                                                             canBypassConcurrentPolicy,
++                                                             canCaptureHotword,
+                                                              mOutputCommandThread);
+         mAudioRecordClients.add(portId, client);
+     }
+diff --git a/services/audiopolicy/service/AudioPolicyService.cpp b/services/audiopolicy/service/AudioPolicyService.cpp
+index 80ee34e03a..4c506e867c 100644
+--- a/services/audiopolicy/service/AudioPolicyService.cpp
++++ b/services/audiopolicy/service/AudioPolicyService.cpp
+@@ -853,13 +853,13 @@ void AudioPolicyService::updateUidStates_l()
+ //               AND an accessibility service is TOP
+ //                  AND source is either VOICE_RECOGNITION OR HOTWORD
+ //               OR there is no active privacy sensitive capture or call
+-//                          OR client has CAPTURE_AUDIO_OUTPUT privileged permission
++//                          OR client can capture calls
+ //                  AND source is VOICE_RECOGNITION OR HOTWORD
+ //    The client is an assistant AND active assistant is not being used
+ //        AND an accessibility service is on TOP or a RTT call is active
+ //                AND the source is VOICE_RECOGNITION or HOTWORD
+ //        OR there is no active privacy sensitive capture or call
+-//                OR client has CAPTURE_AUDIO_OUTPUT privileged permission
++//                OR client can capture calls
+ //            AND is TOP most recent assistant and uses VOICE_RECOGNITION or HOTWORD
+ //                OR there is no top recent assistant and source is HOTWORD
+ //    OR The client is an accessibility service
+@@ -867,7 +867,7 @@ void AudioPolicyService::updateUidStates_l()
+ //                AND the source is VOICE_RECOGNITION or HOTWORD
+ //            OR The assistant is not on TOP
+ //                AND there is no active privacy sensitive capture or call
+-//                    OR client has CAPTURE_AUDIO_OUTPUT privileged permission
++//                    OR client can capture calls
+ //        AND is on TOP
+ //        AND the source is VOICE_RECOGNITION or HOTWORD
+ //    OR the client source is virtual (remote submix, call audio TX or RX...)
+@@ -875,7 +875,7 @@ void AudioPolicyService::updateUidStates_l()
+ //        AND is on TOP
+ //            OR all active clients are using HOTWORD source
+ //        AND no call is active
+-//            OR client has CAPTURE_AUDIO_OUTPUT privileged permission
++//            OR client can capture calls
+ //    OR the client is the current InputMethodService
+ //        AND a RTT call is active AND the source is VOICE_RECOGNITION
+ //    OR The client is an active communication owner
+@@ -884,7 +884,11 @@ void AudioPolicyService::updateUidStates_l()
+ //        AND The assistant is not on TOP
+ //        AND is on TOP or latest started
+ //        AND there is no active privacy sensitive capture or call
+-//            OR client has CAPTURE_AUDIO_OUTPUT privileged permission
++//            OR client can capture calls
++//    NOTE: a client can capture calls if it either:
++//       has CAPTURE_AUDIO_OUTPUT privileged permission (temporarily until
++//            all system apps are updated)
++//       or has CONCURRENT_AUDIO_RECORD_BYPASS privileged permission
+ 
+ 
+     sp<AudioRecordClient> topActive;
+@@ -1024,7 +1028,7 @@ void AudioPolicyService::updateUidStates_l()
+     //  else
+     //    favor the privacy sensitive case
+     if (topActive != nullptr && topSensitiveActive != nullptr
+-            && !topActive->canCaptureOutput) {
++            && !topActive->canBypassConcurrentPolicy) {
+         topActive = nullptr;
+     }
+ 
+@@ -1055,8 +1059,8 @@ void AudioPolicyService::updateUidStates_l()
+                                                                mMutex) {
+             uid_t recordUid = VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(
+                 recordClient->attributionSource.uid));
+-            bool canCaptureCall = recordClient->canCaptureOutput;
+-            bool canCaptureCommunication = recordClient->canCaptureOutput
++            bool canCaptureCall = recordClient->canBypassConcurrentPolicy;
++            bool canCaptureCommunication = recordClient->canBypassConcurrentPolicy
+                 || !isPhoneStateOwnerActive
+                 || recordUid == mPhoneStateOwnerUid;
+             return !(isInCall && !canCaptureCall)
+@@ -1072,7 +1076,7 @@ void AudioPolicyService::updateUidStates_l()
+         //         AND is ongoing communication owner
+         //         AND is on TOP or latest started
+         const bool allowSensitiveCapture =
+-            !isSensitiveActive || isTopOrLatestSensitive || current->canCaptureOutput;
++            !isSensitiveActive || isTopOrLatestSensitive || current->canBypassConcurrentPolicy;
+         bool allowCapture = false;
+         if (!isAssistantOnTop || isActiveAssistant) {
+             allowCapture = (isTopOrLatestActive || isTopOrLatestSensitive) &&
+diff --git a/services/audiopolicy/service/AudioRecordClient.h b/services/audiopolicy/service/AudioRecordClient.h
+index 76bc17add6..213557553c 100644
+--- a/services/audiopolicy/service/AudioRecordClient.h
++++ b/services/audiopolicy/service/AudioRecordClient.h
+@@ -90,12 +90,12 @@ public:
+                       const DeviceIdVector deviceIds,
+                       const AttributionSourceState& attributionSource,
+                       const uint32_t virtualDeviceId,
+-                      bool canCaptureOutput, bool canCaptureHotword,
++                      bool canBypassConcurrentPolicy, bool canCaptureHotword,
+                       wp<AudioPolicyService::AudioCommandThread> commandThread) :
+                 AudioClient(attributes, io, attributionSource,
+                     session, portId, deviceIds), attributionSource(attributionSource),
+                     virtualDeviceId(virtualDeviceId),
+-                    startTimeNs(0), canCaptureOutput(canCaptureOutput),
++                    startTimeNs(0), canBypassConcurrentPolicy(canBypassConcurrentPolicy),
+                     canCaptureHotword(canCaptureHotword), silenced(false),
+                     mOpRecordAudioMonitor(
+                             OpRecordAudioMonitor::createIfNeeded(attributionSource,
+@@ -112,7 +112,7 @@ public:
+     const AttributionSourceState attributionSource; // attribution source of client
+     const uint32_t virtualDeviceId; // id of the virtual device associated with the audio device
+     nsecs_t startTimeNs;
+-    const bool canCaptureOutput;
++    const bool canBypassConcurrentPolicy;
+     const bool canCaptureHotword;
+     bool silenced;
+ 
+-- 
+2.43.0
+

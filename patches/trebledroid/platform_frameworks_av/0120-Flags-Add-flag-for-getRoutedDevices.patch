@@ -1,0 +1,60 @@
+From 80f9048708f20bac0a79ec60df20d2f8749a5814 Mon Sep 17 00:00:00 2001
+From: Robert Wu <robertwu@google.com>
+Date: Thu, 17 Oct 2024 23:18:16 +0000
+Subject: [PATCH 120/436] Flags: Add flag for getRoutedDevices()
+
+Bug: 367816690
+Test: make
+Flag: android.media.audio.routed_device_ids
+Change-Id: I92e21077584f41b45ec7645a801865b15878a793
+---
+ media/audio/aconfig/Android.bp              | 6 ++++++
+ media/audio/aconfig/audio_framework.aconfig | 9 +++++++++
+ 2 files changed, 15 insertions(+)
+
+diff --git a/media/audio/aconfig/Android.bp b/media/audio/aconfig/Android.bp
+index a5aeff268b..47418cf61e 100644
+--- a/media/audio/aconfig/Android.bp
++++ b/media/audio/aconfig/Android.bp
+@@ -171,6 +171,12 @@ java_aconfig_library {
+     defaults: ["framework-minus-apex-aconfig-java-defaults"],
+ }
+ 
++cc_aconfig_library {
++    name: "android.media.audio-aconfig-cc",
++    aconfig_declarations: "android.media.audio-aconfig",
++    defaults: ["audio-aconfig-cc-defaults"],
++}
++
+ cc_aconfig_library {
+     name: "android.media.audiopolicy-aconfig-cc",
+     aconfig_declarations: "android.media.audiopolicy-aconfig",
+diff --git a/media/audio/aconfig/audio_framework.aconfig b/media/audio/aconfig/audio_framework.aconfig
+index 411996ea82..2fa4a5f1d1 100644
+--- a/media/audio/aconfig/audio_framework.aconfig
++++ b/media/audio/aconfig/audio_framework.aconfig
+@@ -1,5 +1,6 @@
+ # Top level framework (android.media) flags
+ # Only add flags here which must be included in framework.jar
++# Flags used in both framework.jar and native can be added here
+ #
+ # Please add flags in alphabetical order.
+ 
+@@ -144,6 +145,14 @@ flag {
+     is_fixed_read_only: true
+ }
+ 
++flag {
++    name: "routed_device_ids"
++    namespace: "media_audio"
++    description:
++        "Enable Java and native functions to get"
++        "multiple routed device ids"
++    bug: "367816690"
++}
+ 
+ # TODO remove
+ flag {
+-- 
+2.43.0
+

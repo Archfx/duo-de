@@ -1,0 +1,35 @@
+From a3fa8cd807debbbf56fd10b2124b36571372386c Mon Sep 17 00:00:00 2001
+From: Girish <girishshetty@google.com>
+Date: Fri, 22 Nov 2024 17:45:40 +0000
+Subject: [PATCH 331/436] codec_fwk: add codec availability support feature
+ flag
+
+Bug: 363282971
+Flag: android.media.codec.codec_availability_support
+Test: presubmit
+Change-Id: I2f5d622db937c8bc66754a8480b9f531ba64d7a5
+---
+ media/aconfig/codec_fwk.aconfig | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/media/aconfig/codec_fwk.aconfig b/media/aconfig/codec_fwk.aconfig
+index 96fb3e3e09..af82982e05 100644
+--- a/media/aconfig/codec_fwk.aconfig
++++ b/media/aconfig/codec_fwk.aconfig
+@@ -28,6 +28,13 @@ flag {
+   bug: "363282971"
+ }
+ 
++flag {
++  name: "codec_availability_support"
++  namespace: "codec_fwk"
++  description: "Feature flag for codec availability HAL API implementation"
++  bug: "363282971"
++}
++
+ flag {
+   name: "codec_buffer_state_cleanup"
+   namespace: "codec_fwk"
+-- 
+2.43.0
+

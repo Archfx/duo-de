@@ -1,0 +1,49 @@
+From 0f58671cdb0f479ab62a7605428c2712cda88569 Mon Sep 17 00:00:00 2001
+From: Eric Laurent <elaurent@google.com>
+Date: Thu, 5 Dec 2024 15:11:40 +0000
+Subject: [PATCH 403/436] mediautils::SetviceSingleton : fix missing
+ onServiceDied notification
+
+If after the native service dies, an explicit request to get the service
+happens before the death notification has been processed, the client
+onServiceDied callback will never be called.
+In the case of audioservice, this prevents proper reinitialization of
+audio policy manager state.
+
+Fixed by forcing an onServiceDied callback on previous service instance
+in the RequestServiceManagerCallback if the new service is created with
+a non null previous service instance.
+
+Bug: 378032953
+Test: kill native audioserver and monitor proper execution of audio
+policy manager initialization
+Flag: EXEMPT bug fix
+
+Change-Id: Ida06566f5275587b9ce0c6cf1c18cf2a538dafbd
+---
+ media/utils/include/mediautils/ServiceSingleton.h | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/media/utils/include/mediautils/ServiceSingleton.h b/media/utils/include/mediautils/ServiceSingleton.h
+index fe8e9f2a8c..f3208cb052 100644
+--- a/media/utils/include/mediautils/ServiceSingleton.h
++++ b/media/utils/include/mediautils/ServiceSingleton.h
+@@ -299,9 +299,15 @@ private:
+                     audio_utils::unique_lock ul(mMutex);
+                     auto originalService = std::get<BaseInterfaceType<Service>>(mService);
+                     if (originalService != service) {
++                        if (originalService != nullptr) {
++                            invalidateService_l<Service>();
++                        }
+                         mService = service;
+                         mValid = true;
+                         ul.unlock();
++                        if (originalService != nullptr) {
++                            traits->onServiceDied(interfaceFromBase<Service>(originalService));
++                        }
+                         traits->onNewService(service);
+                         ul.lock();
+                         setDeathNotifier_l<Service>(service);
+-- 
+2.43.0
+

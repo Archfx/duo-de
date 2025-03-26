@@ -1,0 +1,48 @@
+From b6bad9b230be9d118fd47b02f62deda7d698783b Mon Sep 17 00:00:00 2001
+From: James Zern <jzern@google.com>
+Date: Fri, 11 Oct 2024 11:13:40 -0700
+Subject: [PATCH 119/436] C2SoftAomEnc: set AOME_SET_MAX_INTRA_BITRATE_PCT
+
+to 300 for CBR, 450 otherwise. This matches the setting in WebRTC [1]
+(where this wrapper's settings are derived from) for CBR and prevents
+overshoot in CTS tests that set a low (forced) key frame interval and
+use VBR.
+
+[1]: https://webrtc.googlesource.com/src/+/bd42ee87507e8b55a37ec89e7e659a249825f69a/modules/video_coding/codecs/av1/libaom_av1_encoder.cc#289
+
+Bug: 369325415
+Test: (komodo) atest \
+  MctsMediaCodecTestCases:android.media.codec.cts.VideoCodecTest#testBasic \
+  -- \
+  --module-arg MctsMediaCodecTestCases:instrumentation-arg:codec-prefix:=c2.android.av1.encoder
+Change-Id: Id0dbeda7cfec33ef0fa438a7a2b0453c0c504961
+---
+ media/codec2/components/aom/C2SoftAomEnc.cpp | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/media/codec2/components/aom/C2SoftAomEnc.cpp b/media/codec2/components/aom/C2SoftAomEnc.cpp
+index 722b13a568..93009c4b33 100644
+--- a/media/codec2/components/aom/C2SoftAomEnc.cpp
++++ b/media/codec2/components/aom/C2SoftAomEnc.cpp
+@@ -466,6 +466,7 @@ static int MapC2ComplexityToAOMSpeed (int c2Complexity) {
+ 
+ aom_codec_err_t C2SoftAomEnc::setupCodecParameters() {
+     aom_codec_err_t codec_return = AOM_CODEC_OK;
++    const int maxIntraBitratePct = mBitrateControlMode == AOM_CBR ? 300 : 450;
+ 
+     codec_return = aom_codec_control(mCodecContext, AV1E_SET_TARGET_SEQ_LEVEL_IDX, mAV1EncLevel);
+     if (codec_return != AOM_CODEC_OK) goto BailOut;
+@@ -492,6 +493,10 @@ aom_codec_err_t C2SoftAomEnc::setupCodecParameters() {
+     codec_return = aom_codec_control(mCodecContext, AV1E_SET_AQ_MODE, 3);
+     if (codec_return != AOM_CODEC_OK) goto BailOut;
+ 
++    codec_return = aom_codec_control(mCodecContext, AOME_SET_MAX_INTRA_BITRATE_PCT,
++                                     maxIntraBitratePct);
++    if (codec_return != AOM_CODEC_OK) goto BailOut;
++
+     codec_return = aom_codec_control(mCodecContext, AV1E_SET_COEFF_COST_UPD_FREQ, 3);
+     if (codec_return != AOM_CODEC_OK) goto BailOut;
+ 
+-- 
+2.43.0
+

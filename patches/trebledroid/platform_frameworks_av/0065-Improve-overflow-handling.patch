@@ -1,0 +1,706 @@
+From a19e9176c74af40f258058e4cbb679eb5eafb77c Mon Sep 17 00:00:00 2001
+From: Haripriya <deshmukhh@google.com>
+Date: Tue, 13 Aug 2024 11:01:43 +0000
+Subject: [PATCH 065/436] Improve overflow handling
+
+Bug: 357558004
+Test: atest CtsMediaV2TestCases
+Test: atest MctsMediaV2TestCases
+Test: atest VtsHalMediaC2V1_0TargetAudioDecTest
+Test: atest VtsHalMediaC2V1_0TargetAudioEncTest
+Test: atest AmrnbDecoderTest AmrnbEncoderTest
+Test: atest AmrwbDecoderTest AmrwbEncoderTest
+
+Change-Id: I4e1d99b338a327723c7a5d4c3e26383f335a198c
+---
+ .../common/include/basic_op_c_equivalent.h    |  7 +-
+ .../module/codecs/amrnb/common/src/az_lsp.cpp |  3 -
+ .../module/codecs/amrnb/common/src/l_abs.cpp  | 10 ++-
+ .../module/codecs/amrnb/common/src/lsp_az.cpp |  4 +-
+ .../module/codecs/amrnb/common/src/norm_l.cpp |  3 +-
+ .../module/codecs/amrnb/common/src/residu.cpp | 37 +++++++----
+ media/module/codecs/amrnb/common/src/sub.cpp  |  3 -
+ .../codecs/amrnb/common/src/syn_filt.cpp      |  3 -
+ .../module/codecs/amrnb/enc/src/autocorr.cpp  | 10 ++-
+ media/module/codecs/amrnb/enc/src/c2_9pf.cpp  |  4 +-
+ media/module/codecs/amrnb/enc/src/c3_14pf.cpp |  4 +-
+ media/module/codecs/amrnb/enc/src/c4_17pf.cpp | 10 ++-
+ media/module/codecs/amrnb/enc/src/cor_h_x.cpp | 22 +++++--
+ .../module/codecs/amrnb/enc/src/cor_h_x2.cpp  |  2 +-
+ media/module/codecs/amrnb/enc/src/dtx_enc.cpp |  4 +-
+ .../module/codecs/amrnb/enc/src/levinson.cpp  |  2 +-
+ .../module/codecs/amrnb/enc/src/pitch_fr.cpp  | 23 ++++---
+ .../module/codecs/amrnb/enc/src/pitch_ol.cpp  |  4 +-
+ .../module/codecs/amrnb/enc/src/pre_proc.cpp  |  2 +-
+ media/module/codecs/amrnb/enc/src/s10_8pf.cpp |  8 ++-
+ .../module/codecs/amrnb/enc/src/set_sign.cpp  |  4 +-
+ .../module/codecs/amrnb/enc/src/spstproc.cpp  |  7 +-
+ media/module/codecs/amrwb/enc/src/az_isp.c    |  8 +--
+ media/module/codecs/amrwb/enc/src/syn_filt.c  | 64 +++++++++----------
+ 24 files changed, 147 insertions(+), 101 deletions(-)
+
+diff --git a/media/module/codecs/amrnb/common/include/basic_op_c_equivalent.h b/media/module/codecs/amrnb/common/include/basic_op_c_equivalent.h
+index 881762128f..64fdfb979f 100644
+--- a/media/module/codecs/amrnb/common/include/basic_op_c_equivalent.h
++++ b/media/module/codecs/amrnb/common/include/basic_op_c_equivalent.h
+@@ -115,7 +115,6 @@ extern "C"
+      Returns:
+         L_sum = 32-bit sum of L_var1 and L_var2 (Word32)
+     */
+-    __attribute__((no_sanitize("integer")))
+     static inline Word32 L_add(Word32 L_var1, Word32 L_var2, Flag *pOverflow)
+     {
+         Word32 L_sum;
+@@ -454,7 +453,8 @@ extern "C"
+     {
+         Word32 result;
+ 
+-        result = L_var3 + L_var1 * L_var2;
++        __builtin_mul_overflow(L_var1, L_var2, &result);
++        __builtin_add_overflow(L_var3, result, &result);
+ 
+         return result;
+     }
+@@ -463,7 +463,8 @@ extern "C"
+     {
+         Word32 result;
+ 
+-        result = L_var3 - L_var1 * L_var2;
++        __builtin_mul_overflow(L_var1, L_var2, &result);
++        __builtin_sub_overflow(L_var3, result, &result);
+ 
+         return result;
+     }
+diff --git a/media/module/codecs/amrnb/common/src/az_lsp.cpp b/media/module/codecs/amrnb/common/src/az_lsp.cpp
+index f3098f5d97..a19ddbf766 100644
+--- a/media/module/codecs/amrnb/common/src/az_lsp.cpp
++++ b/media/module/codecs/amrnb/common/src/az_lsp.cpp
+@@ -237,9 +237,6 @@ static Word16 Chebps (Word16 x,
+ 
+ ------------------------------------------------------------------------------
+ */
+-#ifdef __clang__
+-__attribute__((no_sanitize("integer")))
+-#endif
+ static Word16 Chebps(Word16 x,
+                      Word16 f[], /* (n) */
+                      Word16 n,
+diff --git a/media/module/codecs/amrnb/common/src/l_abs.cpp b/media/module/codecs/amrnb/common/src/l_abs.cpp
+index 7e0ae990b6..b13a40a58a 100644
+--- a/media/module/codecs/amrnb/common/src/l_abs.cpp
++++ b/media/module/codecs/amrnb/common/src/l_abs.cpp
+@@ -186,8 +186,12 @@ Word32 L_abs(Word32 L_var1)
+     ; Function body here
+     ----------------------------------------------------------------------------*/
+ 
+-    Word32 y = L_var1 - (L_var1 < 0);
+-    y = y ^(y >> 31);
+-    return (y);
++    if (L_var1 >= 0) return L_var1;
++    if (L_var1 != 0x80000000) return -L_var1;
++    // abs(0x80000000) can not be represented in Word32.
++    // we choose to return the closest value we can -- 0x7fffffff
++    // This is acceptable because it keeps the result within the valid 32-bit signed integer range,
++    // consistent with other overflow handling in the code. such as amrnb/enc/src/l_negate.cpp.
++    return 0x7FFFFFFF;
+ 
+ }
+diff --git a/media/module/codecs/amrnb/common/src/lsp_az.cpp b/media/module/codecs/amrnb/common/src/lsp_az.cpp
+index 495359fe7e..bb8a34d76c 100644
+--- a/media/module/codecs/amrnb/common/src/lsp_az.cpp
++++ b/media/module/codecs/amrnb/common/src/lsp_az.cpp
+@@ -281,8 +281,8 @@ static void Get_lsp_pol(
+             t0 += ((Word32)lo * *lsp) >> 15;
+ 
+             *(f) +=  *(f - 2);          /*      *f += f[-2]      */
+-            *(f--) -=  t0 << 2;         /*      *f -= t0         */
+-
++            __builtin_sub_overflow(*(f), (t0 << 2), f);   /*      *f -= t0         */
++            f--;
+         }
+ 
+         *f -= (Word32)(*lsp++) << 10;
+diff --git a/media/module/codecs/amrnb/common/src/norm_l.cpp b/media/module/codecs/amrnb/common/src/norm_l.cpp
+index d8d12599bf..b24ebda1d9 100644
+--- a/media/module/codecs/amrnb/common/src/norm_l.cpp
++++ b/media/module/codecs/amrnb/common/src/norm_l.cpp
+@@ -211,8 +211,7 @@ Word16 norm_l(Word32 L_var1)
+     if (L_var1)
+     {
+ 
+-        Word32 y = L_var1 - (L_var1 < 0);
+-        L_var1 = y ^(y >> 31);
++        L_var1 = L_abs(L_var1);
+ 
+ 
+         while (!(0x40000000L & L_var1))
+diff --git a/media/module/codecs/amrnb/common/src/residu.cpp b/media/module/codecs/amrnb/common/src/residu.cpp
+index 2ad132fe6b..9b077e2c08 100644
+--- a/media/module/codecs/amrnb/common/src/residu.cpp
++++ b/media/module/codecs/amrnb/common/src/residu.cpp
+@@ -227,22 +227,35 @@ void Residu(
+         p_input3 = p_input_ptr--;
+         p_input4 = p_input_ptr--;
+ 
++        Word32 tmp;
+         for (j = M >> 1; j != 0; j--)
+         {
+-            s1 += ((Word32) * (p_coef) * *(p_input1++));
+-            s2 += ((Word32) * (p_coef) * *(p_input2++));
+-            s3 += ((Word32) * (p_coef) * *(p_input3++));
+-            s4 += ((Word32) * (p_coef--) * *(p_input4++));
+-            s1 += ((Word32) * (p_coef) * *(p_input1++));
+-            s2 += ((Word32) * (p_coef) * *(p_input2++));
+-            s3 += ((Word32) * (p_coef) * *(p_input3++));
+-            s4 += ((Word32) * (p_coef--) * *(p_input4++));
++            __builtin_mul_overflow(*p_coef, *(p_input1++), &tmp);
++            __builtin_add_overflow(s1, tmp, &s1);
++            __builtin_mul_overflow(*p_coef, *(p_input2++), &tmp);
++            __builtin_add_overflow(s2, tmp, &s2);
++            __builtin_mul_overflow(*p_coef, *(p_input3++), &tmp);
++            __builtin_add_overflow(s3, tmp, &s3);
++            __builtin_mul_overflow(*(p_coef--), *(p_input4++), &tmp);
++            __builtin_add_overflow(s4, tmp, &s4);
++            __builtin_mul_overflow(*p_coef, *(p_input1++), &tmp);
++            __builtin_add_overflow(s1, tmp, &s1);
++            __builtin_mul_overflow(*p_coef, *(p_input2++), &tmp);
++            __builtin_add_overflow(s2, tmp, &s2);
++            __builtin_mul_overflow(*p_coef, *(p_input3++), &tmp);
++            __builtin_add_overflow(s3, tmp, &s3);
++            __builtin_mul_overflow(*(p_coef--), *(p_input4++), &tmp);
++            __builtin_add_overflow(s4, tmp, &s4);
+         }
+ 
+-        s1 += (((Word32) * (p_coef)) * *(p_input1));
+-        s2 += (((Word32) * (p_coef)) * *(p_input2));
+-        s3 += (((Word32) * (p_coef)) * *(p_input3));
+-        s4 += (((Word32) * (p_coef)) * *(p_input4));
++        __builtin_mul_overflow(*p_coef, *(p_input1), &tmp);
++        __builtin_add_overflow(s1, tmp, &s1);
++        __builtin_mul_overflow(*p_coef, *(p_input2), &tmp);
++        __builtin_add_overflow(s2, tmp, &s2);
++        __builtin_mul_overflow(*p_coef, *(p_input3), &tmp);
++        __builtin_add_overflow(s3, tmp, &s3);
++        __builtin_mul_overflow(*p_coef, *(p_input4), &tmp);
++        __builtin_add_overflow(s4, tmp, &s4);
+ 
+         *(p_residual_ptr--) = (Word16)(s1 >> 12);
+         *(p_residual_ptr--) = (Word16)(s2 >> 12);
+diff --git a/media/module/codecs/amrnb/common/src/sub.cpp b/media/module/codecs/amrnb/common/src/sub.cpp
+index b956912e13..d9361280f6 100644
+--- a/media/module/codecs/amrnb/common/src/sub.cpp
++++ b/media/module/codecs/amrnb/common/src/sub.cpp
+@@ -187,9 +187,6 @@ terms listed above has been obtained from the copyright holder.
+ ; FUNCTION CODE
+ ----------------------------------------------------------------------------*/
+ 
+-#ifdef __clang__
+-__attribute__((no_sanitize("integer")))
+-#endif
+ Word16 sub(Word16 var1, Word16 var2, Flag *pOverflow)
+ {
+ 
+diff --git a/media/module/codecs/amrnb/common/src/syn_filt.cpp b/media/module/codecs/amrnb/common/src/syn_filt.cpp
+index 36c1d845ff..82770f15db 100644
+--- a/media/module/codecs/amrnb/common/src/syn_filt.cpp
++++ b/media/module/codecs/amrnb/common/src/syn_filt.cpp
+@@ -245,9 +245,6 @@ void Syn_filt (
+ 
+ ------------------------------------------------------------------------------
+ */
+-#ifdef __clang__
+-__attribute__((no_sanitize("integer")))
+-#endif
+ void Syn_filt(
+     Word16 a[],     /* (i)   : a[M+1] prediction coefficients   (M=10)  */
+     Word16 x[],     /* (i)   : input signal                             */
+diff --git a/media/module/codecs/amrnb/enc/src/autocorr.cpp b/media/module/codecs/amrnb/enc/src/autocorr.cpp
+index c71811d639..a078f5a04f 100644
+--- a/media/module/codecs/amrnb/enc/src/autocorr.cpp
++++ b/media/module/codecs/amrnb/enc/src/autocorr.cpp
+@@ -312,6 +312,7 @@ Word16 Autocorr(
+ 
+     Word16 y[L_WINDOW];
+     Word32 sum;
++    Word32 mul;
+     Word16 overfl_shft;
+ 
+ 
+@@ -343,7 +344,8 @@ Word16 Autocorr(
+         temp = (amrnb_fxp_mac_16_by_16bb((Word32) * (p_x++), (Word32) * (p_wind++), 0x04000)) >> 15;
+         *(p_y++) = temp;
+ 
+-        sum += ((Word32)temp * temp) << 1;
++        __builtin_mul_overflow(temp, temp, &mul);
++        __builtin_add_overflow(sum, mul << 1, &sum);
+         if (sum < 0)
+         {
+             /*
+@@ -395,10 +397,12 @@ Word16 Autocorr(
+         {
+             temp = *p_y >> 2;
+             *(p_y++) = temp;
+-            sum += ((Word32)temp * temp) << 1;
++            __builtin_mul_overflow(temp, temp, &mul);
++            __builtin_add_overflow(sum, mul << 1, &sum);
+             temp = *p_y >> 2;
+             *(p_y++) = temp;
+-            sum += ((Word32)temp * temp) << 1;
++            __builtin_mul_overflow(temp, temp, &mul);
++            __builtin_add_overflow(sum, mul << 1, &sum);
+         }
+         if (sum > 0)
+         {
+diff --git a/media/module/codecs/amrnb/enc/src/c2_9pf.cpp b/media/module/codecs/amrnb/enc/src/c2_9pf.cpp
+index b211032acf..56b4fb863a 100644
+--- a/media/module/codecs/amrnb/enc/src/c2_9pf.cpp
++++ b/media/module/codecs/amrnb/enc/src/c2_9pf.cpp
+@@ -610,6 +610,7 @@ extern "C"
+         Word32 alp1;
+         Word16 i;
+         Word32 L_temp;
++        Word32 mul;
+         Word16 *p_codvec = &codvec[0];
+ 
+         OSCL_UNUSED_ARG(pOverflow);
+@@ -693,7 +694,8 @@ extern "C"
+                     L_temp = ((Word32) alp * sq1) << 1;
+ 
+                     /* s = L_msu(L_temp, sq, alp_16, pOverflow); */
+-                    s = L_temp - (((Word32) sq * alp_16) << 1);
++                    __builtin_mul_overflow(sq, alp_16, &mul);
++                    __builtin_sub_overflow(L_temp, (mul << 1), &s);
+ 
+                     if (s > 0)
+                     {
+diff --git a/media/module/codecs/amrnb/enc/src/c3_14pf.cpp b/media/module/codecs/amrnb/enc/src/c3_14pf.cpp
+index 58ab2fa0e8..bb4fe36f4e 100644
+--- a/media/module/codecs/amrnb/enc/src/c3_14pf.cpp
++++ b/media/module/codecs/amrnb/enc/src/c3_14pf.cpp
+@@ -403,6 +403,7 @@ static void search_3i40(
+     Word16 *p_codvec = &codvec[0];
+ 
+     Word32 s;
++    Word32 mul;
+     Word32 alp0;
+     Word32 alp1;
+ 
+@@ -487,7 +488,8 @@ static void search_3i40(
+                             s = ((Word32) alp * sq1) << 1;
+ 
+                             /* s = L_msu(s, sq, alp_16, pOverflow); */
+-                            s -= (((Word32) sq * alp_16) << 1);
++                            __builtin_mul_overflow(sq, alp_16, &mul);
++                            __builtin_sub_overflow(s, (mul << 1), &s);
+ 
+                             if (s > 0)
+                             {
+diff --git a/media/module/codecs/amrnb/enc/src/c4_17pf.cpp b/media/module/codecs/amrnb/enc/src/c4_17pf.cpp
+index d52b43b8b9..062ee5ac34 100644
+--- a/media/module/codecs/amrnb/enc/src/c4_17pf.cpp
++++ b/media/module/codecs/amrnb/enc/src/c4_17pf.cpp
+@@ -416,6 +416,7 @@ extern "C"
+         Word16 *p_codvec = &codvec[0];
+ 
+         Word32 s;
++        Word32 mul;
+         Word32 alp0;
+         Word32 alp1;
+ 
+@@ -497,7 +498,8 @@ extern "C"
+                             s = ((Word32) alp * sq1) << 1;
+ 
+                             /* s = L_msu(s, sq, alp_16, pOverflow); */
+-                            s -= (((Word32) sq * alp_16) << 1);
++                            __builtin_mul_overflow(sq, alp_16, &mul);
++                            __builtin_sub_overflow(s, (mul << 1), &s);
+ 
+                             if (s > 0)
+                             {
+@@ -610,7 +612,8 @@ extern "C"
+                             s = ((Word32) alp * sq1) << 1;
+ 
+                             /* s = L_msu(s, sq, alp_16, pOverflow); */
+-                            s -= (((Word32) sq * alp_16) << 1);
++                            __builtin_mul_overflow(sq, alp_16, &mul);
++                            __builtin_sub_overflow(s, (mul << 1), &s);
+ 
+                             if (s > 0)
+                             {
+@@ -630,7 +633,8 @@ extern "C"
+                         s = ((Word32) alpk * sq) << 1;
+ 
+                         /* s = L_msu(s, psk, alp, pOverflow); */
+-                        s -= (((Word32) psk * alp) << 1);
++                        __builtin_mul_overflow(psk, alp, &mul);
++                        __builtin_sub_overflow(s, (mul << 1), &s);
+ 
+                         if (s > 0)
+                         {
+diff --git a/media/module/codecs/amrnb/enc/src/cor_h_x.cpp b/media/module/codecs/amrnb/enc/src/cor_h_x.cpp
+index c25c026a6e..398c71fd70 100644
+--- a/media/module/codecs/amrnb/enc/src/cor_h_x.cpp
++++ b/media/module/codecs/amrnb/enc/src/cor_h_x.cpp
+@@ -254,6 +254,7 @@ void cor_h_x(
+     Word16 k;
+ 
+     Word32 s;
++    Word32 mul;
+     Word32 y32[L_CODE];
+     Word32 max;
+     Word32 tot;
+@@ -275,15 +276,19 @@ void cor_h_x(
+ 
+             for (j = (L_CODE - i - 1) >> 1; j != 0; j--)
+             {
+-                s += ((Word32) * (p_x++) * *(p_ptr++)) << 1;
+-                s += ((Word32) * (p_x++) * *(p_ptr++)) << 1;
++                __builtin_mul_overflow(*(p_x++), *(p_ptr++), &mul);
++                __builtin_add_overflow(s, mul << 1, &s);
++                __builtin_mul_overflow(*(p_x++), *(p_ptr++), &mul);
++                __builtin_add_overflow(s, mul << 1, &s);
+             }
+ 
+-            s += ((Word32) * (p_x++) * *(p_ptr++)) << 1;
++            __builtin_mul_overflow(*(p_x++), *(p_ptr++), &mul);
++            __builtin_add_overflow(s, mul << 1, &s);
+ 
+             if (!((L_CODE - i) & 1))    /* if even number of iterations */
+             {
+-                s += ((Word32) * (p_x++) * *(p_ptr++)) << 1;
++                __builtin_mul_overflow(*(p_x++), *(p_ptr++), &mul);
++                __builtin_add_overflow(s, mul << 1, &s);
+             }
+ 
+             y32[i] = s;
+@@ -299,7 +304,7 @@ void cor_h_x(
+             }
+         }
+ 
+-        tot += (max >> 1);
++        __builtin_add_overflow(tot, (max >> 1), &tot);
+     }
+ 
+ 
+@@ -310,10 +315,13 @@ void cor_h_x(
+ 
+     for (i = L_CODE >> 1; i != 0; i--)
+     {
++        Word32 result;
+         s = L_shl(*(p_y32++), j, pOverflow);
+-        *(p_ptr++) = (s + 0x00008000) >> 16;
++        __builtin_add_overflow(s, 0x00008000, &result);
++        *(p_ptr++) = result >> 16;
+         s = L_shl(*(p_y32++), j, pOverflow);
+-        *(p_ptr++) = (s + 0x00008000) >> 16;
++        __builtin_add_overflow(s, 0x00008000, &result);
++        *(p_ptr++) = result >> 16;
+     }
+ 
+     return;
+diff --git a/media/module/codecs/amrnb/enc/src/cor_h_x2.cpp b/media/module/codecs/amrnb/enc/src/cor_h_x2.cpp
+index e32eb4ac6c..80ebb73a7e 100644
+--- a/media/module/codecs/amrnb/enc/src/cor_h_x2.cpp
++++ b/media/module/codecs/amrnb/enc/src/cor_h_x2.cpp
+@@ -268,7 +268,7 @@ void cor_h_x2(
+                 max = s;
+             }
+         }
+-        tot = (tot + (max >> 1));
++        __builtin_add_overflow(tot, (max >> 1), &tot);
+     }
+ 
+     j = sub(norm_l(tot), sf, pOverflow);
+diff --git a/media/module/codecs/amrnb/enc/src/dtx_enc.cpp b/media/module/codecs/amrnb/enc/src/dtx_enc.cpp
+index 2ccb777622..0d56c9bfd2 100644
+--- a/media/module/codecs/amrnb/enc/src/dtx_enc.cpp
++++ b/media/module/codecs/amrnb/enc/src/dtx_enc.cpp
+@@ -945,6 +945,7 @@ void dtx_buffer(dtx_encState *st,   /* i/o : State struct                    */
+ 
+     Word16 i;
+     Word32 L_frame_en;
++    Word32 mul;
+     Word32 L_temp;
+     Word16 log_en_e;
+     Word16 log_en_m;
+@@ -967,7 +968,8 @@ void dtx_buffer(dtx_encState *st,   /* i/o : State struct                    */
+ 
+     for (i = L_FRAME; i != 0; i--)
+     {
+-        L_frame_en += (((Word32) * p_speech) * *(p_speech)) << 1;
++        __builtin_mul_overflow(*p_speech, *p_speech, &mul);
++        __builtin_add_overflow(L_frame_en, mul << 1, &L_frame_en);
+         p_speech++;
+         if (L_frame_en < 0)
+         {
+diff --git a/media/module/codecs/amrnb/enc/src/levinson.cpp b/media/module/codecs/amrnb/enc/src/levinson.cpp
+index 29cdac68a5..83dd81e9c3 100644
+--- a/media/module/codecs/amrnb/enc/src/levinson.cpp
++++ b/media/module/codecs/amrnb/enc/src/levinson.cpp
+@@ -731,7 +731,7 @@ Word16 Levinson(
+         t0 = t0 << 5;
+ 
+         t1 = ((Word32) * (Rh + i) << 16) + ((Word32)(*(Rl + i)) << 1);
+-        t0 += t1;
++        __builtin_add_overflow(t0, t1, &t0);
+ 
+         /* K = -t0 / Alpha */
+ 
+diff --git a/media/module/codecs/amrnb/enc/src/pitch_fr.cpp b/media/module/codecs/amrnb/enc/src/pitch_fr.cpp
+index 584f79b727..ab0a221714 100644
+--- a/media/module/codecs/amrnb/enc/src/pitch_fr.cpp
++++ b/media/module/codecs/amrnb/enc/src/pitch_fr.cpp
+@@ -326,6 +326,7 @@ static void Norm_Corr(Word16 exc[],
+     Word16 norm_h;
+     Word16 norm_l;
+     Word32 s;
++    Word32 mul;
+     Word32 s2;
+     Word16 excf[L_SUBFR];
+     Word16 scaling;
+@@ -353,10 +354,12 @@ static void Norm_Corr(Word16 exc[],
+     {
+         temp = *(p_excf++);
+         *(p_s_excf++) = temp >> 2;
+-        s += (Word32) temp * temp;
++        __builtin_mul_overflow(temp, temp, &mul);
++        __builtin_add_overflow(s, mul, &s);
+         temp = *(p_excf++);
+         *(p_s_excf++) = temp >> 2;
+-        s += (Word32) temp * temp;
++        __builtin_mul_overflow(temp, temp, &mul);
++        __builtin_add_overflow(s, mul, &s);
+     }
+ 
+ 
+@@ -387,20 +390,24 @@ static void Norm_Corr(Word16 exc[],
+ 
+         while (j--)
+         {
+-            s  += (Word32) * (p_x++) * *(p_s_excf);
+-            s2 += ((Word32)(*(p_s_excf)) * (*(p_s_excf)));
++            __builtin_mul_overflow(*(p_x++), *p_s_excf, &mul);
++            __builtin_add_overflow(s, mul, &s);
++            __builtin_mul_overflow(*p_s_excf, *p_s_excf, &mul);
++            __builtin_add_overflow(s2, mul, &s2);
+             p_s_excf++;
+-            s  += (Word32) * (p_x++) * *(p_s_excf);
+-            s2 += ((Word32)(*(p_s_excf)) * (*(p_s_excf)));
++            __builtin_mul_overflow(*(p_x++), *p_s_excf, &mul);
++            __builtin_add_overflow(s, mul, &s);
++            __builtin_mul_overflow(*p_s_excf, *p_s_excf, &mul);
++            __builtin_add_overflow(s2, mul, &s2);
+             p_s_excf++;
+         }
+ 
+         s2     = s2 << 1;
+         s2     = Inv_sqrt(s2, pOverflow);
+         norm_h = (Word16)(s2 >> 16);
+-        norm_l = (Word16)((s2 >> 1) - (norm_h << 15));
++        __builtin_sub_overflow((s2 >> 1), (norm_h << 15), &norm_l);
+         corr_h = (Word16)(s >> 15);
+-        corr_l = (Word16)((s) - (corr_h << 15));
++        __builtin_sub_overflow(s, (corr_h << 15), &corr_l);
+ 
+         /* Normalize correlation = correlation * (1/sqrt(energy)) */
+ 
+diff --git a/media/module/codecs/amrnb/enc/src/pitch_ol.cpp b/media/module/codecs/amrnb/enc/src/pitch_ol.cpp
+index c039bb041d..0e4b74b271 100644
+--- a/media/module/codecs/amrnb/enc/src/pitch_ol.cpp
++++ b/media/module/codecs/amrnb/enc/src/pitch_ol.cpp
+@@ -959,6 +959,7 @@ Word16 Pitch_ol(       /* o   : open loop pitch lag                         */
+     Word16 p_max3;
+     Word16 scal_flag = 0;
+     Word32 t0;
++    Word32 mul;
+ 
+ #ifdef VAD2
+     Word32 r01;
+@@ -1002,7 +1003,8 @@ Word16 Pitch_ol(       /* o   : open loop pitch lag                         */
+ 
+     for (i = -pit_max; i < L_frame; i++)
+     {
+-        t0 += (((Word32) * (p_signal)) * *(p_signal)) << 1;
++        __builtin_mul_overflow(*p_signal, *p_signal, &mul);
++        __builtin_add_overflow(t0, mul << 1, &t0);
+         p_signal++;
+         if (t0 < 0)
+         {
+diff --git a/media/module/codecs/amrnb/enc/src/pre_proc.cpp b/media/module/codecs/amrnb/enc/src/pre_proc.cpp
+index 042920e1cf..0e2be41b35 100644
+--- a/media/module/codecs/amrnb/enc/src/pre_proc.cpp
++++ b/media/module/codecs/amrnb/enc/src/pre_proc.cpp
+@@ -576,7 +576,7 @@ void Pre_Process(
+         *(p_signal++) = (Word16)((L_tmp + 0x0000800L) >> 12);
+ 
+         st->y1_hi = (Word16)(L_tmp >> 12);
+-        st->y1_lo = (Word16)((L_tmp << 3) - ((Word32)(st->y1_hi) << 15));
++        __builtin_sub_overflow((Word16)(L_tmp << 3), (st->y1_hi) << 15, &st->y1_lo);
+ 
+     }
+ 
+diff --git a/media/module/codecs/amrnb/enc/src/s10_8pf.cpp b/media/module/codecs/amrnb/enc/src/s10_8pf.cpp
+index 352b611447..97d0318160 100644
+--- a/media/module/codecs/amrnb/enc/src/s10_8pf.cpp
++++ b/media/module/codecs/amrnb/enc/src/s10_8pf.cpp
+@@ -746,11 +746,13 @@ void search_10and8i40(
+ 
+             for (i5 = ipos[5]; i5 < L_CODE; i5 += step)
+             {
+-                ps2 = ps1 + *(p_temp1++);
++                __builtin_add_overflow(ps1, *(p_temp1++), &ps2);
+ 
+-                alp2 = alp1 + ((Word32) * (p_temp2 + i5) << 12);
++                __builtin_add_overflow(alp1, *(p_temp2 + i5) << 12, &alp2);
+ 
+-                alp_16 = (Word16)((alp2 + ((Word32) * (p_temp1++) << 14)) >> 16);
++                Word32 result;
++                __builtin_add_overflow(alp2, *(p_temp1++) << 14, &result);
++                alp_16 = (Word16)(result >> 16);
+                 sq2 = (Word16)(((Word32) ps2 * ps2) >> 15);
+ 
+                 if (((Word32) sq2 * alp) > ((Word32) sq * alp_16))
+diff --git a/media/module/codecs/amrnb/enc/src/set_sign.cpp b/media/module/codecs/amrnb/enc/src/set_sign.cpp
+index fa43f78a46..55658a481e 100644
+--- a/media/module/codecs/amrnb/enc/src/set_sign.cpp
++++ b/media/module/codecs/amrnb/enc/src/set_sign.cpp
+@@ -505,6 +505,7 @@ void set_sign12k2(
+     Word16 en[L_CODE];                  /* correlation vector */
+     Word32 s;
+     Word32 t;
++    Word32 mul;
+     Word32 L_temp;
+     Word16 *p_cn;
+     Word16 *p_dn;
+@@ -525,7 +526,8 @@ void set_sign12k2(
+         val = *(p_cn++);
+         s = L_mac(s, val, val, pOverflow);
+         val = *(p_dn++);
+-        t += ((Word32) val * val) << 1;
++        __builtin_mul_overflow(val, val, &mul);
++        __builtin_add_overflow(t, mul << 1, &t);
+     }
+     s = Inv_sqrt(s, pOverflow);
+     k_cn = (Word16)((L_shl(s, 5, pOverflow)) >> 16);
+diff --git a/media/module/codecs/amrnb/enc/src/spstproc.cpp b/media/module/codecs/amrnb/enc/src/spstproc.cpp
+index b9574aa793..5210a39339 100644
+--- a/media/module/codecs/amrnb/enc/src/spstproc.cpp
++++ b/media/module/codecs/amrnb/enc/src/spstproc.cpp
+@@ -192,6 +192,7 @@ void subframePostProc(
+     Word16 i;
+     Word16 j;
+     Word16 temp;
++    Word32 mul;
+     Word32 L_temp;
+     Word32 L_temp2;
+     Word16 tempShift;
+@@ -262,8 +263,10 @@ void subframePostProc(
+          */
+         L_temp     = ((Word32) * (p_exc++) * pitch_fac) << 1;
+         L_temp2    = ((Word32) * (p_exc--) * pitch_fac) << 1;
+-        L_temp    += ((Word32) * (p_code++) * gain_code) << 1;
+-        L_temp2   += ((Word32) * (p_code++) * gain_code) << 1;
++        __builtin_mul_overflow(*(p_code++), gain_code, &mul);
++        __builtin_add_overflow(L_temp, mul << 1, &L_temp);
++        __builtin_mul_overflow(*(p_code++), gain_code, &mul);
++        __builtin_add_overflow(L_temp2, mul << 1, &L_temp2);
+         L_temp   <<=  tempShift;
+         L_temp2  <<=  tempShift;
+         *(p_exc++) = (Word16)((L_temp  + 0x08000L) >> 16);
+diff --git a/media/module/codecs/amrwb/enc/src/az_isp.c b/media/module/codecs/amrwb/enc/src/az_isp.c
+index d7074f07e7..22a5c25bbf 100644
+--- a/media/module/codecs/amrwb/enc/src/az_isp.c
++++ b/media/module/codecs/amrwb/enc/src/az_isp.c
+@@ -248,10 +248,10 @@ static __inline Word16 Chebps2(Word16 x, Word16 f[], Word32 n)
+         b1_h = b0_h;
+     }
+ 
+-    t0 = ((b1_h * x)<<1) + (((b1_l * x)>>15)<<1);
+-    t0 += (b2_h * (-32768))<<1;             /* t0 = x*b1 - b2          */
+-    t0 -= (b2_l << 1);
+-    t0 += (f[n] << 12);                     /* t0 = x*b1 - b2 + f[i]/2 */
++    __builtin_add_overflow(((b1_h * x)<<1), (((b1_l * x)>>15)<<1), &t0);
++    __builtin_add_overflow(t0, (b2_h * (-32768))<<1, &t0);   /* t0 = x*b1 - b2          */
++    __builtin_sub_overflow(t0, (b2_l << 1), &t0);
++    __builtin_add_overflow(t0, (f[n] << 12), &t0);     /* t0 = x*b1 - b2 + f[i]/2 */
+ 
+     t0 = L_shl2(t0, 6);                     /* Q24 to Q30 with saturation */
+ 
+diff --git a/media/module/codecs/amrwb/enc/src/syn_filt.c b/media/module/codecs/amrwb/enc/src/syn_filt.c
+index 7eba12fdb6..40398f5a80 100644
+--- a/media/module/codecs/amrwb/enc/src/syn_filt.c
++++ b/media/module/codecs/amrwb/enc/src/syn_filt.c
+@@ -109,38 +109,38 @@ void Syn_filt_32(
+         p2 = &sig_lo[i - 1];
+         p3 = &sig_hi[i - 1];
+ 
+-        L_tmp  -= vo_mult32((*p2--), (*p1));
+-        L_tmp1 -= vo_mult32((*p3--), (*p1++));
+-        L_tmp  -= vo_mult32((*p2--), (*p1));
+-        L_tmp1 -= vo_mult32((*p3--), (*p1++));
+-        L_tmp  -= vo_mult32((*p2--), (*p1));
+-        L_tmp1 -= vo_mult32((*p3--), (*p1++));
+-        L_tmp  -= vo_mult32((*p2--), (*p1));
+-        L_tmp1 -= vo_mult32((*p3--), (*p1++));
+-        L_tmp  -= vo_mult32((*p2--), (*p1));
+-        L_tmp1 -= vo_mult32((*p3--), (*p1++));
+-        L_tmp  -= vo_mult32((*p2--), (*p1));
+-        L_tmp1 -= vo_mult32((*p3--), (*p1++));
+-        L_tmp  -= vo_mult32((*p2--), (*p1));
+-        L_tmp1 -= vo_mult32((*p3--), (*p1++));
+-        L_tmp  -= vo_mult32((*p2--), (*p1));
+-        L_tmp1 -= vo_mult32((*p3--), (*p1++));
+-        L_tmp  -= vo_mult32((*p2--), (*p1));
+-        L_tmp1 -= vo_mult32((*p3--), (*p1++));
+-        L_tmp  -= vo_mult32((*p2--), (*p1));
+-        L_tmp1 -= vo_mult32((*p3--), (*p1++));
+-        L_tmp  -= vo_mult32((*p2--), (*p1));
+-        L_tmp1 -= vo_mult32((*p3--), (*p1++));
+-        L_tmp  -= vo_mult32((*p2--), (*p1));
+-        L_tmp1 -= vo_mult32((*p3--), (*p1++));
+-        L_tmp  -= vo_mult32((*p2--), (*p1));
+-        L_tmp1 -= vo_mult32((*p3--), (*p1++));
+-        L_tmp  -= vo_mult32((*p2--), (*p1));
+-        L_tmp1 -= vo_mult32((*p3--), (*p1++));
+-        L_tmp  -= vo_mult32((*p2--), (*p1));
+-        L_tmp1 -= vo_mult32((*p3--), (*p1++));
+-        L_tmp  -= vo_mult32((*p2--), (*p1));
+-        L_tmp1 -= vo_mult32((*p3--), (*p1++));
++        __builtin_sub_overflow(L_tmp, vo_mult32((*p2--), (*p1)), &L_tmp);
++        __builtin_sub_overflow(L_tmp1, vo_mult32((*p3--), (*p1++)), &L_tmp1);
++        __builtin_sub_overflow(L_tmp, vo_mult32((*p2--), (*p1)), &L_tmp);
++        __builtin_sub_overflow(L_tmp1, vo_mult32((*p3--), (*p1++)), &L_tmp1);
++        __builtin_sub_overflow(L_tmp, vo_mult32((*p2--), (*p1)), &L_tmp);
++        __builtin_sub_overflow(L_tmp1, vo_mult32((*p3--), (*p1++)), &L_tmp1);
++        __builtin_sub_overflow(L_tmp, vo_mult32((*p2--), (*p1)), &L_tmp);
++        __builtin_sub_overflow(L_tmp1, vo_mult32((*p3--), (*p1++)), &L_tmp1);
++        __builtin_sub_overflow(L_tmp, vo_mult32((*p2--), (*p1)), &L_tmp);
++        __builtin_sub_overflow(L_tmp1, vo_mult32((*p3--), (*p1++)), &L_tmp1);
++        __builtin_sub_overflow(L_tmp, vo_mult32((*p2--), (*p1)), &L_tmp);
++        __builtin_sub_overflow(L_tmp1, vo_mult32((*p3--), (*p1++)), &L_tmp1);
++        __builtin_sub_overflow(L_tmp, vo_mult32((*p2--), (*p1)), &L_tmp);
++        __builtin_sub_overflow(L_tmp1, vo_mult32((*p3--), (*p1++)), &L_tmp1);
++        __builtin_sub_overflow(L_tmp, vo_mult32((*p2--), (*p1)), &L_tmp);
++        __builtin_sub_overflow(L_tmp1, vo_mult32((*p3--), (*p1++)), &L_tmp1);
++        __builtin_sub_overflow(L_tmp, vo_mult32((*p2--), (*p1)), &L_tmp);
++        __builtin_sub_overflow(L_tmp1, vo_mult32((*p3--), (*p1++)), &L_tmp1);
++        __builtin_sub_overflow(L_tmp, vo_mult32((*p2--), (*p1)), &L_tmp);
++        __builtin_sub_overflow(L_tmp1, vo_mult32((*p3--), (*p1++)), &L_tmp1);
++        __builtin_sub_overflow(L_tmp, vo_mult32((*p2--), (*p1)), &L_tmp);
++        __builtin_sub_overflow(L_tmp1, vo_mult32((*p3--), (*p1++)), &L_tmp1);
++        __builtin_sub_overflow(L_tmp, vo_mult32((*p2--), (*p1)), &L_tmp);
++        __builtin_sub_overflow(L_tmp1, vo_mult32((*p3--), (*p1++)), &L_tmp1);
++        __builtin_sub_overflow(L_tmp, vo_mult32((*p2--), (*p1)), &L_tmp);
++        __builtin_sub_overflow(L_tmp1, vo_mult32((*p3--), (*p1++)), &L_tmp1);
++        __builtin_sub_overflow(L_tmp, vo_mult32((*p2--), (*p1)), &L_tmp);
++        __builtin_sub_overflow(L_tmp1, vo_mult32((*p3--), (*p1++)), &L_tmp1);
++        __builtin_sub_overflow(L_tmp, vo_mult32((*p2--), (*p1)), &L_tmp);
++        __builtin_sub_overflow(L_tmp1, vo_mult32((*p3--), (*p1++)), &L_tmp1);
++        __builtin_sub_overflow(L_tmp, vo_mult32((*p2--), (*p1)), &L_tmp);
++        __builtin_sub_overflow(L_tmp1, vo_mult32((*p3--), (*p1++)), &L_tmp1);
+ 
+         L_tmp = L_tmp >> 11;
+         L_tmp += vo_L_mult(exc[i], a0);
+-- 
+2.43.0
+

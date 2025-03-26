@@ -1,0 +1,830 @@
+From 0996f2b4b2023730f98c06cb013a92d42c81ccc3 Mon Sep 17 00:00:00 2001
+From: jiabin <jiabin@google.com>
+Date: Wed, 6 Nov 2024 00:46:58 +0000
+Subject: [PATCH 295/436] Add offload support for aaudio.
+
+Bug: 372041799
+Test: atest AAudioTests
+Flag: EXEMPT NDK
+Change-Id: I34ffa52f600b3de234eb327307321db2562853c9
+---
+ media/libaaudio/include/aaudio/AAudio.h       | 161 +++++++++++++++++-
+ media/libaaudio/src/core/AAudioAudio.cpp      |  34 ++++
+ .../src/core/AAudioStreamParameters.cpp       |   7 +
+ media/libaaudio/src/core/AudioStream.cpp      |   6 +
+ media/libaaudio/src/core/AudioStream.h        |  30 +++-
+ .../libaaudio/src/core/AudioStreamBuilder.cpp |  13 ++
+ media/libaaudio/src/core/AudioStreamBuilder.h |  21 +++
+ .../libaaudio/src/legacy/AudioStreamTrack.cpp | 145 +++++++++++++++-
+ media/libaaudio/src/legacy/AudioStreamTrack.h |  34 ++++
+ media/libaaudio/src/libaaudio.map.txt         |   5 +
+ .../libaaudio/src/utility/AAudioUtilities.cpp |  42 +++++
+ media/libaaudio/src/utility/AAudioUtilities.h |   2 +
+ 12 files changed, 490 insertions(+), 10 deletions(-)
+
+diff --git a/media/libaaudio/include/aaudio/AAudio.h b/media/libaaudio/include/aaudio/AAudio.h
+index 136edcc446..6c411989b7 100644
+--- a/media/libaaudio/include/aaudio/AAudio.h
++++ b/media/libaaudio/include/aaudio/AAudio.h
+@@ -119,8 +119,42 @@ enum {
+      *
+      * Available since API level 34.
+      */
+-    AAUDIO_FORMAT_IEC61937
++    AAUDIO_FORMAT_IEC61937,
+ 
++    /**
++     * This format is used for audio compressed in MP3 format.
++     */
++    AAUDIO_FORMAT_MP3,
++
++    /**
++     * This format is used for audio compressed in AAC LC format.
++     */
++    AAUDIO_FORMAT_AAC_LC,
++
++    /**
++     * This format is used for audio compressed in AAC HE V1 format.
++     */
++    AAUDIO_FORMAT_AAC_HE_V1,
++
++    /**
++     * This format is used for audio compressed in AAC HE V2 format.
++     */
++    AAUDIO_FORMAT_AAC_HE_V2,
++
++    /**
++     * This format is used for audio compressed in AAC ELD format.
++     */
++    AAUDIO_FORMAT_AAC_ELD,
++
++    /**
++     * This format is used for audio compressed in AAC XHE format.
++     */
++    AAUDIO_FORMAT_AAC_XHE,
++
++    /**
++     * This format is used for audio compressed in OPUS.
++     */
++    AAUDIO_FORMAT_OPUS
+ };
+ typedef int32_t aaudio_format_t;
+ 
+@@ -335,7 +369,23 @@ enum {
+     /**
+      * Reducing latency is more important than battery life.
+      */
+-    AAUDIO_PERFORMANCE_MODE_LOW_LATENCY
++    AAUDIO_PERFORMANCE_MODE_LOW_LATENCY,
++
++    /**
++     * Extending battery life is more important than low latency.
++     *
++     * This mode is not supported in input streams.
++     * This mode will play through the offloaded audio path to save battery life.
++     *
++     * Comparing to mode {@link #AAUDIO_PERFORMANCE_MODE_POWER_SAVING}, the stream at
++     * this mode will be able to write a large amount(several seconds) of data within a
++     * short time. The written data will be queued in a hardware buffer. After that, the
++     * app can suspend its thread/process that playing audio, the audio framework's data
++     * pipe will be suspended automatically and the CPU will be allowed to sleep for
++     * power saving. When all queued data are played, the apps will be able to get callback
++     * to feed more data.
++     */
++    AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED
+ };
+ typedef int32_t aaudio_performance_mode_t;
+ 
+@@ -1090,7 +1140,8 @@ AAUDIO_API void AAudioStreamBuilder_setBufferCapacityInFrames(
+  * Set the requested performance mode.
+  *
+  * Supported modes are {@link #AAUDIO_PERFORMANCE_MODE_NONE},
+- * {@link #AAUDIO_PERFORMANCE_MODE_POWER_SAVING} * and {@link #AAUDIO_PERFORMANCE_MODE_LOW_LATENCY}.
++ * {@link #AAUDIO_PERFORMANCE_MODE_POWER_SAVING}, {@link #AAUDIO_PERFORMANCE_MODE_LOW_LATENCY} and
++ * {@link #AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED}.
+  *
+  * The default, if you do not call this function, is {@link #AAUDIO_PERFORMANCE_MODE_NONE}.
+  *
+@@ -1474,6 +1525,44 @@ AAUDIO_API void AAudioStreamBuilder_setErrorCallback(AAudioStreamBuilder* _Nonnu
+         AAudioStream_errorCallback _Nullable callback, void* _Nullable userData)
+         __INTRODUCED_IN(26);
+ 
++/**
++ * Prototype for the callback function that is passed to
++ * AAudioStreamBuilder_setPresentationEndCallback().
++ *
++ * This will be called when all the buffers of an offloaded stream that were queued in the audio
++ * system (e.g. the combination of the Android audio framework and the device's audio hardware)
++ * have been played after AudioStream_requestStop() has been called.
++ *
++ * @param stream reference provided by AAudioStreamBuilder_openStream(), which must be an
++ *               output stream as the offloaded mode is only supported for output stream
++ * @param userData the same address that was passed to
++ *                 AAudioStreamBuilder_setPresentationEndCallback().
++ */
++typedef void (*AAudioStream_presentationEndCallback)(AAudioStream* _Nonnull stream,
++                                                     void* _Null_unspecified userData);
++
++/**
++ * Request that AAudio call this function when all the buffers of an offloaded stream that were
++ * queued in the audio system (e.g. the combination of the Android audio framework and the device's
++ * audio hardware) have been played.
++ *
++ * The presentation end callback must be used together with the data callback.
++ * The presentation edn callback won't be called if the stream is closed before all the data
++ * is played.
++ *
++ * Available since API level 36.
++ *
++ * @param builder reference provided by AAudio_createStreamBuilder()
++ * @param callback pointer to a function that will be called when all the buffers of an offloaded
++ *                 stream that were queued have been played.
++ * @param userData pointer to an application data structure that will be passed
++ *                 to the callback functions.
++ */
++AAUDIO_API void AAudioStreamBuilder_setPresentationEndCallback(
++        AAudioStreamBuilder* _Nonnull builder,
++        AAudioStream_presentationEndCallback _Nonnull callback,
++        void* _Nullable userData) __INTRODUCED_IN(36);
++
+ /**
+  * Open a stream based on the options in the StreamBuilder.
+  *
+@@ -2188,6 +2277,72 @@ AAUDIO_API bool AAudioStream_isPrivacySensitive(AAudioStream* _Nonnull stream)
+ AAUDIO_API aaudio_channel_mask_t AAudioStream_getChannelMask(AAudioStream* _Nonnull stream)
+         __INTRODUCED_IN(32);
+ 
++/**
++ * Configures the delay and padding values for the current stream playing in offload mode.
++ * This should only be used on a stream whose performance mode is
++ * {@link #AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED} and the format is compressed format.
++ * The unit is frames, where a frame includes samples for all audio channels, e.g. 100 frames
++ * for a stereo stream corresponds to 200 interleaved PCM samples.
++ *
++ * @param stream reference provided by AAudioStreamBuilder_openStream()
++ * @param delayInFrames number of frames to be ignored at the beginning of the stream. A value
++ *                      of 0 indicates no delay is to be applied.
++ * @param paddingInFrames number of frames to be ignored at the end of the stream. A value of 0
++ *                        of 0 indicates no padding is to be applied.
++ * @return {@link #AAUDIO_OK} if the delay and padding values are set successfully,
++ *         or {@link #AAUDIO_ERROR_ILLEGAL_ARGUMENT} if delayInFrames or paddingInFrames
++ *         is less than 0,
++ *         or {@link #AAUDIO_ERROR_UNIMPLEMENTED} if the stream is not an output stream whose
++ *         performance mode is {@link #AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED},
++ *         or {@link #AAUDIO_ERROR_INVALID_STATE} if the stream is not yet initialized.
++ */
++AAUDIO_API aaudio_result_t AAudioStream_setOffloadDelayPadding(
++        AAudioStream* _Nonnull stream, int32_t delayInFrames, int32_t paddingInFrames)
++        __INTRODUCED_IN(36);
++
++/**
++ * Return the decoder delay of an offloaded stream in frames.
++ *
++ * @param stream reference provided by AAudioStreamBuilder_openStream()
++ * @return the offload delay in frames that previously set with
++ *         {@link #AAudioStream_setOffloadDelayPadding},
++ *         or 0 if it was never modified,
++ *         or {@link #AAUDIO_ERROR_UNIMPLEMENTED} if the stream is not an output stream whose
++ *         performance mode is {@link #AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED},
++ *         or {@link #AAUDIO_ERROR_INVALID_STATE} if the stream is not yet initialized.
++ */
++AAUDIO_API int32_t AAudioStream_getOffloadDelay(AAudioStream* _Nonnull stream) __INTRODUCED_IN(36);
++
++/**
++ * Return the decoder padding of an offloaded stream in frames.
++ *
++ * @param stream reference provided by AAudioStreamBuilder_openStream()
++ * @return the offload padding in frames that previously set with
++ *         {@link #AAudioStream_setOffloadDelayPadding},
++ *         or 0 if it was never modified,
++ *         or {@link #AAUDIO_ERROR_UNIMPLEMENTED} if the stream is not an output stream whose
++ *         performance mode is {@link #AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED},
++ *         or {@link #AAUDIO_ERROR_INVALID_STATE} if the stream is not yet initialized.
++ */
++AAUDIO_API int32_t AAudioStream_getOffloadPadding(AAudioStream* _Nonnull stream)
++        __INTRODUCED_IN(36);
++
++/**
++ * Declares that the last data writing operation on this stream provided the last buffer of this
++ * stream.
++ * After the end of stream, previously set padding and delay values are ignored. That indicates
++ * all written data will be played.
++ * Use this method in the same thread as any data writing operation.
++ *
++ * @param stream reference provided by AAudioStreamBuilder_openStream()
++ * @return {@link #AAUDIO_OK} on success,
++ *         or {@link #AAUDIO_ERROR_UNIMPLEMENTED} if the stream is not an output stream whose
++ *         performance mode is {@link #AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED},
++ *         or {@link #AAUDIO_ERROR_INVALID_STATE} if the stream is not yet initialized.
++ */
++AAUDIO_API aaudio_result_t AAudioStream_setOffloadEndOfStream(AAudioStream* _Nonnull stream)
++        __INTRODUCED_IN(36);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/media/libaaudio/src/core/AAudioAudio.cpp b/media/libaaudio/src/core/AAudioAudio.cpp
+index 64152f07bd..de82471c4b 100644
+--- a/media/libaaudio/src/core/AAudioAudio.cpp
++++ b/media/libaaudio/src/core/AAudioAudio.cpp
+@@ -255,6 +255,16 @@ AAUDIO_API void AAudioStreamBuilder_setErrorCallback(AAudioStreamBuilder* builde
+     streamBuilder->setErrorCallbackUserData(userData);
+ }
+ 
++AAUDIO_API void AAudioStreamBuilder_setPresentationEndCallback(AAudioStreamBuilder* builder,
++        AAudioStream_presentationEndCallback callback, void* userData) {
++    AudioStreamBuilder *streamBuilder = convertAAudioBuilderToStreamBuilder(builder);
++    if (streamBuilder == nullptr) {
++        return;
++    }
++    streamBuilder->setPresentationEndCallbackProc(callback)
++                 ->setPresentationEndCallbackUserData(userData);
++}
++
+ AAUDIO_API void AAudioStreamBuilder_setFramesPerDataCallback(AAudioStreamBuilder* builder,
+                                                 int32_t frames)
+ {
+@@ -693,3 +703,27 @@ AAUDIO_API aaudio_channel_mask_t AAudioStream_getChannelMask(AAudioStream* strea
+     // Do not return channel index masks as they are not public.
+     return AAudio_isChannelIndexMask(channelMask) ? AAUDIO_UNSPECIFIED : channelMask;
+ }
++
++AAUDIO_API aaudio_result_t AAudioStream_setOffloadDelayPadding(
++        AAudioStream* stream, int32_t delayInFrames, int32_t paddingInFrames) {
++    if (delayInFrames < 0 || paddingInFrames < 0) {
++        return AAUDIO_ERROR_ILLEGAL_ARGUMENT;
++    }
++    AudioStream *audioStream = convertAAudioStreamToAudioStream(stream);
++    return audioStream->setOffloadDelayPadding(delayInFrames, paddingInFrames);
++}
++
++AAUDIO_API int32_t AAudioStream_getOffloadDelay(AAudioStream* stream) {
++    AudioStream *audioStream = convertAAudioStreamToAudioStream(stream);
++    return audioStream->getOffloadDelay();
++}
++
++AAUDIO_API int32_t AAudioStream_getOffloadPadding(AAudioStream* stream) {
++    AudioStream *audioStream = convertAAudioStreamToAudioStream(stream);
++    return audioStream->getOffloadPadding();
++}
++
++AAUDIO_API aaudio_result_t AAudioStream_setOffloadEndOfStream(AAudioStream* stream) {
++    AudioStream *audioStream = convertAAudioStreamToAudioStream(stream);
++    return audioStream->setOffloadEndOfStream();
++}
+diff --git a/media/libaaudio/src/core/AAudioStreamParameters.cpp b/media/libaaudio/src/core/AAudioStreamParameters.cpp
+index f504fa902a..ed20d12394 100644
+--- a/media/libaaudio/src/core/AAudioStreamParameters.cpp
++++ b/media/libaaudio/src/core/AAudioStreamParameters.cpp
+@@ -58,6 +58,13 @@ static aaudio_result_t isFormatValid(audio_format_t format) {
+         case AUDIO_FORMAT_PCM_24_BIT_PACKED:
+         case AUDIO_FORMAT_PCM_8_24_BIT:
+         case AUDIO_FORMAT_IEC61937:
++        case AUDIO_FORMAT_MP3:
++        case AUDIO_FORMAT_AAC_LC:
++        case AUDIO_FORMAT_AAC_HE_V1:
++        case AUDIO_FORMAT_AAC_HE_V2:
++        case AUDIO_FORMAT_AAC_ELD:
++        case AUDIO_FORMAT_AAC_XHE:
++        case AUDIO_FORMAT_OPUS:
+             break; // valid
+         default:
+             ALOGD("audioFormat not valid, audio_format_t = 0x%08x", format);
+diff --git a/media/libaaudio/src/core/AudioStream.cpp b/media/libaaudio/src/core/AudioStream.cpp
+index 8e3bcf7808..468bcfa5ca 100644
+--- a/media/libaaudio/src/core/AudioStream.cpp
++++ b/media/libaaudio/src/core/AudioStream.cpp
+@@ -116,6 +116,8 @@ aaudio_result_t AudioStream::open(const AudioStreamBuilder& builder)
+     mErrorCallbackProc = builder.getErrorCallbackProc();
+     mDataCallbackUserData = builder.getDataCallbackUserData();
+     mErrorCallbackUserData = builder.getErrorCallbackUserData();
++    setPresentationEndCallbackUserData(builder.getPresentationEndCallbackUserData());
++    setPresentationEndCallbackProc(builder.getPresentationEndCallbackProc());
+ 
+     return AAUDIO_OK;
+ }
+@@ -285,6 +287,10 @@ aaudio_result_t AudioStream::safeFlush() {
+ 
+ aaudio_result_t AudioStream::systemStopInternal() {
+     std::lock_guard<std::mutex> lock(mStreamLock);
++    return systemStopInternal_l();
++}
++
++aaudio_result_t AudioStream::systemStopInternal_l() {
+     aaudio_result_t result = safeStop_l();
+     if (result == AAUDIO_OK) {
+         // We only call this for logging in "dumpsys audio". So ignore return code.
+diff --git a/media/libaaudio/src/core/AudioStream.h b/media/libaaudio/src/core/AudioStream.h
+index 3354adf284..0ddc8edf83 100644
+--- a/media/libaaudio/src/core/AudioStream.h
++++ b/media/libaaudio/src/core/AudioStream.h
+@@ -332,7 +332,7 @@ public:
+      * have been called.
+      */
+     int32_t getBytesPerFrame() const {
+-        return mSamplesPerFrame * getBytesPerSample();
++        return audio_bytes_per_frame(mSamplesPerFrame, mFormat);
+     }
+ 
+     /**
+@@ -346,7 +346,7 @@ public:
+      * This is only valid after setDeviceSamplesPerFrame() and setDeviceFormat() have been called.
+      */
+     int32_t getBytesPerDeviceFrame() const {
+-        return getDeviceSamplesPerFrame() * audio_bytes_per_sample(getDeviceFormat());
++        return audio_bytes_per_frame(getDeviceSamplesPerFrame(), getDeviceFormat());
+     }
+ 
+     virtual int64_t getFramesWritten() = 0;
+@@ -390,6 +390,24 @@ public:
+         mDeviceSamplesPerFrame = deviceSamplesPerFrame;
+     }
+ 
++    virtual aaudio_result_t setOffloadDelayPadding(int32_t delayInFrames, int32_t paddingInFrames) {
++        return AAUDIO_ERROR_UNIMPLEMENTED;
++    }
++
++    virtual int32_t getOffloadDelay() {
++        return AAUDIO_ERROR_UNIMPLEMENTED;
++    }
++
++    virtual int32_t getOffloadPadding() {
++        return AAUDIO_ERROR_UNIMPLEMENTED;
++    }
++
++    virtual aaudio_result_t setOffloadEndOfStream() EXCLUDES(mStreamLock) {
++        return AAUDIO_ERROR_UNIMPLEMENTED;
++    }
++
++    virtual void setPresentationEndCallbackProc(AAudioStream_presentationEndCallback proc) { }
++    virtual void setPresentationEndCallbackUserData(void* userData) { }
+ 
+     /**
+      * @return true if data callback has been specified
+@@ -408,7 +426,7 @@ public:
+     /**
+      * @return true if called from the same thread as the callback
+      */
+-    bool collidesWithCallback() const;
++    virtual bool collidesWithCallback() const;
+ 
+     // Implement AudioDeviceCallback
+     void onAudioDeviceUpdate(audio_io_handle_t audioIo,
+@@ -649,6 +667,8 @@ protected:
+ 
+     aaudio_result_t joinThread_l(void **returnArg) REQUIRES(mStreamLock);
+ 
++    virtual aaudio_result_t systemStopInternal_l() REQUIRES(mStreamLock);
++
+     std::atomic<bool>    mCallbackEnabled{false};
+ 
+     float                mDuckAndMuteVolume = 1.0f;
+@@ -742,6 +762,8 @@ protected:
+         mAudioBalance = audioBalance;
+     }
+ 
++    aaudio_result_t safeStop_l() REQUIRES(mStreamLock);
++
+     std::string mMetricsId; // set once during open()
+ 
+     std::mutex                 mStreamLock;
+@@ -750,8 +772,6 @@ protected:
+ 
+ private:
+ 
+-    aaudio_result_t safeStop_l() REQUIRES(mStreamLock);
+-
+     /**
+      * Release then close the stream.
+      */
+diff --git a/media/libaaudio/src/core/AudioStreamBuilder.cpp b/media/libaaudio/src/core/AudioStreamBuilder.cpp
+index 73bd69f527..61881cbb86 100644
+--- a/media/libaaudio/src/core/AudioStreamBuilder.cpp
++++ b/media/libaaudio/src/core/AudioStreamBuilder.cpp
+@@ -174,6 +174,11 @@ aaudio_result_t AudioStreamBuilder::build(AudioStream** streamPtr) {
+               __func__);
+         allowMMap = false;
+     }
++    if (!audio_is_linear_pcm(getFormat())) {
++        ALOGD("%s() MMAP not used because the requested format(%#x) is not pcm",
++              __func__, getFormat());
++        allowMMap = false;
++    }
+ 
+     // SessionID and Effects are only supported in Legacy mode.
+     if (getSessionId() != AAUDIO_SESSION_ID_NONE) {
+@@ -261,6 +266,14 @@ aaudio_result_t AudioStreamBuilder::validate() const {
+         case AAUDIO_PERFORMANCE_MODE_POWER_SAVING:
+         case AAUDIO_PERFORMANCE_MODE_LOW_LATENCY:
+             break;
++        case AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED:
++            if (getDirection() != AAUDIO_DIRECTION_OUTPUT ||
++                getFormat() == AUDIO_FORMAT_DEFAULT ||
++                getSampleRate() == 0 ||
++                getChannelMask() == AAUDIO_UNSPECIFIED) {
++                return AAUDIO_ERROR_ILLEGAL_ARGUMENT;
++            }
++            break;
+         default:
+             ALOGE("illegal performanceMode = %d", mPerformanceMode);
+             return AAUDIO_ERROR_ILLEGAL_ARGUMENT;
+diff --git a/media/libaaudio/src/core/AudioStreamBuilder.h b/media/libaaudio/src/core/AudioStreamBuilder.h
+index f91c25a183..d0678ae445 100644
+--- a/media/libaaudio/src/core/AudioStreamBuilder.h
++++ b/media/libaaudio/src/core/AudioStreamBuilder.h
+@@ -89,6 +89,24 @@ public:
+         return mErrorCallbackUserData;
+     }
+ 
++    AudioStreamBuilder* setPresentationEndCallbackProc(AAudioStream_presentationEndCallback proc) {
++        mPresentationEndCallbackProc = proc;
++        return this;
++    }
++
++    AAudioStream_presentationEndCallback getPresentationEndCallbackProc() const {
++        return mPresentationEndCallbackProc;
++    }
++
++    AudioStreamBuilder* setPresentationEndCallbackUserData(void *userData) {
++        mPresentationEndCallbackUserData = userData;
++        return this;
++    }
++
++    void *getPresentationEndCallbackUserData() const {
++        return mPresentationEndCallbackUserData;
++    }
++
+     int32_t getFramesPerDataCallback() const {
+         return mFramesPerDataCallback;
+     }
+@@ -128,6 +146,9 @@ private:
+     AAudioStream_errorCallback mErrorCallbackProc = nullptr;
+     void                      *mErrorCallbackUserData = nullptr;
+ 
++    AAudioStream_presentationEndCallback mPresentationEndCallbackProc = nullptr;
++    void                                *mPresentationEndCallbackUserData = nullptr;
++
+     enum {
+         PRIVACY_SENSITIVE_DEFAULT = -1,
+         PRIVACY_SENSITIVE_DISABLED = 0,
+diff --git a/media/libaaudio/src/legacy/AudioStreamTrack.cpp b/media/libaaudio/src/legacy/AudioStreamTrack.cpp
+index 2e57f0d716..da15563bd1 100644
+--- a/media/libaaudio/src/legacy/AudioStreamTrack.cpp
++++ b/media/libaaudio/src/legacy/AudioStreamTrack.cpp
+@@ -22,6 +22,7 @@
+ #include <media/AudioTrack.h>
+ 
+ #include <aaudio/AAudio.h>
++#include <com_android_media_aaudio.h>
+ #include <system/audio.h>
+ 
+ #include "core/AudioGlobal.h"
+@@ -56,6 +57,10 @@ AudioStreamTrack::~AudioStreamTrack()
+ 
+ aaudio_result_t AudioStreamTrack::open(const AudioStreamBuilder& builder)
+ {
++    if (!com::android::media::aaudio::offload_support() &&
++        builder.getPerformanceMode() == AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED) {
++        return AAUDIO_ERROR_UNIMPLEMENTED;
++    }
+     aaudio_result_t result = AAUDIO_OK;
+ 
+     result = AudioStream::open(builder);
+@@ -152,6 +157,34 @@ aaudio_result_t AudioStreamTrack::open(const AudioStreamBuilder& builder)
+     if (tags.has_value() && !tags.value().empty()) {
+         strcpy(attributes.tags, tags.value().c_str());
+     }
++
++    audio_offload_info_t offloadInfo = AUDIO_INFO_INITIALIZER;
++    if (getPerformanceMode() == AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED) {
++        audio_config_t config = AUDIO_CONFIG_INITIALIZER;
++        config.format = format;
++        config.channel_mask = channelMask;
++        config.sample_rate = getSampleRate();
++        audio_direct_mode_t directMode = AUDIO_DIRECT_NOT_SUPPORTED;
++        if (status_t status = AudioSystem::getDirectPlaybackSupport(
++                &attributes, &config, &directMode);
++            status != NO_ERROR) {
++            ALOGE("%s, failed to query direct support, error=%d", __func__, status);
++            return status;
++        }
++        static const audio_direct_mode_t offloadMode = static_cast<audio_direct_mode_t>(
++                AUDIO_DIRECT_OFFLOAD_SUPPORTED | AUDIO_DIRECT_OFFLOAD_GAPLESS_SUPPORTED);
++        if ((directMode & offloadMode) == AUDIO_DIRECT_NOT_SUPPORTED) {
++            return AAUDIO_ERROR_ILLEGAL_ARGUMENT;
++        }
++        flags = AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD;
++        frameCount = 0;
++        offloadInfo.format = format;
++        offloadInfo.sample_rate = getSampleRate();
++        offloadInfo.channel_mask = channelMask;
++        offloadInfo.has_video = false;
++        offloadInfo.stream_type = AUDIO_STREAM_MUSIC;
++    }
++
+     mAudioTrack = new AudioTrack();
+     // TODO b/182392769: use attribution source util
+     mAudioTrack->set(
+@@ -167,7 +200,8 @@ aaudio_result_t AudioStreamTrack::open(const AudioStreamBuilder& builder)
+             false,   // DEFAULT threadCanCallJava
+             sessionId,
+             streamTransferType,
+-            nullptr,    // DEFAULT audio_offload_info_t
++            getPerformanceMode() == AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED
++                    ? &offloadInfo : nullptr,
+             AttributionSourceState(), // DEFAULT uid and pid
+             &attributes,
+             // WARNING - If doNotReconnect set true then audio stops after plugging and unplugging
+@@ -247,7 +281,9 @@ aaudio_result_t AudioStreamTrack::open(const AudioStreamBuilder& builder)
+     audio_output_flags_t actualFlags = mAudioTrack->getFlags();
+     aaudio_performance_mode_t actualPerformanceMode = AAUDIO_PERFORMANCE_MODE_NONE;
+     // We may not get the RAW flag. But as long as we get the FAST flag we can call it LOW_LATENCY.
+-    if ((actualFlags & AUDIO_OUTPUT_FLAG_FAST) != 0) {
++    if ((actualFlags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) != AUDIO_OUTPUT_FLAG_NONE) {
++        actualPerformanceMode = AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED;
++    } else if ((actualFlags & AUDIO_OUTPUT_FLAG_FAST) != 0) {
+         actualPerformanceMode = AAUDIO_PERFORMANCE_MODE_LOW_LATENCY;
+     } else if ((actualFlags & AUDIO_OUTPUT_FLAG_DEEP_BUFFER) != 0) {
+         actualPerformanceMode = AAUDIO_PERFORMANCE_MODE_POWER_SAVING;
+@@ -347,6 +383,7 @@ aaudio_result_t AudioStreamTrack::requestStart_l() {
+         setState(originalState);
+         return AAudioConvert_androidToAAudioResult(err);
+     }
++    mOffloadEosPending = false;
+     return AAUDIO_OK;
+ }
+ 
+@@ -430,6 +467,12 @@ aaudio_result_t AudioStreamTrack::processCommands() {
+         break;
+     case AAUDIO_STREAM_STATE_STOPPING:
+         if (mAudioTrack->stopped()) {
++            if (getPerformanceMode() == AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED) {
++                std::lock_guard<std::mutex> lock(mStreamLock);
++                if (!mOffloadEosPending) {
++                    break;
++                }
++            }
+             setState(AAUDIO_STREAM_STATE_STOPPED);
+         }
+         break;
+@@ -579,6 +622,104 @@ void AudioStreamTrack::registerPlayerBase() {
+     mAudioTrack->setPlayerIId(mPlayerBase->getPlayerIId());
+ }
+ 
++aaudio_result_t AudioStreamTrack::systemStopInternal_l() {
++    if (aaudio_result_t result = AudioStream::systemStopInternal_l(); result != AAUDIO_OK) {
++        return result;
++    }
++    mOffloadEosPending = false;
++    return AAUDIO_OK;
++}
++
++aaudio_result_t AudioStreamTrack::setOffloadDelayPadding(
++        int32_t delayInFrames, int32_t paddingInFrames) {
++    if (getPerformanceMode() != AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED ||
++        audio_is_linear_pcm(getFormat())) {
++        return AAUDIO_ERROR_UNIMPLEMENTED;
++    }
++    if (mAudioTrack == nullptr) {
++        return AAUDIO_ERROR_INVALID_STATE;
++    }
++    AudioParameter param = AudioParameter();
++    param.addInt(String8(AUDIO_OFFLOAD_CODEC_DELAY_SAMPLES),  delayInFrames);
++    param.addInt(String8(AUDIO_OFFLOAD_CODEC_PADDING_SAMPLES),  paddingInFrames);
++    mAudioTrack->setParameters(param.toString());
++    mOffloadDelayFrames.store(delayInFrames);
++    mOffloadPaddingFrames.store(paddingInFrames);
++    return AAUDIO_OK;
++}
++
++int32_t AudioStreamTrack::getOffloadDelay() {
++    if (getPerformanceMode() != AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED ||
++        audio_is_linear_pcm(getFormat())) {
++        return AAUDIO_ERROR_UNIMPLEMENTED;
++    }
++    if (mAudioTrack == nullptr) {
++        return AAUDIO_ERROR_INVALID_STATE;
++    }
++    return mOffloadDelayFrames.load();
++}
++
++int32_t AudioStreamTrack::getOffloadPadding() {
++    if (getPerformanceMode() != AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED ||
++        audio_is_linear_pcm(getFormat())) {
++        return AAUDIO_ERROR_UNIMPLEMENTED;
++    }
++    if (mAudioTrack == nullptr) {
++        return AAUDIO_ERROR_INVALID_STATE;
++    }
++    return mOffloadPaddingFrames.load();
++}
++
++aaudio_result_t AudioStreamTrack::setOffloadEndOfStream() {
++    if (getPerformanceMode() != AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED) {
++        return AAUDIO_ERROR_UNIMPLEMENTED;
++    }
++    if (mAudioTrack == nullptr) {
++        return AAUDIO_ERROR_INVALID_STATE;
++    }
++    std::lock_guard<std::mutex> lock(mStreamLock);
++    if (aaudio_result_t result = safeStop_l(); result != AAUDIO_OK) {
++        return result;
++    }
++    mOffloadEosPending = true;
++    return AAUDIO_OK;
++}
++
++bool AudioStreamTrack::collidesWithCallback() const {
++    if (AudioStream::collidesWithCallback()) {
++        return true;
++    }
++    pid_t thisThread = gettid();
++    return mPresentationEndCallbackThread.load() == thisThread;
++}
++
++void AudioStreamTrack::onStreamEnd() {
++    if (getPerformanceMode() != AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED) {
++        return;
++    }
++    if (getState() == AAUDIO_STREAM_STATE_STOPPING) {
++        std::lock_guard<std::mutex> lock(mStreamLock);
++        if (mOffloadEosPending) {
++            requestStart_l();
++        }
++        mOffloadEosPending = false;
++    }
++    maybeCallPresentationEndCallback();
++}
++
++void AudioStreamTrack::maybeCallPresentationEndCallback() {
++    if (mPresentationEndCallbackProc != nullptr) {
++        pid_t expected = CALLBACK_THREAD_NONE;
++        if (mPresentationEndCallbackThread.compare_exchange_strong(expected, gettid())) {
++            (*mPresentationEndCallbackProc)(
++                    (AAudioStream *) this, mPresentationEndCallbackUserData);
++            mPresentationEndCallbackThread.store(CALLBACK_THREAD_NONE);
++        } else {
++            ALOGW("%s() error callback already running!", __func__);
++        }
++    }
++}
++
+ #if AAUDIO_USE_VOLUME_SHAPER
+ 
+ using namespace android::media::VolumeShaper;
+diff --git a/media/libaaudio/src/legacy/AudioStreamTrack.h b/media/libaaudio/src/legacy/AudioStreamTrack.h
+index 05609c4bca..82ba7726d8 100644
+--- a/media/libaaudio/src/legacy/AudioStreamTrack.h
++++ b/media/libaaudio/src/legacy/AudioStreamTrack.h
+@@ -49,6 +49,11 @@ protected:
+     aaudio_result_t requestPause_l() REQUIRES(mStreamLock) override;
+     aaudio_result_t requestFlush_l() REQUIRES(mStreamLock) override;
+     aaudio_result_t requestStop_l() REQUIRES(mStreamLock) override;
++    aaudio_result_t systemStopInternal_l() REQUIRES(mStreamLock) final;
++
++    bool collidesWithCallback() const final;
++
++    void onStreamEnd() final;
+ 
+ public:
+     bool isFlushSupported() const override {
+@@ -89,6 +94,26 @@ public:
+ 
+     void registerPlayerBase() override;
+ 
++    // Offload begin --------------------------------------
++    aaudio_result_t setOffloadDelayPadding(int32_t delayInFrames, int32_t paddingInFrames) final;
++
++    int32_t getOffloadDelay() final;
++
++    int32_t getOffloadPadding() final;
++
++    aaudio_result_t setOffloadEndOfStream() EXCLUDES(mStreamLock) final;
++
++    void setPresentationEndCallbackProc(AAudioStream_presentationEndCallback proc) final {
++        mPresentationEndCallbackProc = proc;
++    }
++
++    virtual void setPresentationEndCallbackUserData(void *userData) final {
++        mPresentationEndCallbackUserData = userData;
++    }
++
++    void maybeCallPresentationEndCallback();
++    // Offload end ----------------------------------------
++
+ #if AAUDIO_USE_VOLUME_SHAPER
+     virtual android::binder::Status applyVolumeShaper(
+             const android::media::VolumeShaper::Configuration& configuration,
+@@ -110,6 +135,15 @@ private:
+ 
+     // TODO add 64-bit position reporting to AudioTrack and use it.
+     aaudio_wrapping_frames_t         mPositionWhenPausing = 0;
++
++    // Offload --------------------------------------------
++    std::atomic<int32_t>        mOffloadDelayFrames = 0;
++    std::atomic<int32_t>        mOffloadPaddingFrames = 0;
++    bool                        mOffloadEosPending GUARDED_BY(mStreamLock) = false;
++
++    AAudioStream_presentationEndCallback mPresentationEndCallbackProc = nullptr;
++    void                                *mPresentationEndCallbackUserData = nullptr;
++    std::atomic<pid_t>                   mPresentationEndCallbackThread{CALLBACK_THREAD_NONE};
+ };
+ 
+ } /* namespace aaudio */
+diff --git a/media/libaaudio/src/libaaudio.map.txt b/media/libaaudio/src/libaaudio.map.txt
+index 36d76aa556..44bb4c6aa8 100644
+--- a/media/libaaudio/src/libaaudio.map.txt
++++ b/media/libaaudio/src/libaaudio.map.txt
+@@ -28,6 +28,7 @@ LIBAAUDIO {
+     AAudioStreamBuilder_setChannelMask;    # introduced=32
+     AAudioStreamBuilder_setSpatializationBehavior; # introduced=32
+     AAudioStreamBuilder_setIsContentSpatialized;   # introduced=32
++    AAudioStreamBuilder_setPresentationEndCallback; #introduced=36
+     AAudioStreamBuilder_openStream;
+     AAudioStreamBuilder_delete;
+     AAudioStream_close;
+@@ -73,6 +74,10 @@ LIBAAUDIO {
+     AAudio_getPlatformMMapPolicy; # introduced=36
+     AAudio_getPlatformMMapExclusivePolicy; #introduced=36
+     AAudioStream_getDeviceIds; # introduced=36
++    AAudioStream_setOffloadDelayPadding; #introduced=36
++    AAudioStream_getOffloadDelay; #introduced=36
++    AAudioStream_getOffloadPadding; #introduced=36
++    AAudioStream_setOffloadEndOfStream; #introduced=36
+ 
+     AAudioStreamBuilder_setTags; # systemapi
+     AAudioStream_getTags; # systemapi
+diff --git a/media/libaaudio/src/utility/AAudioUtilities.cpp b/media/libaaudio/src/utility/AAudioUtilities.cpp
+index c741946b92..873fcba9e7 100644
+--- a/media/libaaudio/src/utility/AAudioUtilities.cpp
++++ b/media/libaaudio/src/utility/AAudioUtilities.cpp
+@@ -147,6 +147,27 @@ audio_format_t AAudioConvert_aaudioToAndroidDataFormat(aaudio_format_t aaudioFor
+     case AAUDIO_FORMAT_IEC61937:
+         androidFormat = AUDIO_FORMAT_IEC61937;
+         break;
++    case AAUDIO_FORMAT_MP3:
++        androidFormat = AUDIO_FORMAT_MP3;
++        break;
++    case AAUDIO_FORMAT_AAC_LC:
++        androidFormat = AUDIO_FORMAT_AAC_LC;
++        break;
++    case AAUDIO_FORMAT_AAC_HE_V1:
++        androidFormat = AUDIO_FORMAT_AAC_HE_V1;
++        break;
++    case AAUDIO_FORMAT_AAC_HE_V2:
++        androidFormat = AUDIO_FORMAT_AAC_HE_V2;
++        break;
++    case AAUDIO_FORMAT_AAC_ELD:
++        androidFormat = AUDIO_FORMAT_AAC_ELD;
++        break;
++    case AAUDIO_FORMAT_AAC_XHE:
++        androidFormat = AUDIO_FORMAT_AAC_XHE;
++        break;
++    case AAUDIO_FORMAT_OPUS:
++        androidFormat = AUDIO_FORMAT_OPUS;
++        break;
+     default:
+         androidFormat = AUDIO_FORMAT_INVALID;
+         ALOGE("%s() 0x%08X unrecognized", __func__, aaudioFormat);
+@@ -176,6 +197,27 @@ aaudio_format_t AAudioConvert_androidToAAudioDataFormat(audio_format_t androidFo
+     case AUDIO_FORMAT_IEC61937:
+         aaudioFormat = AAUDIO_FORMAT_IEC61937;
+         break;
++    case AUDIO_FORMAT_MP3:
++        aaudioFormat = AAUDIO_FORMAT_MP3;
++        break;
++    case AUDIO_FORMAT_AAC_LC:
++        aaudioFormat = AAUDIO_FORMAT_AAC_LC;
++        break;
++    case AUDIO_FORMAT_AAC_HE_V1:
++        aaudioFormat = AAUDIO_FORMAT_AAC_HE_V1;
++        break;
++    case AUDIO_FORMAT_AAC_HE_V2:
++        aaudioFormat = AAUDIO_FORMAT_AAC_HE_V2;
++        break;
++    case AUDIO_FORMAT_AAC_ELD:
++        aaudioFormat = AAUDIO_FORMAT_AAC_ELD;
++        break;
++    case AUDIO_FORMAT_AAC_XHE:
++        aaudioFormat = AAUDIO_FORMAT_AAC_XHE;
++        break;
++    case AUDIO_FORMAT_OPUS:
++        aaudioFormat = AAUDIO_FORMAT_OPUS;
++        break;
+     default:
+         aaudioFormat = AAUDIO_FORMAT_INVALID;
+         ALOGE("%s() 0x%08X unrecognized", __func__, androidFormat);
+diff --git a/media/libaaudio/src/utility/AAudioUtilities.h b/media/libaaudio/src/utility/AAudioUtilities.h
+index d5069f5078..940e4b5a32 100644
+--- a/media/libaaudio/src/utility/AAudioUtilities.h
++++ b/media/libaaudio/src/utility/AAudioUtilities.h
+@@ -373,4 +373,6 @@ audio_devices_t AAudioConvert_aaudioToAndroidDeviceType(
+ aaudio_policy_t AAudioConvert_androidToAAudioMMapPolicy(
+         android::media::audio::common::AudioMMapPolicy policy);
+ 
++bool AAudio_isCompressedFormat(audio_format_t format);
++
+ #endif //UTILITY_AAUDIO_UTILITIES_H
+-- 
+2.43.0
+

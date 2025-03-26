@@ -1,0 +1,72 @@
+From 6319b2d1d6e38637e2967292a83ed25b340cb646 Mon Sep 17 00:00:00 2001
+From: Vlad Popa <pvlad@google.com>
+Date: Fri, 15 Nov 2024 18:32:13 -0800
+Subject: [PATCH 290/436] APM: apply volumes when abs volume stream changes
+
+Whenever the stream that drives the absolute volume changes also reapply
+all the stream volumes for all the active outputs.
+
+Reapplying the reverted CL ag/30134818, do not use timeout when applying volumes and
+only apply if something changes.
+
+Test: manual + logs
+Flag: EXEMPT bugfix
+Bug: 378613219
+Change-Id: Ia746926472f942b3c506bf6e55d614a67ddbad1a
+---
+ .../managerdefault/AudioPolicyManager.cpp     | 35 ++++++++++++++-----
+ 1 file changed, 26 insertions(+), 9 deletions(-)
+
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index 1ad5d38088..0a28e9c669 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -3573,19 +3573,36 @@ status_t AudioPolicyManager::setDeviceAbsoluteVolumeEnabled(audio_devices_t devi
+     ALOGI("%s: deviceType 0x%X, enabled %d, streamToDriveAbs %d", __func__, deviceType, enabled,
+           streamToDriveAbs);
+ 
+-    if (!enabled) {
+-        mAbsoluteVolumeDrivingStreams.erase(deviceType);
+-        return NO_ERROR;
++    bool changed = false;
++    audio_attributes_t attributesToDriveAbs = mEngine->getAttributesForStreamType(streamToDriveAbs);
++    if (enabled) {
++        if (attributesToDriveAbs == AUDIO_ATTRIBUTES_INITIALIZER) {
++            ALOGW("%s: no attributes for stream %s, bailing out", __func__,
++                  toString(streamToDriveAbs).c_str());
++            return BAD_VALUE;
++        }
++
++        if (mAbsoluteVolumeDrivingStreams[deviceType] != attributesToDriveAbs) {
++            mAbsoluteVolumeDrivingStreams[deviceType] = attributesToDriveAbs;
++            changed = true;
++        }
++    } else {
++        if (mAbsoluteVolumeDrivingStreams.find(deviceType) != mAbsoluteVolumeDrivingStreams.end()) {
++            mAbsoluteVolumeDrivingStreams.erase(deviceType);
++            changed = true;
++        }
+     }
+ 
+-    audio_attributes_t attributesToDriveAbs = mEngine->getAttributesForStreamType(streamToDriveAbs);
+-    if (attributesToDriveAbs == AUDIO_ATTRIBUTES_INITIALIZER) {
+-        ALOGW("%s: no attributes for stream %s, bailing out", __func__,
+-              toString(streamToDriveAbs).c_str());
+-        return BAD_VALUE;
++    // if something changed, apply the stream volumes regarding the new absolute mode to all the
++    // outputs without any delay
++    if (changed) {
++        for (size_t i = 0; i < mOutputs.size(); i++) {
++            sp<SwAudioOutputDescriptor> desc = mOutputs.valueAt(i);
++            ALOGV("%s: apply stream volumes for portId %d", __func__, desc->getId());
++            applyStreamVolumes(desc, {deviceType});
++        }
+     }
+ 
+-    mAbsoluteVolumeDrivingStreams[deviceType] = attributesToDriveAbs;
+     return NO_ERROR;
+ }
+ 
+-- 
+2.43.0
+

@@ -1,0 +1,37 @@
+From 5c68943239be52a3bb6d435239500b4c747a490a Mon Sep 17 00:00:00 2001
+From: Atneya Nair <atneya@google.com>
+Date: Tue, 8 Oct 2024 18:06:47 -0700
+Subject: [PATCH 081/436] ExtendedTimestamp toString fixup
+
+Test: adb shell dumpsys media.audio_flinger
+Flag: EXEMPT logs only
+Bug: 372070273
+Change-Id: I636691c1f2a54bf15bc701aea91aa3edcc8c5836
+---
+ media/libaudioclient/include/media/AudioTimestamp.h | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/media/libaudioclient/include/media/AudioTimestamp.h b/media/libaudioclient/include/media/AudioTimestamp.h
+index e5925dd942..45d5595020 100644
+--- a/media/libaudioclient/include/media/AudioTimestamp.h
++++ b/media/libaudioclient/include/media/AudioTimestamp.h
+@@ -154,10 +154,13 @@ struct alignas(8) /* bug 29096183, bug 29108507 */ ExtendedTimestamp {
+     std::string toString() const {
+         std::stringstream ss;
+ 
+-        ss << "BOOTTIME offset " << mTimebaseOffset[TIMEBASE_BOOTTIME] << "\n";
++        ss << "BOOTTIME offset " << mTimebaseOffset[TIMEBASE_BOOTTIME] << ": ExtendedTimestamp: ";
+         for (int i = 0; i < LOCATION_MAX; ++i) {
+-            ss << "ExtendedTimestamp[" << i << "]  position: "
+-                    << mPosition[i] << "  time: "  << mTimeNs[i] << "\n";
++            ss << "([" << i << "]  position: "
++                    << mPosition[i] << "  time: "  << mTimeNs[i] << ")";
++            if (i != LOCATION_MAX - 1) {
++                ss << ", ";
++            }
+         }
+         return ss.str();
+     }
+-- 
+2.43.0
+

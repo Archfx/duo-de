@@ -1,0 +1,563 @@
+From ae987e1420714cb91a6bf0311d92123c8062c38d Mon Sep 17 00:00:00 2001
+From: Shuzhen Wang <shuzhenwang@google.com>
+Date: Thu, 24 Oct 2024 21:46:34 -0700
+Subject: [PATCH 242/436] Camera: Add flag for zoom method metadata tag
+
+If zoom method is ZOOM_RATIO, the camera device makes
+sure the effective zoom is reflected in zoom_ratio.
+
+Flag: com.android.internal.camera.flags.zoom_method
+Test: atest CtsCameraTestCases
+Bug: 350076823
+Change-Id: Ida5621e471d9c50f4a441d030060cf437b673520
+---
+ camera/camera_platform.aconfig                |   8 ++
+ camera/ndk/impl/ACameraMetadata.cpp           |   1 +
+ .../include/camera/NdkCameraMetadataTags.h    |  34 +++++
+ .../aidl/VndkVersionMetadataTags.h            |   1 +
+ .../device3/Camera3Device.cpp                 |  15 +-
+ .../libcameraservice/device3/Camera3Device.h  |   4 +-
+ .../device3/Camera3OutputUtils.cpp            |  15 +-
+ .../device3/InFlightRequest.h                 |  11 +-
+ .../device3/ZoomRatioMapper.cpp               | 135 +++++++++++-------
+ .../device3/ZoomRatioMapper.h                 |   2 +-
+ .../libcameraservice/tests/ZoomRatioTest.cpp  |   8 +-
+ 11 files changed, 161 insertions(+), 73 deletions(-)
+
+diff --git a/camera/camera_platform.aconfig b/camera/camera_platform.aconfig
+index a03ccf5e98..774d21c814 100644
+--- a/camera/camera_platform.aconfig
++++ b/camera/camera_platform.aconfig
+@@ -218,3 +218,11 @@ flag {
+     description: "Indicates when to activate Night Mode Camera Extension"
+     bug: "335902696"
+ }
++
++flag {
++    namespace: "camera_platform"
++    name: "zoom_method"
++    is_exported: true
++    description: "Gives apps explicit control on reflects zoom via ZOOM_RATIO capture result"
++    bug: "298899993"
++}
+diff --git a/camera/ndk/impl/ACameraMetadata.cpp b/camera/ndk/impl/ACameraMetadata.cpp
+index fef6443b46..b701c6e96d 100644
+--- a/camera/ndk/impl/ACameraMetadata.cpp
++++ b/camera/ndk/impl/ACameraMetadata.cpp
+@@ -562,6 +562,7 @@ ACameraMetadata::isCaptureRequestTag(const uint32_t tag) {
+         case ACAMERA_CONTROL_ZOOM_RATIO:
+         case ACAMERA_CONTROL_SETTINGS_OVERRIDE:
+         case ACAMERA_CONTROL_AUTOFRAMING:
++        case ACAMERA_CONTROL_ZOOM_METHOD:
+         case ACAMERA_EDGE_MODE:
+         case ACAMERA_FLASH_MODE:
+         case ACAMERA_FLASH_STRENGTH_LEVEL:
+diff --git a/camera/ndk/include/camera/NdkCameraMetadataTags.h b/camera/ndk/include/camera/NdkCameraMetadataTags.h
+index 6c88288aae..ece37a744f 100644
+--- a/camera/ndk/include/camera/NdkCameraMetadataTags.h
++++ b/camera/ndk/include/camera/NdkCameraMetadataTags.h
+@@ -2401,6 +2401,40 @@ typedef enum acamera_metadata_tag {
+      */
+     ACAMERA_CONTROL_LOW_LIGHT_BOOST_STATE =                     // byte (acamera_metadata_enum_android_control_low_light_boost_state_t)
+             ACAMERA_CONTROL_START + 59,
++    /**
++     * <p>Whether the application uses ACAMERA_SCALER_CROP_REGION or ACAMERA_CONTROL_ZOOM_RATIO
++     * to control zoom levels.</p>
++     *
++     * @see ACAMERA_CONTROL_ZOOM_RATIO
++     * @see ACAMERA_SCALER_CROP_REGION
++     *
++     * <p>Type: byte (acamera_metadata_enum_android_control_zoom_method_t)</p>
++     *
++     * <p>This tag may appear in:
++     * <ul>
++     *   <li>ACameraMetadata from ACameraCaptureSession_captureCallback_result callbacks</li>
++     *   <li>ACaptureRequest</li>
++     * </ul></p>
++     *
++     * <p>If set to AUTO, the camera device detects which capture request key the application uses
++     * to do zoom, ACAMERA_SCALER_CROP_REGION or ACAMERA_CONTROL_ZOOM_RATIO. If
++     * the application doesn't set android.scaler.zoomRatio or sets it to 1.0 in the capture
++     * request, the effective zoom level is reflected in ACAMERA_SCALER_CROP_REGION in capture
++     * results. If ACAMERA_CONTROL_ZOOM_RATIO is set to values other than 1.0, the effective
++     * zoom level is reflected in ACAMERA_CONTROL_ZOOM_RATIO. AUTO is the default value
++     * for this control, and also the behavior of the OS before Android version
++     * <a href="https://developer.android.com/reference/android/os/Build.VERSION_CODES.html#BAKLAVA">BAKLAVA</a>.</p>
++     * <p>If set to ZOOM_RATIO, the application explicitly specifies zoom level be controlled
++     * by ACAMERA_CONTROL_ZOOM_RATIO, and the effective zoom level is reflected in
++     * ACAMERA_CONTROL_ZOOM_RATIO in capture results. This addresses an ambiguity with AUTO,
++     * with which the camera device cannot know if the application is using cropRegion or
++     * zoomRatio at 1.0x.</p>
++     *
++     * @see ACAMERA_CONTROL_ZOOM_RATIO
++     * @see ACAMERA_SCALER_CROP_REGION
++     */
++    ACAMERA_CONTROL_ZOOM_METHOD =                               // byte (acamera_metadata_enum_android_control_zoom_method_t)
++            ACAMERA_CONTROL_START + 60,
+     ACAMERA_CONTROL_END,
+ 
+     /**
+diff --git a/services/camera/libcameraservice/aidl/VndkVersionMetadataTags.h b/services/camera/libcameraservice/aidl/VndkVersionMetadataTags.h
+index 24473f74f8..05d1c9e5a2 100644
+--- a/services/camera/libcameraservice/aidl/VndkVersionMetadataTags.h
++++ b/services/camera/libcameraservice/aidl/VndkVersionMetadataTags.h
+@@ -138,6 +138,7 @@ std::map<int, std::vector<camera_metadata_tag>> dynamic_api_level_to_keys{
+       {36, {
+           ANDROID_COLOR_CORRECTION_COLOR_TEMPERATURE,
+           ANDROID_COLOR_CORRECTION_COLOR_TINT,
++          ANDROID_CONTROL_ZOOM_METHOD,
+           ANDROID_EXTENSION_NIGHT_MODE_INDICATOR,
+         }  },
+ };
+diff --git a/services/camera/libcameraservice/device3/Camera3Device.cpp b/services/camera/libcameraservice/device3/Camera3Device.cpp
+index 52954427c5..6260b9b14d 100644
+--- a/services/camera/libcameraservice/device3/Camera3Device.cpp
++++ b/services/camera/libcameraservice/device3/Camera3Device.cpp
+@@ -2885,7 +2885,7 @@ status_t Camera3Device::registerInFlight(uint32_t frameNumber,
+         bool hasAppCallback, nsecs_t minExpectedDuration, nsecs_t maxExpectedDuration,
+         bool isFixedFps, const std::set<std::set<std::string>>& physicalCameraIds,
+         bool isStillCapture, bool isZslCapture, bool rotateAndCropAuto, bool autoframingAuto,
+-        const std::set<std::string>& cameraIdsWithZoom,
++        const std::set<std::string>& cameraIdsWithZoom, bool useZoomRatio,
+         const SurfaceMap& outputSurfaces, nsecs_t requestTimeNs) {
+     ATRACE_CALL();
+     std::lock_guard<std::mutex> l(mInFlightLock);
+@@ -2894,7 +2894,7 @@ status_t Camera3Device::registerInFlight(uint32_t frameNumber,
+     res = mInFlightMap.add(frameNumber, InFlightRequest(numBuffers, resultExtras, hasInput,
+             hasAppCallback, minExpectedDuration, maxExpectedDuration, isFixedFps, physicalCameraIds,
+             isStillCapture, isZslCapture, rotateAndCropAuto, autoframingAuto, cameraIdsWithZoom,
+-            requestTimeNs, outputSurfaces));
++            useZoomRatio, requestTimeNs, outputSurfaces));
+     if (res < 0) return res;
+ 
+     if (mInFlightMap.size() == 1) {
+@@ -4182,6 +4182,7 @@ status_t Camera3Device::RequestThread::prepareHalRequests() {
+         }
+         bool isStillCapture = false;
+         bool isZslCapture = false;
++        bool useZoomRatio = false;
+         const camera_metadata_t* settings = halRequest->settings;
+         bool shouldUnlockSettings = false;
+         if (settings == nullptr) {
+@@ -4201,6 +4202,14 @@ status_t Camera3Device::RequestThread::prepareHalRequests() {
+             if ((e.count > 0) && (e.data.u8[0] == ANDROID_CONTROL_ENABLE_ZSL_TRUE)) {
+                 isZslCapture = true;
+             }
++
++            if (flags::zoom_method()) {
++                e = camera_metadata_ro_entry_t();
++                find_camera_metadata_ro_entry(settings, ANDROID_CONTROL_ZOOM_METHOD, &e);
++                if ((e.count > 0) && (e.data.u8[0] == ANDROID_CONTROL_ZOOM_METHOD_ZOOM_RATIO)) {
++                    useZoomRatio = true;
++                }
++            }
+         }
+         bool passSurfaceMap =
+                 mUseHalBufManager || containsHalBufferManagedStream;
+@@ -4214,7 +4223,7 @@ status_t Camera3Device::RequestThread::prepareHalRequests() {
+                 expectedDurationInfo.isFixedFps,
+                 requestedPhysicalCameras, isStillCapture, isZslCapture,
+                 captureRequest->mRotateAndCropAuto, captureRequest->mAutoframingAuto,
+-                mPrevCameraIdsWithZoom,
++                mPrevCameraIdsWithZoom, useZoomRatio,
+                 passSurfaceMap ? uniqueSurfaceIdMap :
+                                       SurfaceMap{}, captureRequest->mRequestTimeNs);
+         ALOGVV("%s: registered in flight requestId = %" PRId32 ", frameNumber = %" PRId64
+diff --git a/services/camera/libcameraservice/device3/Camera3Device.h b/services/camera/libcameraservice/device3/Camera3Device.h
+index 397ec5c8c7..f1e088e23f 100644
+--- a/services/camera/libcameraservice/device3/Camera3Device.h
++++ b/services/camera/libcameraservice/device3/Camera3Device.h
+@@ -1275,8 +1275,8 @@ class Camera3Device :
+             bool callback, nsecs_t minExpectedDuration, nsecs_t maxExpectedDuration,
+             bool isFixedFps, const std::set<std::set<std::string>>& physicalCameraIds,
+             bool isStillCapture, bool isZslCapture, bool rotateAndCropAuto, bool autoframingAuto,
+-            const std::set<std::string>& cameraIdsWithZoom, const SurfaceMap& outputSurfaces,
+-            nsecs_t requestTimeNs);
++            const std::set<std::string>& cameraIdsWithZoom, bool useZoomRatio,
++            const SurfaceMap& outputSurfaces, nsecs_t requestTimeNs);
+ 
+     /**
+      * Tracking for idle detection
+diff --git a/services/camera/libcameraservice/device3/Camera3OutputUtils.cpp b/services/camera/libcameraservice/device3/Camera3OutputUtils.cpp
+index 62226e1aed..66ffc98331 100644
+--- a/services/camera/libcameraservice/device3/Camera3OutputUtils.cpp
++++ b/services/camera/libcameraservice/device3/Camera3OutputUtils.cpp
+@@ -304,7 +304,7 @@ void sendCaptureResult(
+         CameraMetadata &collectedPartialResult,
+         uint32_t frameNumber,
+         bool reprocess, bool zslStillCapture, bool rotateAndCropAuto,
+-        const std::set<std::string>& cameraIdsWithZoom,
++        const std::set<std::string>& cameraIdsWithZoom, bool useZoomRatio,
+         const std::vector<PhysicalCaptureResultInfo>& physicalMetadatas) {
+     ATRACE_CALL();
+     if (pendingMetadata.isEmpty())
+@@ -385,8 +385,9 @@ void sendCaptureResult(
+     // Fix up result metadata to account for zoom ratio availabilities between
+     // HAL and app.
+     bool zoomRatioIs1 = cameraIdsWithZoom.find(states.cameraId) == cameraIdsWithZoom.end();
++    bool appUsesZoomRatio = !zoomRatioIs1 || useZoomRatio;
+     res = states.zoomRatioMappers[states.cameraId].updateCaptureResult(
+-            &captureResult.mMetadata, zoomRatioIs1);
++            &captureResult.mMetadata, appUsesZoomRatio);
+     if (res != OK) {
+         SET_ERR("Failed to update capture result zoom ratio metadata for frame %d: %s (%d)",
+                 frameNumber, strerror(-res), res);
+@@ -452,9 +453,10 @@ void sendCaptureResult(
+             }
+         }
+ 
+-        zoomRatioIs1 = cameraIdsWithZoom.find(cameraId) == cameraIdsWithZoom.end();
++        // Note: Physical camera continues to use SCALER_CROP_REGION to reflect
++        // zoom levels.
+         res = states.zoomRatioMappers[cameraId].updateCaptureResult(
+-                &physicalMetadata.mPhysicalCameraMetadata, zoomRatioIs1);
++                &physicalMetadata.mPhysicalCameraMetadata, /*appUsesZoomRatio*/ false);
+         if (res != OK) {
+             SET_ERR("Failed to update camera %s's physical zoom ratio metadata for "
+                     "frame %d: %s(%d)", cameraId.c_str(), frameNumber, strerror(-res), res);
+@@ -828,7 +830,7 @@ void processCaptureResult(CaptureOutputStates& states, const camera_capture_resu
+                 sendCaptureResult(states, metadata, request.resultExtras,
+                     collectedPartialResult, frameNumber,
+                     hasInputBufferInRequest, request.zslCapture && request.stillCapture,
+-                    request.rotateAndCropAuto, cameraIdsWithZoom,
++                    request.rotateAndCropAuto, cameraIdsWithZoom, request.useZoomRatio,
+                     request.physicalMetadatas);
+             }
+         }
+@@ -1097,7 +1099,8 @@ void notifyShutter(CaptureOutputStates& states, const camera_shutter_msg_t &msg)
+                     r.pendingMetadata, r.resultExtras,
+                     r.collectedPartialResult, msg.frame_number,
+                     r.hasInputBuffer, r.zslCapture && r.stillCapture,
+-                    r.rotateAndCropAuto, cameraIdsWithZoom, r.physicalMetadatas);
++                    r.rotateAndCropAuto, cameraIdsWithZoom, r.useZoomRatio,
++                    r.physicalMetadatas);
+             }
+             collectAndRemovePendingOutputBuffers(
+                     states.useHalBufManager, states.halBufManagedStreamIds,
+diff --git a/services/camera/libcameraservice/device3/InFlightRequest.h b/services/camera/libcameraservice/device3/InFlightRequest.h
+index 3626f20335..62980c5c82 100644
+--- a/services/camera/libcameraservice/device3/InFlightRequest.h
++++ b/services/camera/libcameraservice/device3/InFlightRequest.h
+@@ -198,6 +198,9 @@ struct InFlightRequest {
+     // Current output transformation
+     int32_t transform;
+ 
++    // Whether the app explicitly uses ZOOM_RATIO
++    bool useZoomRatio;
++
+     static const nsecs_t kDefaultMinExpectedDuration = 33333333; // 33 ms
+     static const nsecs_t kDefaultMaxExpectedDuration = 100000000; // 100 ms
+ 
+@@ -220,14 +223,15 @@ struct InFlightRequest {
+             rotateAndCropAuto(false),
+             autoframingAuto(false),
+             requestTimeNs(0),
+-            transform(-1) {
++            transform(-1),
++            useZoomRatio(false) {
+     }
+ 
+     InFlightRequest(int numBuffers, CaptureResultExtras extras, bool hasInput,
+             bool hasAppCallback, nsecs_t minDuration, nsecs_t maxDuration, bool fixedFps,
+             const std::set<std::set<std::string>>& physicalCameraIdSet, bool isStillCapture,
+             bool isZslCapture, bool rotateAndCropAuto, bool autoframingAuto,
+-            const std::set<std::string>& idsWithZoom, nsecs_t requestNs,
++            const std::set<std::string>& idsWithZoom, nsecs_t requestNs, bool useZoomRatio,
+             const SurfaceMap& outSurfaces = SurfaceMap{}) :
+             shutterTimestamp(0),
+             sensorTimestamp(0),
+@@ -250,7 +254,8 @@ struct InFlightRequest {
+             cameraIdsWithZoom(idsWithZoom),
+             requestTimeNs(requestNs),
+             outputSurfaces(outSurfaces),
+-            transform(-1) {
++            transform(-1),
++            useZoomRatio(useZoomRatio) {
+     }
+ };
+ 
+diff --git a/services/camera/libcameraservice/device3/ZoomRatioMapper.cpp b/services/camera/libcameraservice/device3/ZoomRatioMapper.cpp
+index 2016284a66..5260ad348e 100644
+--- a/services/camera/libcameraservice/device3/ZoomRatioMapper.cpp
++++ b/services/camera/libcameraservice/device3/ZoomRatioMapper.cpp
+@@ -19,6 +19,8 @@
+ 
+ #include <algorithm>
+ 
++#include <com_android_internal_camera_flags.h>
++
+ #include "device3/ZoomRatioMapper.h"
+ #include "utils/SessionConfigurationUtilsHost.h"
+ 
+@@ -42,13 +44,25 @@ void ZoomRatioMapper::initRemappedKeys() {
+ }
+ 
+ status_t ZoomRatioMapper::initZoomRatioInTemplate(CameraMetadata *request) {
++    status_t res = OK;
++
++    if (flags::zoom_method()) {
++        uint8_t zoomMethod = ANDROID_CONTROL_ZOOM_METHOD_AUTO;
++        res = request->update(ANDROID_CONTROL_ZOOM_METHOD, &zoomMethod, 1);
++        if (res != OK) {
++            ALOGE("%s: Failed to update CONTROL_ZOOM_METHOD key: %s (%d)",
++                    __FUNCTION__, strerror(-res), res);
++            return res;
++        }
++    }
++
+     camera_metadata_entry_t entry;
+     entry = request->find(ANDROID_CONTROL_ZOOM_RATIO);
+     float defaultZoomRatio = 1.0f;
+     if (entry.count == 0) {
+-        return request->update(ANDROID_CONTROL_ZOOM_RATIO, &defaultZoomRatio, 1);
++        res = request->update(ANDROID_CONTROL_ZOOM_RATIO, &defaultZoomRatio, 1);
+     }
+-    return OK;
++    return res;
+ }
+ 
+ status_t ZoomRatioMapper::overrideZoomRatioTags(
+@@ -57,76 +71,85 @@ status_t ZoomRatioMapper::overrideZoomRatioTags(
+         return BAD_VALUE;
+     }
+ 
++    bool halSupportZoomRatio = false;
+     camera_metadata_entry_t entry;
+     entry = deviceInfo->find(ANDROID_CONTROL_ZOOM_RATIO_RANGE);
+     if (entry.count != 2 && entry.count != 0) return BAD_VALUE;
+-
+     // Hal has zoom ratio support
+     if (entry.count == 2) {
+-        *supportNativeZoomRatio = true;
+-        return OK;
+-    }
+-
+-    // Hal has no zoom ratio support
+-    *supportNativeZoomRatio = false;
+-
+-    entry = deviceInfo->find(ANDROID_SCALER_AVAILABLE_MAX_DIGITAL_ZOOM);
+-    if (entry.count != 1) {
+-        ALOGI("%s: Camera device doesn't support SCALER_AVAILABLE_MAX_DIGITAL_ZOOM key!",
+-                __FUNCTION__);
+-        return OK;
+-    }
+-
+-    float zoomRange[] = {1.0f, entry.data.f[0]};
+-    status_t res = deviceInfo->update(ANDROID_CONTROL_ZOOM_RATIO_RANGE, zoomRange, 2);
+-    if (res != OK) {
+-        ALOGE("%s: Failed to update CONTROL_ZOOM_RATIO_RANGE key: %s (%d)",
+-                __FUNCTION__, strerror(-res), res);
+-        return res;
++        halSupportZoomRatio = true;
+     }
+ 
++    // Add ZOOM_METHOD request and result keys
+     std::vector<int32_t> requestKeys;
+     entry = deviceInfo->find(ANDROID_REQUEST_AVAILABLE_REQUEST_KEYS);
+     if (entry.count > 0) {
+         requestKeys.insert(requestKeys.end(), entry.data.i32, entry.data.i32 + entry.count);
+     }
+-    requestKeys.push_back(ANDROID_CONTROL_ZOOM_RATIO);
+-    res = deviceInfo->update(ANDROID_REQUEST_AVAILABLE_REQUEST_KEYS,
+-            requestKeys.data(), requestKeys.size());
+-    if (res != OK) {
+-        ALOGE("%s: Failed to update REQUEST_AVAILABLE_REQUEST_KEYS: %s (%d)",
+-                __FUNCTION__, strerror(-res), res);
+-        return res;
++    if (flags::zoom_method()) {
++        requestKeys.push_back(ANDROID_CONTROL_ZOOM_METHOD);
+     }
+-
+     std::vector<int32_t> resultKeys;
+     entry = deviceInfo->find(ANDROID_REQUEST_AVAILABLE_RESULT_KEYS);
+     if (entry.count > 0) {
+         resultKeys.insert(resultKeys.end(), entry.data.i32, entry.data.i32 + entry.count);
+     }
+-    resultKeys.push_back(ANDROID_CONTROL_ZOOM_RATIO);
+-    res = deviceInfo->update(ANDROID_REQUEST_AVAILABLE_RESULT_KEYS,
+-            resultKeys.data(), resultKeys.size());
++    if (flags::zoom_method()) {
++        resultKeys.push_back(ANDROID_CONTROL_ZOOM_METHOD);
++    }
++
++    // Add additional keys if the HAL doesn't support ZOOM_RATIO
++    status_t res = OK;
++    if (!halSupportZoomRatio) {
++        entry = deviceInfo->find(ANDROID_SCALER_AVAILABLE_MAX_DIGITAL_ZOOM);
++        if (entry.count != 1) {
++            ALOGI("%s: Camera device doesn't support SCALER_AVAILABLE_MAX_DIGITAL_ZOOM key!",
++                    __FUNCTION__);
++            return OK;
++        }
++        float zoomRange[] = {1.0f, entry.data.f[0]};
++        res = deviceInfo->update(ANDROID_CONTROL_ZOOM_RATIO_RANGE, zoomRange, 2);
++        if (res != OK) {
++            ALOGE("%s: Failed to update CONTROL_ZOOM_RATIO_RANGE key: %s (%d)",
++                    __FUNCTION__, strerror(-res), res);
++            return res;
++        }
++
++        requestKeys.push_back(ANDROID_CONTROL_ZOOM_RATIO);
++        resultKeys.push_back(ANDROID_CONTROL_ZOOM_RATIO);
++
++        std::vector<int32_t> charKeys;
++        entry = deviceInfo->find(ANDROID_REQUEST_AVAILABLE_CHARACTERISTICS_KEYS);
++        if (entry.count > 0) {
++            charKeys.insert(charKeys.end(), entry.data.i32, entry.data.i32 + entry.count);
++        }
++        charKeys.push_back(ANDROID_CONTROL_ZOOM_RATIO_RANGE);
++        res = deviceInfo->update(ANDROID_REQUEST_AVAILABLE_CHARACTERISTICS_KEYS,
++                charKeys.data(), charKeys.size());
++        if (res != OK) {
++            ALOGE("%s: Failed to update REQUEST_AVAILABLE_CHARACTERISTICS_KEYS: %s (%d)",
++                    __FUNCTION__, strerror(-res), res);
++            return res;
++        }
++    }
++
++    // Update available request and result keys
++    res = deviceInfo->update(ANDROID_REQUEST_AVAILABLE_REQUEST_KEYS,
++            requestKeys.data(), requestKeys.size());
+     if (res != OK) {
+-        ALOGE("%s: Failed to update REQUEST_AVAILABLE_RESULT_KEYS: %s (%d)",
++        ALOGE("%s: Failed to update REQUEST_AVAILABLE_REQUEST_KEYS: %s (%d)",
+                 __FUNCTION__, strerror(-res), res);
+         return res;
+     }
+-
+-    std::vector<int32_t> charKeys;
+-    entry = deviceInfo->find(ANDROID_REQUEST_AVAILABLE_CHARACTERISTICS_KEYS);
+-    if (entry.count > 0) {
+-        charKeys.insert(charKeys.end(), entry.data.i32, entry.data.i32 + entry.count);
+-    }
+-    charKeys.push_back(ANDROID_CONTROL_ZOOM_RATIO_RANGE);
+-    res = deviceInfo->update(ANDROID_REQUEST_AVAILABLE_CHARACTERISTICS_KEYS,
+-            charKeys.data(), charKeys.size());
++    res = deviceInfo->update(ANDROID_REQUEST_AVAILABLE_RESULT_KEYS,
++            resultKeys.data(), resultKeys.size());
+     if (res != OK) {
+-        ALOGE("%s: Failed to update REQUEST_AVAILABLE_CHARACTERISTICS_KEYS: %s (%d)",
++        ALOGE("%s: Failed to update REQUEST_AVAILABLE_RESULT_KEYS: %s (%d)",
+                 __FUNCTION__, strerror(-res), res);
+         return res;
+     }
+ 
++    *supportNativeZoomRatio = halSupportZoomRatio;
+     return OK;
+ }
+ 
+@@ -223,7 +246,6 @@ status_t ZoomRatioMapper::updateCaptureRequest(CameraMetadata* request) {
+     if (!mIsValid) return INVALID_OPERATION;
+ 
+     status_t res = OK;
+-    bool zoomRatioIs1 = true;
+     camera_metadata_entry_t entry;
+     int arrayHeight, arrayWidth = 0;
+     res = getArrayDimensionsToBeUsed(request, &arrayWidth, &arrayHeight);
+@@ -231,9 +253,14 @@ status_t ZoomRatioMapper::updateCaptureRequest(CameraMetadata* request) {
+         return res;
+     }
+     entry = request->find(ANDROID_CONTROL_ZOOM_RATIO);
+-    if (entry.count == 1 && entry.data.f[0] != 1.0f) {
+-        zoomRatioIs1 = false;
+-
++    bool zoomRatioIs1 = (entry.count == 0 || entry.data.f[0] == 1.0f);
++    bool useZoomRatio = !zoomRatioIs1;
++    if (flags::zoom_method()) {
++        entry = request->find(ANDROID_CONTROL_ZOOM_METHOD);
++        useZoomRatio |= (entry.count == 1
++                        && entry.data.u8[0] == ANDROID_CONTROL_ZOOM_METHOD_ZOOM_RATIO);
++    }
++    if (useZoomRatio) {
+         // If cropRegion is windowboxing, override it with activeArray
+         camera_metadata_entry_t cropRegionEntry = request->find(ANDROID_SCALER_CROP_REGION);
+         if (cropRegionEntry.count == 4) {
+@@ -248,9 +275,9 @@ status_t ZoomRatioMapper::updateCaptureRequest(CameraMetadata* request) {
+         }
+     }
+ 
+-    if (mHalSupportsZoomRatio && zoomRatioIs1) {
++    if (mHalSupportsZoomRatio && !useZoomRatio) {
+         res = separateZoomFromCropLocked(request, false/*isResult*/, arrayWidth, arrayHeight);
+-    } else if (!mHalSupportsZoomRatio && !zoomRatioIs1) {
++    } else if (!mHalSupportsZoomRatio && useZoomRatio) {
+         res = combineZoomAndCropLocked(request, false/*isResult*/, arrayWidth, arrayHeight);
+     }
+ 
+@@ -263,7 +290,7 @@ status_t ZoomRatioMapper::updateCaptureRequest(CameraMetadata* request) {
+     return res;
+ }
+ 
+-status_t ZoomRatioMapper::updateCaptureResult(CameraMetadata* result, bool requestedZoomRatioIs1) {
++status_t ZoomRatioMapper::updateCaptureResult(CameraMetadata* result, bool useZoomRatio) {
+     if (!mIsValid) return INVALID_OPERATION;
+ 
+     status_t res = OK;
+@@ -273,9 +300,9 @@ status_t ZoomRatioMapper::updateCaptureResult(CameraMetadata* result, bool reque
+     if (res != OK) {
+         return res;
+     }
+-    if (mHalSupportsZoomRatio && requestedZoomRatioIs1) {
++    if (mHalSupportsZoomRatio && !useZoomRatio) {
+         res = combineZoomAndCropLocked(result, true/*isResult*/, arrayWidth, arrayHeight);
+-    } else if (!mHalSupportsZoomRatio && !requestedZoomRatioIs1) {
++    } else if (!mHalSupportsZoomRatio && useZoomRatio) {
+         res = separateZoomFromCropLocked(result, true/*isResult*/, arrayWidth, arrayHeight);
+     } else {
+         camera_metadata_entry_t entry = result->find(ANDROID_CONTROL_ZOOM_RATIO);
+diff --git a/services/camera/libcameraservice/device3/ZoomRatioMapper.h b/services/camera/libcameraservice/device3/ZoomRatioMapper.h
+index 1aa8e78483..0ac2e09b4c 100644
+--- a/services/camera/libcameraservice/device3/ZoomRatioMapper.h
++++ b/services/camera/libcameraservice/device3/ZoomRatioMapper.h
+@@ -64,7 +64,7 @@ class ZoomRatioMapper : public CoordinateMapper {
+     /**
+      * Update capture result to handle both cropRegion and zoomRatio.
+      */
+-    status_t updateCaptureResult(CameraMetadata *request, bool requestedZoomRatioIs1);
++    status_t updateCaptureResult(CameraMetadata *request, bool useZoomRatio);
+ 
+   public: // Visible for testing. Do not use concurently.
+     void scaleCoordinates(int32_t* coordPairs, int coordCount,
+diff --git a/services/camera/libcameraservice/tests/ZoomRatioTest.cpp b/services/camera/libcameraservice/tests/ZoomRatioTest.cpp
+index badd47aad5..a531e10a35 100644
+--- a/services/camera/libcameraservice/tests/ZoomRatioTest.cpp
++++ b/services/camera/libcameraservice/tests/ZoomRatioTest.cpp
+@@ -296,7 +296,7 @@ void subCropOverMaxDigitalZoomTest(bool usePreCorrectArray) {
+     }
+ 
+     metadata.update(ANDROID_SCALER_CROP_REGION, test2xCropRegion[index], 4);
+-    res = mapper.updateCaptureResult(&metadata, true/*requestedZoomRatioIs1*/);
++    res = mapper.updateCaptureResult(&metadata, false/*useZoomRatio*/);
+     ASSERT_EQ(res, OK);
+     entry = metadata.find(ANDROID_SCALER_CROP_REGION);
+     ASSERT_EQ(entry.count, 4U);
+@@ -340,7 +340,7 @@ void subCropOverZoomRangeTest(bool usePreCorrectArray) {
+     entry = metadata.find(ANDROID_CONTROL_ZOOM_RATIO);
+     EXPECT_NEAR(entry.data.f[0], 2.0f, kMaxAllowedRatioError);
+ 
+-    res = mapper.updateCaptureResult(&metadata, true/*requestedZoomRatioIs1*/);
++    res = mapper.updateCaptureResult(&metadata, false/*useZoomRatio*/);
+     ASSERT_EQ(res, OK);
+     entry = metadata.find(ANDROID_CONTROL_ZOOM_RATIO);
+     EXPECT_NEAR(entry.data.f[0], 1.0f, kMaxAllowedRatioError);
+@@ -364,7 +364,7 @@ void subCropOverZoomRangeTest(bool usePreCorrectArray) {
+     entry = metadata.find(ANDROID_CONTROL_ZOOM_RATIO);
+     EXPECT_NEAR(entry.data.f[0], 1.0f, kMaxAllowedRatioError);
+ 
+-    res = mapper.updateCaptureResult(&metadata, true/*requestedZoomRatioIs1*/);
++    res = mapper.updateCaptureResult(&metadata, false/*useZoomRatio*/);
+     ASSERT_EQ(res, OK);
+     entry = metadata.find(ANDROID_SCALER_CROP_REGION);
+     ASSERT_EQ(entry.count, 4U);
+@@ -452,7 +452,7 @@ void subZoomOverZoomRangeTest(bool usePreCorrectArray) {
+     entry = metadata.find(ANDROID_CONTROL_ZOOM_RATIO);
+     ASSERT_EQ(entry.data.f[0], zoomRatio);
+ 
+-    res = mapper.updateCaptureResult(&metadata, false/*requestedZoomRatioIs1*/);
++    res = mapper.updateCaptureResult(&metadata, true/*useZoomRatio*/);
+     ASSERT_EQ(res, OK);
+     entry = metadata.find(ANDROID_SCALER_CROP_REGION);
+     ASSERT_EQ(entry.count, 4U);
+-- 
+2.43.0
+

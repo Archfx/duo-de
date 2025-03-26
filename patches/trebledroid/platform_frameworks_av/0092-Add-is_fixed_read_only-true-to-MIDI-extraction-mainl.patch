@@ -1,0 +1,31 @@
+From cf0a8ee1ba96ef321254305e35b37909ed932c65 Mon Sep 17 00:00:00 2001
+From: Ian Baker <ibaker@google.com>
+Date: Mon, 14 Oct 2024 09:09:22 +0000
+Subject: [PATCH 092/436] Add is_fixed_read_only: true to MIDI extraction
+ mainline flag def
+
+All mainline flags must be read-only, and if this is missing then
+the import to Gantry fails (relatively silently).
+
+Bug: b/359920208
+Change-Id: Ie008da9b083fbacf72b5d55062b7c0768239a2d4
+Test: Presubmit
+---
+ media/module/extractors/extractor.aconfig | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/media/module/extractors/extractor.aconfig b/media/module/extractors/extractor.aconfig
+index c61efa4722..c9bf6945be 100644
+--- a/media/module/extractors/extractor.aconfig
++++ b/media/module/extractors/extractor.aconfig
+@@ -7,6 +7,7 @@ container: "com.android.media"
+ flag {
+     name: "extractor_sniff_midi_optimizations"
+     is_exported: true
++    is_fixed_read_only: true
+     namespace: "media_extractor"
+     description: "Enable SniffMidi optimizations."
+     bug: "359920208"
+-- 
+2.43.0
+

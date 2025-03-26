@@ -1,0 +1,64 @@
+From 778ccd1813577d79db0e17d951861797d41883a6 Mon Sep 17 00:00:00 2001
+From: Imran Ziad <imranziad@google.com>
+Date: Tue, 3 Dec 2024 11:29:17 +0800
+Subject: [PATCH 377/436] Camera: Add desktop effects metadata tags
+
+- Auto-generated
+Flag: com.android.internal.camera.flags.desktop_effects
+
+Test: None
+Bug: 376797335
+Change-Id: I0c3808591634a7d9efe0f5a02630d39005b4ef3e
+---
+ camera/ndk/impl/ACameraMetadata.cpp               | 6 ++++++
+ camera/ndk/include/camera/NdkCameraMetadataTags.h | 3 +++
+ 2 files changed, 9 insertions(+)
+
+diff --git a/camera/ndk/impl/ACameraMetadata.cpp b/camera/ndk/impl/ACameraMetadata.cpp
+index 32e2f3dc9c..8d0ca96156 100644
+--- a/camera/ndk/impl/ACameraMetadata.cpp
++++ b/camera/ndk/impl/ACameraMetadata.cpp
+@@ -654,6 +654,12 @@ std::unordered_set<uint32_t> ACameraMetadata::sSystemTags ({
+     ANDROID_DEPTH_MAX_DEPTH_SAMPLES,
+     ANDROID_HEIC_INFO_SUPPORTED,
+     ANDROID_HEIC_INFO_MAX_JPEG_APP_SEGMENTS_COUNT,
++    ANDROID_DESKTOP_EFFECTS_CAPABILITIES,
++    ANDROID_DESKTOP_EFFECTS_BACKGROUND_BLUR_MODES,
++    ANDROID_DESKTOP_EFFECTS_BACKGROUND_BLUR_MODE,
++    ANDROID_DESKTOP_EFFECTS_FACE_RETOUCH_MODE,
++    ANDROID_DESKTOP_EFFECTS_FACE_RETOUCH_STRENGTH,
++    ANDROID_DESKTOP_EFFECTS_PORTRAIT_RELIGHT_MODE,
+ });
+ 
+ /*~@~@~@~@~@~@~@~@~@~@~@~@~@~@~@~@~@~@~@~@~@~@~@~@~@~@~@~@~@~@~@~@~@~@~@~
+diff --git a/camera/ndk/include/camera/NdkCameraMetadataTags.h b/camera/ndk/include/camera/NdkCameraMetadataTags.h
+index fc6b93289f..2234bedabd 100644
+--- a/camera/ndk/include/camera/NdkCameraMetadataTags.h
++++ b/camera/ndk/include/camera/NdkCameraMetadataTags.h
+@@ -92,6 +92,7 @@ typedef enum acamera_metadata_section {
+     ACAMERA_EXTENSION,
+     ACAMERA_JPEGR,
+     ACAMERA_SHARED_SESSION,
++    ACAMERA_DESKTOP_EFFECTS,
+     ACAMERA_SECTION_COUNT,
+ 
+     ACAMERA_VENDOR = 0x8000
+@@ -140,6 +141,7 @@ typedef enum acamera_metadata_section_start {
+     ACAMERA_EXTENSION_START        = ACAMERA_EXTENSION         << 16,
+     ACAMERA_JPEGR_START            = ACAMERA_JPEGR             << 16,
+     ACAMERA_SHARED_SESSION_START   = ACAMERA_SHARED_SESSION    << 16,
++    ACAMERA_DESKTOP_EFFECTS_START  = ACAMERA_DESKTOP_EFFECTS   << 16,
+     ACAMERA_VENDOR_START           = ACAMERA_VENDOR            << 16
+ } acamera_metadata_section_start_t;
+ 
+@@ -12082,6 +12084,7 @@ typedef enum acamera_metadata_enum_acamera_jpegr_available_jpeg_r_stream_configu
+ 
+ 
+ 
++
+ __END_DECLS
+ 
+ #endif /* _NDK_CAMERA_METADATA_TAGS_H */
+-- 
+2.43.0
+

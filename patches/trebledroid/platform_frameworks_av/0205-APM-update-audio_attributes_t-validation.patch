@@ -1,0 +1,31 @@
+From d9add5765a58bf3ad654684808888b6831954468 Mon Sep 17 00:00:00 2001
+From: Jean-Michel Trivi <jmtrivi@google.com>
+Date: Tue, 5 Nov 2024 14:48:40 -0800
+Subject: [PATCH 205/436] APM: update audio_attributes_t validation
+
+Accept USAGE_SPEAKER_CLEANUP.
+
+Bug: 355050846
+Flag: android.media.audio.speaker_cleanup_usage
+Test: atest CtsMediaAudioTestCases:AudioAttributesTest
+
+Change-Id: Ice031be5b67931abc4e462da8f1e63f4b26cc0ae
+---
+ services/audiopolicy/managerdefault/AudioPolicyManager.cpp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index 000b5717e8..db5eeb3dff 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -8752,6 +8752,7 @@ bool AudioPolicyManager::isValidAttributes(const audio_attributes_t *paa)
+     case AUDIO_USAGE_SAFETY:
+     case AUDIO_USAGE_VEHICLE_STATUS:
+     case AUDIO_USAGE_ANNOUNCEMENT:
++    case AUDIO_USAGE_SPEAKER_CLEANUP:
+         break;
+     default:
+         return false;
+-- 
+2.43.0
+

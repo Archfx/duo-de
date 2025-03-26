@@ -1,0 +1,57 @@
+From 6379ef2b67105e101710624c36f6400197c71a24 Mon Sep 17 00:00:00 2001
+From: Fyodor Kyslov <kyslov@google.com>
+Date: Thu, 7 Nov 2024 16:44:51 +0000
+Subject: [PATCH 223/436] Put APV Codec creation under flag
+
+Bug: 376770121
+Bug: 363333555
+
+Test: manual, verifying that codec is not created when flag is not set
+Change-Id: I04a9be9972107475c8960faaa3212aae51bf965e
+---
+ media/codec2/components/apv/C2SoftApvDec.cpp | 4 ++++
+ media/codec2/components/apv/C2SoftApvEnc.cpp | 6 ++++++
+ 2 files changed, 10 insertions(+)
+
+diff --git a/media/codec2/components/apv/C2SoftApvDec.cpp b/media/codec2/components/apv/C2SoftApvDec.cpp
+index 6e92b6f03a..0617d06af6 100644
+--- a/media/codec2/components/apv/C2SoftApvDec.cpp
++++ b/media/codec2/components/apv/C2SoftApvDec.cpp
+@@ -1231,6 +1231,10 @@ class C2SoftApvDecFactory : public C2ComponentFactory {
+ }  // namespace android
+ 
+ __attribute__((cfi_canonical_jump_table)) extern "C" ::C2ComponentFactory* CreateCodec2Factory() {
++    if (!android::media::swcodec::flags::apv_software_codec()) {
++        ALOGV("APV SW Codec is not enabled");
++        return nullptr;
++    }
+     return new ::android::C2SoftApvDecFactory();
+ }
+ 
+diff --git a/media/codec2/components/apv/C2SoftApvEnc.cpp b/media/codec2/components/apv/C2SoftApvEnc.cpp
+index c395e20df3..999c08da23 100644
+--- a/media/codec2/components/apv/C2SoftApvEnc.cpp
++++ b/media/codec2/components/apv/C2SoftApvEnc.cpp
+@@ -18,6 +18,8 @@
+ #define LOG_TAG "C2SoftApvEnc"
+ #include <log/log.h>
+ 
++#include <android_media_swcodec_flags.h>
++
+ #include <media/hardware/VideoAPI.h>
+ #include <media/stagefright/MediaDefs.h>
+ #include <media/stagefright/MediaErrors.h>
+@@ -1267,6 +1269,10 @@ class C2SoftApvEncFactory : public C2ComponentFactory {
+ }  // namespace android
+ 
+ __attribute__((cfi_canonical_jump_table)) extern "C" ::C2ComponentFactory* CreateCodec2Factory() {
++    if (!android::media::swcodec::flags::apv_software_codec()) {
++        ALOGV("APV SW Codec is not enabled");
++        return nullptr;
++    }
+     return new ::android::C2SoftApvEncFactory();
+ }
+ 
+-- 
+2.43.0
+

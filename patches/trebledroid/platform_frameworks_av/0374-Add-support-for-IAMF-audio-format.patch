@@ -1,0 +1,90 @@
+From 3fabd2e1478d74e3b9c34da8397dc383a4ca62cb Mon Sep 17 00:00:00 2001
+From: Jean-Michel Trivi <jmtrivi@google.com>
+Date: Mon, 2 Dec 2024 12:47:29 -0800
+Subject: [PATCH 374/436] Add support for IAMF audio format
+
+Flag: android.media.audio.iamf_definitions_api
+Bug: 337522902
+Test: compile
+Change-Id: I42787f788e8cebc172fcaf07e824685a701ee148
+---
+ .../AidlConversionCppNdk.cpp                  | 36 +++++++++++++++++++
+ media/module/foundation/MediaDefs.cpp         |  2 ++
+ .../media/stagefright/foundation/MediaDefs.h  |  1 +
+ 3 files changed, 39 insertions(+)
+
+diff --git a/media/audioaidlconversion/AidlConversionCppNdk.cpp b/media/audioaidlconversion/AidlConversionCppNdk.cpp
+index 0b784a3d19..99b538152c 100644
+--- a/media/audioaidlconversion/AidlConversionCppNdk.cpp
++++ b/media/audioaidlconversion/AidlConversionCppNdk.cpp
+@@ -803,6 +803,42 @@ const detail::AudioFormatPairs& getAudioFormatPairs() {
+             {// Note: not in the IANA registry.
+              AUDIO_FORMAT_APTX_ADAPTIVE_R4,
+              make_AudioFormatDescription("audio/vnd.qcom.aptx.adaptive.r4")},
++            {// Note: not in the IANA registry.
++             AUDIO_FORMAT_IAMF_SIMPLE_OPUS, make_AudioFormatDescription(
++                     std::string(::android::MEDIA_MIMETYPE_AUDIO_IAMF) + ".simple.opus")},
++            {// Note: not in the IANA registry.
++             AUDIO_FORMAT_IAMF_SIMPLE_AAC, make_AudioFormatDescription(
++                     std::string(::android::MEDIA_MIMETYPE_AUDIO_IAMF) + ".simple.aac")},
++            {// Note: not in the IANA registry.
++             AUDIO_FORMAT_IAMF_SIMPLE_FLAC, make_AudioFormatDescription(
++                    std::string(::android::MEDIA_MIMETYPE_AUDIO_IAMF) + ".simple.flac")},
++            {// Note: not in the IANA registry.
++             AUDIO_FORMAT_IAMF_SIMPLE_PCM, make_AudioFormatDescription(
++                    std::string(::android::MEDIA_MIMETYPE_AUDIO_IAMF) + ".simple.pcm")},
++            {// Note: not in the IANA registry.
++             AUDIO_FORMAT_IAMF_BASE_OPUS, make_AudioFormatDescription(
++                    std::string(::android::MEDIA_MIMETYPE_AUDIO_IAMF) + ".base.opus")},
++            {// Note: not in the IANA registry.
++             AUDIO_FORMAT_IAMF_BASE_AAC, make_AudioFormatDescription(
++                    std::string(::android::MEDIA_MIMETYPE_AUDIO_IAMF) + ".base.aac")},
++            {// Note: not in the IANA registry.
++             AUDIO_FORMAT_IAMF_BASE_FLAC, make_AudioFormatDescription(
++                    std::string(::android::MEDIA_MIMETYPE_AUDIO_IAMF) + ".base.flac")},
++            {// Note: not in the IANA registry.
++             AUDIO_FORMAT_IAMF_BASE_PCM, make_AudioFormatDescription(
++                    std::string(::android::MEDIA_MIMETYPE_AUDIO_IAMF) + ".base.pcm")},
++            {// Note: not in the IANA registry.
++             AUDIO_FORMAT_IAMF_BASE_ENHANCED_OPUS, make_AudioFormatDescription(
++                    std::string(::android::MEDIA_MIMETYPE_AUDIO_IAMF) + ".base_enhanced.opus")},
++            {// Note: not in the IANA registry.
++             AUDIO_FORMAT_IAMF_BASE_ENHANCED_AAC, make_AudioFormatDescription(
++                    std::string(::android::MEDIA_MIMETYPE_AUDIO_IAMF) + ".base_enhanced.aac")},
++            {// Note: not in the IANA registry.
++             AUDIO_FORMAT_IAMF_BASE_ENHANCED_FLAC, make_AudioFormatDescription(
++                    std::string(::android::MEDIA_MIMETYPE_AUDIO_IAMF) + ".base_enhanced.flac")},
++            {// Note: not in the IANA registry.
++             AUDIO_FORMAT_IAMF_BASE_ENHANCED_PCM, make_AudioFormatDescription(
++                    std::string(::android::MEDIA_MIMETYPE_AUDIO_IAMF) + ".base_enhanced.pcm")},
+     }};
+     return pairs;
+ }
+diff --git a/media/module/foundation/MediaDefs.cpp b/media/module/foundation/MediaDefs.cpp
+index a89069649f..b2572a8cc7 100644
+--- a/media/module/foundation/MediaDefs.cpp
++++ b/media/module/foundation/MediaDefs.cpp
+@@ -124,6 +124,8 @@ const char *MEDIA_MIMETYPE_AUDIO_AAC_LATM_HE_V2 = "audio/mp4a-latm.29";
+ const char *MEDIA_MIMETYPE_AUDIO_IEC61937 = "audio/x-iec61937";
+ // Note: not in the IANA registry.
+ const char *MEDIA_MIMETYPE_AUDIO_IEC60958 = "audio/x-iec60958";
++// Note: not in the IANA registry.
++const char *MEDIA_MIMETYPE_AUDIO_IAMF = "audio/iamf";
+ 
+ const char *MEDIA_MIMETYPE_CONTAINER_MPEG4 = "video/mp4";
+ const char *MEDIA_MIMETYPE_CONTAINER_WAV = "audio/x-wav";
+diff --git a/media/module/foundation/include/media/stagefright/foundation/MediaDefs.h b/media/module/foundation/include/media/stagefright/foundation/MediaDefs.h
+index 2b3f4464b5..d02f6c20e4 100644
+--- a/media/module/foundation/include/media/stagefright/foundation/MediaDefs.h
++++ b/media/module/foundation/include/media/stagefright/foundation/MediaDefs.h
+@@ -119,6 +119,7 @@ extern const char *MEDIA_MIMETYPE_AUDIO_AAC_LATM_HE_V1;
+ extern const char *MEDIA_MIMETYPE_AUDIO_AAC_LATM_HE_V2;
+ extern const char *MEDIA_MIMETYPE_AUDIO_IEC61937;
+ extern const char *MEDIA_MIMETYPE_AUDIO_IEC60958;
++extern const char *MEDIA_MIMETYPE_AUDIO_IAMF;
+ 
+ extern const char *MEDIA_MIMETYPE_CONTAINER_MPEG4;
+ extern const char *MEDIA_MIMETYPE_CONTAINER_WAV;
+-- 
+2.43.0
+

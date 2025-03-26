@@ -1,0 +1,81 @@
+From 9c70c66558dded2d59aeb908ece201040109338f Mon Sep 17 00:00:00 2001
+From: Robert Wu <robertwu@google.com>
+Date: Wed, 30 Oct 2024 18:27:47 +0000
+Subject: [PATCH 181/436] Add DeviceIdSet to AudioContainers
+
+This CL adds a new container type for a set of device ids.
+This is part of a larger change to add getRoutedDevices() functions.
+
+Bug: 367816690
+Test: make
+Flag: android.media.audio.routed_device_ids
+Change-Id: Id27fdbec9f259dfd86cc288cb58343d452048e4d
+---
+ media/libaudiofoundation/AudioContainers.cpp  | 21 +++++++++++++++++++
+ .../include/media/AudioContainers.h           | 11 ++++++++++
+ 2 files changed, 32 insertions(+)
+
+diff --git a/media/libaudiofoundation/AudioContainers.cpp b/media/libaudiofoundation/AudioContainers.cpp
+index e1265cf9aa..6727562170 100644
+--- a/media/libaudiofoundation/AudioContainers.cpp
++++ b/media/libaudiofoundation/AudioContainers.cpp
+@@ -130,6 +130,27 @@ std::string dumpMixerBehaviors(const MixerBehaviorSet& mixerBehaviors) {
+     return ss.str();
+ }
+ 
++std::string toString(const DeviceIdSet& deviceIds) {
++    if (deviceIds.empty()) {
++        return "Empty device ids";
++    }
++    std::stringstream ss;
++    for (auto it = deviceIds.begin(); it != deviceIds.end(); ++it) {
++        if (it != deviceIds.begin()) {
++            ss << ", ";
++        }
++        ss << *it;
++    }
++    return ss.str();
++}
++
++audio_port_handle_t getFirstDeviceId(const DeviceIdSet& deviceIds) {
++    if (deviceIds.empty()) {
++        return AUDIO_PORT_HANDLE_NONE;
++    }
++    return *(deviceIds.begin());
++}
++
+ AudioProfileAttributesMultimap createAudioProfilesAttrMap(audio_profile profiles[],
+                                                           uint32_t first,
+                                                           uint32_t last) {
+diff --git a/media/libaudiofoundation/include/media/AudioContainers.h b/media/libaudiofoundation/include/media/AudioContainers.h
+index 46fd620b1f..3673871f47 100644
+--- a/media/libaudiofoundation/include/media/AudioContainers.h
++++ b/media/libaudiofoundation/include/media/AudioContainers.h
+@@ -33,6 +33,7 @@ using DeviceTypeSet = std::set<audio_devices_t>;
+ using FormatSet = std::set<audio_format_t>;
+ using SampleRateSet = std::set<uint32_t>;
+ using MixerBehaviorSet = std::set<audio_mixer_behavior_t>;
++using DeviceIdSet = std::set<audio_port_handle_t>;
+ 
+ using FormatVector = std::vector<audio_format_t>;
+ using AudioProfileAttributesMultimap =
+@@ -138,6 +139,16 @@ inline std::string toString(const DeviceTypeSet& deviceTypes) {
+     return deviceTypesToString(deviceTypes);
+ }
+ 
++/**
++ * Returns human readable string for a set of device ids.
++ */
++std::string toString(const DeviceIdSet& deviceIds);
++
++/**
++ * Returns the first device id of a set of device ids or AUDIO_PORT_HANDLE_NONE when its empty.
++ */
++audio_port_handle_t getFirstDeviceId(const DeviceIdSet& deviceIds);
++
+ /**
+  * Create audio profile attributes map by given audio profile array from the range of [first, last).
+  *
+-- 
+2.43.0
+

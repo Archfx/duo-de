@@ -1,0 +1,60 @@
+From adde7689244edba32b36f7f5f1a2649e1e053cde Mon Sep 17 00:00:00 2001
+From: Fyodor Kyslov <kyslov@google.com>
+Date: Fri, 8 Nov 2024 04:14:58 +0000
+Subject: [PATCH 236/436] Restrict APV codec to Android B and above
+
+Bug: 376770121
+Test: CodecEncoderTest, CodecDecoderTest
+Change-Id: Ifeae48b20759cfc06031a710124a56d127fa7ae1
+---
+ media/libstagefright/data/media_codecs_google_c2_video.xml | 4 ++--
+ media/libstagefright/data/media_codecs_sw.xml              | 4 ++--
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/media/libstagefright/data/media_codecs_google_c2_video.xml b/media/libstagefright/data/media_codecs_google_c2_video.xml
+index fc0a5e9081..72a25510aa 100644
+--- a/media/libstagefright/data/media_codecs_google_c2_video.xml
++++ b/media/libstagefright/data/media_codecs_google_c2_video.xml
+@@ -95,7 +95,7 @@
+             <Feature name="adaptive-playback" />
+             <Attribute name="software-codec" />
+         </MediaCodec>
+-        <MediaCodec name="c2.android.apv.decoder" type="video/apv">
++        <MediaCodec name="c2.android.apv.decoder" type="video/apv" enabled="false" minsdk="36" variant="!slow-cpu">
+             <Limit name="size" min="16x16" max="1920x1920"/>
+             <Limit name="alignment" value="2x2"/>
+             <Limit name="bitrate" range="1-240000000"/>
+@@ -168,7 +168,7 @@
+             <Limit name="bitrate" range="1-40000000" />
+             <Feature name="bitrate-modes" value="VBR,CBR" />
+         </MediaCodec>
+-        <MediaCodec name="c2.android.apv.encoder" type="video/apv">
++        <MediaCodec name="c2.android.apv.encoder" type="video/apv" enabled="false" minsdk="36" variant="!slow-cpu">
+             <Limit name="size" min="2x2" max="1920x1920" />
+             <Limit name="alignment" value="2x2" />
+             <Limit name="block-size" value="16x16" />
+diff --git a/media/libstagefright/data/media_codecs_sw.xml b/media/libstagefright/data/media_codecs_sw.xml
+index 61b7198a2a..4601831f9b 100644
+--- a/media/libstagefright/data/media_codecs_sw.xml
++++ b/media/libstagefright/data/media_codecs_sw.xml
+@@ -255,7 +255,7 @@
+             <Feature name="adaptive-playback" />
+             <Attribute name="software-codec" />
+         </MediaCodec>
+-        <MediaCodec name="c2.android.apv.decoder" type="video/apv">
++        <MediaCodec name="c2.android.apv.decoder" type="video/apv" enabled="false" minsdk="36" variant="!slow-cpu">
+             <Limit name="size" min="16x16" max="1920x1920"/>
+             <Limit name="alignment" value="2x2"/>
+             <Limit name="bitrate" range="1-240000000"/>
+@@ -417,7 +417,7 @@
+             <Feature name="qp-bounds" />
+             <Attribute name="software-codec" />
+         </MediaCodec>
+-        <MediaCodec name="c2.android.apv.encoder" type="video/apv" variant="!slow-cpu">
++        <MediaCodec name="c2.android.apv.encoder" type="video/apv" enabled="false" minsdk="36" variant="!slow-cpu">
+             <Limit name="size" min="2x2" max="1920x1920" />
+             <Limit name="alignment" value="2x2" />
+             <Limit name="block-size" value="16x16" />
+-- 
+2.43.0
+

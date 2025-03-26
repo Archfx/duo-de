@@ -1,0 +1,81 @@
+From 2b609afa587f81af500e5470047d1795c3f5425e Mon Sep 17 00:00:00 2001
+From: Shuzhen Wang <shuzhenwang@google.com>
+Date: Fri, 8 Nov 2024 14:13:46 -0800
+Subject: [PATCH 248/436] Camera: Add new feature combination query version
+
+The new flag is for introducing new combinations with 2 private streams.
+
+Flag: com.android.internal.camera.flags.feature_combination_baklava
+Test: Camera CTS
+Bug: 370778206
+Change-Id: I1c040c066e817e70b5b13625d989100237318c98
+---
+ camera/camera_platform.aconfig                |  6 ++++++
+ .../common/CameraProviderManager.cpp          | 21 ++++++++++++++-----
+ .../common/CameraProviderManager.h            |  1 +
+ 3 files changed, 23 insertions(+), 5 deletions(-)
+
+diff --git a/camera/camera_platform.aconfig b/camera/camera_platform.aconfig
+index 78b793dc8a..ebfd7d7e15 100644
+--- a/camera/camera_platform.aconfig
++++ b/camera/camera_platform.aconfig
+@@ -229,3 +229,9 @@ flag {
+     bug: "359944765"
+ }
+ 
++flag {
++    namespace: "camera_platform"
++    name: "feature_combination_baklava"
++    description: "Add new feature combination query version for Baklava"
++    bug: "370778206"
++}
+diff --git a/services/camera/libcameraservice/common/CameraProviderManager.cpp b/services/camera/libcameraservice/common/CameraProviderManager.cpp
+index c1f9204025..48f43e60d6 100644
+--- a/services/camera/libcameraservice/common/CameraProviderManager.cpp
++++ b/services/camera/libcameraservice/common/CameraProviderManager.cpp
+@@ -2058,14 +2058,25 @@ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addSessionConfigQuery
+ 
+     int versionCode = ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION_UPSIDE_DOWN_CAKE;
+     IPCTransport ipcTransport = parentProvider->getIPCTransport();
++    auto& c = mCameraCharacteristics;
++    status_t res = OK;
++    if (ipcTransport != IPCTransport::AIDL) {
++        res = c.update(ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION, &versionCode, 1);
++        mSessionConfigQueryVersion = versionCode;
++        return res;
++    }
++
+     int deviceVersion = HARDWARE_DEVICE_API_VERSION(mVersion.get_major(), mVersion.get_minor());
+-    if (ipcTransport == IPCTransport::AIDL
+-            && deviceVersion >= CAMERA_DEVICE_API_VERSION_1_3) {
++    if (deviceVersion == CAMERA_DEVICE_API_VERSION_1_3) {
+         versionCode = ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION_VANILLA_ICE_CREAM;
++    } else if (deviceVersion >= CAMERA_DEVICE_API_VERSION_1_4) {
++        if (flags::feature_combination_baklava()) {
++            versionCode = ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION_BAKLAVA;
++        } else {
++            versionCode = ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION_VANILLA_ICE_CREAM;
++        }
+     }
+-
+-    auto& c = mCameraCharacteristics;
+-    status_t res = c.update(ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION, &versionCode, 1);
++    res = c.update(ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION, &versionCode, 1);
+     mSessionConfigQueryVersion = versionCode;
+     return res;
+ }
+diff --git a/services/camera/libcameraservice/common/CameraProviderManager.h b/services/camera/libcameraservice/common/CameraProviderManager.h
+index 3bad975f57..803df40776 100644
+--- a/services/camera/libcameraservice/common/CameraProviderManager.h
++++ b/services/camera/libcameraservice/common/CameraProviderManager.h
+@@ -88,6 +88,7 @@ enum SystemCameraKind {
+ #define CAMERA_DEVICE_API_VERSION_1_0 HARDWARE_DEVICE_API_VERSION(1, 0)
+ #define CAMERA_DEVICE_API_VERSION_1_2 HARDWARE_DEVICE_API_VERSION(1, 2)
+ #define CAMERA_DEVICE_API_VERSION_1_3 HARDWARE_DEVICE_API_VERSION(1, 3)
++#define CAMERA_DEVICE_API_VERSION_1_4 HARDWARE_DEVICE_API_VERSION(1, 4)
+ #define CAMERA_DEVICE_API_VERSION_3_0 HARDWARE_DEVICE_API_VERSION(3, 0)
+ #define CAMERA_DEVICE_API_VERSION_3_1 HARDWARE_DEVICE_API_VERSION(3, 1)
+ #define CAMERA_DEVICE_API_VERSION_3_2 HARDWARE_DEVICE_API_VERSION(3, 2)
+-- 
+2.43.0
+

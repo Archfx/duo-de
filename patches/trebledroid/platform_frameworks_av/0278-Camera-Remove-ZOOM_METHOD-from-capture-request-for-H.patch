@@ -1,0 +1,81 @@
+From dc2300cc7533d77c59ef5ac8711b97e660bc338e Mon Sep 17 00:00:00 2001
+From: Shuzhen Wang <shuzhenwang@google.com>
+Date: Mon, 18 Nov 2024 09:04:23 -0800
+Subject: [PATCH 278/436] Camera: Remove ZOOM_METHOD from capture request for
+ HAL
+
+ZOOM_METHOD is a framework only key. Remove it from the capture request
+before sending it to the camera HAL.
+
+Flag: EXEMPT bugfix
+Test: Use camera
+Bug: 379333302
+Change-Id: I2df90b2282f8845a6bde213f958bf303d770efbd
+---
+ .../libcameraservice/device3/Camera3Device.cpp  | 17 ++++++++++-------
+ .../libcameraservice/device3/Camera3Device.h    |  2 +-
+ 2 files changed, 11 insertions(+), 8 deletions(-)
+
+diff --git a/services/camera/libcameraservice/device3/Camera3Device.cpp b/services/camera/libcameraservice/device3/Camera3Device.cpp
+index c6434a5290..9e89a196d7 100644
+--- a/services/camera/libcameraservice/device3/Camera3Device.cpp
++++ b/services/camera/libcameraservice/device3/Camera3Device.cpp
+@@ -3796,16 +3796,19 @@ bool Camera3Device::RequestThread::threadLoop() {
+     return submitRequestSuccess;
+ }
+ 
+-status_t Camera3Device::removeFwkOnlyRegionKeys(CameraMetadata *request) {
+-    static const std::array<uint32_t, 4> kFwkOnlyRegionKeys = {ANDROID_CONTROL_AF_REGIONS_SET,
+-        ANDROID_CONTROL_AE_REGIONS_SET, ANDROID_CONTROL_AWB_REGIONS_SET,
+-        ANDROID_SCALER_CROP_REGION_SET};
++status_t Camera3Device::removeFwkOnlyKeys(CameraMetadata *request) {
++    static const std::array<uint32_t, 5> kFwkOnlyKeys = {
++            ANDROID_CONTROL_AF_REGIONS_SET,
++            ANDROID_CONTROL_AE_REGIONS_SET,
++            ANDROID_CONTROL_AWB_REGIONS_SET,
++            ANDROID_SCALER_CROP_REGION_SET,
++            ANDROID_CONTROL_ZOOM_METHOD};
+     if (request == nullptr) {
+         ALOGE("%s request metadata nullptr", __FUNCTION__);
+         return BAD_VALUE;
+     }
+     status_t res = OK;
+-    for (const auto &key : kFwkOnlyRegionKeys) {
++    for (const auto &key : kFwkOnlyKeys) {
+         if (request->exists(key)) {
+             res = request->erase(key);
+             if (res != OK) {
+@@ -3884,7 +3887,7 @@ status_t Camera3Device::RequestThread::prepareHalRequests() {
+                             it != captureRequest->mSettingsList.end(); it++) {
+                         if (parent->mUHRCropAndMeteringRegionMappers.find(it->cameraId) ==
+                                 parent->mUHRCropAndMeteringRegionMappers.end()) {
+-                            if (removeFwkOnlyRegionKeys(&(it->metadata)) != OK) {
++                            if (removeFwkOnlyKeys(&(it->metadata)) != OK) {
+                                 SET_ERR("RequestThread: Unable to remove fwk-only keys from request"
+                                         "%d: %s (%d)", halRequest->frame_number, strerror(-res),
+                                         res);
+@@ -3904,7 +3907,7 @@ status_t Camera3Device::RequestThread::prepareHalRequests() {
+                                 return INVALID_OPERATION;
+                             }
+                             captureRequest->mUHRCropAndMeteringRegionsUpdated = true;
+-                            if (removeFwkOnlyRegionKeys(&(it->metadata)) != OK) {
++                            if (removeFwkOnlyKeys(&(it->metadata)) != OK) {
+                                 SET_ERR("RequestThread: Unable to remove fwk-only keys from request"
+                                         "%d: %s (%d)", halRequest->frame_number, strerror(-res),
+                                         res);
+diff --git a/services/camera/libcameraservice/device3/Camera3Device.h b/services/camera/libcameraservice/device3/Camera3Device.h
+index f1e088e23f..5711384b0a 100644
+--- a/services/camera/libcameraservice/device3/Camera3Device.h
++++ b/services/camera/libcameraservice/device3/Camera3Device.h
+@@ -367,7 +367,7 @@ class Camera3Device :
+ 
+   protected:
+     status_t disconnectImpl();
+-    static status_t removeFwkOnlyRegionKeys(CameraMetadata *request);
++    static status_t removeFwkOnlyKeys(CameraMetadata *request);
+ 
+     float getMaxPreviewFps(sp<camera3::Camera3OutputStreamInterface> stream);
+ 
+-- 
+2.43.0
+

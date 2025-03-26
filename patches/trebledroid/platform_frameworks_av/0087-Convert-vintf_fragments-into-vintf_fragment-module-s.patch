@@ -1,0 +1,70 @@
+From d2d3326c69b8dac91ce1a4096cb4903a3a31eb10 Mon Sep 17 00:00:00 2001
+From: Kiyoung Kim <kiyoungkim@google.com>
+Date: Fri, 11 Oct 2024 16:50:53 +0900
+Subject: [PATCH 087/436] Convert vintf_fragments into vintf_fragment module(s)
+
+Convert vintf_fragments into vintf_fragment module(s) so those manifests
+can be handled in the same way between KATI defined system image and
+Soong defined system image.
+
+Bug: 322089980
+Test: aosp_cf_x86_64_phone build succeeded
+Change-Id: I24f112edf32ea2d0146ebe1d95ba42be28552a6b
+---
+ camera/cameraserver/Android.bp | 7 ++++++-
+ media/mediaserver/Android.bp   | 7 ++++++-
+ 2 files changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/camera/cameraserver/Android.bp b/camera/cameraserver/Android.bp
+index 6862cb156b..d0df90b833 100644
+--- a/camera/cameraserver/Android.bp
++++ b/camera/cameraserver/Android.bp
+@@ -22,6 +22,11 @@ package {
+     default_applicable_licenses: ["frameworks_av_camera_license"],
+ }
+ 
++vintf_fragment {
++    name: "manifest_android.frameworks.cameraservice.service.xml",
++    src: "manifest_android.frameworks.cameraservice.service.xml",
++}
++
+ cc_binary {
+     name: "cameraserver",
+ 
+@@ -61,7 +66,7 @@ cc_binary {
+ 
+     init_rc: ["cameraserver.rc"],
+ 
+-    vintf_fragments: [
++    vintf_fragment_modules: [
+         "manifest_android.frameworks.cameraservice.service.xml",
+     ],
+ }
+diff --git a/media/mediaserver/Android.bp b/media/mediaserver/Android.bp
+index d916fd1347..b5124d07d0 100644
+--- a/media/mediaserver/Android.bp
++++ b/media/mediaserver/Android.bp
+@@ -51,6 +51,11 @@ soong_config_module_type {
+     ],
+ }
+ 
++vintf_fragment {
++    name: "manifest_media_c2_software.xml",
++    src: "manifest_media_c2_software.xml",
++}
++
+ mediaserver_cc_binary {
+     name: "mediaserver",
+ 
+@@ -88,7 +93,7 @@ mediaserver_cc_binary {
+         "-Wall",
+     ],
+ 
+-    vintf_fragments: ["manifest_media_c2_software.xml"],
++    vintf_fragment_modules: ["manifest_media_c2_software.xml"],
+ 
+     soong_config_variables: {
+         TARGET_DYNAMIC_64_32_MEDIASERVER: {
+-- 
+2.43.0
+

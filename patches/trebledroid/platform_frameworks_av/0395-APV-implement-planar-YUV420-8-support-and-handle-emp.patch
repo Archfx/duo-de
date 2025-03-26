@@ -1,0 +1,156 @@
+From d97db43ba7cef0cdf5ead0084ed1beb1d6c87dfd Mon Sep 17 00:00:00 2001
+From: Fyodor Kyslov <kyslov@google.com>
+Date: Wed, 4 Dec 2024 23:30:50 +0000
+Subject: [PATCH 395/436] APV: implement planar YUV420-8 support and handle
+ empty inputs
+
+Bug: 373705881
+Bug: 376770121
+
+Test: CodecEncoderTest, VtsHalMediaC2V1_0TargetVideoEncTest
+Change-Id: I4eef519a17ee0960a3fe2aa1b04276ede3ae3818
+---
+ media/codec2/components/apv/C2SoftApvEnc.cpp  | 34 +++++++++++++++----
+ .../components/base/SimpleC2Component.cpp     | 33 ++++++++++++++++++
+ .../base/include/SimpleC2Component.h          |  6 ++++
+ 3 files changed, 66 insertions(+), 7 deletions(-)
+
+diff --git a/media/codec2/components/apv/C2SoftApvEnc.cpp b/media/codec2/components/apv/C2SoftApvEnc.cpp
+index 9d84bc7502..9036df18a5 100644
+--- a/media/codec2/components/apv/C2SoftApvEnc.cpp
++++ b/media/codec2/components/apv/C2SoftApvEnc.cpp
+@@ -1056,10 +1056,20 @@ c2_status_t C2SoftApvEnc::setEncodeArgs(oapv_frms_t* inputFrames, const C2Graphi
+                                          input->width(), input->width(), input->width(),
+                                          input->width(), input->width(), input->height(),
+                                          CONV_FORMAT_I420);
+-            } else if (IsYUV420(*input)) {
+-                return C2_BAD_VALUE;
+             } else if (IsI420(*input)) {
+-                return C2_BAD_VALUE;
++                uint8_t  *srcY  = (uint8_t*)input->data()[0];
++                uint8_t  *srcU  = (uint8_t*)input->data()[1];
++                uint8_t  *srcV  = (uint8_t*)input->data()[2];
++                uint16_t *dstY  = (uint16_t*)inputFrames->frm[0].imgb->a[0];
++                uint16_t *dstUV = (uint16_t*)inputFrames->frm[0].imgb->a[1];
++                convertPlanar8ToP210(dstY, dstUV, srcY, srcU, srcV,
++                                        layout.planes[C2PlanarLayout::PLANE_Y].rowInc,
++                                        layout.planes[C2PlanarLayout::PLANE_U].rowInc,
++                                        layout.planes[C2PlanarLayout::PLANE_V].rowInc,
++                                        input->width(), input->width(),
++                                        input->width(), input->height(),
++                                        CONV_FORMAT_I420);
++
+             } else {
+                 ALOGE("Not supported color format. %d", mColorFormat);
+                 return C2_BAD_VALUE;
+@@ -1317,10 +1327,6 @@ void C2SoftApvEnc::process(const std::unique_ptr<C2Work>& work,
+         return;
+     }
+ 
+-    if (work->input.buffers.empty()) {
+-        return;
+-    }
+-
+     std::shared_ptr<C2GraphicView> view;
+     std::shared_ptr<C2Buffer> inputBuffer = nullptr;
+     if (!work->input.buffers.empty()) {
+@@ -1332,7 +1338,19 @@ void C2SoftApvEnc::process(const std::unique_ptr<C2Work>& work,
+             work->workletsProcessed = 1u;
+             return;
+         }
++    } else {
++        ALOGV("Empty input Buffer");
++        uint32_t flags = 0;
++        if (work->input.flags & C2FrameData::FLAG_END_OF_STREAM) {
++            flags |= C2FrameData::FLAG_END_OF_STREAM;
++        }
++        work->worklets.front()->output.flags = (C2FrameData::flags_t)flags;
++        work->worklets.front()->output.buffers.clear();
++        work->worklets.front()->output.ordinal = work->input.ordinal;
++        work->workletsProcessed = 1u;
++        return;
+     }
++
+     if (!inputBuffer) {
+         fillEmptyWork(work);
+         return;
+@@ -1361,6 +1379,7 @@ void C2SoftApvEnc::process(const std::unique_ptr<C2Work>& work,
+ 
+     error = setEncodeArgs(&mInputFrames, view.get(), workIndex);
+     if (error != C2_OK) {
++        ALOGE("setEncodeArgs has failed. err = %d", error);
+         mSignalledError = true;
+         work->result = error;
+         work->workletsProcessed = 1u;
+@@ -1382,6 +1401,7 @@ void C2SoftApvEnc::process(const std::unique_ptr<C2Work>& work,
+         int32_t status =
+                 oapve_encode(mEncoderId, &mInputFrames, mMetaId, bits.get(), &stat, &mReconFrames);
+         if (status != C2_OK) {
++            ALOGE("oapve_encode has failed. err = %d", status);
+             mSignalledError = true;
+             work->result = C2_CORRUPTED;
+             work->workletsProcessed = 1u;
+diff --git a/media/codec2/components/base/SimpleC2Component.cpp b/media/codec2/components/base/SimpleC2Component.cpp
+index a03f24ffac..ea67bf408f 100644
+--- a/media/codec2/components/base/SimpleC2Component.cpp
++++ b/media/codec2/components/base/SimpleC2Component.cpp
+@@ -713,6 +713,39 @@ void convertSemiPlanar8ToP210(uint16_t *dstY, uint16_t *dstUV,
+   }
+ }
+ 
++void convertPlanar8ToP210(uint16_t *dstY, uint16_t *dstUV,
++                              const uint8_t *srcY, const uint8_t *srcU, const uint8_t *srcV,
++                              size_t srcYStride, size_t srcUStride, size_t srcVStride,
++                              size_t dstYStride, size_t dstUVStride,
++                              uint32_t width, uint32_t height,
++                              CONV_FORMAT_T format) {
++  if (format != CONV_FORMAT_I420) {
++    ALOGE("No support for planar8 to P210. format is %d", format);
++    return;
++  }
++
++  for (int32_t y = 0; y < height; ++y) {
++    for (int32_t x = 0; x < width; ++x) {
++      dstY[x] = ((uint16_t)((double)srcY[x] * 1023 / 255 + 0.5) << 6) & 0xFFC0;
++    }
++    dstY += dstYStride;
++    srcY += srcYStride;
++  }
++
++  for (int32_t y = 0; y < height / 2; ++y) {
++    for (int32_t x = 0; x < width / 2; ++x) {
++      dstUV[x<<1] = dstUV[(x<<1) + dstUVStride] =
++                ((uint16_t)((double)srcU[x] * 1023 / 255 + 0.5) << 6) & 0xFFC0;
++      dstUV[(x<<1) + 1] = dstUV[(x<<1) + dstUVStride + 1] =
++                ((uint16_t)((double)srcV[x] * 1023 / 255 + 0.5) << 6) & 0xFFC0;
++    }
++    dstUV += dstUVStride << 1;
++    srcU += srcUStride;
++    srcV += srcVStride;
++  }
++}
++
++
+ std::unique_ptr<C2Work> SimpleC2Component::WorkQueue::pop_front() {
+     std::unique_ptr<C2Work> work = std::move(mQueue.front().work);
+     mQueue.pop_front();
+diff --git a/media/codec2/components/base/include/SimpleC2Component.h b/media/codec2/components/base/include/SimpleC2Component.h
+index 4306e556c1..5d2e8cd5e7 100644
+--- a/media/codec2/components/base/include/SimpleC2Component.h
++++ b/media/codec2/components/base/include/SimpleC2Component.h
+@@ -111,6 +111,12 @@ void convertSemiPlanar8ToP210(uint16_t *dstY, uint16_t *dstUV,
+                               size_t dstYStride, size_t dstUVStride,
+                               uint32_t width, uint32_t height,
+                               CONV_FORMAT_T format);
++void convertPlanar8ToP210(uint16_t *dstY, uint16_t *dstUV,
++                              const uint8_t *srcY, const uint8_t *srcU, const uint8_t *srcV,
++                              size_t srcYStride, size_t srcUStride, size_t srcVStride,
++                              size_t dstYStride, size_t dstUVStride,
++                              uint32_t width, uint32_t height,
++                              CONV_FORMAT_T format);
+ 
+ class SimpleC2Component
+         : public C2Component, public std::enable_shared_from_this<SimpleC2Component> {
+-- 
+2.43.0
+

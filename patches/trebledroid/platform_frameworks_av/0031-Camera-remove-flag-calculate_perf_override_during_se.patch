@@ -1,0 +1,53 @@
+From e005df561c94910330dd81dd5d6c5be594900790 Mon Sep 17 00:00:00 2001
+From: Avichal Rakesh <arakesh@google.com>
+Date: Wed, 25 Sep 2024 17:13:27 -0700
+Subject: [PATCH 031/436] Camera: remove flag
+ calculate_perf_override_during_session_support
+
+Bug: 365555385
+Test: Builds successfully
+Flag: EXEMPT flag removal
+Change-Id: I0417e2bf899566f51f2458f76f15808cb345bd7b
+---
+ camera/camera_platform.aconfig                     | 10 ----------
+ services/camera/libcameraservice/CameraService.cpp |  3 +--
+ 2 files changed, 1 insertion(+), 12 deletions(-)
+
+diff --git a/camera/camera_platform.aconfig b/camera/camera_platform.aconfig
+index b4de874d4a..ab2c5cc32e 100644
+--- a/camera/camera_platform.aconfig
++++ b/camera/camera_platform.aconfig
+@@ -131,16 +131,6 @@ flag {
+     }
+ }
+ 
+-flag {
+-    namespace: "camera_platform"
+-    name: "calculate_perf_override_during_session_support"
+-    description: "Dynamically calulate whether perf class override should be set in isSessionConfigurationWithParametersSupported."
+-    bug: "332975108"
+-    metadata {
+-        purpose: PURPOSE_BUGFIX
+-    }
+-}
+-
+ flag {
+     namespace: "camera_platform"
+     name: "analytics_24q3"
+diff --git a/services/camera/libcameraservice/CameraService.cpp b/services/camera/libcameraservice/CameraService.cpp
+index eb8708e824..6077e63d67 100644
+--- a/services/camera/libcameraservice/CameraService.cpp
++++ b/services/camera/libcameraservice/CameraService.cpp
+@@ -916,8 +916,7 @@ Status CameraService::isSessionConfigurationWithParametersSupported(
+                 cameraId.c_str());
+     }
+ 
+-    bool overrideForPerfClass = flags::calculate_perf_override_during_session_support() &&
+-                                SessionConfigurationUtils::targetPerfClassPrimaryCamera(
++    bool overrideForPerfClass = SessionConfigurationUtils::targetPerfClassPrimaryCamera(
+                                         mPerfClassPrimaryCameraIds, cameraId, targetSdkVersion);
+ 
+     auto ret = isSessionConfigurationWithParametersSupportedUnsafe(cameraId,
+-- 
+2.43.0
+

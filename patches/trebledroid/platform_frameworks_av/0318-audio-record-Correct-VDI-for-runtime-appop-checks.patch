@@ -1,0 +1,81 @@
+From 08506ced64f457ea540a5759ccbd97c5120191c7 Mon Sep 17 00:00:00 2001
+From: Atneya Nair <atneya@google.com>
+Date: Tue, 19 Nov 2024 16:54:06 -0800
+Subject: [PATCH 318/436] audio record: Correct VDI for runtime appop checks
+
+Make the appop checks for non default-vdi associated streams more
+precise. We should be checking the op against the VDI, in alignment
+with the perm check at the beginning of the stream.
+
+Test: CtsMediaAudioTestCases
+Test: CtsMediaAudioTestCases
+Bug: 343523722
+Flag: EXEMPT infeasible bugfix
+Change-Id: Ie64f0d01009103c160443ff5ce00bf93c903528d
+---
+ .../audiopolicy/service/AudioRecordClient.cpp  | 18 ++++++++++++++----
+ .../audiopolicy/service/AudioRecordClient.h    |  2 +-
+ 2 files changed, 15 insertions(+), 5 deletions(-)
+
+diff --git a/services/audiopolicy/service/AudioRecordClient.cpp b/services/audiopolicy/service/AudioRecordClient.cpp
+index fd344d9334..01e557cae9 100644
+--- a/services/audiopolicy/service/AudioRecordClient.cpp
++++ b/services/audiopolicy/service/AudioRecordClient.cpp
+@@ -64,12 +64,12 @@ class AttrSourceItr {
+     using iterator_category = std::forward_iterator_tag;
+     using difference_type = std::ptrdiff_t;
+     using value_type = AttributionSourceState;
+-    using pointer = const value_type*;
+-    using reference = const value_type&;
++    using pointer = value_type*;
++    using reference = value_type&;
+ 
+     AttrSourceItr() : mAttr(nullptr) {}
+ 
+-    AttrSourceItr(const AttributionSourceState& attr) : mAttr(&attr) {}
++    AttrSourceItr(AttributionSourceState& attr) : mAttr(&attr) {}
+ 
+     reference operator*() const { return *mAttr; }
+     pointer operator->() const { return mAttr; }
+@@ -89,7 +89,7 @@ class AttrSourceItr {
+ 
+     static AttrSourceItr end() { return AttrSourceItr{}; }
+ private:
+-    const AttributionSourceState * mAttr;
++    AttributionSourceState * mAttr;
+ };
+ } // anonymous
+ 
+@@ -134,6 +134,16 @@ OpRecordAudioMonitor::OpRecordAudioMonitor(
+         mVirtualDeviceId(virtualDeviceId), mAttr(attr), mAppOp(appOp),
+         mShouldMonitorRecord(shouldMonitorRecord),
+         mCommandThread(commandThread) {
++    // The vdi is carried in the attribution source for appops perm checks.
++    // Overwrite the entire chain with the vdi associated with the mix this client is attached to
++    // This ensures the checkOps triggered by the listener are correct.
++    // Note: we still only register for events by package name, so we assume that we get events
++    // independent of vdi.
++    if (mVirtualDeviceId != 0 /* default vdi */) {
++        // TODO (atneya@) lift for const
++        std::for_each(AttrSourceItr{mAttributionSource}, AttrSourceItr::end(),
++                      [&](auto& attr) { attr.deviceId = mVirtualDeviceId; });
++    }
+ }
+ 
+ OpRecordAudioMonitor::~OpRecordAudioMonitor()
+diff --git a/services/audiopolicy/service/AudioRecordClient.h b/services/audiopolicy/service/AudioRecordClient.h
+index f45b4de157..3553f1d8f5 100644
+--- a/services/audiopolicy/service/AudioRecordClient.h
++++ b/services/audiopolicy/service/AudioRecordClient.h
+@@ -71,7 +71,7 @@ private:
+     void checkOp(bool updateUidStates = false);
+ 
+     std::atomic_bool mHasOp;
+-    const AttributionSourceState mAttributionSource;
++    AttributionSourceState mAttributionSource;
+     const uint32_t mVirtualDeviceId;
+     const audio_attributes_t mAttr;
+     const int32_t mAppOp;
+-- 
+2.43.0
+

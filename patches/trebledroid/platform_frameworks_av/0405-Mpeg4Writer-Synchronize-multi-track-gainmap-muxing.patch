@@ -1,0 +1,56 @@
+From f94d3eaeec0bf0b91e370ddcb40edd891a290076 Mon Sep 17 00:00:00 2001
+From: Emilian Peev <epeev@google.com>
+Date: Fri, 6 Dec 2024 22:06:09 +0000
+Subject: [PATCH 405/436] Mpeg4Writer: Synchronize multi-track gainmap muxing
+
+HEIF/AVIF images with gainmap will include at least two
+tracks. Each track will have its own thread for writing
+and calculating the sample offsets. Currently sample
+offset calculation relies on the same parent
+functionality and is not synchronized.
+Avoid possible race conditions by synchronizing access
+in this scenario.
+
+Flag: EXEMPT bugfix
+Bug: 376155468
+Test: atest -c -d cts/tests/camera/src/android/hardware/camera2/cts/ImageReaderTest.java#testHeicUltraHdr
+
+Change-Id: I1bad7fa8e3a70f27478d81fd80c0873c9e43525e
+---
+ media/libstagefright/MPEG4Writer.cpp | 16 +++++++++++++---
+ 1 file changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/media/libstagefright/MPEG4Writer.cpp b/media/libstagefright/MPEG4Writer.cpp
+index edd7e7817d..0bfb3ddb09 100644
+--- a/media/libstagefright/MPEG4Writer.cpp
++++ b/media/libstagefright/MPEG4Writer.cpp
+@@ -4212,13 +4212,23 @@ status_t MPEG4Writer::Track::threadEntry() {
+                 trackProgressStatus(timestampUs);
+             }
+         }
+-        if (!hasMultipleTracks || isGainmapMeta || isGainmap) {
++
++        if (flags_camera::camera_heif_gainmap() && mOwner->mHasGainmap) {
++            Mutex::Autolock lock(mOwner->mLock);
++            size_t bytesWritten;
++            off64_t offset = mOwner->addSample_l(copy, usePrefix, tiffHdrOffset, &bytesWritten);
++            addItemOffsetAndSize(offset, bytesWritten, isExif, isGainmapMeta, isGainmap);
++            copy->release();
++            copy = NULL;
++            continue;
++        }
++
++        if (!hasMultipleTracks) {
+             size_t bytesWritten;
+             off64_t offset = mOwner->addSample_l(
+                     copy, usePrefix, tiffHdrOffset, &bytesWritten);
+-
+             if (mIsHeif) {
+-                addItemOffsetAndSize(offset, bytesWritten, isExif, isGainmapMeta, isGainmap);
++                addItemOffsetAndSize(offset, bytesWritten, isExif);
+             } else {
+                 if (mCo64TableEntries->count() == 0) {
+                     addChunkOffset(offset);
+-- 
+2.43.0
+

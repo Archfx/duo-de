@@ -1,0 +1,127 @@
+From 587aa32bcb6f975d30dbe35a602717678fbfbb2b Mon Sep 17 00:00:00 2001
+From: Sungtak Lee <taklee@google.com>
+Date: Wed, 13 Nov 2024 08:47:32 +0000
+Subject: [PATCH 291/436] c2aidl InputSurface: enable InputSurface
+
+Enable InputSurface interface based on flag and system property.
+
+Bug: 201479783
+Change-Id: Ib3ab5a2f34e3ef3d74f1cbfecc5aac5354d6957e
+---
+ media/aconfig/codec_fwk.aconfig                 |  1 +
+ media/codec2/hal/client/client.cpp              |  6 +++---
+ media/codec2/hal/common/Android.bp              |  6 +++++-
+ media/codec2/hal/common/HalSelection.cpp        | 17 +++++++++++++++++
+ .../common/include/codec2/common/HalSelection.h |  3 +++
+ 5 files changed, 29 insertions(+), 4 deletions(-)
+
+diff --git a/media/aconfig/codec_fwk.aconfig b/media/aconfig/codec_fwk.aconfig
+index b5c7edf137..8162b3f813 100644
+--- a/media/aconfig/codec_fwk.aconfig
++++ b/media/aconfig/codec_fwk.aconfig
+@@ -7,6 +7,7 @@ container: "system"
+ 
+ flag {
+   name: "aidl_hal_input_surface"
++  is_exported: true
+   namespace: "codec_fwk"
+   description: "Feature flags for enabling AIDL HAL InputSurface handling"
+   bug: "201479783"
+diff --git a/media/codec2/hal/client/client.cpp b/media/codec2/hal/client/client.cpp
+index 80735cbec4..6348e423d1 100644
+--- a/media/codec2/hal/client/client.cpp
++++ b/media/codec2/hal/client/client.cpp
+@@ -21,7 +21,9 @@
+ #include <utils/Trace.h>
+ 
+ #include <codec2/aidl/GraphicBufferAllocator.h>
++#include <codec2/common/HalSelection.h>
+ #include <codec2/hidl/client.h>
++
+ #include <C2Debug.h>
+ #include <C2BufferPriv.h>
+ #include <C2Config.h> // for C2StreamUsageTuning
+@@ -1832,9 +1834,7 @@ std::vector<C2Component::Traits> const& Codec2Client::ListComponents() {
+ 
+ std::shared_ptr<Codec2Client::InputSurface> Codec2Client::CreateInputSurface(
+         char const* serviceName) {
+-    int32_t inputSurfaceSetting = ::android::base::GetIntProperty(
+-            "debug.stagefright.c2inputsurface", int32_t(0));
+-    if (inputSurfaceSetting <= 0) {
++    if (!IsCodec2AidlInputSurfaceSelected()) {
+         return nullptr;
+     }
+     size_t index = GetServiceNames().size();
+diff --git a/media/codec2/hal/common/Android.bp b/media/codec2/hal/common/Android.bp
+index 06383630c5..886391b912 100644
+--- a/media/codec2/hal/common/Android.bp
++++ b/media/codec2/hal/common/Android.bp
+@@ -56,13 +56,17 @@ cc_library_static {
+         "libaconfig_storage_read_api_cc",
+     ],
+ 
+-    static_libs: ["aconfig_mediacodec_flags_c_lib"],
++    static_libs: [
++        "aconfig_mediacodec_flags_c_lib",
++        "android.media.codec-aconfig-cc",
++    ],
+ }
+ 
+ cc_defaults {
+     name: "libcodec2_hal_selection",
+     static_libs: [
+         "aconfig_mediacodec_flags_c_lib",
++        "android.media.codec-aconfig-cc",
+         "libcodec2_hal_selection_static",
+     ],
+     shared_libs: [
+diff --git a/media/codec2/hal/common/HalSelection.cpp b/media/codec2/hal/common/HalSelection.cpp
+index d3ea181417..5bf4fbefe3 100644
+--- a/media/codec2/hal/common/HalSelection.cpp
++++ b/media/codec2/hal/common/HalSelection.cpp
+@@ -21,6 +21,7 @@
+ // NOTE: due to dependency from mainline modules cannot use libsysprop
+ // #include <android/sysprop/MediaProperties.sysprop.h>
+ #include <android-base/properties.h>
++#include <android_media_codec.h>
+ #include <com_android_media_codec_flags.h>
+ 
+ #include <codec2/common/HalSelection.h>
+@@ -66,4 +67,20 @@ bool IsCodec2AidlHalSelected() {
+     return false;
+ }
+ 
++bool IsCodec2AidlInputSurfaceSelected() {
++    if (!IsCodec2AidlHalSelected()) {
++        return false;
++    }
++
++    int32_t inputSurfaceSetting = ::android::base::GetIntProperty(
++            "debug.stagefright.c2inputsurface", int32_t(0));
++    if (inputSurfaceSetting <= 0) {
++        return false;
++    }
++    if (!android::media::codec::provider_->aidl_hal_input_surface()) {
++        return false;
++    }
++    return true;
++}
++
+ }  // namespace android
+diff --git a/media/codec2/hal/common/include/codec2/common/HalSelection.h b/media/codec2/hal/common/include/codec2/common/HalSelection.h
+index 7c7751549d..bf0c7c5dc3 100644
+--- a/media/codec2/hal/common/include/codec2/common/HalSelection.h
++++ b/media/codec2/hal/common/include/codec2/common/HalSelection.h
+@@ -22,6 +22,9 @@ namespace android {
+ // Returns true iff AIDL c2 HAL is selected for the system
+ bool IsCodec2AidlHalSelected();
+ 
++// Returns true iff AIDL c2 InputSurface interface is selected for the system
++bool IsCodec2AidlInputSurfaceSelected();
++
+ }  // namespace android
+ 
+ #endif  // CODEC2_HAL_SELECTION_H
+-- 
+2.43.0
+

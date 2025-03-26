@@ -1,0 +1,448 @@
+From aeb1d00bf0606cf294aef9e6f4a783d53a77bc5b Mon Sep 17 00:00:00 2001
+From: Robert Wu <robertwu@google.com>
+Date: Wed, 30 Oct 2024 23:19:44 +0000
+Subject: [PATCH 212/436] Add AudioDeviceVector to MMAP path
+
+This CL adds AudioDeviceVector in the MMAP interface between
+AudioFlinger and AAudioService.
+
+Bug: 367816690
+Test: OboeTester Test Output
+Flag: android.media.audio.routed_device_ids
+Change-Id: Ib658a36e91ee9f0336a59855d33cb326497a1bdc
+---
+ include/media/MmapStreamCallback.h            |  7 ++--
+ include/media/MmapStreamInterface.h           | 10 +++---
+ services/audioflinger/AudioFlinger.cpp        | 22 ++++++------
+ services/audioflinger/AudioFlinger.h          |  2 +-
+ services/audioflinger/IAfThread.h             |  2 +-
+ services/audioflinger/Threads.cpp             | 34 ++++++++-----------
+ services/audioflinger/Threads.h               | 12 +++----
+ .../oboeservice/AAudioServiceEndpointMMAP.cpp | 13 +++++--
+ .../oboeservice/AAudioServiceEndpointMMAP.h   |  2 +-
+ services/oboeservice/Android.bp               |  1 +
+ services/oboeservice/fuzzer/Android.bp        |  1 +
+ 11 files changed, 57 insertions(+), 49 deletions(-)
+
+diff --git a/include/media/MmapStreamCallback.h b/include/media/MmapStreamCallback.h
+index 76ee6d75eb..a3876d983c 100644
+--- a/include/media/MmapStreamCallback.h
++++ b/include/media/MmapStreamCallback.h
+@@ -17,6 +17,7 @@
+ #ifndef ANDROID_AUDIO_MMAP_STREAM_CALLBACK_H
+ #define ANDROID_AUDIO_MMAP_STREAM_CALLBACK_H
+ 
++#include <media/AudioContainers.h>
+ #include <system/audio.h>
+ #include <utils/Errors.h>
+ #include <utils/RefBase.h>
+@@ -42,10 +43,10 @@ class MmapStreamCallback : public virtual RefBase {
+     virtual void onVolumeChanged(float volume) = 0;
+ 
+     /**
+-     * The device the stream is routed to/from has changed
+-     * \param[in] onRoutingChanged the unique device ID of the new device.
++     * The devices the stream is routed to/from has changed
++     * \param[in] deviceIds a set of the device IDs of the new devices.
+      */
+-    virtual void onRoutingChanged(audio_port_handle_t deviceId) = 0;
++    virtual void onRoutingChanged(const DeviceIdVector& deviceIds) = 0;
+ 
+   protected:
+     MmapStreamCallback() {}
+diff --git a/include/media/MmapStreamInterface.h b/include/media/MmapStreamInterface.h
+index 772517558b..3d29335100 100644
+--- a/include/media/MmapStreamInterface.h
++++ b/include/media/MmapStreamInterface.h
+@@ -19,6 +19,7 @@
+ 
+ #include <system/audio.h>
+ #include <media/AudioClient.h>
++#include <media/AudioContainers.h>
+ #include <utils/Errors.h>
+ #include <utils/RefBase.h>
+ 
+@@ -51,9 +52,10 @@ class MmapStreamInterface : public virtual RefBase
+      *                       Requested parameters as input,
+      *                       Actual parameters as output
+      * \param[in] client a AudioClient struct describing the first client using this stream.
+-     * \param[in,out] deviceId audio device the stream should preferably be routed to/from
+-     *                       Requested as input,
+-     *                       Actual as output
++     * \param[in,out] deviceIds audio devices the stream should preferably be routed to/from.
++     *                          Leave empty if there are no preferred devices.
++     *                          Requested as input,
++     *                          Actual as output
+      * \param[in,out] sessionId audio sessionId for the stream
+      *                       Requested as input, may be AUDIO_SESSION_ALLOCATE
+      *                       Actual as output
+@@ -70,7 +72,7 @@ class MmapStreamInterface : public virtual RefBase
+                                            const audio_attributes_t *attr,
+                                            audio_config_base_t *config,
+                                            const AudioClient& client,
+-                                           audio_port_handle_t *deviceId,
++                                           DeviceIdVector *deviceIds,
+                                            audio_session_t *sessionId,
+                                            const sp<MmapStreamCallback>& callback,
+                                            sp<MmapStreamInterface>& interface,
+diff --git a/services/audioflinger/AudioFlinger.cpp b/services/audioflinger/AudioFlinger.cpp
+index 5fb326f0c0..2322780f34 100644
+--- a/services/audioflinger/AudioFlinger.cpp
++++ b/services/audioflinger/AudioFlinger.cpp
+@@ -541,7 +541,7 @@ status_t MmapStreamInterface::openMmapStream(MmapStreamInterface::stream_directi
+                                              const audio_attributes_t *attr,
+                                              audio_config_base_t *config,
+                                              const AudioClient& client,
+-                                             audio_port_handle_t *deviceId,
++                                             DeviceIdVector *deviceIds,
+                                              audio_session_t *sessionId,
+                                              const sp<MmapStreamCallback>& callback,
+                                              sp<MmapStreamInterface>& interface,
+@@ -553,7 +553,7 @@ status_t MmapStreamInterface::openMmapStream(MmapStreamInterface::stream_directi
+     status_t ret = NO_INIT;
+     if (af != 0) {
+         ret = af->openMmapStream(
+-                direction, attr, config, client, deviceId,
++                direction, attr, config, client, deviceIds,
+                 sessionId, callback, interface, handle);
+     }
+     return ret;
+@@ -563,7 +563,7 @@ status_t AudioFlinger::openMmapStream(MmapStreamInterface::stream_direction_t di
+                                       const audio_attributes_t *attr,
+                                       audio_config_base_t *config,
+                                       const AudioClient& client,
+-                                      audio_port_handle_t *deviceId,
++                                      DeviceIdVector *deviceIds,
+                                       audio_session_t *sessionId,
+                                       const sp<MmapStreamCallback>& callback,
+                                       sp<MmapStreamInterface>& interface,
+@@ -630,22 +630,17 @@ status_t AudioFlinger::openMmapStream(MmapStreamInterface::stream_direction_t di
+         bool isBitPerfect;
+         float volume;
+         bool muted;
+-        DeviceIdVector selectedDeviceIds;
+-        if (*deviceId != AUDIO_PORT_HANDLE_NONE) {
+-            selectedDeviceIds.push_back(*deviceId);
+-        }
+         ret = AudioSystem::getOutputForAttr(&localAttr, &io,
+                                             actualSessionId,
+                                             &streamType, adjAttributionSource,
+                                             &fullConfig,
+                                             (audio_output_flags_t)(AUDIO_OUTPUT_FLAG_MMAP_NOIRQ |
+                                                     AUDIO_OUTPUT_FLAG_DIRECT),
+-                                            &selectedDeviceIds, &portId, &secondaryOutputs,
++                                            deviceIds, &portId, &secondaryOutputs,
+                                             &isSpatialized,
+                                             &isBitPerfect,
+                                             &volume,
+                                             &muted);
+-        *deviceId = getFirstDeviceId(selectedDeviceIds);
+         if (ret != NO_ERROR) {
+             config->sample_rate = fullConfig.sample_rate;
+             config->channel_mask = fullConfig.channel_mask;
+@@ -654,12 +649,17 @@ status_t AudioFlinger::openMmapStream(MmapStreamInterface::stream_direction_t di
+         ALOGW_IF(!secondaryOutputs.empty(),
+                  "%s does not support secondary outputs, ignoring them", __func__);
+     } else {
++        audio_port_handle_t deviceId = getFirstDeviceId(*deviceIds);
+         ret = AudioSystem::getInputForAttr(&localAttr, &io,
+                                               RECORD_RIID_INVALID,
+                                               actualSessionId,
+                                               adjAttributionSource,
+                                               config,
+-                                              AUDIO_INPUT_FLAG_MMAP_NOIRQ, deviceId, &portId);
++                                              AUDIO_INPUT_FLAG_MMAP_NOIRQ, &deviceId, &portId);
++        deviceIds->clear();
++        if (deviceId != AUDIO_PORT_HANDLE_NONE) {
++            deviceIds->push_back(deviceId);
++        }
+     }
+     if (ret != NO_ERROR) {
+         return ret;
+@@ -673,7 +673,7 @@ status_t AudioFlinger::openMmapStream(MmapStreamInterface::stream_direction_t di
+     const sp<IAfMmapThread> thread = mMmapThreads.valueFor(io);
+     if (thread != 0) {
+         interface = IAfMmapThread::createMmapStreamInterfaceAdapter(thread);
+-        thread->configure(&localAttr, streamType, actualSessionId, callback, *deviceId, portId);
++        thread->configure(&localAttr, streamType, actualSessionId, callback, *deviceIds, portId);
+         *handle = portId;
+         *sessionId = actualSessionId;
+         config->sample_rate = thread->sampleRate();
+diff --git a/services/audioflinger/AudioFlinger.h b/services/audioflinger/AudioFlinger.h
+index 042194f9e5..133410e0e6 100644
+--- a/services/audioflinger/AudioFlinger.h
++++ b/services/audioflinger/AudioFlinger.h
+@@ -439,7 +439,7 @@ public:
+                             const audio_attributes_t *attr,
+                             audio_config_base_t *config,
+                             const AudioClient& client,
+-                            audio_port_handle_t *deviceId,
++                            DeviceIdVector *deviceIds,
+                             audio_session_t *sessionId,
+                             const sp<MmapStreamCallback>& callback,
+                             sp<MmapStreamInterface>& interface,
+diff --git a/services/audioflinger/IAfThread.h b/services/audioflinger/IAfThread.h
+index a13819ce5b..3163d4c5a5 100644
+--- a/services/audioflinger/IAfThread.h
++++ b/services/audioflinger/IAfThread.h
+@@ -661,7 +661,7 @@ public:
+             audio_stream_type_t streamType,
+             audio_session_t sessionId,
+             const sp<MmapStreamCallback>& callback,
+-            audio_port_handle_t deviceId,
++            const DeviceIdVector& deviceIds,
+             audio_port_handle_t portId) EXCLUDES_ThreadBase_Mutex = 0;
+     virtual void disconnect() EXCLUDES_ThreadBase_Mutex = 0;
+ 
+diff --git a/services/audioflinger/Threads.cpp b/services/audioflinger/Threads.cpp
+index db01cff08b..7ed53f26c8 100644
+--- a/services/audioflinger/Threads.cpp
++++ b/services/audioflinger/Threads.cpp
+@@ -10393,13 +10393,13 @@ void MmapThread::configure_l(const audio_attributes_t* attr,
+                                                 audio_stream_type_t streamType __unused,
+                                                 audio_session_t sessionId,
+                                                 const sp<MmapStreamCallback>& callback,
+-                                                audio_port_handle_t deviceId,
++                                                const DeviceIdVector& deviceIds,
+                                                 audio_port_handle_t portId)
+ {
+     mAttr = *attr;
+     mSessionId = sessionId;
+     mCallback = callback;
+-    mDeviceId = deviceId;
++    mDeviceIds = deviceIds;
+     mPortId = portId;
+ }
+ 
+@@ -10492,12 +10492,7 @@ status_t MmapThread::start(const AudioClient& client,
+         audio_stream_type_t stream = streamType_l();
+         audio_output_flags_t flags =
+                 (audio_output_flags_t)(AUDIO_OUTPUT_FLAG_MMAP_NOIRQ | AUDIO_OUTPUT_FLAG_DIRECT);
+-        DeviceIdVector deviceIds;
+-        if (mDeviceId != AUDIO_PORT_HANDLE_NONE) {
+-            deviceIds.push_back(mDeviceId);
+-        } else {
+-            ALOGW("%s no device id set", __func__);
+-        }
++        DeviceIdVector deviceIds = mDeviceIds;
+         std::vector<audio_io_handle_t> secondaryOutputs;
+         bool isSpatialized;
+         bool isBitPerfect;
+@@ -10524,7 +10519,7 @@ status_t MmapThread::start(const AudioClient& client,
+         config.sample_rate = mSampleRate;
+         config.channel_mask = mChannelMask;
+         config.format = mFormat;
+-        audio_port_handle_t deviceId = mDeviceId;
++        audio_port_handle_t deviceId = getFirstDeviceId(mDeviceIds);
+         mutex().unlock();
+         ret = AudioSystem::getInputForAttr(&localAttr, &io,
+                                               RECORD_RIID_INVALID,
+@@ -10877,7 +10872,7 @@ NO_THREAD_SAFETY_ANALYSIS  // elease and re-acquire mutex()
+ 
+     // store new device and send to effects
+     audio_devices_t type = AUDIO_DEVICE_NONE;
+-    audio_port_handle_t deviceId;
++    DeviceIdVector deviceIds;
+     AudioDeviceTypeAddrVector sinkDeviceTypeAddrs;
+     AudioDeviceTypeAddr sourceDeviceTypeAddr;
+     uint32_t numDevices = 0;
+@@ -10891,12 +10886,12 @@ NO_THREAD_SAFETY_ANALYSIS  // elease and re-acquire mutex()
+             type = static_cast<audio_devices_t>(type | patch->sinks[i].ext.device.type);
+             sinkDeviceTypeAddrs.emplace_back(patch->sinks[i].ext.device.type,
+                     patch->sinks[i].ext.device.address);
++            deviceIds.push_back(patch->sinks[i].id);
+         }
+-        deviceId = patch->sinks[0].id;
+         numDevices = mPatch.num_sinks;
+     } else {
+         type = patch->sources[0].ext.device.type;
+-        deviceId = patch->sources[0].id;
++        deviceIds.push_back(patch->sources[0].id);
+         numDevices = mPatch.num_sources;
+         sourceDeviceTypeAddr.mType = patch->sources[0].ext.device.type;
+         sourceDeviceTypeAddr.setAddress(patch->sources[0].ext.device.address);
+@@ -10922,11 +10917,11 @@ NO_THREAD_SAFETY_ANALYSIS  // elease and re-acquire mutex()
+ 
+     // For mmap streams, once the routing has changed, they will be disconnected. It should be
+     // okay to notify the client earlier before the new patch creation.
+-    if (mDeviceId != deviceId) {
++    if (mDeviceIds != deviceIds) {
+         if (const sp<MmapStreamCallback> callback = mCallback.promote()) {
+             // The aaudioservice handle the routing changed event asynchronously. In that case,
+             // it is safe to hold the lock here.
+-            callback->onRoutingChanged(deviceId);
++            callback->onRoutingChanged(deviceIds);
+         }
+     }
+ 
+@@ -10946,7 +10941,7 @@ NO_THREAD_SAFETY_ANALYSIS  // elease and re-acquire mutex()
+         *handle = AUDIO_PATCH_HANDLE_NONE;
+     }
+ 
+-    if (numDevices == 0 || mDeviceId != deviceId) {
++    if (numDevices == 0 || mDeviceIds != deviceIds) {
+         if (isOutput()) {
+             sendIoConfigEvent_l(AUDIO_OUTPUT_CONFIG_CHANGED);
+             mOutDeviceTypeAddrs = sinkDeviceTypeAddrs;
+@@ -10956,7 +10951,7 @@ NO_THREAD_SAFETY_ANALYSIS  // elease and re-acquire mutex()
+             mInDeviceTypeAddr = sourceDeviceTypeAddr;
+         }
+         mPatch = *patch;
+-        mDeviceId = deviceId;
++        mDeviceIds = deviceIds;
+     }
+     // Force meteadata update after a route change
+     mActiveTracks.setHasChanged();
+@@ -11111,7 +11106,8 @@ void MmapThread::checkInvalidTracks_l()
+             if (const sp<MmapStreamCallback> callback = mCallback.promote()) {
+                 // The aaudioservice handle the routing changed event asynchronously. In that case,
+                 // it is safe to hold the lock here.
+-                callback->onRoutingChanged(AUDIO_PORT_HANDLE_NONE);
++                DeviceIdVector emptyDeviceIdVector;
++                callback->onRoutingChanged(emptyDeviceIdVector);
+             } else if (mNoCallbackWarningCount < kMaxNoCallbackWarnings) {
+                 ALOGW("Could not notify MMAP stream tear down: no onRoutingChanged callback!");
+                 mNoCallbackWarningCount++;
+@@ -11203,11 +11199,11 @@ void MmapPlaybackThread::configure(const audio_attributes_t* attr,
+                                                 audio_stream_type_t streamType,
+                                                 audio_session_t sessionId,
+                                                 const sp<MmapStreamCallback>& callback,
+-                                                audio_port_handle_t deviceId,
++                                                const DeviceIdVector& deviceIds,
+                                                 audio_port_handle_t portId)
+ {
+     audio_utils::lock_guard l(mutex());
+-    MmapThread::configure_l(attr, streamType, sessionId, callback, deviceId, portId);
++    MmapThread::configure_l(attr, streamType, sessionId, callback, deviceIds, portId);
+     mStreamType = streamType;
+ }
+ 
+diff --git a/services/audioflinger/Threads.h b/services/audioflinger/Threads.h
+index 0c5a2c3bbd..1d6e2447db 100644
+--- a/services/audioflinger/Threads.h
++++ b/services/audioflinger/Threads.h
+@@ -2243,17 +2243,17 @@ class MmapThread : public ThreadBase, public virtual IAfMmapThread
+                                       audio_stream_type_t streamType,
+                                       audio_session_t sessionId,
+                                       const sp<MmapStreamCallback>& callback,
+-                                      audio_port_handle_t deviceId,
++                                      const DeviceIdVector& deviceIds,
+             audio_port_handle_t portId) override EXCLUDES_ThreadBase_Mutex {
+         audio_utils::lock_guard l(mutex());
+-        configure_l(attr, streamType, sessionId, callback, deviceId, portId);
++        configure_l(attr, streamType, sessionId, callback, deviceIds, portId);
+     }
+ 
+     void configure_l(const audio_attributes_t* attr,
+             audio_stream_type_t streamType,
+             audio_session_t sessionId,
+             const sp<MmapStreamCallback>& callback,
+-            audio_port_handle_t deviceId,
++            const DeviceIdVector& deviceIds,
+             audio_port_handle_t portId) REQUIRES(mutex());
+ 
+     void disconnect() final EXCLUDES_ThreadBase_Mutex;
+@@ -2363,9 +2363,9 @@ class MmapThread : public ThreadBase, public virtual IAfMmapThread
+     void dumpTracks_l(int fd, const Vector<String16>& args) final REQUIRES(mutex());
+ 
+                 /**
+-                 * @brief mDeviceId  current device port unique identifier
++                 * @brief mDeviceIds current device port unique identifiers
+                  */
+-    audio_port_handle_t mDeviceId GUARDED_BY(mutex()) = AUDIO_PORT_HANDLE_NONE;
++    DeviceIdVector mDeviceIds GUARDED_BY(mutex());
+ 
+     audio_attributes_t mAttr GUARDED_BY(mutex());
+     audio_session_t mSessionId GUARDED_BY(mutex());
+@@ -2397,7 +2397,7 @@ public:
+                                       audio_stream_type_t streamType,
+                                       audio_session_t sessionId,
+                                       const sp<MmapStreamCallback>& callback,
+-                                      audio_port_handle_t deviceId,
++                                      const DeviceIdVector& deviceIds,
+             audio_port_handle_t portId) final EXCLUDES_ThreadBase_Mutex;
+ 
+     AudioStreamOut* clearOutput() final EXCLUDES_ThreadBase_Mutex;
+diff --git a/services/oboeservice/AAudioServiceEndpointMMAP.cpp b/services/oboeservice/AAudioServiceEndpointMMAP.cpp
+index d663f37fbc..398068d4dc 100644
+--- a/services/oboeservice/AAudioServiceEndpointMMAP.cpp
++++ b/services/oboeservice/AAudioServiceEndpointMMAP.cpp
+@@ -206,12 +206,17 @@ aaudio_result_t AAudioServiceEndpointMMAP::openWithConfig(
+           __func__, config->format, config->sample_rate,
+           config->channel_mask, deviceId);
+ 
++    android::DeviceIdVector deviceIds;
++    if (deviceId != AAUDIO_UNSPECIFIED) {
++        deviceIds.push_back(deviceId);
++    }
++
+     const std::lock_guard<std::mutex> lock(mMmapStreamLock);
+     const status_t status = MmapStreamInterface::openMmapStream(streamDirection,
+                                                                 &attributes,
+                                                                 config,
+                                                                 mMmapClient,
+-                                                                &deviceId,
++                                                                &deviceIds,
+                                                                 &sessionId,
+                                                                 this, // callback
+                                                                 mMmapStream,
+@@ -228,6 +233,7 @@ aaudio_result_t AAudioServiceEndpointMMAP::openWithConfig(
+         config->channel_mask = currentConfig.channel_mask;
+         return AAUDIO_ERROR_UNAVAILABLE;
+     }
++    deviceId = android::getFirstDeviceId(deviceIds);
+ 
+     if (deviceId == AAUDIO_UNSPECIFIED) {
+         ALOGW("%s() - openMmapStream() failed to set deviceId", __func__);
+@@ -476,8 +482,9 @@ void AAudioServiceEndpointMMAP::onVolumeChanged(float volume) {
+     }
+ };
+ 
+-void AAudioServiceEndpointMMAP::onRoutingChanged(audio_port_handle_t portHandle) {
+-    const auto deviceId = static_cast<int32_t>(portHandle);
++void AAudioServiceEndpointMMAP::onRoutingChanged(const android::DeviceIdVector& deviceIds) {
++    const auto deviceId = android::getFirstDeviceId(deviceIds);
++    // TODO(b/367816690): Compare the new and saved device sets.
+     ALOGD("%s() called with dev %d, old = %d", __func__, deviceId, getDeviceId());
+     if (getDeviceId() != deviceId) {
+         if (getDeviceId() != AUDIO_PORT_HANDLE_NONE) {
+diff --git a/services/oboeservice/AAudioServiceEndpointMMAP.h b/services/oboeservice/AAudioServiceEndpointMMAP.h
+index 962d39009d..a4eeba19dd 100644
+--- a/services/oboeservice/AAudioServiceEndpointMMAP.h
++++ b/services/oboeservice/AAudioServiceEndpointMMAP.h
+@@ -83,7 +83,7 @@ public:
+ 
+     void onVolumeChanged(float volume) override;
+ 
+-    void onRoutingChanged(audio_port_handle_t portHandle) override;
++    void onRoutingChanged(const android::DeviceIdVector& deviceIds) override;
+     // ------------------------------------------------------------------------------
+ 
+     aaudio_result_t getDownDataDescription(AudioEndpointParcelable* parcelable);
+diff --git a/services/oboeservice/Android.bp b/services/oboeservice/Android.bp
+index 67b319fc78..8200ab55fa 100644
+--- a/services/oboeservice/Android.bp
++++ b/services/oboeservice/Android.bp
+@@ -89,6 +89,7 @@ cc_defaults {
+         "libaaudio_internal",
+         "libaudioclient",
+         "libaudioclient_aidl_conversion",
++        "libaudiofoundation",
+         "libaudioutils",
+         "libbase",
+         "libbinder",
+diff --git a/services/oboeservice/fuzzer/Android.bp b/services/oboeservice/fuzzer/Android.bp
+index 97825b3616..8f672e1de9 100644
+--- a/services/oboeservice/fuzzer/Android.bp
++++ b/services/oboeservice/fuzzer/Android.bp
+@@ -44,6 +44,7 @@ cc_fuzz {
+         "libaudioclient",
+         "libaudioclient_aidl_conversion",
+         "libaudioflinger",
++        "libaudiofoundation",
+         "libaudioutils",
+         "libbase",
+         "libbinder",
+-- 
+2.43.0
+

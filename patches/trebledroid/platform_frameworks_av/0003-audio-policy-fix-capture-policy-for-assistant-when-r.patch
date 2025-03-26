@@ -1,0 +1,46 @@
+From 73efbca95001884cc1b930433fe3b192d18e4333 Mon Sep 17 00:00:00 2001
+From: Eric Laurent <elaurent@google.com>
+Date: Mon, 2 Sep 2024 13:55:32 +0000
+Subject: [PATCH 003/436] audio policy: fix capture policy for assistant when
+ running as top
+
+Under regular circumstances, an app with the assistant role should
+be applied the same concurrent capture policy as any other app.
+
+Current implementation would apply more restrictions to an assistant than
+to a regular app when running as top.
+
+Bug: 355644902
+Flag: EXEMPT bug fix
+Test: regression for various audio capture scenarii
+Change-Id: Ifd12ea4590ebbdc9224ce1f2142ffb33da5ac002
+---
+ services/audiopolicy/service/AudioPolicyService.cpp | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/services/audiopolicy/service/AudioPolicyService.cpp b/services/audiopolicy/service/AudioPolicyService.cpp
+index 2e0aa3c52a..29a3f8a805 100644
+--- a/services/audiopolicy/service/AudioPolicyService.cpp
++++ b/services/audiopolicy/service/AudioPolicyService.cpp
+@@ -1039,6 +1039,9 @@ void AudioPolicyService::updateUidStates_l()
+             current->attributionSource.uid == topSensitiveActive->attributionSource.uid;
+         bool isTopOrLatestAssistant = latestActiveAssistant == nullptr ? false :
+             current->attributionSource.uid == latestActiveAssistant->attributionSource.uid;
++        bool isActiveAssistant =
++                (useActiveAssistantList && mUidPolicy->isActiveAssistantUid(currentUid))
++                    || mUidPolicy->isAssistantUid(currentUid);
+ 
+         // TODO: b/339112720
+         // Refine this logic when we have the correct phone state owner UID. The current issue is
+@@ -1067,7 +1070,7 @@ void AudioPolicyService::updateUidStates_l()
+         const bool allowSensitiveCapture =
+             !isSensitiveActive || isTopOrLatestSensitive || current->canCaptureOutput;
+         bool allowCapture = false;
+-        if (!isAssistantOnTop) {
++        if (!isAssistantOnTop || isActiveAssistant) {
+             allowCapture = (isTopOrLatestActive || isTopOrLatestSensitive) &&
+                            allowSensitiveCapture && canCaptureIfInCallOrCommunication;
+         } else {
+-- 
+2.43.0
+

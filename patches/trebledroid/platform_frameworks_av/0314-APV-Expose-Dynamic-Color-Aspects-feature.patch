@@ -1,0 +1,40 @@
+From 5674f527dcfbd4493c1d5a3fd32f18802681fa40 Mon Sep 17 00:00:00 2001
+From: Fyodor Kyslov <kyslov@google.com>
+Date: Wed, 20 Nov 2024 22:14:30 +0000
+Subject: [PATCH 314/436] APV: Expose Dynamic Color Aspects feature
+
+Bug: 377945099
+Test: CodecInfoTest
+Change-Id: I3bfe490a15af3b0c2d05201f94fee8a978ba45ee
+---
+ media/libstagefright/data/media_codecs_google_c2_video.xml | 1 +
+ media/libstagefright/data/media_codecs_sw.xml              | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/media/libstagefright/data/media_codecs_google_c2_video.xml b/media/libstagefright/data/media_codecs_google_c2_video.xml
+index 72a25510aa..2fb2d5947b 100644
+--- a/media/libstagefright/data/media_codecs_google_c2_video.xml
++++ b/media/libstagefright/data/media_codecs_google_c2_video.xml
+@@ -101,6 +101,7 @@
+             <Limit name="bitrate" range="1-240000000"/>
+             <Limit name="block-size" value="16x16" />
+             <Limit name="block-count" range="1-32768" /> <!-- max 4096x2048 equivalent -->
++            <Feature name="dynamic-color-aspects" />
+             <Attribute name="software-codec"/>
+          </MediaCodec>
+     </Decoders>
+diff --git a/media/libstagefright/data/media_codecs_sw.xml b/media/libstagefright/data/media_codecs_sw.xml
+index 20c97dc45c..c79ac5c3c1 100644
+--- a/media/libstagefright/data/media_codecs_sw.xml
++++ b/media/libstagefright/data/media_codecs_sw.xml
+@@ -262,6 +262,7 @@
+             <Limit name="block-size" value="16x16" />
+             <Limit name="block-count" range="1-32768" /> <!-- max 4096x2048 equivalent -->
+             <Feature name="adaptive-playback" />
++            <Feature name="dynamic-color-aspects" />
+             <Attribute name="software-codec"/>
+         </MediaCodec>
+     </Decoders>
+-- 
+2.43.0
+

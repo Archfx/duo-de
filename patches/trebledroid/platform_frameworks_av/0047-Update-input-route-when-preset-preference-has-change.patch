@@ -1,0 +1,34 @@
+From 47655d2d0f9bf88f7c87200487242927336d27e3 Mon Sep 17 00:00:00 2001
+From: Wenyu Zhang <zhangwenyu@google.com>
+Date: Tue, 1 Oct 2024 12:24:53 +0000
+Subject: [PATCH 047/436] Update input route when preset preference has changed
+
+Similar to addDevicesRoleForCapturePreset(), the updateInputRouting()
+should be called inside of setDevicesRoleForCapturePreset(). Otherwise,
+when a RecordThread is already ongoing, changing preset doesn't work.
+This CL fixes the issue.
+
+Change-Id: I31de5fe576215d832a2ad6a41464c0cd0aa80107
+Bug: b/364923030
+Flag: com.android.media.audioserver.enable_audio_input_device_routing
+---
+ services/audiopolicy/managerdefault/AudioPolicyManager.cpp | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index 70234fe9de..d57ab49c4e 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -4520,6 +4520,9 @@ status_t AudioPolicyManager::setDevicesRoleForCapturePreset(
+             "Engine could not set preferred devices %s for audio source %d role %d",
+             dumpAudioDeviceTypeAddrVector(devices).c_str(), audioSource, role);
+ 
++    if (status == NO_ERROR) {
++        updateInputRouting();
++    }
+     return status;
+ }
+ 
+-- 
+2.43.0
+

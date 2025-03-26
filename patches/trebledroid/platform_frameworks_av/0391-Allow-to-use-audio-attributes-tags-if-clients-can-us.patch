@@ -1,0 +1,47 @@
+From 638fcaa331193fa9cac2a7c1f63531da9b8c43c4 Mon Sep 17 00:00:00 2001
+From: jiabin <jiabin@google.com>
+Date: Wed, 4 Dec 2024 00:03:46 +0000
+Subject: [PATCH 391/436] Allow to use audio attributes tags if clients can use
+ dynamic policy.
+
+The audio attributes tags will also be used by dynamic policy. For
+clients that can use dynamic policy will should also be allowed to use
+audio attributes tags.
+
+Test: atest VirtualAudioPermissionTest
+Bug: 382113460
+Flag: EXEMPT bugfix
+Change-Id: I29175931bac56b0cbd25721b3853f7c6faf7d309
+---
+ .../service/AudioPolicyInterfaceImpl.cpp          | 15 ++++++++++++---
+ 1 file changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+index 802ebeb318..4e8e742515 100644
+--- a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
++++ b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+@@ -445,9 +445,18 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
+     }
+ 
+     if (strlen(attr.tags) != 0) {
+-        if (!(audioserver_permissions() ?
+-              CHECK_PERM(MODIFY_AUDIO_SETTINGS_PRIVILEGED, attributionSource.uid)
+-              : modifyAudioSettingsPrivilegedAllowed(attributionSource))) {
++        const bool audioAttributesTagsAllowed = audioserver_permissions() ? (
++                CHECK_PERM(MODIFY_AUDIO_SETTINGS_PRIVILEGED, attributionSource.uid) ||
++                CHECK_PERM(MODIFY_AUDIO_ROUTING, attributionSource.uid) ||
++                CHECK_PERM(CALL_AUDIO_INTERCEPTION, attributionSource.uid) ||
++                CHECK_PERM(CAPTURE_MEDIA_OUTPUT, attributionSource.uid) ||
++                CHECK_PERM(CAPTURE_VOICE_COMMUNICATION_OUTPUT, attributionSource.uid))
++                : (modifyAudioSettingsPrivilegedAllowed(attributionSource) ||
++                   modifyAudioRoutingAllowed() ||
++                   callAudioInterceptionAllowed(attributionSource) ||
++                   captureMediaOutputAllowed(attributionSource) ||
++                   captureVoiceCommunicationOutputAllowed(attributionSource));
++        if (!audioAttributesTagsAllowed) {
+             ALOGE("%s: permission denied: audio attributes tags not allowed for uid %d pid %d",
+                   __func__, attributionSource.uid, attributionSource.pid);
+             return binderStatusFromStatusT(PERMISSION_DENIED);
+-- 
+2.43.0
+

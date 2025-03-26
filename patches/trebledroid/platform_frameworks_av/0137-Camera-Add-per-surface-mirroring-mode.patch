@@ -1,0 +1,1820 @@
+From 38df0cacf1cc8a36633e433d0b206b2e5fc6e5f8 Mon Sep 17 00:00:00 2001
+From: Shuzhen Wang <shuzhenwang@google.com>
+Date: Wed, 9 Oct 2024 11:33:44 -0700
+Subject: [PATCH 137/436] Camera: Add per-surface mirroring mode
+
+Add the support to do per output surface mirror mode. Previously
+mirroring mode is set per OutputConfiguration, which could contain
+multiple shared surfaces.
+
+Flag: com.android.internal.camera.flags.mirror_mode_shared_surfaces
+Test: atest MultiViewTest
+Bug: 298899993
+Change-Id: I3654cb585d243365b62a10131c21a869af754e73
+---
+ camera/camera2/OutputConfiguration.cpp        |  64 +++++++--
+ camera/camera_platform.aconfig                |   8 ++
+ .../camera/camera2/OutputConfiguration.h      |  10 +-
+ .../camera_c2OutputConfiguration_fuzzer.cpp   |   5 +-
+ .../api2/CameraDeviceClient.cpp               |  84 +++---------
+ .../api2/CameraDeviceClient.h                 |   7 -
+ .../libcameraservice/api2/CompositeStream.cpp |   2 +-
+ .../libcameraservice/api2/CompositeStream.h   |   4 +-
+ .../api2/DepthCompositeStream.cpp             |   4 +-
+ .../api2/DepthCompositeStream.h               |   2 +-
+ .../api2/HeicCompositeStream.cpp              |   4 +-
+ .../api2/HeicCompositeStream.h                |   2 +-
+ .../api2/JpegRCompositeStream.cpp             |   4 +-
+ .../api2/JpegRCompositeStream.h               |   2 +-
+ .../common/CameraDeviceBase.h                 |   8 +-
+ .../device3/Camera3Device.cpp                 |  68 +++++++---
+ .../libcameraservice/device3/Camera3Device.h  |  10 +-
+ .../device3/Camera3FakeStream.cpp             |   6 +-
+ .../device3/Camera3FakeStream.h               |   6 +-
+ .../device3/Camera3OutputStream.cpp           |  44 +++---
+ .../device3/Camera3OutputStream.h             |  12 +-
+ .../device3/Camera3OutputStreamInterface.h    |   6 +-
+ .../device3/Camera3SharedOutputStream.cpp     | 125 +++++++++++++-----
+ .../device3/Camera3SharedOutputStream.h       |  39 +++---
+ .../device3/Camera3StreamInterface.h          |  13 +-
+ .../device3/Camera3StreamSplitter.cpp         |  18 ++-
+ .../device3/Camera3StreamSplitter.h           |   4 +
+ .../DeprecatedCamera3StreamSplitter.cpp       |  17 ++-
+ .../DeprecatedCamera3StreamSplitter.h         |   4 +
+ .../utils/SessionConfigurationUtils.cpp       |   3 +-
+ 30 files changed, 365 insertions(+), 220 deletions(-)
+
+diff --git a/camera/camera2/OutputConfiguration.cpp b/camera/camera2/OutputConfiguration.cpp
+index 2d1af321e1..48a733886e 100644
+--- a/camera/camera2/OutputConfiguration.cpp
++++ b/camera/camera2/OutputConfiguration.cpp
+@@ -22,12 +22,14 @@
+ 
+ #include <camera/camera2/OutputConfiguration.h>
+ #include <camera/StringUtils.h>
++#include <com_android_internal_camera_flags.h>
+ #include <binder/Parcel.h>
+ #include <gui/view/Surface.h>
+ #include <system/camera_metadata.h>
+ #include <system/graphics.h>
+ #include <utils/String8.h>
+ 
++namespace flags = com::android::internal::camera::flags;
+ 
+ namespace android {
+ 
+@@ -95,7 +97,21 @@ int OutputConfiguration::getTimestampBase() const {
+     return mTimestampBase;
+ }
+ 
+-int OutputConfiguration::getMirrorMode() const {
++int OutputConfiguration::getMirrorMode(sp<IGraphicBufferProducer> surface) const {
++    if (!flags::mirror_mode_shared_surfaces()) {
++        return mMirrorMode;
++    }
++
++    // Use per-producer mirror mode if available.
++    for (size_t i = 0; i < mGbps.size(); i++) {
++        if (mGbps[i] == surface) {
++            return mMirrorModeForProducers[i];
++        }
++    }
++
++    // For surface that doesn't belong to this output configuration, use
++    // mMirrorMode as default.
++    ALOGW("%s: Surface doesn't belong to this OutputConfiguration!", __FUNCTION__);
+     return mMirrorMode;
+ }
+ 
+@@ -251,6 +267,12 @@ status_t OutputConfiguration::readFromParcel(const android::Parcel* parcel) {
+         return err;
+     }
+ 
++    std::vector<int> mirrorModeForProducers;
++    if ((err = parcel->readInt32Vector(&mirrorModeForProducers)) != OK) {
++        ALOGE("%s: Failed to read mirroring mode for surfaces from parcel", __FUNCTION__);
++        return err;
++    }
++
+     int useReadoutTimestamp = 0;
+     if ((err = parcel->readInt32(&useReadoutTimestamp)) != OK) {
+         ALOGE("%s: Failed to read useReadoutTimestamp flag from parcel", __FUNCTION__);
+@@ -286,6 +308,7 @@ status_t OutputConfiguration::readFromParcel(const android::Parcel* parcel) {
+     mStreamUseCase = streamUseCase;
+     mTimestampBase = timestampBase;
+     mMirrorMode = mirrorMode;
++    mMirrorModeForProducers = std::move(mirrorModeForProducers);
+     mUseReadoutTimestamp = useReadoutTimestamp != 0;
+     for (auto& surface : surfaceShims) {
+         ALOGV("%s: OutputConfiguration: %p, name %s", __FUNCTION__,
+@@ -409,6 +432,9 @@ status_t OutputConfiguration::writeToParcel(android::Parcel* parcel) const {
+     err = parcel->writeInt32(mMirrorMode);
+     if (err != OK) return err;
+ 
++    err = parcel->writeInt32Vector(mMirrorModeForProducers);
++    if (err != OK) return err;
++
+     err = parcel->writeInt32(mUseReadoutTimestamp ? 1 : 0);
+     if (err != OK) return err;
+ 
+@@ -438,6 +464,20 @@ static bool simpleVectorsEqual(T first, T second) {
+     return true;
+ }
+ 
++template <typename T>
++static bool simpleVectorsLessThan(T first, T second) {
++    if (first.size() != second.size()) {
++        return first.size() < second.size();
++    }
++
++    for (size_t i = 0; i < first.size(); i++) {
++        if (first[i] != second[i]) {
++            return first[i] < second[i];
++        }
++    }
++    return false;
++}
++
+ bool OutputConfiguration::gbpsEqual(const OutputConfiguration& other) const {
+     const std::vector<sp<IGraphicBufferProducer> >& otherGbps =
+             other.getGraphicBufferProducers();
+@@ -449,20 +489,20 @@ bool OutputConfiguration::sensorPixelModesUsedEqual(const OutputConfiguration& o
+     return simpleVectorsEqual(othersensorPixelModesUsed, mSensorPixelModesUsed);
+ }
+ 
+-bool OutputConfiguration::sensorPixelModesUsedLessThan(const OutputConfiguration& other) const {
+-    const std::vector<int32_t>& spms = other.getSensorPixelModesUsed();
++bool OutputConfiguration::mirrorModesEqual(const OutputConfiguration& other) const {
++    const std::vector<int>& otherMirrorModes = other.getMirrorModes();
++    return simpleVectorsEqual(otherMirrorModes, mMirrorModeForProducers);
+ 
+-    if (mSensorPixelModesUsed.size() !=  spms.size()) {
+-        return mSensorPixelModesUsed.size() < spms.size();
+-    }
++}
+ 
+-    for (size_t i = 0; i < spms.size(); i++) {
+-        if (mSensorPixelModesUsed[i] != spms[i]) {
+-            return mSensorPixelModesUsed[i] < spms[i];
+-        }
+-    }
++bool OutputConfiguration::sensorPixelModesUsedLessThan(const OutputConfiguration& other) const {
++    const std::vector<int32_t>& spms = other.getSensorPixelModesUsed();
++    return simpleVectorsLessThan(mSensorPixelModesUsed, spms);
++}
+ 
+-    return false;
++bool OutputConfiguration::mirrorModesLessThan(const OutputConfiguration& other) const {
++    const std::vector<int>& otherMirrorModes = other.getMirrorModes();
++    return simpleVectorsLessThan(mMirrorModeForProducers, otherMirrorModes);
+ }
+ 
+ bool OutputConfiguration::gbpsLessThan(const OutputConfiguration& other) const {
+diff --git a/camera/camera_platform.aconfig b/camera/camera_platform.aconfig
+index 8e53ca08dc..cabfbc4152 100644
+--- a/camera/camera_platform.aconfig
++++ b/camera/camera_platform.aconfig
+@@ -178,3 +178,11 @@ flag {
+     description: "Pass the full AttributionSource chain to PermissionChecker"
+     bug: "190657833"
+ }
++
++flag {
++    namespace: "camera_platform"
++    name: "mirror_mode_shared_surfaces"
++    is_exported: true
++    description: "Support setting and getting mirror mode for shared surfaces"
++    bug: "298899993"
++}
+diff --git a/camera/include/camera/camera2/OutputConfiguration.h b/camera/include/camera/camera2/OutputConfiguration.h
+index 83ce39d917..2049a310e2 100644
+--- a/camera/include/camera/camera2/OutputConfiguration.h
++++ b/camera/include/camera/camera2/OutputConfiguration.h
+@@ -72,7 +72,7 @@ public:
+     bool                       isMultiResolution() const;
+     int64_t                    getStreamUseCase() const;
+     int                        getTimestampBase() const;
+-    int                        getMirrorMode() const;
++    int                        getMirrorMode(sp<IGraphicBufferProducer> surface) const;
+     bool                       useReadoutTimestamp() const;
+     int                        getFormat() const;
+     int                        getDataspace() const;
+@@ -125,6 +125,7 @@ public:
+                 mStreamUseCase == other.mStreamUseCase &&
+                 mTimestampBase == other.mTimestampBase &&
+                 mMirrorMode == other.mMirrorMode &&
++                mirrorModesEqual(other) &&
+                 mUseReadoutTimestamp == other.mUseReadoutTimestamp &&
+                 mFormat == other.mFormat &&
+                 mDataspace == other.mDataspace &&
+@@ -180,6 +181,9 @@ public:
+         if (mMirrorMode != other.mMirrorMode) {
+             return mMirrorMode < other.mMirrorMode;
+         }
++        if (!mirrorModesEqual(other)) {
++            return mirrorModesLessThan(other);
++        }
+         if (mUseReadoutTimestamp != other.mUseReadoutTimestamp) {
+             return mUseReadoutTimestamp < other.mUseReadoutTimestamp;
+         }
+@@ -204,6 +208,9 @@ public:
+     bool sensorPixelModesUsedLessThan(const OutputConfiguration& other) const;
+     bool gbpsLessThan(const OutputConfiguration& other) const;
+     void addGraphicProducer(sp<IGraphicBufferProducer> gbp) {mGbps.push_back(gbp);}
++    bool mirrorModesEqual(const OutputConfiguration& other) const;
++    bool mirrorModesLessThan(const OutputConfiguration& other) const;
++    const std::vector<int32_t>& getMirrorModes() const {return mMirrorModeForProducers;}
+ private:
+     std::vector<sp<IGraphicBufferProducer>> mGbps;
+     int                        mRotation;
+@@ -221,6 +228,7 @@ private:
+     int64_t                    mStreamUseCase;
+     int                        mTimestampBase;
+     int                        mMirrorMode;
++    std::vector<int>           mMirrorModeForProducers; // 1:1 mapped with mGbps
+     bool                       mUseReadoutTimestamp;
+     int                        mFormat;
+     int                        mDataspace;
+diff --git a/camera/tests/fuzzer/camera_c2OutputConfiguration_fuzzer.cpp b/camera/tests/fuzzer/camera_c2OutputConfiguration_fuzzer.cpp
+index 7046075996..b6fa817d93 100644
+--- a/camera/tests/fuzzer/camera_c2OutputConfiguration_fuzzer.cpp
++++ b/camera/tests/fuzzer/camera_c2OutputConfiguration_fuzzer.cpp
+@@ -120,7 +120,10 @@ void C2OutputConfigurationFuzzer::invokeC2OutputConfigFuzzer() {
+                 [&]() { outputConfiguration->getColorSpace(); },
+                 [&]() { outputConfiguration->getStreamUseCase(); },
+                 [&]() { outputConfiguration->getTimestampBase(); },
+-                [&]() { outputConfiguration->getMirrorMode(); },
++                [&]() {
++                    sp<IGraphicBufferProducer> gbp = createIGraphicBufferProducer();
++                    outputConfiguration->getMirrorMode(gbp);
++                },
+                 [&]() { outputConfiguration->useReadoutTimestamp(); },
+         });
+         callC2OutputConfAPIs();
+diff --git a/services/camera/libcameraservice/api2/CameraDeviceClient.cpp b/services/camera/libcameraservice/api2/CameraDeviceClient.cpp
+index f469aad0f2..bacbfafbfd 100644
+--- a/services/camera/libcameraservice/api2/CameraDeviceClient.cpp
++++ b/services/camera/libcameraservice/api2/CameraDeviceClient.cpp
+@@ -908,7 +908,6 @@ binder::Status CameraDeviceClient::createStream(
+     int64_t dynamicRangeProfile = outputConfiguration.getDynamicRangeProfile();
+     int64_t streamUseCase = outputConfiguration.getStreamUseCase();
+     int timestampBase = outputConfiguration.getTimestampBase();
+-    int mirrorMode = outputConfiguration.getMirrorMode();
+     int32_t colorSpace = outputConfiguration.getColorSpace();
+     bool useReadoutTimestamp = outputConfiguration.useReadoutTimestamp();
+ 
+@@ -927,7 +926,7 @@ binder::Status CameraDeviceClient::createStream(
+         return res;
+     }
+ 
+-    std::vector<sp<Surface>> surfaces;
++    std::vector<SurfaceHolder> surfaces;
+     std::vector<sp<IBinder>> binders;
+     status_t err;
+ 
+@@ -952,6 +951,7 @@ binder::Status CameraDeviceClient::createStream(
+             return STATUS_ERROR(CameraService::ERROR_ALREADY_EXISTS, msg.c_str());
+         }
+ 
++        int mirrorMode = outputConfiguration.getMirrorMode(bufferProducer);
+         sp<Surface> surface;
+         res = SessionConfigurationUtils::createSurfaceFromGbp(streamInfo,
+                 isStreamInfoValid, surface, bufferProducer, mCameraIdStr,
+@@ -966,7 +966,7 @@ binder::Status CameraDeviceClient::createStream(
+         }
+ 
+         binders.push_back(IInterface::asBinder(bufferProducer));
+-        surfaces.push_back(surface);
++        surfaces.push_back({surface, mirrorMode});
+     }
+ 
+     // If mOverrideForPerfClass is true, do not fail createStream() for small
+@@ -976,10 +976,11 @@ binder::Status CameraDeviceClient::createStream(
+     int streamId = camera3::CAMERA3_STREAM_ID_INVALID;
+     std::vector<int> surfaceIds;
+     bool isDepthCompositeStream =
+-            camera3::DepthCompositeStream::isDepthCompositeStream(surfaces[0]);
+-    bool isHeicCompositeStream = camera3::HeicCompositeStream::isHeicCompositeStream(surfaces[0]);
++            camera3::DepthCompositeStream::isDepthCompositeStream(surfaces[0].mSurface);
++    bool isHeicCompositeStream = camera3::HeicCompositeStream::isHeicCompositeStream(
++            surfaces[0].mSurface);
+     bool isJpegRCompositeStream =
+-        camera3::JpegRCompositeStream::isJpegRCompositeStream(surfaces[0]) &&
++        camera3::JpegRCompositeStream::isJpegRCompositeStream(surfaces[0].mSurface) &&
+         !mDevice->isCompositeJpegRDisabled();
+     if (isDepthCompositeStream || isHeicCompositeStream || isJpegRCompositeStream) {
+         sp<CompositeStream> compositeStream;
+@@ -1000,7 +1001,8 @@ binder::Status CameraDeviceClient::createStream(
+                 useReadoutTimestamp);
+         if (err == OK) {
+             Mutex::Autolock l(mCompositeLock);
+-            mCompositeStreamMap.add(IInterface::asBinder(surfaces[0]->getIGraphicBufferProducer()),
++            mCompositeStreamMap.add(
++                    IInterface::asBinder(surfaces[0].mSurface->getIGraphicBufferProducer()),
+                     compositeStream);
+         }
+     } else {
+@@ -1010,8 +1012,7 @@ binder::Status CameraDeviceClient::createStream(
+                 &streamId, physicalCameraId, streamInfo.sensorPixelModesUsed, &surfaceIds,
+                 outputConfiguration.getSurfaceSetID(), isShared, isMultiResolution,
+                 /*consumerUsage*/0, streamInfo.dynamicRangeProfile, streamInfo.streamUseCase,
+-                streamInfo.timestampBase, streamInfo.mirrorMode, streamInfo.colorSpace,
+-                useReadoutTimestamp);
++                streamInfo.timestampBase, streamInfo.colorSpace, useReadoutTimestamp);
+     }
+ 
+     if (err != OK) {
+@@ -1036,9 +1037,6 @@ binder::Status CameraDeviceClient::createStream(
+                   __FUNCTION__, mCameraIdStr.c_str(), streamId, streamInfo.width,
+                   streamInfo.height, streamInfo.format);
+ 
+-        // Set transform flags to ensure preview to be rotated correctly.
+-        res = setStreamTransformLocked(streamId, streamInfo.mirrorMode);
+-
+         // Fill in mHighResolutionCameraIdToStreamIdSet map
+         const std::string &cameraIdUsed =
+                 physicalCameraId.size() != 0 ? physicalCameraId : mCameraIdStr;
+@@ -1087,7 +1085,7 @@ binder::Status CameraDeviceClient::createDeferredSurfaceStreamLocked(
+         consumerUsage |= GraphicBuffer::USAGE_HW_COMPOSER;
+     }
+     int streamId = camera3::CAMERA3_STREAM_ID_INVALID;
+-    std::vector<sp<Surface>> noSurface;
++    std::vector<SurfaceHolder> noSurface;
+     std::vector<int> surfaceIds;
+     const std::string &physicalCameraId = outputConfiguration.getPhysicalCameraId();
+     const std::string &cameraIdUsed =
+@@ -1113,7 +1111,6 @@ binder::Status CameraDeviceClient::createDeferredSurfaceStreamLocked(
+             outputConfiguration.isMultiResolution(), consumerUsage,
+             outputConfiguration.getDynamicRangeProfile(),
+             outputConfiguration.getStreamUseCase(),
+-            outputConfiguration.getMirrorMode(),
+             outputConfiguration.useReadoutTimestamp());
+ 
+     if (err != OK) {
+@@ -1132,16 +1129,12 @@ binder::Status CameraDeviceClient::createDeferredSurfaceStreamLocked(
+                         outputConfiguration.getDynamicRangeProfile(),
+                         outputConfiguration.getStreamUseCase(),
+                         outputConfiguration.getTimestampBase(),
+-                        outputConfiguration.getMirrorMode(),
+                         colorSpace));
+ 
+         ALOGV("%s: Camera %s: Successfully created a new stream ID %d for a deferred surface"
+                 " (%d x %d) stream with format 0x%x.",
+               __FUNCTION__, mCameraIdStr.c_str(), streamId, width, height, format);
+ 
+-        // Set transform flags to ensure preview to be rotated correctly.
+-        res = setStreamTransformLocked(streamId, outputConfiguration.getMirrorMode());
+-
+         *newStreamId = streamId;
+         // Fill in mHighResolutionCameraIdToStreamIdSet
+         // Only needed for high resolution sensors
+@@ -1153,33 +1146,6 @@ binder::Status CameraDeviceClient::createDeferredSurfaceStreamLocked(
+     return res;
+ }
+ 
+-binder::Status CameraDeviceClient::setStreamTransformLocked(int streamId, int mirrorMode) {
+-    int32_t transform = 0;
+-    status_t err;
+-    binder::Status res;
+-
+-    if (!mDevice.get()) {
+-        return STATUS_ERROR(CameraService::ERROR_DISCONNECTED, "Camera device no longer alive");
+-    }
+-
+-    err = getRotationTransformLocked(mirrorMode, &transform);
+-    if (err != OK) {
+-        // Error logged by getRotationTransformLocked.
+-        return STATUS_ERROR(CameraService::ERROR_INVALID_OPERATION,
+-                "Unable to calculate rotation transform for new stream");
+-    }
+-
+-    err = mDevice->setStreamTransform(streamId, transform);
+-    if (err != OK) {
+-        std::string msg = fmt::sprintf("Failed to set stream transform (stream id %d)",
+-                streamId);
+-        ALOGE("%s: %s", __FUNCTION__, msg.c_str());
+-        return STATUS_ERROR(CameraService::ERROR_INVALID_OPERATION, msg.c_str());
+-    }
+-
+-    return res;
+-}
+-
+ binder::Status CameraDeviceClient::createInputStream(
+         int width, int height, int format, bool isMultiResolution,
+         /*out*/
+@@ -1312,7 +1278,7 @@ binder::Status CameraDeviceClient::updateOutputConfiguration(int streamId,
+ 
+     std::vector<size_t> removedSurfaceIds;
+     std::vector<sp<IBinder>> removedOutputs;
+-    std::vector<sp<Surface>> newOutputs;
++    std::vector<SurfaceHolder> newOutputs;
+     std::vector<OutputStreamInfo> streamInfos;
+     KeyedVector<sp<IBinder>, sp<IGraphicBufferProducer>> newOutputsMap;
+     for (auto &it : bufferProducers) {
+@@ -1341,11 +1307,11 @@ binder::Status CameraDeviceClient::updateOutputConfiguration(int streamId,
+     int timestampBase = outputConfiguration.getTimestampBase();
+     int64_t dynamicRangeProfile = outputConfiguration.getDynamicRangeProfile();
+     int32_t colorSpace = outputConfiguration.getColorSpace();
+-    int mirrorMode = outputConfiguration.getMirrorMode();
+ 
+     for (size_t i = 0; i < newOutputsMap.size(); i++) {
+         OutputStreamInfo outInfo;
+         sp<Surface> surface;
++        int mirrorMode = outputConfiguration.getMirrorMode(newOutputsMap.valueAt(i));
+         res = SessionConfigurationUtils::createSurfaceFromGbp(outInfo,
+                 /*isStreamInfoValid*/ false, surface, newOutputsMap.valueAt(i), mCameraIdStr,
+                 mDevice->infoPhysical(physicalCameraId), sensorPixelModesUsed, dynamicRangeProfile,
+@@ -1354,7 +1320,7 @@ binder::Status CameraDeviceClient::updateOutputConfiguration(int streamId,
+             return res;
+ 
+         streamInfos.push_back(outInfo);
+-        newOutputs.push_back(surface);
++        newOutputs.push_back({surface, mirrorMode});
+     }
+ 
+     //Trivial case no changes required
+@@ -1711,14 +1677,13 @@ binder::Status CameraDeviceClient::finalizeOutputConfigurations(int32_t streamId
+         return STATUS_ERROR(CameraService::ERROR_DISCONNECTED, "Camera device no longer alive");
+     }
+ 
+-    std::vector<sp<Surface>> consumerSurfaces;
++    std::vector<SurfaceHolder> consumerSurfaceHolders;
+     const std::vector<int32_t> &sensorPixelModesUsed =
+             outputConfiguration.getSensorPixelModesUsed();
+     int64_t dynamicRangeProfile = outputConfiguration.getDynamicRangeProfile();
+     int32_t colorSpace = outputConfiguration.getColorSpace();
+     int64_t streamUseCase = outputConfiguration.getStreamUseCase();
+     int timestampBase = outputConfiguration.getTimestampBase();
+-    int mirrorMode = outputConfiguration.getMirrorMode();
+     for (auto& bufferProducer : bufferProducers) {
+         // Don't create multiple streams for the same target surface
+         ssize_t index = mStreamMap.indexOfKey(IInterface::asBinder(bufferProducer));
+@@ -1729,6 +1694,7 @@ binder::Status CameraDeviceClient::finalizeOutputConfigurations(int32_t streamId
+         }
+ 
+         sp<Surface> surface;
++        int mirrorMode = outputConfiguration.getMirrorMode(bufferProducer);
+         res = SessionConfigurationUtils::createSurfaceFromGbp(mStreamInfoMap[streamId],
+                 true /*isStreamInfoValid*/, surface, bufferProducer, mCameraIdStr,
+                 mDevice->infoPhysical(physicalId), sensorPixelModesUsed, dynamicRangeProfile,
+@@ -1737,12 +1703,12 @@ binder::Status CameraDeviceClient::finalizeOutputConfigurations(int32_t streamId
+         if (!res.isOk())
+             return res;
+ 
+-        consumerSurfaces.push_back(surface);
++        consumerSurfaceHolders.push_back({surface, mirrorMode});
+     }
+ 
+     // Gracefully handle case where finalizeOutputConfigurations is called
+     // without any new surface.
+-    if (consumerSurfaces.size() == 0) {
++    if (consumerSurfaceHolders.size() == 0) {
+         mStreamInfoMap[streamId].finalized = true;
+         return res;
+     }
+@@ -1750,11 +1716,11 @@ binder::Status CameraDeviceClient::finalizeOutputConfigurations(int32_t streamId
+     // Finish the deferred stream configuration with the surface.
+     status_t err;
+     std::vector<int> consumerSurfaceIds;
+-    err = mDevice->setConsumerSurfaces(streamId, consumerSurfaces, &consumerSurfaceIds);
++    err = mDevice->setConsumerSurfaces(streamId, consumerSurfaceHolders, &consumerSurfaceIds);
+     if (err == OK) {
+-        for (size_t i = 0; i < consumerSurfaces.size(); i++) {
++        for (size_t i = 0; i < consumerSurfaceHolders.size(); i++) {
+             sp<IBinder> binder = IInterface::asBinder(
+-                    consumerSurfaces[i]->getIGraphicBufferProducer());
++                    consumerSurfaceHolders[i].mSurface->getIGraphicBufferProducer());
+             ALOGV("%s: mStreamMap add binder %p streamId %d, surfaceId %d", __FUNCTION__,
+                     binder.get(), streamId, consumerSurfaceIds[i]);
+             mStreamMap.add(binder, StreamSurfaceId(streamId, consumerSurfaceIds[i]));
+@@ -2271,14 +2237,6 @@ bool CameraDeviceClient::enforceRequestPermissions(CameraMetadata& metadata) {
+     return true;
+ }
+ 
+-status_t CameraDeviceClient::getRotationTransformLocked(int mirrorMode,
+-        int32_t* transform) {
+-    ALOGV("%s: begin", __FUNCTION__);
+-
+-    const CameraMetadata& staticInfo = mDevice->info();
+-    return CameraUtils::getRotationTransform(staticInfo, mirrorMode, transform);
+-}
+-
+ const CameraMetadata &CameraDeviceClient::getStaticInfo(const std::string &cameraId) {
+     if (mDevice->getId() == cameraId) {
+         return mDevice->info();
+diff --git a/services/camera/libcameraservice/api2/CameraDeviceClient.h b/services/camera/libcameraservice/api2/CameraDeviceClient.h
+index 42f27526cb..912577d91d 100644
+--- a/services/camera/libcameraservice/api2/CameraDeviceClient.h
++++ b/services/camera/libcameraservice/api2/CameraDeviceClient.h
+@@ -247,9 +247,6 @@ protected:
+     virtual void          onResultAvailable(const CaptureResult& result);
+     virtual void          detachDevice();
+ 
+-    // Calculate the ANativeWindow transform from android.sensor.orientation
+-    status_t              getRotationTransformLocked(int mirrorMode, /*out*/int32_t* transform);
+-
+     bool supportsUltraHighResolutionCapture(const std::string &cameraId);
+ 
+     bool isSensorPixelModeConsistent(const std::list<int> &streamIdList,
+@@ -306,10 +303,6 @@ private:
+             bool isShared,
+             int* newStreamId = NULL);
+ 
+-    // Set the stream transform flags to automatically rotate the camera stream for preview use
+-    // cases.
+-    binder::Status setStreamTransformLocked(int streamId, int mirrorMode);
+-
+     // Utility method to insert the surface into SurfaceMap
+     binder::Status insertGbpLocked(const sp<IGraphicBufferProducer>& gbp,
+             /*out*/SurfaceMap* surfaceMap, /*out*/Vector<int32_t>* streamIds,
+diff --git a/services/camera/libcameraservice/api2/CompositeStream.cpp b/services/camera/libcameraservice/api2/CompositeStream.cpp
+index 8f53458756..6d7fabd83d 100644
+--- a/services/camera/libcameraservice/api2/CompositeStream.cpp
++++ b/services/camera/libcameraservice/api2/CompositeStream.cpp
+@@ -44,7 +44,7 @@ CompositeStream::CompositeStream(sp<CameraDeviceBase> device,
+     }
+ }
+ 
+-status_t CompositeStream::createStream(const std::vector<sp<Surface>>& consumers,
++status_t CompositeStream::createStream(const std::vector<SurfaceHolder>& consumers,
+         bool hasDeferredConsumer, uint32_t width, uint32_t height, int format,
+         camera_stream_rotation_t rotation, int * id, const std::string& physicalCameraId,
+         const std::unordered_set<int32_t> &sensorPixelModesUsed,
+diff --git a/services/camera/libcameraservice/api2/CompositeStream.h b/services/camera/libcameraservice/api2/CompositeStream.h
+index fa569ce987..2b158c932c 100644
+--- a/services/camera/libcameraservice/api2/CompositeStream.h
++++ b/services/camera/libcameraservice/api2/CompositeStream.h
+@@ -41,7 +41,7 @@ public:
+     CompositeStream(sp<CameraDeviceBase> device, wp<hardware::camera2::ICameraDeviceCallbacks> cb);
+     virtual ~CompositeStream() {}
+ 
+-    status_t createStream(const std::vector<sp<Surface>>& consumers,
++    status_t createStream(const std::vector<SurfaceHolder>& consumers,
+             bool hasDeferredConsumer, uint32_t width, uint32_t height, int format,
+             camera_stream_rotation_t rotation, int *id, const std::string& physicalCameraId,
+             const std::unordered_set<int32_t> &sensorPixelModesUsed,
+@@ -55,7 +55,7 @@ public:
+     void switchToOffline();
+ 
+     // Create and register all internal camera streams.
+-    virtual status_t createInternalStreams(const std::vector<sp<Surface>>& consumers,
++    virtual status_t createInternalStreams(const std::vector<SurfaceHolder>& consumers,
+             bool hasDeferredConsumer, uint32_t width, uint32_t height, int format,
+             camera_stream_rotation_t rotation, int *id, const std::string& physicalCameraId,
+             const std::unordered_set<int32_t> &sensorPixelModesUsed,
+diff --git a/services/camera/libcameraservice/api2/DepthCompositeStream.cpp b/services/camera/libcameraservice/api2/DepthCompositeStream.cpp
+index 244a1e56de..14618c4cec 100644
+--- a/services/camera/libcameraservice/api2/DepthCompositeStream.cpp
++++ b/services/camera/libcameraservice/api2/DepthCompositeStream.cpp
+@@ -588,7 +588,7 @@ status_t DepthCompositeStream::checkAndGetMatchingDepthSize(size_t width, size_t
+ }
+ 
+ 
+-status_t DepthCompositeStream::createInternalStreams(const std::vector<sp<Surface>>& consumers,
++status_t DepthCompositeStream::createInternalStreams(const std::vector<SurfaceHolder>& consumers,
+         bool /*hasDeferredConsumer*/, uint32_t width, uint32_t height, int format,
+         camera_stream_rotation_t rotation, int *id, const std::string& physicalCameraId,
+         const std::unordered_set<int32_t> &sensorPixelModesUsed,
+@@ -643,7 +643,7 @@ status_t DepthCompositeStream::createInternalStreams(const std::vector<sp<Surfac
+     if (ret == OK) {
+         mBlobStreamId = *id;
+         mBlobSurfaceId = (*surfaceIds)[0];
+-        mOutputSurface = consumers[0];
++        mOutputSurface = consumers[0].mSurface;
+     } else {
+         return ret;
+     }
+diff --git a/services/camera/libcameraservice/api2/DepthCompositeStream.h b/services/camera/libcameraservice/api2/DepthCompositeStream.h
+index 75deef70b0..9c0311eb03 100644
+--- a/services/camera/libcameraservice/api2/DepthCompositeStream.h
++++ b/services/camera/libcameraservice/api2/DepthCompositeStream.h
+@@ -49,7 +49,7 @@ public:
+     static bool isDepthCompositeStreamInfo(const OutputStreamInfo& streamInfo);
+ 
+     // CompositeStream overrides
+-    status_t createInternalStreams(const std::vector<sp<Surface>>& consumers,
++    status_t createInternalStreams(const std::vector<SurfaceHolder>& consumers,
+             bool hasDeferredConsumer, uint32_t width, uint32_t height, int format,
+             camera_stream_rotation_t rotation, int *id, const std::string& physicalCameraId,
+             const std::unordered_set<int32_t> &sensorPixelModesUsed,
+diff --git a/services/camera/libcameraservice/api2/HeicCompositeStream.cpp b/services/camera/libcameraservice/api2/HeicCompositeStream.cpp
+index 3af673b5f1..0f4ba654c0 100644
+--- a/services/camera/libcameraservice/api2/HeicCompositeStream.cpp
++++ b/services/camera/libcameraservice/api2/HeicCompositeStream.cpp
+@@ -123,7 +123,7 @@ bool HeicCompositeStream::isHeicCompositeStream(const sp<Surface> &surface) {
+     return ((format == HAL_PIXEL_FORMAT_BLOB) && (dataspace == HAL_DATASPACE_HEIF));
+ }
+ 
+-status_t HeicCompositeStream::createInternalStreams(const std::vector<sp<Surface>>& consumers,
++status_t HeicCompositeStream::createInternalStreams(const std::vector<SurfaceHolder>& consumers,
+         bool /*hasDeferredConsumer*/, uint32_t width, uint32_t height, int format,
+         camera_stream_rotation_t rotation, int *id, const std::string& physicalCameraId,
+         const std::unordered_set<int32_t> &sensorPixelModesUsed,
+@@ -228,7 +228,7 @@ status_t HeicCompositeStream::createInternalStreams(const std::vector<sp<Surface
+         return res;
+     }
+ 
+-    mOutputSurface = consumers[0];
++    mOutputSurface = consumers[0].mSurface;
+     res = registerCompositeStreamListener(mMainImageStreamId);
+     if (res != OK) {
+         ALOGE("%s: Failed to register HAL main image stream: %s (%d)", __FUNCTION__,
+diff --git a/services/camera/libcameraservice/api2/HeicCompositeStream.h b/services/camera/libcameraservice/api2/HeicCompositeStream.h
+index ba10e0560e..fad968aa00 100644
+--- a/services/camera/libcameraservice/api2/HeicCompositeStream.h
++++ b/services/camera/libcameraservice/api2/HeicCompositeStream.h
+@@ -43,7 +43,7 @@ public:
+     static bool isHeicCompositeStream(const sp<Surface> &surface);
+     static bool isHeicCompositeStreamInfo(const OutputStreamInfo& streamInfo);
+ 
+-    status_t createInternalStreams(const std::vector<sp<Surface>>& consumers,
++    status_t createInternalStreams(const std::vector<SurfaceHolder>& consumers,
+             bool hasDeferredConsumer, uint32_t width, uint32_t height, int format,
+             camera_stream_rotation_t rotation, int *id, const std::string& physicalCameraId,
+             const std::unordered_set<int32_t> &sensorPixelModesUsed,
+diff --git a/services/camera/libcameraservice/api2/JpegRCompositeStream.cpp b/services/camera/libcameraservice/api2/JpegRCompositeStream.cpp
+index c5bd7a96ef..e0d7604457 100644
+--- a/services/camera/libcameraservice/api2/JpegRCompositeStream.cpp
++++ b/services/camera/libcameraservice/api2/JpegRCompositeStream.cpp
+@@ -557,7 +557,7 @@ void JpegRCompositeStream::deriveDynamicRangeAndDataspace(int64_t dynamicProfile
+ 
+ }
+ 
+-status_t JpegRCompositeStream::createInternalStreams(const std::vector<sp<Surface>>& consumers,
++status_t JpegRCompositeStream::createInternalStreams(const std::vector<SurfaceHolder>& consumers,
+         bool /*hasDeferredConsumer*/, uint32_t width, uint32_t height, int format,
+         camera_stream_rotation_t rotation, int *id, const std::string& physicalCameraId,
+         const std::unordered_set<int32_t> &sensorPixelModesUsed,
+@@ -600,7 +600,7 @@ status_t JpegRCompositeStream::createInternalStreams(const std::vector<sp<Surfac
+     if (ret == OK) {
+         mP010StreamId = *id;
+         mP010SurfaceId = (*surfaceIds)[0];
+-        mOutputSurface = consumers[0];
++        mOutputSurface = consumers[0].mSurface;
+     } else {
+         return ret;
+     }
+diff --git a/services/camera/libcameraservice/api2/JpegRCompositeStream.h b/services/camera/libcameraservice/api2/JpegRCompositeStream.h
+index d3ab19c387..efd31da83d 100644
+--- a/services/camera/libcameraservice/api2/JpegRCompositeStream.h
++++ b/services/camera/libcameraservice/api2/JpegRCompositeStream.h
+@@ -46,7 +46,7 @@ public:
+     static bool isJpegRCompositeStreamInfo(const OutputStreamInfo& streamInfo);
+ 
+     // CompositeStream overrides
+-    status_t createInternalStreams(const std::vector<sp<Surface>>& consumers,
++    status_t createInternalStreams(const std::vector<SurfaceHolder>& consumers,
+             bool hasDeferredConsumer, uint32_t width, uint32_t height, int format,
+             camera_stream_rotation_t rotation, int *id, const std::string& physicalCameraId,
+             const std::unordered_set<int32_t> &sensorPixelModesUsed,
+diff --git a/services/camera/libcameraservice/common/CameraDeviceBase.h b/services/camera/libcameraservice/common/CameraDeviceBase.h
+index 9c8f5ad246..f5e960b1e8 100644
+--- a/services/camera/libcameraservice/common/CameraDeviceBase.h
++++ b/services/camera/libcameraservice/common/CameraDeviceBase.h
+@@ -68,6 +68,7 @@ enum {
+ using camera3::camera_request_template_t;;
+ using camera3::camera_stream_configuration_mode_t;
+ using camera3::camera_stream_rotation_t;
++using camera3::SurfaceHolder;
+ 
+ class CameraProviderManager;
+ 
+@@ -200,7 +201,7 @@ class CameraDeviceBase : public virtual FrameProducer {
+      * For HAL_PIXEL_FORMAT_BLOB formats, the width and height should be the
+      * logical dimensions of the buffer, not the number of bytes.
+      */
+-    virtual status_t createStream(const std::vector<sp<Surface>>& consumers,
++    virtual status_t createStream(const std::vector<SurfaceHolder>& consumers,
+             bool hasDeferredConsumer, uint32_t width, uint32_t height, int format,
+             android_dataspace dataSpace, camera_stream_rotation_t rotation, int *id,
+             const std::string& physicalCameraId,
+@@ -212,7 +213,6 @@ class CameraDeviceBase : public virtual FrameProducer {
+             int64_t dynamicProfile = ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD,
+             int64_t streamUseCase = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
+             int timestampBase = OutputConfiguration::TIMESTAMP_BASE_DEFAULT,
+-            int mirrorMode = OutputConfiguration::MIRROR_MODE_AUTO,
+             int32_t colorSpace = ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_UNSPECIFIED,
+             bool useReadoutTimestamp = false)
+             = 0;
+@@ -404,12 +404,12 @@ class CameraDeviceBase : public virtual FrameProducer {
+      * Set the deferred consumer surface and finish the rest of the stream configuration.
+      */
+     virtual status_t setConsumerSurfaces(int streamId,
+-            const std::vector<sp<Surface>>& consumers, std::vector<int> *surfaceIds /*out*/) = 0;
++            const std::vector<SurfaceHolder>& consumers, std::vector<int> *surfaceIds /*out*/) = 0;
+ 
+     /**
+      * Update a given stream.
+      */
+-    virtual status_t updateStream(int streamId, const std::vector<sp<Surface>> &newSurfaces,
++    virtual status_t updateStream(int streamId, const std::vector<SurfaceHolder> &newSurfaces,
+             const std::vector<android::camera3::OutputStreamInfo> &outputInfo,
+             const std::vector<size_t> &removedSurfaceIds,
+             KeyedVector<sp<Surface>, size_t> *outputMap/*out*/) = 0;
+diff --git a/services/camera/libcameraservice/device3/Camera3Device.cpp b/services/camera/libcameraservice/device3/Camera3Device.cpp
+index 57217453eb..eb8cb9df10 100644
+--- a/services/camera/libcameraservice/device3/Camera3Device.cpp
++++ b/services/camera/libcameraservice/device3/Camera3Device.cpp
+@@ -50,6 +50,7 @@
+ #include <utils/Trace.h>
+ #include <utils/Timers.h>
+ #include <cutils/properties.h>
++#include <camera/CameraUtils.h>
+ #include <camera/StringUtils.h>
+ 
+ #include <android-base/properties.h>
+@@ -1046,13 +1047,13 @@ status_t Camera3Device::createStream(sp<Surface> consumer,
+         return BAD_VALUE;
+     }
+ 
+-    std::vector<sp<Surface>> consumers;
+-    consumers.push_back(consumer);
++    std::vector<SurfaceHolder> consumers;
++    consumers.push_back(SurfaceHolder{consumer, mirrorMode});
+ 
+     return createStream(consumers, /*hasDeferredConsumer*/ false, width, height,
+             format, dataSpace, rotation, id, physicalCameraId, sensorPixelModesUsed, surfaceIds,
+             streamSetId, isShared, isMultiResolution, consumerUsage, dynamicRangeProfile,
+-            streamUseCase, timestampBase, mirrorMode, colorSpace, useReadoutTimestamp);
++            streamUseCase, timestampBase, colorSpace, useReadoutTimestamp);
+ }
+ 
+ static bool isRawFormat(int format) {
+@@ -1067,14 +1068,14 @@ static bool isRawFormat(int format) {
+     }
+ }
+ 
+-status_t Camera3Device::createStream(const std::vector<sp<Surface>>& consumers,
++status_t Camera3Device::createStream(const std::vector<SurfaceHolder>& consumers,
+         bool hasDeferredConsumer, uint32_t width, uint32_t height, int format,
+         android_dataspace dataSpace, camera_stream_rotation_t rotation, int *id,
+         const std::string& physicalCameraId,
+         const std::unordered_set<int32_t> &sensorPixelModesUsed,
+         std::vector<int> *surfaceIds, int streamSetId, bool isShared, bool isMultiResolution,
+         uint64_t consumerUsage, int64_t dynamicRangeProfile, int64_t streamUseCase,
+-        int timestampBase, int mirrorMode, int32_t colorSpace, bool useReadoutTimestamp) {
++        int timestampBase, int32_t colorSpace, bool useReadoutTimestamp) {
+     ATRACE_CALL();
+ 
+     Mutex::Autolock il(mInterfaceLock);
+@@ -1083,10 +1084,10 @@ status_t Camera3Device::createStream(const std::vector<sp<Surface>>& consumers,
+     ALOGV("Camera %s: Creating new stream %d: %d x %d, format %d, dataspace %d rotation %d"
+             " consumer usage %" PRIu64 ", isShared %d, physicalCameraId %s, isMultiResolution %d"
+             " dynamicRangeProfile 0x%" PRIx64 ", streamUseCase %" PRId64 ", timestampBase %d,"
+-            " mirrorMode %d, colorSpace %d, useReadoutTimestamp %d",
++            " colorSpace %d, useReadoutTimestamp %d",
+             mId.c_str(), mNextStreamId, width, height, format, dataSpace, rotation,
+             consumerUsage, isShared, physicalCameraId.c_str(), isMultiResolution,
+-            dynamicRangeProfile, streamUseCase, timestampBase, mirrorMode, colorSpace,
++            dynamicRangeProfile, streamUseCase, timestampBase, colorSpace,
+             useReadoutTimestamp);
+ 
+     status_t res;
+@@ -1155,11 +1156,11 @@ status_t Camera3Device::createStream(const std::vector<sp<Surface>>& consumers,
+                 return BAD_VALUE;
+             }
+         }
+-        newStream = new Camera3OutputStream(mNextStreamId, consumers[0],
++        newStream = new Camera3OutputStream(mNextStreamId, consumers[0].mSurface,
+                 width, height, blobBufferSize, format, dataSpace, rotation,
+                 mTimestampOffset, physicalCameraId, sensorPixelModesUsed, transport, streamSetId,
+                 isMultiResolution, dynamicRangeProfile, streamUseCase, mDeviceTimeBaseIsRealtime,
+-                timestampBase, mirrorMode, colorSpace, useReadoutTimestamp);
++                timestampBase, consumers[0].mMirrorMode, colorSpace, useReadoutTimestamp);
+     } else if (format == HAL_PIXEL_FORMAT_RAW_OPAQUE) {
+         bool maxResolution =
+                 sensorPixelModesUsed.find(ANDROID_SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION) !=
+@@ -1170,34 +1171,34 @@ status_t Camera3Device::createStream(const std::vector<sp<Surface>>& consumers,
+             SET_ERR_L("Invalid RAW opaque buffer size %zd", rawOpaqueBufferSize);
+             return BAD_VALUE;
+         }
+-        newStream = new Camera3OutputStream(mNextStreamId, consumers[0],
++        newStream = new Camera3OutputStream(mNextStreamId, consumers[0].mSurface,
+                 width, height, rawOpaqueBufferSize, format, dataSpace, rotation,
+                 mTimestampOffset, physicalCameraId, sensorPixelModesUsed, transport, streamSetId,
+                 isMultiResolution, dynamicRangeProfile, streamUseCase, mDeviceTimeBaseIsRealtime,
+-                timestampBase, mirrorMode, colorSpace, useReadoutTimestamp);
++                timestampBase, consumers[0].mMirrorMode, colorSpace, useReadoutTimestamp);
+     } else if (isShared) {
+         newStream = new Camera3SharedOutputStream(mNextStreamId, consumers,
+                 width, height, format, consumerUsage, dataSpace, rotation,
+                 mTimestampOffset, physicalCameraId, sensorPixelModesUsed, transport, streamSetId,
+                 mUseHalBufManager, dynamicRangeProfile, streamUseCase, mDeviceTimeBaseIsRealtime,
+-                timestampBase, mirrorMode, colorSpace, useReadoutTimestamp);
++                timestampBase, colorSpace, useReadoutTimestamp);
+     } else if (consumers.size() == 0 && hasDeferredConsumer) {
+         newStream = new Camera3OutputStream(mNextStreamId,
+                 width, height, format, consumerUsage, dataSpace, rotation,
+                 mTimestampOffset, physicalCameraId, sensorPixelModesUsed, transport, streamSetId,
+                 isMultiResolution, dynamicRangeProfile, streamUseCase, mDeviceTimeBaseIsRealtime,
+-                timestampBase, mirrorMode, colorSpace, useReadoutTimestamp);
++                timestampBase, colorSpace, useReadoutTimestamp);
+     } else {
+-        newStream = new Camera3OutputStream(mNextStreamId, consumers[0],
++        newStream = new Camera3OutputStream(mNextStreamId, consumers[0].mSurface,
+                 width, height, format, dataSpace, rotation,
+                 mTimestampOffset, physicalCameraId, sensorPixelModesUsed, transport, streamSetId,
+                 isMultiResolution, dynamicRangeProfile, streamUseCase, mDeviceTimeBaseIsRealtime,
+-                timestampBase, mirrorMode, colorSpace, useReadoutTimestamp);
++                timestampBase, consumers[0].mMirrorMode, colorSpace, useReadoutTimestamp);
+     }
+ 
+     size_t consumerCount = consumers.size();
+     for (size_t i = 0; i < consumerCount; i++) {
+-        int id = newStream->getSurfaceId(consumers[i]);
++        int id = newStream->getSurfaceId(consumers[i].mSurface);
+         if (id < 0) {
+             SET_ERR_L("Invalid surface id");
+             return BAD_VALUE;
+@@ -1205,6 +1206,11 @@ status_t Camera3Device::createStream(const std::vector<sp<Surface>>& consumers,
+         if (surfaceIds != nullptr) {
+             surfaceIds->push_back(id);
+         }
++
++        res = deriveAndSetTransformLocked(*newStream, consumers[i].mMirrorMode, id);
++        if (res < 0) {
++            return res;
++        }
+     }
+ 
+     newStream->setStatusTracker(mStatusTracker);
+@@ -2038,7 +2044,7 @@ void Camera3Device::notifyStatus(bool idle) {
+ }
+ 
+ status_t Camera3Device::setConsumerSurfaces(int streamId,
+-        const std::vector<sp<Surface>>& consumers, std::vector<int> *surfaceIds) {
++        const std::vector<SurfaceHolder>& consumers, std::vector<int> *surfaceIds) {
+     ATRACE_CALL();
+     ALOGV("%s: Camera %s: set consumer surface for stream %d",
+             __FUNCTION__, mId.c_str(), streamId);
+@@ -2070,12 +2076,17 @@ status_t Camera3Device::setConsumerSurfaces(int streamId,
+     }
+ 
+     for (auto &consumer : consumers) {
+-        int id = stream->getSurfaceId(consumer);
++        int id = stream->getSurfaceId(consumer.mSurface);
+         if (id < 0) {
+             CLOGE("Invalid surface id!");
+             return BAD_VALUE;
+         }
+         surfaceIds->push_back(id);
++
++        res = deriveAndSetTransformLocked(*stream, consumer.mMirrorMode, id);
++        if (res != OK) {
++            return res;
++        }
+     }
+ 
+     if (isDeferred) {
+@@ -2101,7 +2112,7 @@ status_t Camera3Device::setConsumerSurfaces(int streamId,
+     return OK;
+ }
+ 
+-status_t Camera3Device::updateStream(int streamId, const std::vector<sp<Surface>> &newSurfaces,
++status_t Camera3Device::updateStream(int streamId, const std::vector<SurfaceHolder> &newSurfaces,
+         const std::vector<OutputStreamInfo> &outputInfo,
+         const std::vector<size_t> &removedSurfaceIds, KeyedVector<sp<Surface>, size_t> *outputMap) {
+     Mutex::Autolock il(mInterfaceLock);
+@@ -2131,6 +2142,14 @@ status_t Camera3Device::updateStream(int streamId, const std::vector<sp<Surface>
+         return res;
+     }
+ 
++    for (size_t i = 0; i < outputMap->size(); i++) {
++        res = deriveAndSetTransformLocked(
++                *stream, newSurfaces[i].mMirrorMode, outputMap->valueAt(i));
++        if (res != OK) {
++            return res;
++        }
++    }
++
+     return res;
+ }
+ 
+@@ -5786,4 +5805,15 @@ void Camera3Device::overrideStreamUseCaseLocked() {
+     }
+ }
+ 
++status_t Camera3Device::deriveAndSetTransformLocked(
++        Camera3OutputStreamInterface& stream, int mirrorMode, int surfaceId) {
++    int transform = -1;
++    int res = CameraUtils::getRotationTransform(mDeviceInfo, mirrorMode, &transform);
++    if (res != OK) {
++        return res;
++    }
++    stream.setTransform(transform, false /*mayChangeMirror*/, surfaceId);
++    return OK;
++}
++
+ }; // namespace android
+diff --git a/services/camera/libcameraservice/device3/Camera3Device.h b/services/camera/libcameraservice/device3/Camera3Device.h
+index 3c45c1a3d4..397ec5c8c7 100644
+--- a/services/camera/libcameraservice/device3/Camera3Device.h
++++ b/services/camera/libcameraservice/device3/Camera3Device.h
+@@ -63,6 +63,7 @@ using android::camera3::camera_stream_configuration_t;
+ using android::camera3::camera_stream_configuration_mode_t;
+ using android::camera3::CAMERA_TEMPLATE_COUNT;
+ using android::camera3::OutputStreamInfo;
++using android::camera3::SurfaceHolder;
+ 
+ namespace android {
+ 
+@@ -168,7 +169,7 @@ class Camera3Device :
+             bool useReadoutTimestamp = false)
+             override;
+ 
+-    status_t createStream(const std::vector<sp<Surface>>& consumers,
++    status_t createStream(const std::vector<SurfaceHolder>& consumers,
+             bool hasDeferredConsumer, uint32_t width, uint32_t height, int format,
+             android_dataspace dataSpace, camera_stream_rotation_t rotation, int *id,
+             const std::string& physicalCameraId,
+@@ -181,7 +182,6 @@ class Camera3Device :
+             ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD,
+             int64_t streamUseCase = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
+             int timestampBase = OutputConfiguration::TIMESTAMP_BASE_DEFAULT,
+-            int mirrorMode = OutputConfiguration::MIRROR_MODE_AUTO,
+             int32_t colorSpace = ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_UNSPECIFIED,
+             bool useReadoutTimestamp = false)
+             override;
+@@ -247,13 +247,13 @@ class Camera3Device :
+      * consumer configuration.
+      */
+     status_t setConsumerSurfaces(
+-            int streamId, const std::vector<sp<Surface>>& consumers,
++            int streamId, const std::vector<SurfaceHolder>& consumers,
+             std::vector<int> *surfaceIds /*out*/) override;
+ 
+     /**
+      * Update a given stream.
+      */
+-    status_t updateStream(int streamId, const std::vector<sp<Surface>> &newSurfaces,
++    status_t updateStream(int streamId, const std::vector<SurfaceHolder> &newSurfaces,
+             const std::vector<OutputStreamInfo> &outputInfo,
+             const std::vector<size_t> &removedSurfaceIds,
+             KeyedVector<sp<Surface>, size_t> *outputMap/*out*/);
+@@ -1644,6 +1644,8 @@ class Camera3Device :
+     sp<Camera3DeviceInjectionMethods> mInjectionMethods;
+ 
+     void overrideStreamUseCaseLocked();
++    status_t deriveAndSetTransformLocked(camera3::Camera3OutputStreamInterface& stream,
++                                   int mirrorMode, int surfaceId);
+ 
+ 
+ }; // class Camera3Device
+diff --git a/services/camera/libcameraservice/device3/Camera3FakeStream.cpp b/services/camera/libcameraservice/device3/Camera3FakeStream.cpp
+index 55467c3766..79b88f87e9 100644
+--- a/services/camera/libcameraservice/device3/Camera3FakeStream.cpp
++++ b/services/camera/libcameraservice/device3/Camera3FakeStream.cpp
+@@ -76,7 +76,7 @@ void Camera3FakeStream::dump(int fd, [[maybe_unused]] const Vector<String16> &ar
+     Camera3IOStreamBase::dump(fd, args);
+ }
+ 
+-status_t Camera3FakeStream::setTransform(int, bool) {
++status_t Camera3FakeStream::setTransform(int, bool, int) {
+     ATRACE_CALL();
+     // Do nothing
+     return OK;
+@@ -120,13 +120,13 @@ const std::string& Camera3FakeStream::getPhysicalCameraId() const {
+     return FAKE_ID;
+ }
+ 
+-status_t Camera3FakeStream::setConsumers(const std::vector<sp<Surface>>& /*consumers*/) {
++status_t Camera3FakeStream::setConsumers(const std::vector<SurfaceHolder>& /*consumers*/) {
+     ALOGE("%s: Stream %d: Fake stream doesn't support set consumer surface!",
+             __FUNCTION__, mId);
+     return INVALID_OPERATION;
+ }
+ 
+-status_t Camera3FakeStream::updateStream(const std::vector<sp<Surface>> &/*outputSurfaces*/,
++status_t Camera3FakeStream::updateStream(const std::vector<SurfaceHolder> &/*outputSurfaces*/,
+             const std::vector<OutputStreamInfo> &/*outputInfo*/,
+             const std::vector<size_t> &/*removedSurfaceIds*/,
+             KeyedVector<sp<Surface>, size_t> * /*outputMap*/) {
+diff --git a/services/camera/libcameraservice/device3/Camera3FakeStream.h b/services/camera/libcameraservice/device3/Camera3FakeStream.h
+index 7addb90c29..9291bd05ed 100644
+--- a/services/camera/libcameraservice/device3/Camera3FakeStream.h
++++ b/services/camera/libcameraservice/device3/Camera3FakeStream.h
+@@ -52,7 +52,7 @@ class Camera3FakeStream :
+ 
+     virtual void     dump(int fd, const Vector<String16> &args);
+ 
+-    status_t         setTransform(int transform, bool mayChangeMirror);
++    status_t         setTransform(int transform, bool mayChangeMirror, int surfaceId);
+ 
+     virtual status_t detachBuffer(sp<GraphicBuffer>* buffer, int* fenceFd);
+ 
+@@ -80,7 +80,7 @@ class Camera3FakeStream :
+     /**
+      * Set the consumer surfaces to the output stream.
+      */
+-    virtual status_t setConsumers(const std::vector<sp<Surface>>& consumers);
++    virtual status_t setConsumers(const std::vector<SurfaceHolder>& consumers);
+ 
+     /**
+      * Query the output surface id.
+@@ -93,7 +93,7 @@ class Camera3FakeStream :
+     /**
+      * Update the stream output surfaces.
+      */
+-    virtual status_t updateStream(const std::vector<sp<Surface>> &outputSurfaces,
++    virtual status_t updateStream(const std::vector<SurfaceHolder> &outputSurfaces,
+             const std::vector<OutputStreamInfo> &outputInfo,
+             const std::vector<size_t> &removedSurfaceIds,
+             KeyedVector<sp<Surface>, size_t> *outputMap/*out*/);
+diff --git a/services/camera/libcameraservice/device3/Camera3OutputStream.cpp b/services/camera/libcameraservice/device3/Camera3OutputStream.cpp
+index 83c8a386c5..dc663f3043 100644
+--- a/services/camera/libcameraservice/device3/Camera3OutputStream.cpp
++++ b/services/camera/libcameraservice/device3/Camera3OutputStream.cpp
+@@ -136,7 +136,7 @@ Camera3OutputStream::Camera3OutputStream(int id,
+         const std::unordered_set<int32_t> &sensorPixelModesUsed, IPCTransport transport,
+         int setId, bool isMultiResolution, int64_t dynamicRangeProfile,
+         int64_t streamUseCase, bool deviceTimeBaseIsRealtime, int timestampBase,
+-        int mirrorMode, int32_t colorSpace, bool useReadoutTimestamp) :
++        int32_t colorSpace, bool useReadoutTimestamp) :
+         Camera3IOStreamBase(id, CAMERA_STREAM_OUTPUT, width, height,
+                             /*maxSize*/0, format, dataSpace, rotation,
+                             physicalCameraId, sensorPixelModesUsed, setId, isMultiResolution,
+@@ -150,7 +150,7 @@ Camera3OutputStream::Camera3OutputStream(int id,
+         mUseReadoutTime(useReadoutTimestamp),
+         mConsumerUsage(consumerUsage),
+         mDropBuffers(false),
+-        mMirrorMode(mirrorMode),
++        mMirrorMode(OutputConfiguration::MIRROR_MODE_AUTO),
+         mDequeueBufferLatency(kDequeueLatencyBinSize),
+         mIPCTransport(transport) {
+     // Deferred consumer only support preview surface format now.
+@@ -184,8 +184,7 @@ Camera3OutputStream::Camera3OutputStream(int id, camera_stream_type_t type,
+                                          int setId, bool isMultiResolution,
+                                          int64_t dynamicRangeProfile, int64_t streamUseCase,
+                                          bool deviceTimeBaseIsRealtime, int timestampBase,
+-                                         int mirrorMode, int32_t colorSpace,
+-                                         bool useReadoutTimestamp) :
++                                         int32_t colorSpace, bool useReadoutTimestamp) :
+         Camera3IOStreamBase(id, type, width, height,
+                             /*maxSize*/0,
+                             format, dataSpace, rotation,
+@@ -199,7 +198,7 @@ Camera3OutputStream::Camera3OutputStream(int id, camera_stream_type_t type,
+         mUseReadoutTime(useReadoutTimestamp),
+         mConsumerUsage(consumerUsage),
+         mDropBuffers(false),
+-        mMirrorMode(mirrorMode),
++        mMirrorMode(OutputConfiguration::MIRROR_MODE_AUTO),
+         mDequeueBufferLatency(kDequeueLatencyBinSize),
+         mIPCTransport(transport) {
+ 
+@@ -479,21 +478,23 @@ void Camera3OutputStream::dump(int fd, [[maybe_unused]] const Vector<String16> &
+         "      DequeueBuffer latency histogram:");
+ }
+ 
+-status_t Camera3OutputStream::setTransform(int transform, bool mayChangeMirror) {
++status_t Camera3OutputStream::setTransform(int transform, bool mayChangeMirror, int surfaceId) {
+     ATRACE_CALL();
+     Mutex::Autolock l(mLock);
++
+     if (mMirrorMode != OutputConfiguration::MIRROR_MODE_AUTO && mayChangeMirror) {
+         // If the mirroring mode is not AUTO, do not allow transform update
+         // which may change mirror.
+         return OK;
+     }
+ 
+-    return setTransformLocked(transform);
+-}
+-
+-status_t Camera3OutputStream::setTransformLocked(int transform) {
+     status_t res = OK;
+ 
++    if (surfaceId != 0) {
++        ALOGE("%s: Invalid surfaceId %d", __FUNCTION__, surfaceId);
++        return BAD_VALUE;
++    }
++
+     if (transform == -1) return res;
+ 
+     if (mState == STATE_ERROR) {
+@@ -525,6 +526,12 @@ status_t Camera3OutputStream::configureQueueLocked() {
+         return res;
+     }
+ 
++    if ((res = native_window_set_buffers_transform(mConsumer.get(), mTransform)) != OK) {
++        ALOGE("%s: Unable to configure stream transform to %x: %s (%d)",
++                __FUNCTION__, mTransform, strerror(-res), res);
++        return res;
++    }
++
+     // Set dequeueBuffer/attachBuffer timeout if the consumer is not hw composer or hw texture.
+     // We need skip these cases as timeout will disable the non-blocking (async) mode.
+     if (!(isConsumedByHWComposer() || isConsumedByHWTexture())) {
+@@ -694,14 +701,6 @@ status_t Camera3OutputStream::configureConsumerQueueLocked(bool allowPreviewResp
+         return res;
+     }
+ 
+-    res = native_window_set_buffers_transform(mConsumer.get(),
+-            mTransform);
+-    if (res != OK) {
+-        ALOGE("%s: Unable to configure stream transform to %x: %s (%d)",
+-                __FUNCTION__, mTransform, strerror(-res), res);
+-        return res;
+-    }
+-
+     /**
+      * Camera3 Buffer manager is only supported by HAL3.3 onwards, as the older HALs requires
+      * buffers to be statically allocated for internal static buffer registration, while the
+@@ -1069,7 +1068,7 @@ status_t Camera3OutputStream::setBufferManager(sp<Camera3BufferManager> bufferMa
+     return OK;
+ }
+ 
+-status_t Camera3OutputStream::updateStream(const std::vector<sp<Surface>> &/*outputSurfaces*/,
++status_t Camera3OutputStream::updateStream(const std::vector<SurfaceHolder> &/*outputSurfaces*/,
+             const std::vector<OutputStreamInfo> &/*outputInfo*/,
+             const std::vector<size_t> &/*removedSurfaceIds*/,
+             KeyedVector<sp<Surface>, size_t> * /*outputMapo*/) {
+@@ -1206,14 +1205,14 @@ bool Camera3OutputStream::isConsumerConfigurationDeferred(size_t surface_id) con
+     return mConsumer == nullptr;
+ }
+ 
+-status_t Camera3OutputStream::setConsumers(const std::vector<sp<Surface>>& consumers) {
++status_t Camera3OutputStream::setConsumers(const std::vector<SurfaceHolder>& consumers) {
+     Mutex::Autolock l(mLock);
+     if (consumers.size() != 1) {
+         ALOGE("%s: it's illegal to set %zu consumer surfaces!",
+                   __FUNCTION__, consumers.size());
+         return INVALID_OPERATION;
+     }
+-    if (consumers[0] == nullptr) {
++    if (consumers[0].mSurface == nullptr) {
+         ALOGE("%s: it's illegal to set null consumer surface!", __FUNCTION__);
+         return INVALID_OPERATION;
+     }
+@@ -1223,7 +1222,8 @@ status_t Camera3OutputStream::setConsumers(const std::vector<sp<Surface>>& consu
+         return INVALID_OPERATION;
+     }
+ 
+-    mConsumer = consumers[0];
++    mConsumer = consumers[0].mSurface;
++    mMirrorMode = consumers[0].mMirrorMode;
+     return OK;
+ }
+ 
+diff --git a/services/camera/libcameraservice/device3/Camera3OutputStream.h b/services/camera/libcameraservice/device3/Camera3OutputStream.h
+index f8b78c1f98..a547f8206e 100644
+--- a/services/camera/libcameraservice/device3/Camera3OutputStream.h
++++ b/services/camera/libcameraservice/device3/Camera3OutputStream.h
+@@ -134,7 +134,6 @@ class Camera3OutputStream :
+             int64_t streamUseCase = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
+             bool deviceTimeBaseIsRealtime = false,
+             int timestampBase = OutputConfiguration::TIMESTAMP_BASE_DEFAULT,
+-            int mirrorMode = OutputConfiguration::MIRROR_MODE_AUTO,
+             int32_t colorSpace = ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_UNSPECIFIED,
+             bool useReadoutTimestamp = false);
+ 
+@@ -150,7 +149,7 @@ class Camera3OutputStream :
+      * Set the transform on the output stream; one of the
+      * HAL_TRANSFORM_* / NATIVE_WINDOW_TRANSFORM_* constants.
+      */
+-    status_t         setTransform(int transform, bool mayChangeMirror);
++    virtual status_t setTransform(int transform, bool mayChangeMirror, int surfaceId = 0);
+ 
+     /**
+      * Return if this output stream is for video encoding.
+@@ -179,7 +178,7 @@ class Camera3OutputStream :
+     /**
+      * Set the consumer surfaces to the output stream.
+      */
+-    virtual status_t setConsumers(const std::vector<sp<Surface>>& consumers);
++    virtual status_t setConsumers(const std::vector<SurfaceHolder>& consumers);
+ 
+     class BufferProducerListener : public SurfaceListener {
+         public:
+@@ -236,7 +235,7 @@ class Camera3OutputStream :
+     /**
+      * Update the stream output surfaces.
+      */
+-    virtual status_t updateStream(const std::vector<sp<Surface>> &outputSurfaces,
++    virtual status_t updateStream(const std::vector<SurfaceHolder> &outputSurfaces,
+             const std::vector<OutputStreamInfo> &outputInfo,
+             const std::vector<size_t> &removedSurfaceIds,
+             KeyedVector<sp<Surface>, size_t> *outputMap/*out*/);
+@@ -286,7 +285,6 @@ class Camera3OutputStream :
+             int64_t streamUseCase = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
+             bool deviceTimeBaseIsRealtime = false,
+             int timestampBase = OutputConfiguration::TIMESTAMP_BASE_DEFAULT,
+-            int mirrorMode = OutputConfiguration::MIRROR_MODE_AUTO,
+             int32_t colorSpace = ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_UNSPECIFIED,
+             bool useReadoutTimestamp = false);
+ 
+@@ -323,8 +321,6 @@ class Camera3OutputStream :
+ 
+     int               mTransform;
+ 
+-    virtual status_t  setTransformLocked(int transform);
+-
+     bool mTraceFirstBuffer;
+ 
+     /**
+@@ -383,7 +379,7 @@ class Camera3OutputStream :
+     std::vector<Surface::BatchBuffer> mBatchedBuffers;
+     // ---- End of mBatchLock protected scope ----
+ 
+-    const int mMirrorMode;
++    int mMirrorMode;
+ 
+     /**
+      * Internal Camera3Stream interface
+diff --git a/services/camera/libcameraservice/device3/Camera3OutputStreamInterface.h b/services/camera/libcameraservice/device3/Camera3OutputStreamInterface.h
+index 77edfbe463..ff7ad56d2c 100644
+--- a/services/camera/libcameraservice/device3/Camera3OutputStreamInterface.h
++++ b/services/camera/libcameraservice/device3/Camera3OutputStreamInterface.h
+@@ -34,7 +34,7 @@ class Camera3OutputStreamInterface : public virtual Camera3StreamInterface {
+      * Set the transform on the output stream; one of the
+      * HAL_TRANSFORM_* / NATIVE_WINDOW_TRANSFORM_* constants.
+      */
+-    virtual status_t setTransform(int transform, bool mayChangeMirror) = 0;
++    virtual status_t setTransform(int transform, bool mayChangeMirror, int surfaceId = 0) = 0;
+ 
+     /**
+      * Return if this output stream is for video encoding.
+@@ -49,7 +49,7 @@ class Camera3OutputStreamInterface : public virtual Camera3StreamInterface {
+     /**
+      * Set the consumer surfaces to the output stream.
+      */
+-    virtual status_t setConsumers(const std::vector<sp<Surface>>& consumers) = 0;
++    virtual status_t setConsumers(const std::vector<SurfaceHolder>& consumers) = 0;
+ 
+     /**
+      * Detach an unused buffer from the stream.
+@@ -81,7 +81,7 @@ class Camera3OutputStreamInterface : public virtual Camera3StreamInterface {
+     /**
+      * Update the stream output surfaces.
+      */
+-    virtual status_t updateStream(const std::vector<sp<Surface>> &outputSurfaces,
++    virtual status_t updateStream(const std::vector<SurfaceHolder> &outputSurfaces,
+             const std::vector<OutputStreamInfo> &outputInfo,
+             const std::vector<size_t> &removedSurfaceIds,
+             KeyedVector<sp<Surface>, size_t> *outputMap/*out*/) = 0;
+diff --git a/services/camera/libcameraservice/device3/Camera3SharedOutputStream.cpp b/services/camera/libcameraservice/device3/Camera3SharedOutputStream.cpp
+index 187bd932e0..b436d2eac4 100644
+--- a/services/camera/libcameraservice/device3/Camera3SharedOutputStream.cpp
++++ b/services/camera/libcameraservice/device3/Camera3SharedOutputStream.cpp
+@@ -18,6 +18,8 @@
+ #define ATRACE_TAG ATRACE_TAG_CAMERA
+ //#define LOG_NDEBUG 0
+ 
++#include <utils/Trace.h>
++
+ #include "Flags.h"
+ 
+ #include "Camera3SharedOutputStream.h"
+@@ -29,7 +31,7 @@ namespace camera3 {
+ const size_t Camera3SharedOutputStream::kMaxOutputs;
+ 
+ Camera3SharedOutputStream::Camera3SharedOutputStream(int id,
+-        const std::vector<sp<Surface>>& surfaces,
++        const std::vector<SurfaceHolder>& surfaces,
+         uint32_t width, uint32_t height, int format,
+         uint64_t consumerUsage, android_dataspace dataSpace,
+         camera_stream_rotation_t rotation,
+@@ -37,12 +39,12 @@ Camera3SharedOutputStream::Camera3SharedOutputStream(int id,
+         const std::unordered_set<int32_t> &sensorPixelModesUsed, IPCTransport transport,
+         int setId, bool useHalBufManager, int64_t dynamicProfile,
+         int64_t streamUseCase, bool deviceTimeBaseIsRealtime, int timestampBase,
+-        int mirrorMode, int32_t colorSpace, bool useReadoutTimestamp) :
++        int32_t colorSpace, bool useReadoutTimestamp) :
+         Camera3OutputStream(id, CAMERA_STREAM_OUTPUT, width, height,
+                             format, dataSpace, rotation, physicalCameraId, sensorPixelModesUsed,
+                             transport, consumerUsage, timestampOffset, setId,
+                             /*isMultiResolution*/false, dynamicProfile, streamUseCase,
+-                            deviceTimeBaseIsRealtime, timestampBase, mirrorMode, colorSpace,
++                            deviceTimeBaseIsRealtime, timestampBase, colorSpace,
+                             useReadoutTimestamp),
+         mUseHalBufManager(useHalBufManager) {
+     size_t consumerCount = std::min(surfaces.size(), kMaxOutputs);
+@@ -50,7 +52,7 @@ Camera3SharedOutputStream::Camera3SharedOutputStream(int id,
+         ALOGE("%s: Trying to add more consumers than the maximum ", __func__);
+     }
+     for (size_t i = 0; i < consumerCount; i++) {
+-        mSurfaceUniqueIds[i] = std::make_pair(surfaces[i], mNextUniqueSurfaceId++);
++        mSurfaceUniqueIds[i] = SurfaceHolderUniqueId{surfaces[i], mNextUniqueSurfaceId++};
+     }
+ }
+ 
+@@ -72,8 +74,8 @@ status_t Camera3SharedOutputStream::connectStreamSplitterLocked() {
+ 
+     std::unordered_map<size_t, sp<Surface>> initialSurfaces;
+     for (size_t i = 0; i < kMaxOutputs; i++) {
+-        if (mSurfaceUniqueIds[i].first != nullptr) {
+-            initialSurfaces.emplace(i, mSurfaceUniqueIds[i].first);
++        if (mSurfaceUniqueIds[i].mSurfaceHolder.mSurface != nullptr) {
++            initialSurfaces.emplace(i, mSurfaceUniqueIds[i].mSurfaceHolder.mSurface);
+         }
+     }
+ 
+@@ -142,19 +144,19 @@ bool Camera3SharedOutputStream::isConsumerConfigurationDeferred(size_t surface_i
+         return true;
+     }
+ 
+-    return (mSurfaceUniqueIds[surface_id].first == nullptr);
++    return (mSurfaceUniqueIds[surface_id].mSurfaceHolder.mSurface == nullptr);
+ }
+ 
+-status_t Camera3SharedOutputStream::setConsumers(const std::vector<sp<Surface>>& surfaces) {
++status_t Camera3SharedOutputStream::setConsumers(const std::vector<SurfaceHolder>& surfaceHolders) {
+     Mutex::Autolock l(mLock);
+-    if (surfaces.size() == 0) {
++    if (surfaceHolders.size() == 0) {
+         ALOGE("%s: it's illegal to set zero consumer surfaces!", __FUNCTION__);
+         return INVALID_OPERATION;
+     }
+ 
+     status_t ret = OK;
+-    for (auto& surface : surfaces) {
+-        if (surface == nullptr) {
++    for (auto& surfaceHolder : surfaceHolders) {
++        if (surfaceHolder.mSurface == nullptr) {
+             ALOGE("%s: it's illegal to set a null consumer surface!", __FUNCTION__);
+             return INVALID_OPERATION;
+         }
+@@ -165,11 +167,11 @@ status_t Camera3SharedOutputStream::setConsumers(const std::vector<sp<Surface>>&
+             return NO_MEMORY;
+         }
+ 
+-        mSurfaceUniqueIds[id] = std::make_pair(surface, mNextUniqueSurfaceId++);
++        mSurfaceUniqueIds[id] = SurfaceHolderUniqueId{surfaceHolder, mNextUniqueSurfaceId++};
+ 
+         // Only call addOutput if the splitter has been connected.
+         if (mStreamSplitter != nullptr) {
+-            ret = mStreamSplitter->addOutput(id, surface);
++            ret = mStreamSplitter->addOutput(id, surfaceHolder.mSurface);
+             if (ret != OK) {
+                 ALOGE("%s: addOutput failed with error code %d", __FUNCTION__, ret);
+                 return ret;
+@@ -222,7 +224,7 @@ status_t Camera3SharedOutputStream::queueBufferToConsumer(sp<ANativeWindow>& con
+         for (const auto& uniqueId : uniqueSurfaceIds) {
+             bool uniqueIdFound = false;
+             for (size_t i = 0; i < kMaxOutputs; i++) {
+-                if (mSurfaceUniqueIds[i].second == uniqueId) {
++                if (mSurfaceUniqueIds[i].mId == uniqueId) {
+                     surfaceIds.push_back(i);
+                     uniqueIdFound = true;
+                     break;
+@@ -275,6 +277,23 @@ status_t Camera3SharedOutputStream::configureQueueLocked() {
+         return res;
+     }
+ 
++    // Set buffer transform for all configured surfaces
++    for (const auto& surfaceUniqueId : mSurfaceUniqueIds) {
++        const sp<Surface>& surface = surfaceUniqueId.mSurfaceHolder.mSurface;
++        int surfaceId = surfaceUniqueId.mId;
++        int32_t transform = surfaceUniqueId.mTransform;
++        if (transform == -1 || surface == nullptr) {
++            continue;
++        }
++
++        res = mStreamSplitter->setTransform(surfaceId, transform);
++        if (res != OK) {
++            ALOGE("%s: StreamSplitter failed to setTransform: %s(%d)",
++                    __FUNCTION__, strerror(-res), res);
++            return res;
++        }
++    }
++
+     return OK;
+ }
+ 
+@@ -299,8 +318,9 @@ status_t Camera3SharedOutputStream::getEndpointUsage(uint64_t *usage) {
+         *usage = getPresetConsumerUsage();
+ 
+         for (size_t id = 0; id < kMaxOutputs; id++) {
+-            if (mSurfaceUniqueIds[id].first != nullptr) {
+-                res = getEndpointUsageForSurface(&u, mSurfaceUniqueIds[id].first);
++            const auto& surface = mSurfaceUniqueIds[id].mSurfaceHolder.mSurface;
++            if (surface != nullptr) {
++                res = getEndpointUsageForSurface(&u, surface);
+                 *usage |= u;
+             }
+         }
+@@ -316,7 +336,7 @@ status_t Camera3SharedOutputStream::getEndpointUsage(uint64_t *usage) {
+ ssize_t Camera3SharedOutputStream::getNextSurfaceIdLocked() {
+     ssize_t id = -1;
+     for (size_t i = 0; i < kMaxOutputs; i++) {
+-        if (mSurfaceUniqueIds[i].first == nullptr) {
++        if (mSurfaceUniqueIds[i].mSurfaceHolder.mSurface == nullptr) {
+             id = i;
+             break;
+         }
+@@ -329,7 +349,7 @@ ssize_t Camera3SharedOutputStream::getSurfaceId(const sp<Surface> &surface) {
+     Mutex::Autolock l(mLock);
+     ssize_t id = -1;
+     for (size_t i = 0; i < kMaxOutputs; i++) {
+-        if (mSurfaceUniqueIds[i].first == surface) {
++        if (mSurfaceUniqueIds[i].mSurfaceHolder.mSurface == surface) {
+             id = i;
+             break;
+         }
+@@ -353,13 +373,13 @@ status_t Camera3SharedOutputStream::getUniqueSurfaceIds(
+         if (surfaceId >= kMaxOutputs) {
+             return BAD_VALUE;
+         }
+-        outUniqueIds->push_back(mSurfaceUniqueIds[surfaceId].second);
++        outUniqueIds->push_back(mSurfaceUniqueIds[surfaceId].mId);
+     }
+     return OK;
+ }
+ 
+ status_t Camera3SharedOutputStream::revertPartialUpdateLocked(
+-        const KeyedVector<sp<Surface>, size_t> &removedSurfaces,
++        const KeyedVector<size_t, SurfaceHolder> &removedSurfaces,
+         const KeyedVector<sp<Surface>, size_t> &attachedSurfaces) {
+     status_t ret = OK;
+ 
+@@ -371,25 +391,25 @@ status_t Camera3SharedOutputStream::revertPartialUpdateLocked(
+                 return UNKNOWN_ERROR;
+             }
+         }
+-        mSurfaceUniqueIds[index] = std::make_pair(nullptr, mNextUniqueSurfaceId++);
++        mSurfaceUniqueIds[index] = SurfaceHolderUniqueId{mNextUniqueSurfaceId++};
+     }
+ 
+     for (size_t i = 0; i < removedSurfaces.size(); i++) {
+-        size_t index = removedSurfaces.valueAt(i);
++        size_t index = removedSurfaces.keyAt(i);
+         if (mStreamSplitter != nullptr) {
+-            ret = mStreamSplitter->addOutput(index, removedSurfaces.keyAt(i));
++            ret = mStreamSplitter->addOutput(index, removedSurfaces.valueAt(i).mSurface);
+             if (ret != OK) {
+                 return UNKNOWN_ERROR;
+             }
+         }
+-        mSurfaceUniqueIds[index] = std::make_pair(
+-                removedSurfaces.keyAt(i), mNextUniqueSurfaceId++);
++        mSurfaceUniqueIds[index] = SurfaceHolderUniqueId{removedSurfaces.valueAt(i),
++                mNextUniqueSurfaceId++};
+     }
+ 
+     return ret;
+ }
+ 
+-status_t Camera3SharedOutputStream::updateStream(const std::vector<sp<Surface>> &outputSurfaces,
++status_t Camera3SharedOutputStream::updateStream(const std::vector<SurfaceHolder> &outputSurfaces,
+         const std::vector<OutputStreamInfo> &outputInfo,
+         const std::vector<size_t> &removedSurfaceIds,
+         KeyedVector<sp<Surface>, size_t> *outputMap) {
+@@ -403,7 +423,7 @@ status_t Camera3SharedOutputStream::updateStream(const std::vector<sp<Surface>>
+ 
+     uint64_t usage;
+     getEndpointUsage(&usage);
+-    KeyedVector<sp<Surface>, size_t> removedSurfaces;
++    KeyedVector<size_t, SurfaceHolder> removedSurfaces;
+     //Check whether the new surfaces are compatible.
+     for (const auto &infoIt : outputInfo) {
+         bool imgReaderUsage = (infoIt.consumerUsage & GRALLOC_USAGE_SW_READ_OFTEN) ? true : false;
+@@ -437,8 +457,8 @@ status_t Camera3SharedOutputStream::updateStream(const std::vector<sp<Surface>>
+ 
+             }
+         }
+-        removedSurfaces.add(mSurfaceUniqueIds[it].first, it);
+-        mSurfaceUniqueIds[it] = std::make_pair(nullptr, mNextUniqueSurfaceId++);
++        removedSurfaces.add(it, mSurfaceUniqueIds[it].mSurfaceHolder);
++        mSurfaceUniqueIds[it] = SurfaceHolderUniqueId{mNextUniqueSurfaceId++};
+     }
+ 
+     //Next add the new outputs
+@@ -453,7 +473,7 @@ status_t Camera3SharedOutputStream::updateStream(const std::vector<sp<Surface>>
+             return NO_MEMORY;
+         }
+         if (mStreamSplitter != nullptr) {
+-            ret = mStreamSplitter->addOutput(surfaceId, it);
++            ret = mStreamSplitter->addOutput(surfaceId, it.mSurface);
+             if (ret != OK) {
+                 ALOGE("%s: failed with error code %d", __FUNCTION__, ret);
+                 status_t res = revertPartialUpdateLocked(removedSurfaces, *outputMap);
+@@ -463,13 +483,54 @@ status_t Camera3SharedOutputStream::updateStream(const std::vector<sp<Surface>>
+                 return ret;
+             }
+         }
+-        mSurfaceUniqueIds[surfaceId] = std::make_pair(it, mNextUniqueSurfaceId++);
+-        outputMap->add(it, surfaceId);
++        mSurfaceUniqueIds[surfaceId] = SurfaceHolderUniqueId{it, mNextUniqueSurfaceId++};
++        outputMap->add(it.mSurface, surfaceId);
+     }
+ 
+     return ret;
+ }
+ 
++status_t Camera3SharedOutputStream::setTransform(
++        int transform, bool mayChangeMirror, int surfaceId) {
++    ATRACE_CALL();
++    Mutex::Autolock l(mLock);
++
++    status_t res = OK;
++
++    if (surfaceId < 0 || (size_t)surfaceId >= mSurfaceUniqueIds.size()) {
++        ALOGE("%s: Invalid surfaceId %d", __FUNCTION__, surfaceId);
++        return BAD_VALUE;
++    }
++    if (transform == -1) return res;
++
++    if (mState == STATE_ERROR) {
++        ALOGE("%s: Stream in error state", __FUNCTION__);
++        return INVALID_OPERATION;
++    }
++
++    auto& surfaceHolderForId = mSurfaceUniqueIds[surfaceId];
++    if (surfaceHolderForId.mSurfaceHolder.mMirrorMode != OutputConfiguration::MIRROR_MODE_AUTO &&
++            mayChangeMirror) {
++        // If the mirroring mode is not AUTO, do not allow transform update
++        // which may change mirror.
++        return OK;
++    }
++
++    surfaceHolderForId.mTransform = transform;
++    if (mState == STATE_CONFIGURED) {
++        sp<Surface> surface = surfaceHolderForId.mSurfaceHolder.mSurface;
++        if (surface != nullptr) {
++            res = mStreamSplitter->setTransform(surfaceId, transform);
++            if (res != OK) {
++                ALOGE("%s: StreamSplitter fails to setTransform: %s(%d)",
++                        __FUNCTION__, strerror(-res), res);
++                return res;
++            }
++        }
++    }
++    return res;
++}
++
+ } // namespace camera3
+ 
+ } // namespace android
+diff --git a/services/camera/libcameraservice/device3/Camera3SharedOutputStream.h b/services/camera/libcameraservice/device3/Camera3SharedOutputStream.h
+index ae1150792c..1fd676cc9d 100644
+--- a/services/camera/libcameraservice/device3/Camera3SharedOutputStream.h
++++ b/services/camera/libcameraservice/device3/Camera3SharedOutputStream.h
+@@ -41,21 +41,15 @@ public:
+      * surfaces. A valid stream set id needs to be set to support buffer
+      * sharing between multiple streams.
+      */
+-    Camera3SharedOutputStream(int id, const std::vector<sp<Surface>>& surfaces,
++    Camera3SharedOutputStream(int id, const std::vector<SurfaceHolder>& surfaces,
+             uint32_t width, uint32_t height, int format,
+             uint64_t consumerUsage, android_dataspace dataSpace,
+             camera_stream_rotation_t rotation, nsecs_t timestampOffset,
+             const std::string& physicalCameraId,
+             const std::unordered_set<int32_t> &sensorPixelModesUsed, IPCTransport transport,
+-            int setId = CAMERA3_STREAM_SET_ID_INVALID,
+-            bool useHalBufManager = false,
+-            int64_t dynamicProfile = ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD,
+-            int64_t streamUseCase = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
+-            bool deviceTimeBaseIsRealtime = false,
+-            int timestampBase = OutputConfiguration::TIMESTAMP_BASE_DEFAULT,
+-            int mirrorMode = OutputConfiguration::MIRROR_MODE_AUTO,
+-            int32_t colorSpace = ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_UNSPECIFIED,
+-            bool useReadoutTimestamp = false);
++            int setId, bool useHalBufManager, int64_t dynamicProfile, int64_t streamUseCase,
++            bool deviceTimeBaseIsRealtime, int timestampBase,
++            int32_t colorSpace, bool useReadoutTimestamp);
+ 
+     virtual ~Camera3SharedOutputStream();
+ 
+@@ -65,7 +59,7 @@ public:
+ 
+     virtual bool isConsumerConfigurationDeferred(size_t surface_id) const;
+ 
+-    virtual status_t setConsumers(const std::vector<sp<Surface>>& consumers);
++    virtual status_t setConsumers(const std::vector<SurfaceHolder>& consumers);
+ 
+     virtual ssize_t getSurfaceId(const sp<Surface> &surface);
+ 
+@@ -78,7 +72,7 @@ public:
+     virtual status_t getUniqueSurfaceIds(const std::vector<size_t>& surfaceIds,
+             /*out*/std::vector<size_t>* outUniqueIds) override;
+ 
+-    virtual status_t updateStream(const std::vector<sp<Surface>> &outputSurfaces,
++    virtual status_t updateStream(const std::vector<SurfaceHolder> &outputSurfaces,
+             const std::vector<OutputStreamInfo> &outputInfo,
+             const std::vector<size_t> &removedSurfaceIds,
+             KeyedVector<sp<Surface>, size_t> *outputMap/*out*/);
+@@ -89,6 +83,8 @@ public:
+         return false;
+     }
+ 
++    virtual status_t  setTransform(int transform, bool mayChangeMirror, int surfaceId);
++
+ private:
+ 
+     static const size_t kMaxOutputs = 4;
+@@ -97,17 +93,26 @@ private:
+     // depends on this flag.
+     bool mUseHalBufManager;
+ 
+-    // Pair of an output Surface and its unique ID
+-    typedef std::pair<sp<Surface>, size_t> SurfaceUniqueId;
++    // Struct of an output SurfaceHolder, transform, and its unique ID
++    struct SurfaceHolderUniqueId {
++        SurfaceHolder mSurfaceHolder;
++        int mTransform = -1;
++        size_t mId = -1;
++
++        SurfaceHolderUniqueId() = default;
++        SurfaceHolderUniqueId(size_t id) : mId(id) {}
++        SurfaceHolderUniqueId(const SurfaceHolder& holder, size_t id) :
++                mSurfaceHolder(holder), mId(id) {}
++    };
+ 
+-    // Map surfaceId -> (output surface, unique surface ID)
+-    std::array<SurfaceUniqueId, kMaxOutputs> mSurfaceUniqueIds;
++    // Map surfaceId -> SurfaceHolderUniqueId
++    std::array<SurfaceHolderUniqueId, kMaxOutputs> mSurfaceUniqueIds;
+ 
+     size_t mNextUniqueSurfaceId = 0;
+ 
+     ssize_t getNextSurfaceIdLocked();
+ 
+-    status_t revertPartialUpdateLocked(const KeyedVector<sp<Surface>, size_t> &removedSurfaces,
++    status_t revertPartialUpdateLocked(const KeyedVector<size_t, SurfaceHolder> &removedSurfaces,
+             const KeyedVector<sp<Surface>, size_t> &attachedSurfaces);
+ 
+     /**
+diff --git a/services/camera/libcameraservice/device3/Camera3StreamInterface.h b/services/camera/libcameraservice/device3/Camera3StreamInterface.h
+index 0786622d96..8f3249d6ec 100644
+--- a/services/camera/libcameraservice/device3/Camera3StreamInterface.h
++++ b/services/camera/libcameraservice/device3/Camera3StreamInterface.h
+@@ -115,7 +115,6 @@ class OutputStreamInfo {
+         int64_t dynamicRangeProfile;
+         int64_t streamUseCase;
+         int timestampBase;
+-        int mirrorMode;
+         int32_t colorSpace;
+         OutputStreamInfo() :
+             width(-1), height(-1), format(-1), dataSpace(HAL_DATASPACE_UNKNOWN),
+@@ -123,17 +122,21 @@ class OutputStreamInfo {
+             dynamicRangeProfile(ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD),
+             streamUseCase(ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT),
+             timestampBase(OutputConfiguration::TIMESTAMP_BASE_DEFAULT),
+-            mirrorMode(OutputConfiguration::MIRROR_MODE_AUTO),
+             colorSpace(ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_UNSPECIFIED) {}
+         OutputStreamInfo(int _width, int _height, int _format, android_dataspace _dataSpace,
+                 uint64_t _consumerUsage, const std::unordered_set<int32_t>& _sensorPixelModesUsed,
+-                int64_t _dynamicRangeProfile, int _streamUseCase, int _timestampBase, int _mirrorMode,
++                int64_t _dynamicRangeProfile, int _streamUseCase, int _timestampBase,
+                 int32_t _colorSpace) :
+             width(_width), height(_height), format(_format),
+             dataSpace(_dataSpace), consumerUsage(_consumerUsage),
+             sensorPixelModesUsed(_sensorPixelModesUsed), dynamicRangeProfile(_dynamicRangeProfile),
+-            streamUseCase(_streamUseCase), timestampBase(_timestampBase), mirrorMode(_mirrorMode),
+-            colorSpace(_colorSpace) {}
++            streamUseCase(_streamUseCase), timestampBase(_timestampBase), colorSpace(_colorSpace) {}
++};
++
++// A holder containing a surface and its corresponding mirroring mode
++struct SurfaceHolder {
++    sp<Surface> mSurface;
++    int mMirrorMode = OutputConfiguration::MIRROR_MODE_AUTO;
+ };
+ 
+ // Utility class to lock and unlock a GraphicBuffer
+diff --git a/services/camera/libcameraservice/device3/Camera3StreamSplitter.cpp b/services/camera/libcameraservice/device3/Camera3StreamSplitter.cpp
+index 7090545a83..a360abfed9 100644
+--- a/services/camera/libcameraservice/device3/Camera3StreamSplitter.cpp
++++ b/services/camera/libcameraservice/device3/Camera3StreamSplitter.cpp
+@@ -201,6 +201,17 @@ void Camera3StreamSplitter::setHalBufferManager(bool enabled) {
+     mUseHalBufManager = enabled;
+ }
+ 
++status_t Camera3StreamSplitter::setTransform(size_t surfaceId, int transform) {
++    Mutex::Autolock lock(mMutex);
++    if (!mOutputSurfaces.contains(surfaceId) || mOutputSurfaces[surfaceId] == nullptr) {
++        SP_LOGE("%s: No surface at id %zu", __FUNCTION__, surfaceId);
++        return BAD_VALUE;
++    }
++
++    mOutputTransforms[surfaceId] = transform;
++    return OK;
++}
++
+ status_t Camera3StreamSplitter::addOutputLocked(size_t surfaceId, const sp<Surface>& outputQueue) {
+     ATRACE_CALL();
+     if (outputQueue == nullptr) {
+@@ -374,7 +385,12 @@ status_t Camera3StreamSplitter::outputBufferLocked(const sp<Surface>& output,
+     output->setBuffersDataSpace(static_cast<ui::Dataspace>(bufferItem.mDataSpace));
+     output->setCrop(&bufferItem.mCrop);
+     output->setScalingMode(bufferItem.mScalingMode);
+-    output->setBuffersTransform(bufferItem.mTransform);
++
++    int transform = bufferItem.mTransform;
++    if (mOutputTransforms.contains(surfaceId)) {
++        transform = mOutputTransforms[surfaceId];
++    }
++    output->setBuffersTransform(transform);
+ 
+     // In case the output BufferQueue has its own lock, if we hold splitter lock while calling
+     // queueBuffer (which will try to acquire the output lock), the output could be holding its
+diff --git a/services/camera/libcameraservice/device3/Camera3StreamSplitter.h b/services/camera/libcameraservice/device3/Camera3StreamSplitter.h
+index 0440e08ab2..6e5d8f71c3 100644
+--- a/services/camera/libcameraservice/device3/Camera3StreamSplitter.h
++++ b/services/camera/libcameraservice/device3/Camera3StreamSplitter.h
+@@ -96,6 +96,7 @@ class Camera3StreamSplitter : public BufferItemConsumer::FrameAvailableListener
+ 
+     void setHalBufferManager(bool enabled);
+ 
++    status_t setTransform(size_t surfaceId, int transform);
+ private:
+     // From BufferItemConsumer::FrameAvailableListener
+     //
+@@ -237,6 +238,9 @@ private:
+     //Map surface ids -> gbp outputs
+     std::unordered_map<int, sp<Surface>> mOutputSurfaces;
+ 
++    // Map surface ids -> transform
++    std::unordered_map<int, int> mOutputTransforms;
++
+     //Map surface ids -> consumer buffer count
+     std::unordered_map<int, size_t > mConsumerBufferCount;
+ 
+diff --git a/services/camera/libcameraservice/device3/deprecated/DeprecatedCamera3StreamSplitter.cpp b/services/camera/libcameraservice/device3/deprecated/DeprecatedCamera3StreamSplitter.cpp
+index c1113e5a6b..00bbde3fda 100644
+--- a/services/camera/libcameraservice/device3/deprecated/DeprecatedCamera3StreamSplitter.cpp
++++ b/services/camera/libcameraservice/device3/deprecated/DeprecatedCamera3StreamSplitter.cpp
+@@ -189,6 +189,17 @@ void DeprecatedCamera3StreamSplitter::setHalBufferManager(bool enabled) {
+     mUseHalBufManager = enabled;
+ }
+ 
++status_t DeprecatedCamera3StreamSplitter::setTransform(size_t surfaceId, int transform) {
++    Mutex::Autolock lock(mMutex);
++    if (!mOutputs.contains(surfaceId) || mOutputs[surfaceId] == nullptr) {
++        SP_LOGE("%s: No surface at id %zu", __FUNCTION__, surfaceId);
++        return BAD_VALUE;
++    }
++
++    mOutputTransforms[surfaceId] = transform;
++    return OK;
++}
++
+ status_t DeprecatedCamera3StreamSplitter::addOutputLocked(size_t surfaceId,
+                                                           const sp<Surface>& outputQueue) {
+     ATRACE_CALL();
+@@ -355,9 +366,13 @@ status_t DeprecatedCamera3StreamSplitter::outputBufferLocked(
+         const sp<IGraphicBufferProducer>& output, const BufferItem& bufferItem, size_t surfaceId) {
+     ATRACE_CALL();
+     status_t res;
++    int transform = bufferItem.mTransform;
++    if (mOutputTransforms.contains(surfaceId)) {
++        transform = mOutputTransforms[surfaceId];
++    }
+     IGraphicBufferProducer::QueueBufferInput queueInput(
+             bufferItem.mTimestamp, bufferItem.mIsAutoTimestamp, bufferItem.mDataSpace,
+-            bufferItem.mCrop, static_cast<int32_t>(bufferItem.mScalingMode), bufferItem.mTransform,
++            bufferItem.mCrop, static_cast<int32_t>(bufferItem.mScalingMode), transform,
+             bufferItem.mFence);
+ 
+     IGraphicBufferProducer::QueueBufferOutput queueOutput;
+diff --git a/services/camera/libcameraservice/device3/deprecated/DeprecatedCamera3StreamSplitter.h b/services/camera/libcameraservice/device3/deprecated/DeprecatedCamera3StreamSplitter.h
+index 4610985526..61b43a8bda 100644
+--- a/services/camera/libcameraservice/device3/deprecated/DeprecatedCamera3StreamSplitter.h
++++ b/services/camera/libcameraservice/device3/deprecated/DeprecatedCamera3StreamSplitter.h
+@@ -95,6 +95,7 @@ class DeprecatedCamera3StreamSplitter : public BnConsumerListener {
+ 
+     void setHalBufferManager(bool enabled);
+ 
++    status_t setTransform(size_t surfaceId, int transform);
+   private:
+     // From IConsumerListener
+     //
+@@ -259,6 +260,9 @@ class DeprecatedCamera3StreamSplitter : public BnConsumerListener {
+     // Map surface ids -> gbp outputs
+     std::unordered_map<int, sp<Surface>> mOutputSurfaces;
+ 
++    // Map surface ids -> transform
++    std::unordered_map<int, int> mOutputTransforms;
++
+     // Map surface ids -> consumer buffer count
+     std::unordered_map<int, size_t> mConsumerBufferCount;
+ 
+diff --git a/services/camera/libcameraservice/utils/SessionConfigurationUtils.cpp b/services/camera/libcameraservice/utils/SessionConfigurationUtils.cpp
+index 40ca2764c8..d937fe96e3 100644
+--- a/services/camera/libcameraservice/utils/SessionConfigurationUtils.cpp
++++ b/services/camera/libcameraservice/utils/SessionConfigurationUtils.cpp
+@@ -602,7 +602,6 @@ binder::Status createSurfaceFromGbp(
+         streamInfo.dynamicRangeProfile = dynamicRangeProfile;
+         streamInfo.streamUseCase = streamUseCase;
+         streamInfo.timestampBase = timestampBase;
+-        streamInfo.mirrorMode = mirrorMode;
+         streamInfo.colorSpace = colorSpace;
+         return binder::Status::ok();
+     }
+@@ -848,7 +847,6 @@ convertToHALStreamCombination(
+ 
+         int64_t streamUseCase = it.getStreamUseCase();
+         int timestampBase = it.getTimestampBase();
+-        int mirrorMode = it.getMirrorMode();
+         // If the configuration is a deferred consumer, or a not yet completed
+         // configuration with no buffer producers attached.
+         if (deferredConsumer || (!isConfigurationComplete && numBufferProducers == 0)) {
+@@ -908,6 +906,7 @@ convertToHALStreamCombination(
+         }
+ 
+         for (auto& bufferProducer : bufferProducers) {
++            int mirrorMode = it.getMirrorMode(bufferProducer);
+             sp<Surface> surface;
+             res = createSurfaceFromGbp(streamInfo, isStreamInfoValid, surface, bufferProducer,
+                     logicalCameraId, metadataChosen, sensorPixelModesUsed, dynamicRangeProfile,
+-- 
+2.43.0
+

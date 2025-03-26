@@ -1,0 +1,95 @@
+From 353dfbb4094d5cfae9dbf23c5577662b9d5fa8f6 Mon Sep 17 00:00:00 2001
+From: Dennis Shen <dzshen@google.com>
+Date: Fri, 20 Sep 2024 12:57:22 +0000
+Subject: [PATCH 008/436] update aconfig lib setup for host test
+
+Test targets should use test variant of aconfig lib. especially those
+that are run on host. There is no storage backend on host, therefore
+using prod codegen will not work properly.
+
+Change-Id: I27b04f030fc70f64dbf890387ffb61a467623b9e
+---
+ camera/Android.bp                                 |  6 ++++++
+ services/camera/libcameraservice/Android.bp       | 14 +++++++++++++-
+ services/camera/libcameraservice/tests/Android.bp | 14 +++++++++++++-
+ 3 files changed, 32 insertions(+), 2 deletions(-)
+
+diff --git a/camera/Android.bp b/camera/Android.bp
+index 9e1efae28f..b6241f42e9 100644
+--- a/camera/Android.bp
++++ b/camera/Android.bp
+@@ -54,7 +54,13 @@ aconfig_declarations {
+ cc_aconfig_library {
+     name: "camera_platform_flags_c_lib",
+     aconfig_declarations: "camera_platform_flags",
++}
++
++cc_aconfig_library {
++    name: "camera_platform_flags_c_lib_for_test",
++    aconfig_declarations: "camera_platform_flags",
+     host_supported: true,
++    mode: "test",
+ }
+ 
+ java_aconfig_library {
+diff --git a/services/camera/libcameraservice/Android.bp b/services/camera/libcameraservice/Android.bp
+index 38476a453d..0c4bfcb220 100644
+--- a/services/camera/libcameraservice/Android.bp
++++ b/services/camera/libcameraservice/Android.bp
+@@ -265,9 +265,21 @@ cc_library_static {
+         "liblog",
+         "libutils",
+         "libxml2",
+-        "camera_platform_flags_c_lib",
+     ],
+ 
++    target: {
++        android: {
++            shared_libs: [
++                "camera_platform_flags_c_lib",
++            ],
++        },
++        host: {
++            shared_libs: [
++                "camera_platform_flags_c_lib_for_test",
++            ],
++        },
++    },
++
+     include_dirs: [
+         "frameworks/av/camera/include",
+         "frameworks/av/camera/include/camera",
+diff --git a/services/camera/libcameraservice/tests/Android.bp b/services/camera/libcameraservice/tests/Android.bp
+index 55e2c9d2de..d49aad6000 100644
+--- a/services/camera/libcameraservice/tests/Android.bp
++++ b/services/camera/libcameraservice/tests/Android.bp
+@@ -44,13 +44,25 @@ cc_defaults {
+         "libjpeg",
+         "liblog",
+         "libutils",
+-        "camera_platform_flags_c_lib",
+     ],
+ 
+     static_libs: [
+         "libgmock",
+     ],
+ 
++    target: {
++        android: {
++            shared_libs: [
++                "camera_platform_flags_c_lib",
++            ],
++        },
++        host: {
++            shared_libs: [
++                "camera_platform_flags_c_lib_for_test",
++            ],
++        },
++    },
++
+     cflags: [
+         "-Wall",
+         "-Wextra",
+-- 
+2.43.0
+

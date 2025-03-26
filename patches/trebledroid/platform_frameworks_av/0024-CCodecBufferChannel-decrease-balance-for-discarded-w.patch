@@ -1,0 +1,51 @@
+From 4aa3f70e45fd04e9a77762dd991d3f31ec0a66eb Mon Sep 17 00:00:00 2001
+From: Wonsik Kim <wonsik@google.com>
+Date: Tue, 24 Sep 2024 19:25:14 +0000
+Subject: [PATCH 024/436] CCodecBufferChannel: decrease balance for discarded
+ work as well
+
+Bug: 367371849
+Test: atest MctsMediaEncoderTestCases
+Merged-In: I482c2a731f95b7f8e9c3e4ed4ce7ac4d0aae94df
+Change-Id: I482c2a731f95b7f8e9c3e4ed4ce7ac4d0aae94df
+(cherry picked from commit 9dbb416f7dcf3ef0f27af769fc6524c6d9716320)
+---
+ media/codec2/sfplugin/CCodecBufferChannel.cpp | 11 ++++++-----
+ 1 file changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/media/codec2/sfplugin/CCodecBufferChannel.cpp b/media/codec2/sfplugin/CCodecBufferChannel.cpp
+index caf30c409f..b5f885b4d6 100644
+--- a/media/codec2/sfplugin/CCodecBufferChannel.cpp
++++ b/media/codec2/sfplugin/CCodecBufferChannel.cpp
+@@ -2628,8 +2628,6 @@ void CCodecBufferChannel::sendOutputBuffers() {
+         switch (action) {
+         case OutputBuffers::SKIP:
+             return;
+-        case OutputBuffers::DISCARD:
+-            break;
+         case OutputBuffers::NOTIFY_CLIENT:
+         {
+             // TRICKY: we want popped buffers reported in order, so sending
+@@ -2656,13 +2654,16 @@ void CCodecBufferChannel::sendOutputBuffers() {
+                     outBuffer->meta()->setObject("accessUnitInfo", obj);
+                 }
+             }
++            mCallback->onOutputBufferAvailable(index, outBuffer);
++            [[fallthrough]];
++        }
++        case OutputBuffers::DISCARD: {
+             if (mHasInputSurface && android::media::codec::provider_->input_surface_throttle()) {
+                 Mutexed<InputSurface>::Locked inputSurface(mInputSurface);
+                 --inputSurface->numProcessingBuffersBalance;
+-                ALOGV("[%s] onOutputBufferAvailable: numProcessingBuffersBalance = %lld",
+-                      mName, static_cast<long long>(inputSurface->numProcessingBuffersBalance));
++                ALOGV("[%s] onWorkDone: numProcessingBuffersBalance = %lld",
++                        mName, static_cast<long long>(inputSurface->numProcessingBuffersBalance));
+             }
+-            mCallback->onOutputBufferAvailable(index, outBuffer);
+             break;
+         }
+         case OutputBuffers::REALLOCATE:
+-- 
+2.43.0
+

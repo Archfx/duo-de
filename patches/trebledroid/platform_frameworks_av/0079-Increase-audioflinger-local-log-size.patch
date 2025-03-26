@@ -1,0 +1,45 @@
+From 0423af928219ab105829e7553ee01081e0b7b42e Mon Sep 17 00:00:00 2001
+From: Atneya Nair <atneya@google.com>
+Date: Mon, 7 Oct 2024 21:23:29 -0700
+Subject: [PATCH 079/436] Increase audioflinger local log size
+
+More historical data for BR applicability.
+
+Test: adb shell dumpsys media.audio_flinger
+Flag: EXEMPT logs only
+Bug: 372070273
+Change-Id: I32ae200187f235b7a7394de9cb6ab1439f46395b
+---
+ services/audioflinger/Threads.cpp | 2 +-
+ services/audioflinger/Threads.h   | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/services/audioflinger/Threads.cpp b/services/audioflinger/Threads.cpp
+index eedf5609ed..078f0d20e6 100644
+--- a/services/audioflinger/Threads.cpp
++++ b/services/audioflinger/Threads.cpp
+@@ -1060,7 +1060,7 @@ void ThreadBase::dump(int fd, const Vector<String16>& args)
+     dprintf(fd, "  Local log:\n");
+     const auto logHeader = this->getLocalLogHeader();
+     write(fd, logHeader.data(), logHeader.length());
+-    mLocalLog.dump(fd, "   " /* prefix */, 40 /* lines */);
++    mLocalLog.dump(fd, "   " /* prefix */);
+ 
+     // --all does the statistics
+     bool dumpAll = false;
+diff --git a/services/audioflinger/Threads.h b/services/audioflinger/Threads.h
+index 9c6cd5caa4..a13340d132 100644
+--- a/services/audioflinger/Threads.h
++++ b/services/audioflinger/Threads.h
+@@ -891,7 +891,7 @@ protected:
+                     bool                mHasChanged = false;
+                 };
+ 
+-                SimpleLog mLocalLog;  // locked internally
++                SimpleLog mLocalLog {/* maxLogLines= */ 120};  // locked internally
+ 
+     // mThreadloopExecutor contains deferred functors and object (dtors) to
+     // be executed at the end of the processing period, without any
+-- 
+2.43.0
+

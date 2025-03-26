@@ -1,0 +1,39 @@
+From df4fb83af32ad2fa03949b0c7c216403f32ca132 Mon Sep 17 00:00:00 2001
+From: yucliu <yucliu@google.com>
+Date: Wed, 30 Oct 2024 00:35:47 -0700
+Subject: [PATCH 168/436] Add feature flag for multichannel group audio device
+ type
+
+Flag: android.media.audio.enable_multichannel_group_device
+Bug: 344031109
+Test: Build
+Change-Id: I4fef6ae02036f229c587a081b1714615bb4f73cc
+---
+ media/audio/aconfig/audio_framework.aconfig | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/media/audio/aconfig/audio_framework.aconfig b/media/audio/aconfig/audio_framework.aconfig
+index 0b434f7d45..38b543eaec 100644
+--- a/media/audio/aconfig/audio_framework.aconfig
++++ b/media/audio/aconfig/audio_framework.aconfig
+@@ -32,6 +32,17 @@ flag {
+     bug: "374751406"
+ }
+ 
++flag {
++    name: "enable_multichannel_group_device"
++    namespace: "media_audio"
++    description:
++        "Enable new audio device type for wireless connected speaker group"
++        "supporting multichannel content."
++    is_exported: true
++    is_fixed_read_only: true
++    bug: "344031109"
++}
++
+ flag{
+     name: "enable_ringtone_haptics_customization"
+     namespace: "media_audio"
+-- 
+2.43.0
+

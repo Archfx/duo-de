@@ -1,0 +1,32 @@
+From c618f21c6e84c831c4df7c79122e7ce5fe62bbf5 Mon Sep 17 00:00:00 2001
+From: Wenyu Zhang <zhangwenyu@google.com>
+Date: Thu, 14 Nov 2024 08:25:20 +0000
+Subject: [PATCH 266/436] Fix AudioPolicyManagerTestMsd
+
+According to http://ag/28986784, to retrieve output device, the audio
+source should remain AUDIO_SOURCE_INVALID.
+
+Change-Id: I6b74767cd25049e4e0f0a5040d904d8de00bd692
+Bug: http://b/378534834
+Test: AudioPolicyManagerTestMsd
+Flag: EXEMPT fix test
+---
+ services/audiopolicy/tests/audiopolicymanager_tests.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/services/audiopolicy/tests/audiopolicymanager_tests.cpp b/services/audiopolicy/tests/audiopolicymanager_tests.cpp
+index c37540c732..f8f91fc65c 100644
+--- a/services/audiopolicy/tests/audiopolicymanager_tests.cpp
++++ b/services/audiopolicy/tests/audiopolicymanager_tests.cpp
+@@ -753,7 +753,7 @@ TEST_P(AudioPolicyManagerTestMsd, PatchCreationFromHdmiInToMsd) {
+ TEST_P(AudioPolicyManagerTestMsd, GetDirectProfilesForAttributesWithMsd) {
+     const audio_attributes_t attr = {
+         AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_UNKNOWN,
+-        AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, ""};
++        AUDIO_SOURCE_INVALID, AUDIO_FLAG_NONE, ""};
+ 
+     // count expected direct profiles for the default device
+     int countDirectProfilesPrimary = 0;
+-- 
+2.43.0
+

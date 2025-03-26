@@ -1,0 +1,46 @@
+From 1f00a0911bdd5e6a3c876cafe8a05616529961b4 Mon Sep 17 00:00:00 2001
+From: Dariusz Budner <dariusz@haleytek.com>
+Date: Mon, 14 Oct 2024 14:05:03 +0200
+Subject: [PATCH 095/436] Fix for trying to restore audio track after obtain
+ buffer error
+
+By fixing checking logic of old sequence id this change ensures that
+restoreTrack_l() will be called everytime obtainBuffer() DEAD_OBJECT
+failure happened in case noone called restoreTrack_l() meanwhile.
+
+Test: Manual
+Bug: https://partnerissuetracker.corp.google.com/issues/373284824
+Change-Id: Ie2a14156217d9cd35d69dc77066b8a9e371e84a4
+---
+ media/libaudioclient/AudioTrack.cpp | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/media/libaudioclient/AudioTrack.cpp b/media/libaudioclient/AudioTrack.cpp
+index f92103b2cd..ecf7436333 100644
+--- a/media/libaudioclient/AudioTrack.cpp
++++ b/media/libaudioclient/AudioTrack.cpp
+@@ -2209,11 +2209,10 @@ status_t AudioTrack::obtainBuffer(Buffer* audioBuffer, const struct timespec *re
+         {   // start of lock scope
+             AutoMutex lock(mLock);
+ 
+-            uint32_t newSequence = mSequence;
+             // did previous obtainBuffer() fail due to media server death or voluntary invalidation?
+             if (status == DEAD_OBJECT) {
+                 // re-create track, unless someone else has already done so
+-                if (newSequence == oldSequence) {
++                if (mSequence == oldSequence) {
+                     status = restoreTrack_l("obtainBuffer");
+                     if (status != NO_ERROR) {
+                         buffer.mFrameCount = 0;
+@@ -2223,7 +2222,7 @@ status_t AudioTrack::obtainBuffer(Buffer* audioBuffer, const struct timespec *re
+                     }
+                 }
+             }
+-            oldSequence = newSequence;
++            oldSequence = mSequence;
+ 
+             if (status == NOT_ENOUGH_DATA) {
+                 restartIfDisabled();
+-- 
+2.43.0
+

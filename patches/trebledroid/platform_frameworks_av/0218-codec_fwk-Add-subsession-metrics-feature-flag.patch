@@ -1,0 +1,32 @@
+From b74e689c14c612878486e1ea4e506ea2593f35da Mon Sep 17 00:00:00 2001
+From: Lajos Molnar <lajos@google.com>
+Date: Wed, 6 Nov 2024 23:59:53 +0000
+Subject: [PATCH 218/436] codec_fwk: Add subsession metrics feature flag
+
+Bug: 363382811
+Change-Id: I9c36daa3ad5898e9383023c96d0e87c32ad6bc6d
+---
+ media/aconfig/codec_fwk.aconfig | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/media/aconfig/codec_fwk.aconfig b/media/aconfig/codec_fwk.aconfig
+index b5c7edf137..89a71b5b7c 100644
+--- a/media/aconfig/codec_fwk.aconfig
++++ b/media/aconfig/codec_fwk.aconfig
+@@ -180,6 +180,13 @@ flag {
+   }
+ }
+ 
++flag {
++  name: "subsession_metrics"
++  namespace: "codec_fwk"
++  description: "Feature flag for subsession codec metrics"
++  bug: "363382811"
++}
++
+ flag {
+   name: "teamfood"
+   namespace: "codec_fwk"
+-- 
+2.43.0
+

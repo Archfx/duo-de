@@ -1,0 +1,35 @@
+From 6d6543695505fc01d135cec5cde65f1d30a4fb66 Mon Sep 17 00:00:00 2001
+From: Jean-Michel Trivi <jmtrivi@google.com>
+Date: Tue, 5 Nov 2024 15:40:56 -0800
+Subject: [PATCH 207/436] Flag for IAMF definitions
+
+Flag: android.media.audio.iamf_definitions_api
+Bug: 337522902
+Test: compile
+Change-Id: I67f8d0d9d0933766fc862dd40d5ec904a6432fe6
+---
+ media/audio/aconfig/audio_framework.aconfig | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/media/audio/aconfig/audio_framework.aconfig b/media/audio/aconfig/audio_framework.aconfig
+index c6479d03d6..8d85362d79 100644
+--- a/media/audio/aconfig/audio_framework.aconfig
++++ b/media/audio/aconfig/audio_framework.aconfig
+@@ -119,6 +119,14 @@ flag {
+     bug: "376480814"
+ }
+ 
++flag {
++    name: "iamf_definitions_api"
++    is_exported: true
++    namespace: "media_audio"
++    description: "API definitions for the IAMF format"
++    bug: "337522902"
++}
++
+ flag {
+     name: "loudness_configurator_api"
+     is_exported: true
+-- 
+2.43.0
+

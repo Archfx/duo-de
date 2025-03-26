@@ -1,0 +1,178 @@
+From 8d06fce9ed26ba5913e4ad232af192fb70007bf1 Mon Sep 17 00:00:00 2001
+From: Jyoti Bhayana <jbhayana@google.com>
+Date: Wed, 4 Dec 2024 15:12:38 -0800
+Subject: [PATCH 400/436] Incorporate the API council feedback for camera.
+
+Flag: com.android.internal.camera.flags.camera_multi_client
+Bug: 382286017
+API-Coverage-Bug: 377371012
+Test: all the concerns are addressed
+Change-Id: Idd2aa0aa12678ac22b254297ee76bd783fbb9d79
+---
+ .../include/camera/NdkCameraCaptureSession.h  | 77 ++++++++++++++++---
+ camera/ndk/include/camera/NdkCameraManager.h  | 21 ++++-
+ 2 files changed, 86 insertions(+), 12 deletions(-)
+
+diff --git a/camera/ndk/include/camera/NdkCameraCaptureSession.h b/camera/ndk/include/camera/NdkCameraCaptureSession.h
+index e73222bc7a..06e1d34336 100644
+--- a/camera/ndk/include/camera/NdkCameraCaptureSession.h
++++ b/camera/ndk/include/camera/NdkCameraCaptureSession.h
+@@ -1103,12 +1103,19 @@ camera_status_t ACameraCaptureSession_prepareWindow(
+ /**
+  * Request continuous streaming of a sequence of images for the shared capture session
+  * when more than one clients can open the same camera in shared mode by calling
+- * {@link ACameraManager_openSharedCamera}. In shared session, only primary clients can create
+- * a capture request and change capture parameters. Secondary clients can only request streaming of
+- * images by calling this api {@link ACameraCaptureSessionShared_startStreaming}. Calling this api
+- * for normal sessions when {@link ACameraManager_openCamera} is used to open the camera will throw
++ * {@link ACameraManager_openSharedCamera}. In shared mode, the highest priority client among all
++ * the clients will be the primary client while the others would be secondary clients. In shared
++ * capture session, only primary clients can create a capture request and change capture parameters.
++ * Secondary clients can only request streaming of images by calling this api
++ * {@link ACameraCaptureSessionShared_startStreaming}. Calling this api for normal sessions when
++ * {@link ACameraManager_openCamera} is used to open the camera will throw
+  * {@link ACAMERA_ERROR_INVALID_OPERATION}.
+  *
++ * <p>The priority of client access is determined by considering two factors: its current process
++ * state and its "out of memory" score. Clients operating in the background are assigned a lower
++ * priority. In contrast, clients running in the foreground, along with system-level clients, are
++ * given a higher priority.</p>
++ *
+  * <p>With this method, the camera device will continually capture images, cycling through the
+  * settings in the list of {@link ACaptureRequest} specified by the primary client. If primary
+  * client does not have ongoing repeating request, camera service will use a capture request with
+@@ -1145,20 +1152,72 @@ camera_status_t ACameraCaptureSession_prepareWindow(
+  *         </ul>
+  */
+ camera_status_t ACameraCaptureSessionShared_startStreaming(
+-    ACameraCaptureSession* sharedSession, ACameraCaptureSession_captureCallbacksV2 *callbacks,
++    ACameraCaptureSession* sharedSession,
++    /*optional*/ACameraCaptureSession_captureCallbacksV2 *callbacks,
+     int numOutputWindows, ANativeWindow **window,
+-    int *captureSequenceId) __INTRODUCED_IN(36);
++    /*optional*/int *captureSequenceId) __INTRODUCED_IN(36);
+ 
+ /**
+  * This has the same functionality as ACameraCaptureSessionShared_startStreaming, with added
+  * support for logical multi-camera where the capture callbacks supports result metadata for
+  * physical cameras.
++ *
++ * Request continuous streaming of a sequence of images for the shared capture session
++ * when more than one clients can open the same camera in shared mode by calling
++ * {@link ACameraManager_openSharedCamera}. In shared mode, the highest priority client among all
++ * the clients will be the primary client while the others would be secondary clients. In shared
++ * capture session, only primary clients can create a capture request and change capture parameters.
++ * Secondary clients can only request streaming of images by calling this api
++ * {@link ACameraCaptureSessionShared_logicalCamera_startStreaming}. Calling this api for normal
++ * sessions when {@link ACameraManager_openCamera} is used to open the camera will throw
++ * {@link ACAMERA_ERROR_INVALID_OPERATION}.
++ *
++ * <p>The priority of client access is determined by considering two factors: its current process
++ * state and its "out of memory" score. Clients operating in the background are assigned a lower
++ * priority. In contrast, clients running in the foreground, along with system-level clients, are
++ * given a higher priority.</p>
++ *
++ * <p>With this method, the camera device will continually capture images, cycling through the
++ * settings in the list of {@link ACaptureRequest} specified by the primary client. If primary
++ * client does not have ongoing repeating request, camera service will use a capture request with
++ * default capture parameters for preview template.</p>
++ *
++ * <p>To stop the continuous streaming, call {@link ACameraCaptureSessionShared_stopStreaming}.</p>
++ *
++ * <p>Calling this method will replace an existing continuous streaming request.</p>
++ *
++ * @param sharedSession the shared capture session when camera is opened in
++ *        shared mode.
++ * @param callbacks the {@link ACameraCaptureSession_logicalCamera_captureCallbacksV2} to be
++ *        associated with this capture sequence. No capture callback will be fired if callbacks
++ *        is set to NULL.
++ * @param numOutputWindows number of native windows to be used for streaming. Must be at least 1.
++ * @param windows an array of {@link ANativeWindow} to be used for streaming. Length must be at
++ *        least numOutputWindows.
++ * @param captureSequenceId the capture sequence ID associated with this capture method invocation
++ *        will be stored here if this argument is not NULL and the method call succeeds.
++ *        When this argument is set to NULL, the capture sequence ID will not be returned.
++ *
++ * @return <ul>
++ *         <li>{@link ACAMERA_OK} if the method succeeds. captureSequenceId will be filled
++ *             if it is not NULL.</li>
++ *         <li>{@link ACAMERA_ERROR_INVALID_PARAMETER} if session or requests is NULL, or
++ *             if numRequests < 1</li>
++ *         <li>{@link ACAMERA_ERROR_SESSION_CLOSED} if the capture session has been closed</li>
++ *         <li>{@link ACAMERA_ERROR_CAMERA_DISCONNECTED} if the camera device is closed</li>
++ *         <li>{@link ACAMERA_ERROR_CAMERA_DEVICE} if the camera device encounters fatal error</li>
++ *         <li>{@link ACAMERA_ERROR_CAMERA_SERVICE} if the camera service encounters fatal error
++ *         </li>
++ *         <li>{@link ACAMERA_ERROR_INVALID_OPERATION} if the session passed is not a shared
++ *              session</li>
++ *         <li>{@link ACAMERA_ERROR_UNKNOWN} if the method fails for  some other reasons</li>
++ *         </ul>
+  */
+ camera_status_t ACameraCaptureSessionShared_logicalCamera_startStreaming(
+     ACameraCaptureSession* sharedSession,
+-    ACameraCaptureSession_logicalCamera_captureCallbacksV2 *callbacks,
++    /*optional*/ACameraCaptureSession_logicalCamera_captureCallbacksV2 *callbacks,
+     int numOutputWindows, ANativeWindow **windows,
+-    int *captureSequenceId) __INTRODUCED_IN(36);
++    /*optional*/int *captureSequenceId) __INTRODUCED_IN(36);
+ 
+ /**
+  * Cancel any ongoing streaming started by {@link ACameraCaptureSessionShared_startStreaming}.
+@@ -1183,7 +1242,7 @@ camera_status_t ACameraCaptureSessionShared_logicalCamera_startStreaming(
+  *         </ul>
+  */
+ camera_status_t ACameraCaptureSessionShared_stopStreaming(
+-  ACameraCaptureSession *sharedSession
++    ACameraCaptureSession *sharedSession
+ )  __INTRODUCED_IN(36);
+ __END_DECLS
+ 
+diff --git a/camera/ndk/include/camera/NdkCameraManager.h b/camera/ndk/include/camera/NdkCameraManager.h
+index a9b017474a..492c41b08b 100644
+--- a/camera/ndk/include/camera/NdkCameraManager.h
++++ b/camera/ndk/include/camera/NdkCameraManager.h
+@@ -299,6 +299,21 @@ camera_status_t ACameraManager_openCamera(
+  * ACameraDevice**)} except that it opens the camera in shared mode so that more
+  * than one client can access the camera at the same time.
+  *
++ * <p>When camera is opened in shared mode, the highest priority client among all the clients will
++ * be the primary client while the others would be secondary clients. Primary clients can create
++ * capture requests, modify any capture parameters and send them to the capture session for a
++ * one-shot capture or as a repeating request.</p>
++ *
++ * <p>Secondary clients cannot create a capture request and modify any capture parameters. However,
++ * they can start the camera streaming to desired surface targets using
++ * {@link ACameraCaptureSessionShared_startStreaming}. Once the streaming has successfully started,
++ * then they can stop the streaming using {@link ACameraCaptureSessionShared_stopStreaming}.</p>
++ *
++ * <p>The priority of client access is determined by considering two factors: its current process
++ * state and its "out of memory" score. Clients operating in the background are assigned a lower
++ * priority. In contrast, clients running in the foreground, along with system-level clients, are
++ * given a higher priority.</p>
++ *
+  * <p>Processes need to have android.permission.SYSTEM_CAMERA in addition to
+  * android.permission.CAMERA in order to connect to this camera device in shared
+  * mode.</p>
+@@ -308,7 +323,7 @@ camera_status_t ACameraManager_openCamera(
+  * @param callback the {@link ACameraDevice_StateCallbacks} associated with the opened camera
+  *                 device.
+  * @param device the opened {@link ACameraDevice} will be filled here if the method call succeeds.
+- * @param primaryClient will return as true if the client is primaryClient.
++ * @param isPrimaryClient will return as true if the client is a primary client.
+  *
+  * @return <ul>
+  *         <li>{@link ACAMERA_OK} if the method call succeeds.</li>
+@@ -449,8 +464,8 @@ camera_status_t ACameraManager_unregisterExtendedAvailabilityCallback(
+  *
+  * @return <ul>
+  *         <li>{@link ACAMERA_OK} if the method call succeeds.</li>
+- *         <li>{@link ACAMERA_ERROR_INVALID_PARAMETER} if any parameter is not
+- *         valid.</li>
++ *         <li>{@link ACAMERA_ERROR_INVALID_PARAMETER} if manager, cameraId, or isSharingSupported
++ *                  is NULL, or cameraId does not match any camera devices connected.</li>
+  *         </ul>
+  */
+ camera_status_t ACameraManager_isCameraDeviceSharingSupported(
+-- 
+2.43.0
+

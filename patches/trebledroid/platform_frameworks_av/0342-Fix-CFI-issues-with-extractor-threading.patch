@@ -1,0 +1,129 @@
+From 518b68fd13dc8dee645a0e0b1364a6b027069512 Mon Sep 17 00:00:00 2001
+From: Ray Essick <essick@google.com>
+Date: Sat, 23 Nov 2024 22:06:50 -0600
+Subject: [PATCH 342/436] Fix CFI issues with extractor threading
+
+Recent changes in libutils exposed some issues where a library was
+linked both static and shared into the extractor. This caused CFI
+crashes in the extractor during DRM MediaCas processing.
+
+The plugin where this triggered has been modified to (1) use the shared
+library instance and (2) change from Mutex to std::mutex to reduce
+dependency on that code.
+
+Bug: 379803959
+Test: CtsMediaDrmFrameworkTestCases:android.media.drmframework.cts.MediaDrmClearkeyTest
+Flag: EXEMPT bugfix
+Change-Id: I5ea5337b2b8816f64f5a28b7b144d710fc2f8123
+---
+ media/module/extractors/mpeg2/Android.bp                 | 2 +-
+ media/module/extractors/mpeg2/MPEG2PSExtractor.cpp       | 2 +-
+ media/module/extractors/mpeg2/MPEG2TSExtractor.cpp       | 2 +-
+ media/module/extractors/mpeg2/include/MPEG2PSExtractor.h | 5 +++--
+ media/module/extractors/mpeg2/include/MPEG2TSExtractor.h | 5 +++--
+ 5 files changed, 9 insertions(+), 7 deletions(-)
+
+diff --git a/media/module/extractors/mpeg2/Android.bp b/media/module/extractors/mpeg2/Android.bp
+index 63dbcda947..c68ea51542 100644
+--- a/media/module/extractors/mpeg2/Android.bp
++++ b/media/module/extractors/mpeg2/Android.bp
+@@ -44,6 +44,7 @@ cc_library {
+ 
+     shared_libs: [
+         "libbase",
++        "libutils",
+     ],
+ 
+     header_libs: [
+@@ -70,7 +71,6 @@ cc_library {
+         "libstagefright_foundation_without_imemory",
+         "libstagefright_mpeg2extractor",
+         "libstagefright_mpeg2support_nocrypto",
+-        "libutils",
+     ],
+ 
+     apex_available: [
+diff --git a/media/module/extractors/mpeg2/MPEG2PSExtractor.cpp b/media/module/extractors/mpeg2/MPEG2PSExtractor.cpp
+index 44c8937a08..805f051b97 100644
+--- a/media/module/extractors/mpeg2/MPEG2PSExtractor.cpp
++++ b/media/module/extractors/mpeg2/MPEG2PSExtractor.cpp
+@@ -161,7 +161,7 @@ uint32_t MPEG2PSExtractor::flags() const {
+ }
+ 
+ status_t MPEG2PSExtractor::feedMore() {
+-    Mutex::Autolock autoLock(mLock);
++    std::lock_guard<std::mutex> autoLock(mLock);
+ 
+     // How much data we're reading at a time
+     static const size_t kChunkSize = 8192;
+diff --git a/media/module/extractors/mpeg2/MPEG2TSExtractor.cpp b/media/module/extractors/mpeg2/MPEG2TSExtractor.cpp
+index 736b817aa4..06bf9c2987 100644
+--- a/media/module/extractors/mpeg2/MPEG2TSExtractor.cpp
++++ b/media/module/extractors/mpeg2/MPEG2TSExtractor.cpp
+@@ -479,7 +479,7 @@ void MPEG2TSExtractor::init() {
+ }
+ 
+ status_t MPEG2TSExtractor::feedMore(bool isInit) {
+-    Mutex::Autolock autoLock(mLock);
++    std::lock_guard<std::mutex> autoLock(mLock);
+ 
+     uint8_t packet[kTSPacketSize];
+     ssize_t n = mDataSource->readAt(mOffset + mHeaderSkip, packet, kTSPacketSize);
+diff --git a/media/module/extractors/mpeg2/include/MPEG2PSExtractor.h b/media/module/extractors/mpeg2/include/MPEG2PSExtractor.h
+index e5d591f1da..77b073b378 100644
+--- a/media/module/extractors/mpeg2/include/MPEG2PSExtractor.h
++++ b/media/module/extractors/mpeg2/include/MPEG2PSExtractor.h
+@@ -18,11 +18,12 @@
+ 
+ #define MPEG2_PS_EXTRACTOR_H_
+ 
++#include <mutex>
++
+ #include <media/stagefright/foundation/ABase.h>
+ #include <media/MediaExtractorPluginApi.h>
+ #include <media/MediaExtractorPluginHelper.h>
+ #include <media/stagefright/MetaDataBase.h>
+-#include <utils/threads.h>
+ #include <utils/KeyedVector.h>
+ 
+ namespace android {
+@@ -51,7 +52,7 @@ private:
+     struct Track;
+     struct WrappedTrack;
+ 
+-    mutable Mutex mLock;
++    std::mutex mLock;
+     DataSourceHelper *mDataSource;
+ 
+     off64_t mOffset;
+diff --git a/media/module/extractors/mpeg2/include/MPEG2TSExtractor.h b/media/module/extractors/mpeg2/include/MPEG2TSExtractor.h
+index 0e3e484b6d..d752ce1a22 100644
+--- a/media/module/extractors/mpeg2/include/MPEG2TSExtractor.h
++++ b/media/module/extractors/mpeg2/include/MPEG2TSExtractor.h
+@@ -19,12 +19,13 @@
+ 
+ #define MPEG2_TS_EXTRACTOR_H_
+ 
++#include <mutex>
++
+ #include <media/stagefright/foundation/ABase.h>
+ #include <media/MediaExtractorPluginApi.h>
+ #include <media/MediaExtractorPluginHelper.h>
+ #include <media/stagefright/MetaDataBase.h>
+ #include <mpeg2ts/ATSParser.h>
+-#include <utils/threads.h>
+ #include <utils/KeyedVector.h>
+ #include <utils/Vector.h>
+ 
+@@ -57,7 +58,7 @@ protected:
+ private:
+     friend struct MPEG2TSSource;
+ 
+-    mutable Mutex mLock;
++    std::mutex mLock;
+ 
+     DataSourceHelper *mDataSource;
+ 
+-- 
+2.43.0
+

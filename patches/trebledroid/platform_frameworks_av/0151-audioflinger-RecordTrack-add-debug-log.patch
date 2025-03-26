@@ -1,0 +1,52 @@
+From 35cdf35f2c86b30e3f52027cfbdd6d6ed848004d Mon Sep 17 00:00:00 2001
+From: Ajender Reddy <quic_ajender@quicinc.com>
+Date: Fri, 25 Oct 2024 20:10:44 +0530
+Subject: [PATCH 151/436] audioflinger: RecordTrack: add debug log
+
+Add a debug log about RecordTrack's silenced status
+
+Test: m
+
+Bug: 375589059
+
+Change-Id: I28e35bbb363cbddbcabae4e4393a13da0b73e781
+---
+ services/audioflinger/RecordTracks.h | 2 +-
+ services/audioflinger/Tracks.cpp     | 8 ++++++++
+ 2 files changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/services/audioflinger/RecordTracks.h b/services/audioflinger/RecordTracks.h
+index 3de99681a2..83cd024855 100644
+--- a/services/audioflinger/RecordTracks.h
++++ b/services/audioflinger/RecordTracks.h
+@@ -73,7 +73,7 @@ public:
+     bool isDirect() const final
+                                 { return (mFlags & AUDIO_INPUT_FLAG_DIRECT) != 0; }
+ 
+-    void setSilenced(bool silenced) final { if (!isPatchTrack()) mSilenced = silenced; }
++    void setSilenced(bool silenced) final;
+     bool isSilenced() const final { return mSilenced; }
+ 
+     status_t getActiveMicrophones(
+diff --git a/services/audioflinger/Tracks.cpp b/services/audioflinger/Tracks.cpp
+index f5f11ccd17..3d4e771222 100644
+--- a/services/audioflinger/Tracks.cpp
++++ b/services/audioflinger/Tracks.cpp
+@@ -3136,6 +3136,14 @@ void RecordTrack::copyMetadataTo(MetadataInserter& backInserter) const
+     *backInserter++ = metadata;
+ }
+ 
++void RecordTrack::setSilenced(bool silenced) {
++    if (!isPatchTrack() && mSilenced != silenced) {
++        mSilenced = silenced;
++        ALOGD("%s: track with port id: %d, (%s)", __func__, mPortId,
++              mSilenced ? "silenced" : "unsilenced");
++    }
++}
++
+ // ----------------------------------------------------------------------------
+ #undef LOG_TAG
+ #define LOG_TAG "AF::PatchRecord"
+-- 
+2.43.0
+

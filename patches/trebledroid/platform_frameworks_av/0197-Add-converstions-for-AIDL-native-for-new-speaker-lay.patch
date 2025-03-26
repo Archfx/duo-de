@@ -1,0 +1,83 @@
+From e591abc81104eda307e8179e958a577a5510e8ea Mon Sep 17 00:00:00 2001
+From: Trevor Knight <trevork@google.com>
+Date: Mon, 4 Nov 2024 20:33:57 +0000
+Subject: [PATCH 197/436] Add converstions for AIDL<->native for new speaker
+ layout field
+
+Bug: 337522902
+Test: m
+
+Change-Id: Ic6e693e599f44867c9fd8170f5b5386a29b4f888
+---
+ .../AidlConversionCppNdk.cpp                  | 17 +++++++++++++++++
+ .../audio_aidl_legacy_conversion_tests.cpp    | 19 +++++++++++++++++++
+ 2 files changed, 36 insertions(+)
+
+diff --git a/media/audioaidlconversion/AidlConversionCppNdk.cpp b/media/audioaidlconversion/AidlConversionCppNdk.cpp
+index 90996a3a28..40d5f5f8d3 100644
+--- a/media/audioaidlconversion/AidlConversionCppNdk.cpp
++++ b/media/audioaidlconversion/AidlConversionCppNdk.cpp
+@@ -2315,6 +2315,15 @@ aidl2legacy_AudioPortDeviceExt_audio_port_config_device_ext(const AudioPortDevic
+     audio_port_config_device_ext legacy{};
+     RETURN_IF_ERROR(aidl2legacy_AudioDevice_audio_device(
+                     aidl.device, &legacy.type, legacy.address));
++    const bool isInput = false;  // speaker_layout_channel_mask only represents output.
++    if (aidl.speakerLayout.has_value()) {
++        legacy.speaker_layout_channel_mask =
++                VALUE_OR_RETURN(aidl2legacy_AudioChannelLayout_audio_channel_mask_t(
++                        aidl.speakerLayout.value(), isInput));
++    } else {
++        // Default to none when the field is null in the AIDL.
++        legacy.speaker_layout_channel_mask = AUDIO_CHANNEL_NONE;
++    }
+     return legacy;
+ }
+ 
+@@ -2323,6 +2332,14 @@ ConversionResult<AudioPortDeviceExt> legacy2aidl_audio_port_config_device_ext_Au
+     AudioPortDeviceExt aidl;
+     aidl.device = VALUE_OR_RETURN(
+             legacy2aidl_audio_device_AudioDevice(legacy.type, legacy.address));
++    const bool isInput = false;  // speaker_layout_channel_mask only represents output.
++    // The AIDL speakerLayout is nullable and if set, can only be a layoutMask.
++    if (audio_channel_mask_is_valid(legacy.speaker_layout_channel_mask) &&
++        audio_channel_mask_get_representation(legacy.speaker_layout_channel_mask) ==
++                AUDIO_CHANNEL_REPRESENTATION_POSITION) {
++        aidl.speakerLayout = VALUE_OR_RETURN(legacy2aidl_audio_channel_mask_t_AudioChannelLayout(
++                legacy.speaker_layout_channel_mask, isInput));
++    }
+     return aidl;
+ }
+ 
+diff --git a/media/libaudioclient/tests/audio_aidl_legacy_conversion_tests.cpp b/media/libaudioclient/tests/audio_aidl_legacy_conversion_tests.cpp
+index 7f55e48b21..aa6cb0dc21 100644
+--- a/media/libaudioclient/tests/audio_aidl_legacy_conversion_tests.cpp
++++ b/media/libaudioclient/tests/audio_aidl_legacy_conversion_tests.cpp
+@@ -670,6 +670,25 @@ INSTANTIATE_TEST_SUITE_P(AudioEncapsulationMetadataType,
+                                          AudioEncapsulationMetadataType::FRAMEWORK_TUNER,
+                                          AudioEncapsulationMetadataType::DVB_AD_DESCRIPTOR));
+ 
++TEST(AudioPortDeviceExt_speakerLayoutRoundTripTest, Aidl2Legacy2Aidl_layoutMask) {
++    AudioPortDeviceExt initial{};
++    initial.speakerLayout = make_ACL_Stereo();
++    auto conv = aidl2legacy_AudioPortDeviceExt_audio_port_config_device_ext(initial);
++    ASSERT_TRUE(conv.ok());
++    auto convBack = legacy2aidl_audio_port_config_device_ext_AudioPortDeviceExt(conv.value());
++    ASSERT_TRUE(convBack.ok());
++    EXPECT_EQ(initial, convBack.value());
++}
++
++TEST(AudioPortDeviceExt_speakerLayoutRoundTripTest, Aidl2Legacy2Aidl_null) {
++    const AudioPortDeviceExt initial{};  // speakerLayout is null
++    auto conv = aidl2legacy_AudioPortDeviceExt_audio_port_config_device_ext(initial);
++    ASSERT_TRUE(conv.ok());
++    auto convBack = legacy2aidl_audio_port_config_device_ext_AudioPortDeviceExt(conv.value());
++    ASSERT_TRUE(convBack.ok());
++    EXPECT_EQ(initial, convBack.value());
++}
++
+ class AudioGainModeRoundTripTest : public testing::TestWithParam<AudioGainMode> {};
+ TEST_P(AudioGainModeRoundTripTest, Aidl2Legacy2Aidl) {
+     const auto initial = GetParam();
+-- 
+2.43.0
+

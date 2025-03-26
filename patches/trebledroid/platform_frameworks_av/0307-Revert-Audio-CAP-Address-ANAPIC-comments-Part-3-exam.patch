@@ -1,0 +1,168 @@
+From 4e9e714805c67dda8e34268cf498907488bc66c4 Mon Sep 17 00:00:00 2001
+From: "Priyanka Advani (xWF)" <padvani@google.com>
+Date: Wed, 20 Nov 2024 18:24:09 +0000
+Subject: [PATCH 307/436] Revert "Audio CAP: Address ANAPIC comments, Part 3
+ (example & to..."
+
+Revert submission 3341640-fix-b-364310317-fix-ANAPIC-comments-3
+
+Reason for revert: Droidmonitor created revert due to b/380080376. Will be verifying through ABTD before submission.
+
+Reverted changes: /q/submissionid:3341640-fix-b-364310317-fix-ANAPIC-comments-3
+
+Change-Id: I0a0bc7b52b5b11ed489f09c3130eb06b8222f771
+---
+ ..._policy_engine_criterion_types_aidl.xml.in | 65 +++++++++----------
+ .../tools/capBuildPolicyCriterionTypes.py     |  7 ++
+ 2 files changed, 39 insertions(+), 33 deletions(-)
+
+diff --git a/services/audiopolicy/engineconfigurable/config/example/common/audio_policy_engine_criterion_types_aidl.xml.in b/services/audiopolicy/engineconfigurable/config/example/common/audio_policy_engine_criterion_types_aidl.xml.in
+index 424c983f6d..dc2517b4c8 100644
+--- a/services/audiopolicy/engineconfigurable/config/example/common/audio_policy_engine_criterion_types_aidl.xml.in
++++ b/services/audiopolicy/engineconfigurable/config/example/common/audio_policy_engine_criterion_types_aidl.xml.in
+@@ -19,77 +19,76 @@
+     <criterion_type name="OutputDevicesAddressesType" type="inclusive">
+         <values>
+             <!-- legacy remote submix -->
+-            <value literal="0"/>
++            <value literal="0" numerical="1"/>
+         </values>
+     </criterion_type>
+     <criterion_type name="InputDevicesAddressesType" type="inclusive">
+         <values>
+             <!-- legacy remote submix -->
+-            <value literal="0"/>
++            <value literal="0" numerical="1"/>
+         </values>
+     </criterion_type>
+     <criterion_type name="AndroidModeType" type="exclusive"/>
+     <criterion_type name="ForceUseForCommunicationType" type="exclusive">
+         <values>
+-            <value literal="NONE"/>
+-            <value literal="SPEAKER"/>
+-            <value literal="BT_SCO"/>
++            <value literal="NONE" numerical="0"/>
++            <value literal="SPEAKER" numerical="1"/>
++            <value literal="BT_SCO" numerical="3"/>
+         </values>
+     </criterion_type>
+     <criterion_type name="ForceUseForMediaType" type="exclusive">
+         <values>
+-            <value literal="NONE"/>
+-            <value literal="SPEAKER"/>
+-            <value literal="HEADPHONES"/>
+-            <value literal="BT_A2DP"/>
+-            <value literal="ANALOG_DOCK"/>
+-            <value literal="DIGITAL_DOCK"/>
+-            <value literal="WIRED_ACCESSORY"/>
+-            <value literal="NO_BT_A2DP"/>
++            <value literal="NONE" numerical="0"/>
++            <value literal="SPEAKER" numerical="1"/>
++            <value literal="HEADPHONES" numerical="2"/>
++            <value literal="BT_A2DP" numerical="4"/>
++            <value literal="WIRED_ACCESSORY" numerical="5"/>
++            <value literal="ANALOG_DOCK" numerical="8"/>
++            <value literal="DIGITAL_DOCK" numerical="9"/>
++            <value literal="NO_BT_A2DP" numerical="10"/>
+         </values>
+     </criterion_type>
+     <criterion_type name="ForceUseForRecordType" type="exclusive">
+         <values>
+-            <value literal="NONE"/>
+-            <value literal="BT_SCO"/>
+-            <value literal="WIRED_ACCESSORY"/>
++            <value literal="NONE" numerical="0"/>
++            <value literal="BT_SCO" numerical="3"/>
++            <value literal="WIRED_ACCESSORY" numerical="5"/>
+         </values>
+     </criterion_type>
+     <criterion_type name="ForceUseForDockType" type="exclusive">
+         <values>
+-            <value literal="NONE"/>
+-            <value literal="BT_CAR_DOCK"/>
+-            <value literal="BT_DESK_DOCK"/>
+-            <value literal="ANALOG_DOCK"/>
+-            <value literal="DIGITAL_DOCK"/>
+-            <value literal="WIRED_ACCESSORY"/>
++            <value literal="NONE" numerical="0"/>
++            <value literal="WIRED_ACCESSORY" numerical="5"/>
++            <value literal="BT_CAR_DOCK" numerical="6"/>
++            <value literal="BT_DESK_DOCK" numerical="7"/>
++            <value literal="ANALOG_DOCK" numerical="8"/>
++            <value literal="DIGITAL_DOCK" numerical="9"/>
+         </values>
+     </criterion_type>
+     <criterion_type name="ForceUseForSystemType" type="exclusive" >
+         <values>
+-            <value literal="NONE"/>
+-            <value literal="SYSTEM_ENFORCED"/>
++            <value literal="NONE" numerical="0"/>
++            <value literal="SYSTEM_ENFORCED" numerical="11"/>
+         </values>
+     </criterion_type>
+     <criterion_type name="ForceUseForHdmiSystemAudioType" type="exclusive">
+         <values>
+-            <value literal="NONE"/>
+-            <value literal="HDMI_SYSTEM_AUDIO_ENFORCED"/>
++            <value literal="NONE" numerical="0"/>
++            <value literal="HDMI_SYSTEM_AUDIO_ENFORCED" numerical="12"/>
+         </values>
+     </criterion_type>
+     <criterion_type name="ForceUseForEncodedSurroundType" type="exclusive">
+         <values>
+-            <value literal="UNSPECIFIED"/>
+-            <value literal="NEVER"/>
+-            <value literal="ALWAYS"/>
+-            <value literal="MANUAL"/>
++            <value literal="NONE" numerical="0"/>
++            <value literal="ENCODED_SURROUND_NEVER" numerical="13"/>
++            <value literal="ENCODED_SURROUND_ALWAYS" numerical="14"/>
++            <value literal="ENCODED_SURROUND_MANUAL" numerical="15"/>
+         </values>
+     </criterion_type>
+     <criterion_type name="ForceUseForVibrateRingingType" type="exclusive">
+         <values>
+-            <value literal="NONE"/>
+-            <value literal="BT_SCO"/>
+-            <value literal="BT_BLE"/>
++            <value literal="NONE" numerical="0"/>
++            <value literal="BT_SCO" numerical="3"/>
+         </values>
+     </criterion_type>
+ </criterion_types>
+diff --git a/services/audiopolicy/engineconfigurable/tools/capBuildPolicyCriterionTypes.py b/services/audiopolicy/engineconfigurable/tools/capBuildPolicyCriterionTypes.py
+index 1adc6028af..b873830119 100755
+--- a/services/audiopolicy/engineconfigurable/tools/capBuildPolicyCriterionTypes.py
++++ b/services/audiopolicy/engineconfigurable/tools/capBuildPolicyCriterionTypes.py
+@@ -102,6 +102,7 @@ def generateXmlCriterionTypesFile(criterionTypes, addressCriteria, criterionType
+                 ordered_values = OrderedDict(sorted(values_dict.items(), key=lambda x: x[1]))
+                 for key, value in ordered_values.items():
+                     value_node = ET.SubElement(values_node, "value")
++                    value_node.set('numerical', str(value))
+                     value_node.set('literal', key)
+ 
+                     if criterion_type.get('name') == "OutputDevicesMaskType":
+@@ -113,14 +114,20 @@ def generateXmlCriterionTypesFile(criterionTypes, addressCriteria, criterionType
+         for criterion_name, values_list in addressCriteria.items():
+             for criterion_type in criterion_types_root.findall('criterion_type'):
+                 if criterion_type.get('name') == criterion_name:
++                    index = 0
+                     existing_values_node = criterion_type.find("values")
+                     if existing_values_node is not None:
++                        for existing_value in existing_values_node.findall('value'):
++                            if existing_value.get('numerical') == str(1 << index):
++                                index += 1
+                         values_node = existing_values_node
+                     else:
+                         values_node = ET.SubElement(criterion_type, "values")
+ 
+                     for value in values_list:
+                         value_node = ET.SubElement(values_node, "value", literal=value)
++                        value_node.set('numerical', str(1 << index))
++                        index += 1
+ 
+     xmlstr = ET.tostring(criterion_types_root, encoding='utf8', method='xml')
+     reparsed = MINIDOM.parseString(xmlstr)
+-- 
+2.43.0
+

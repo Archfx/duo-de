@@ -1,0 +1,97 @@
+From fa5a1417b5f1167d16d075e4b66e3fbab66b7c34 Mon Sep 17 00:00:00 2001
+From: Wonsik Kim <wonsik@google.com>
+Date: Tue, 24 Sep 2024 20:40:09 +0000
+Subject: [PATCH 019/436] Add MctsMedia* to postsubmit
+
+Bug: 367371849
+Test: atest --test-mapping frameworks/av/media:postsubmit
+Test: atest --test-mapping frameworks/av/media/libstagefright:postsubmit
+Change-Id: I35357205b088719df1e049a3bbbddfbc7a2ec04e
+---
+ media/TEST_MAPPING                | 26 ++++++++++++++++++++++++++
+ media/libstagefright/TEST_MAPPING | 26 +++++++++++++++++++++++++-
+ 2 files changed, 51 insertions(+), 1 deletion(-)
+
+diff --git a/media/TEST_MAPPING b/media/TEST_MAPPING
+index 1a637ac389..695cad6e38 100644
+--- a/media/TEST_MAPPING
++++ b/media/TEST_MAPPING
+@@ -45,6 +45,32 @@
+             "file_patterns": ["(?i)drm|crypto"]
+         }
+     ],
++    "postsubmit": [
++        {
++            "name": "MctsMediaCodecTestCases",
++            "options": [
++                {
++                    "include-filter": "android.media.codec.cts.EncodeDecodeTest"
++                }
++            ]
++        },
++        {
++            "name": "MctsMediaCodecTestCases",
++            "options": [
++                {
++                    "include-filter": "android.media.codec.cts.DecodeEditEncodeTest"
++                }
++            ]
++        },
++        {
++            "name": "MctsMediaCodecTestCases",
++            "options": [
++                {
++                    "include-filter": "android.media.codec.cts.ExtractDecodeEditEncodeMuxTest"
++                }
++            ]
++        }
++    ],
+     // Postsubmit tests for TV devices
+     "tv-postsubmit": [
+         {
+diff --git a/media/libstagefright/TEST_MAPPING b/media/libstagefright/TEST_MAPPING
+index b7efbcee88..354fab06a8 100644
+--- a/media/libstagefright/TEST_MAPPING
++++ b/media/libstagefright/TEST_MAPPING
+@@ -85,13 +85,37 @@
+     // writerTest fails about 5 out of 66
+     // { "name": "writerTest" },
+     {
+-       "name": "BatteryChecker_test"
++        "name": "BatteryChecker_test"
+     },
+     {
+         "name": "ExtractorFactoryTest"
+     },
+     {
+         "name": "HEVCUtilsUnitTest"
++    },
++    {
++      "name": "MctsMediaDecoderTestCases",
++      "options": [
++        {
++          "include-annotation": "android.platform.test.annotations.Presubmit"
++        }
++      ]
++    },
++    {
++      "name": "MctsMediaEncoderTestCases",
++      "options": [
++        {
++          "include-annotation": "android.platform.test.annotations.Presubmit"
++        }
++      ]
++    },
++    {
++      "name": "MctsMediaCodecTestCases",
++      "options": [
++        {
++          "include-annotation": "android.platform.test.annotations.Presubmit"
++        }
++      ]
+     }
+   ]
+ }
+-- 
+2.43.0
+

@@ -1,0 +1,36 @@
+From 5df00bb4dc9ab0fbc7c9c8c25cce43d4a64db311 Mon Sep 17 00:00:00 2001
+From: Kyle Zhang <kelzhan@google.com>
+Date: Wed, 20 Nov 2024 21:47:44 +0000
+Subject: [PATCH 316/436] Fix getSupportedSchemes() in DrmHal.cpp
+
+The original code returns the status of the first call to getSupportedSchemes() and ignores the status of the second call. This is incorrect because the second call may succeed even if the first call fails. The correct behavior is to return OK if either call succeeds, and to return the status of the first call if both calls fail.
+
+Flag: EXEMPT bugfix
+Bug: 380122010
+Change-Id: I46054f93ec434d2c25943c3b02024f21397e3d0b
+---
+ drm/libmediadrm/DrmHal.cpp | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/drm/libmediadrm/DrmHal.cpp b/drm/libmediadrm/DrmHal.cpp
+index 754f066bf9..eaa5bd57fd 100644
+--- a/drm/libmediadrm/DrmHal.cpp
++++ b/drm/libmediadrm/DrmHal.cpp
+@@ -288,10 +288,10 @@ DrmStatus DrmHal::getLogMessages(Vector<drm::V1_4::LogMessage>& logs) const {
+ }
+ 
+ DrmStatus DrmHal::getSupportedSchemes(std::vector<uint8_t>& schemes) const {
+-    status_t statusResult;
+-    statusResult = mDrmHalAidl->getSupportedSchemes(schemes);
+-    if (statusResult == OK) return statusResult;
+-    return mDrmHalHidl->getSupportedSchemes(schemes);
++    const DrmStatus statusResultAidl = mDrmHalAidl->getSupportedSchemes(schemes);
++    const DrmStatus statusResultHidl = mDrmHalHidl->getSupportedSchemes(schemes);
++    if (statusResultHidl == OK || statusResultAidl == OK) return OK;
++    return statusResultAidl;
+ }
+ 
+ }  // namespace android
+-- 
+2.43.0
+

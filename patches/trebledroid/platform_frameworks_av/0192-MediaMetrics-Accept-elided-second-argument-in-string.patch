@@ -1,0 +1,182 @@
+From c04a820dcefd4dc3bc4a2450287ca39e7bce7170 Mon Sep 17 00:00:00 2001
+From: Andy Hung <hunga@google.com>
+Date: Fri, 1 Nov 2024 17:38:06 -0700
+Subject: [PATCH 192/436] MediaMetrics: Accept elided second argument in string
+ pair
+
+(device, address) string pairs used to have an optional second argument
+that was empty.
+
+Before:  (d1, )|(d2, a2)
+
+we now permit elision of the second argument entirely, so that
+can now be written as
+
+After: d1|(d2, a2)
+
+Note: the prior string continues to be accepted.
+
+Flag: EXEMPT bugfix
+Test: atest mediametrics_tests
+Test: play ringtone with BT buds and check mediametrics dumpsys
+Bug: 376948941
+Change-Id: I41fd2f6acf1ea42cc5e683835790769148988b7d
+---
+ services/audioflinger/Threads.cpp             | 28 ++++++-----
+ services/mediametrics/StringUtils.cpp         | 47 +++++++++++--------
+ .../mediametrics/tests/mediametrics_tests.cpp | 25 ++++++++++
+ 3 files changed, 68 insertions(+), 32 deletions(-)
+
+diff --git a/services/audioflinger/Threads.cpp b/services/audioflinger/Threads.cpp
+index 060c72b44d..91c82a2331 100644
+--- a/services/audioflinger/Threads.cpp
++++ b/services/audioflinger/Threads.cpp
+@@ -338,28 +338,32 @@ std::string IAfThreadBase::formatToString(audio_format_t format) {
+ // under  #ifdef __cplusplus #endif
+ static std::string patchSinksToString(const struct audio_patch *patch)
+ {
+-    std::stringstream ss;
++    std::string s;
+     for (size_t i = 0; i < patch->num_sinks; ++i) {
+-        if (i > 0) {
+-            ss << "|";
++        if (i > 0) s.append("|");
++        if (patch->sinks[i].ext.device.address[0]) {
++            s.append("(").append(toString(patch->sinks[i].ext.device.type))
++                    .append(", ").append(patch->sinks[i].ext.device.address).append(")");
++        } else {
++            s.append(toString(patch->sinks[i].ext.device.type));
+         }
+-        ss << "(" << toString(patch->sinks[i].ext.device.type)
+-            << ", " << patch->sinks[i].ext.device.address << ")";
+     }
+-    return ss.str();
++    return s;
+ }
+ 
+ static std::string patchSourcesToString(const struct audio_patch *patch)
+ {
+-    std::stringstream ss;
++    std::string s;
+     for (size_t i = 0; i < patch->num_sources; ++i) {
+-        if (i > 0) {
+-            ss << "|";
++        if (i > 0) s.append("|");
++        if (patch->sources[i].ext.device.address[0]) {
++            s.append("(").append(toString(patch->sources[i].ext.device.type))
++                    .append(", ").append(patch->sources[i].ext.device.address).append(")");
++        } else {
++            s.append(toString(patch->sources[i].ext.device.type));
+         }
+-        ss << "(" << toString(patch->sources[i].ext.device.type)
+-            << ", " << patch->sources[i].ext.device.address << ")";
+     }
+-    return ss.str();
++    return s;
+ }
+ 
+ static std::string toString(audio_latency_mode_t mode) {
+diff --git a/services/mediametrics/StringUtils.cpp b/services/mediametrics/StringUtils.cpp
+index 5766f1cabc..3b2db85aac 100644
+--- a/services/mediametrics/StringUtils.cpp
++++ b/services/mediametrics/StringUtils.cpp
+@@ -80,33 +80,40 @@ std::vector<std::pair<std::string, std::string>> getDeviceAddressPairs(const std
+ {
+     std::vector<std::pair<std::string, std::string>> result;
+ 
+-    // Currently, the device format is EXACTLY
+-    // (device1, addr1)|(device2, addr2)|...
++    // Currently, the device format is
++    //
++    // devices = device_addr OR device_addr|devices
++    // device_addr = device OR (device, addr)
++    //
++    // EXAMPLE:
++    // device1|(device2, addr2)|...
+ 
+     static constexpr char delim[] = "()|,";
+     for (auto it = devices.begin(); ; ) {
+-        auto token = tokenizer(it, devices.end(), delim);
+-        if (token != "(") return result;
+-
+-        auto device = tokenizer(it, devices.end(), delim);
+-        if (device.empty() || !std::isalnum(device[0])) return result;
+-
+-        token = tokenizer(it, devices.end(), delim);
+-        if (token != ",") return result;
+-
+-        // special handling here for empty addresses
+-        auto address = tokenizer(it, devices.end(), delim);
+-        if (address.empty() || !std::isalnum(device[0])) return result;
+-        if (address == ")") {  // no address, just the ")"
+-            address.clear();
+-        } else {
+-            token = tokenizer(it, devices.end(), delim);
+-            if (token != ")") return result;
++        std::string address;
++        std::string device = tokenizer(it, devices.end(), delim);
++        if (device.empty()) return result;
++        if (device == "(") {  // it is a pair otherwise we consider it a device
++            device = tokenizer(it, devices.end(), delim); // get actual device
++            auto token = tokenizer(it, devices.end(), delim);
++            if (token != ",") return result;  // malformed, must have a comma
++
++            // special handling here for empty addresses
++            address = tokenizer(it, devices.end(), delim);
++            if (address.empty()) return result;
++            if (address == ")") {  // no address, just the ")"
++                address.clear();
++            } else {
++                token = tokenizer(it, devices.end(), delim);
++                if (token != ")") return result;
++            }
+         }
++        // misaligned token, device must start alphanumeric.
++        if (!std::isalnum(device[0])) return result;
+ 
+         result.emplace_back(std::move(device), std::move(address));
+ 
+-        token = tokenizer(it, devices.end(), delim);
++        auto token = tokenizer(it, devices.end(), delim);
+         if (token != "|") return result;  // this includes end of string detection
+     }
+ }
+diff --git a/services/mediametrics/tests/mediametrics_tests.cpp b/services/mediametrics/tests/mediametrics_tests.cpp
+index a7684f4161..f3933a72f9 100644
+--- a/services/mediametrics/tests/mediametrics_tests.cpp
++++ b/services/mediametrics/tests/mediametrics_tests.cpp
+@@ -963,6 +963,31 @@ TEST(mediametrics_tests, device_parsing) {
+     ASSERT_EQ("B", devaddr[0].second);
+     ASSERT_EQ("C", devaddr[1].first);
+     ASSERT_EQ("D2", devaddr[1].second);
++
++    devaddr = android::mediametrics::stringutils::getDeviceAddressPairs(
++            " Z  ");
++    ASSERT_EQ((size_t)1, devaddr.size());
++    ASSERT_EQ("Z", devaddr[0].first);
++
++    devaddr = android::mediametrics::stringutils::getDeviceAddressPairs(
++            "  A | B|C  ");
++    ASSERT_EQ((size_t)3, devaddr.size());
++    ASSERT_EQ("A", devaddr[0].first);
++    ASSERT_EQ("", devaddr[0].second);
++    ASSERT_EQ("B", devaddr[1].first);
++    ASSERT_EQ("", devaddr[1].second);
++    ASSERT_EQ("C", devaddr[2].first);
++    ASSERT_EQ("", devaddr[2].second);
++
++    devaddr = android::mediametrics::stringutils::getDeviceAddressPairs(
++            "  A | (B1, 10) |C  ");
++    ASSERT_EQ((size_t)3, devaddr.size());
++    ASSERT_EQ("A", devaddr[0].first);
++    ASSERT_EQ("", devaddr[0].second);
++    ASSERT_EQ("B1", devaddr[1].first);
++    ASSERT_EQ("10", devaddr[1].second);
++    ASSERT_EQ("C", devaddr[2].first);
++    ASSERT_EQ("", devaddr[2].second);
+ }
+ 
+ TEST(mediametrics_tests, timed_action) {
+-- 
+2.43.0
+

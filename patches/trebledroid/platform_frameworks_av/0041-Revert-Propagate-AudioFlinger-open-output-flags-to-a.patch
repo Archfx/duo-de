@@ -1,0 +1,528 @@
+From 47d862feed706daa5155a02950ab2190bc65f8f8 Mon Sep 17 00:00:00 2001
+From: "Priyanka Advani (xWF)" <padvani@google.com>
+Date: Mon, 30 Sep 2024 18:44:06 +0000
+Subject: [PATCH 041/436] Revert "Propagate AudioFlinger open output flags to
+ audio policy"
+
+Revert submission 2835831-e-ac3-joc remote submix
+
+Reason for revert: Droidmonitor created revert due to b/370533763. Will be verifying through ABTD before submission.
+
+Reverted changes: /q/submissionid:2835831-e-ac3-joc+remote+submix
+
+Change-Id: Idff1500ad1497296d17f0df9ae7622e27f4e8556
+---
+ services/audioflinger/AudioFlinger.cpp            | 14 +++++++-------
+ services/audioflinger/AudioFlinger.h              |  2 +-
+ services/audioflinger/IAfPatchPanel.h             |  2 +-
+ services/audioflinger/PatchPanel.cpp              |  2 +-
+ services/audioflinger/datapath/AudioHwDevice.cpp  | 15 +++++++--------
+ services/audioflinger/datapath/AudioHwDevice.h    |  2 +-
+ services/audioflinger/datapath/AudioStreamOut.cpp | 11 +++++------
+ services/audioflinger/datapath/AudioStreamOut.h   |  5 ++---
+ services/audioflinger/datapath/SpdifStreamOut.cpp |  8 +++-----
+ services/audioflinger/datapath/SpdifStreamOut.h   |  4 ++--
+ services/audiopolicy/AudioPolicyInterface.h       |  2 +-
+ .../include/AudioOutputDescriptor.h               |  2 +-
+ .../src/AudioOutputDescriptor.cpp                 |  9 ++++-----
+ .../managerdefault/AudioPolicyManager.cpp         |  9 ++++-----
+ .../audiopolicy/service/AudioPolicyClientImpl.cpp |  8 +++-----
+ services/audiopolicy/service/AudioPolicyService.h |  2 +-
+ .../tests/AudioPolicyManagerTestClient.h          |  6 +++---
+ .../audiopolicy/tests/AudioPolicyTestClient.h     |  2 +-
+ .../tests/audiopolicymanager_tests.cpp            |  2 +-
+ 19 files changed, 49 insertions(+), 58 deletions(-)
+
+diff --git a/services/audioflinger/AudioFlinger.cpp b/services/audioflinger/AudioFlinger.cpp
+index 82152473ea..537a097763 100644
+--- a/services/audioflinger/AudioFlinger.cpp
++++ b/services/audioflinger/AudioFlinger.cpp
+@@ -2923,7 +2923,7 @@ sp<IAfThreadBase> AudioFlinger::openOutput_l(audio_module_handle_t module,
+                                                         audio_config_base_t *mixerConfig,
+                                                         audio_devices_t deviceType,
+                                                         const String8& address,
+-                                                        audio_output_flags_t *flags,
++                                                        audio_output_flags_t flags,
+                                                         const audio_attributes_t attributes)
+ {
+     AudioHwDevice *outHwDev = findSuitableHwDev_l(module, deviceType);
+@@ -2958,7 +2958,7 @@ sp<IAfThreadBase> AudioFlinger::openOutput_l(audio_module_handle_t module,
+     mHardwareStatus = AUDIO_HW_IDLE;
+ 
+     if (status == NO_ERROR) {
+-        if (*flags & AUDIO_OUTPUT_FLAG_MMAP_NOIRQ) {
++        if (flags & AUDIO_OUTPUT_FLAG_MMAP_NOIRQ) {
+             const sp<IAfMmapPlaybackThread> thread = IAfMmapPlaybackThread::create(
+                     this, *output, outHwDev, outputStream, mSystemReady);
+             mMmapThreads.add(*output, thread);
+@@ -2967,22 +2967,22 @@ sp<IAfThreadBase> AudioFlinger::openOutput_l(audio_module_handle_t module,
+             return thread;
+         } else {
+             sp<IAfPlaybackThread> thread;
+-            if (*flags & AUDIO_OUTPUT_FLAG_BIT_PERFECT) {
++            if (flags & AUDIO_OUTPUT_FLAG_BIT_PERFECT) {
+                 thread = IAfPlaybackThread::createBitPerfectThread(
+                         this, outputStream, *output, mSystemReady);
+                 ALOGV("%s() created bit-perfect output: ID %d thread %p",
+                       __func__, *output, thread.get());
+-            } else if (*flags & AUDIO_OUTPUT_FLAG_SPATIALIZER) {
++            } else if (flags & AUDIO_OUTPUT_FLAG_SPATIALIZER) {
+                 thread = IAfPlaybackThread::createSpatializerThread(this, outputStream, *output,
+                                                     mSystemReady, mixerConfig);
+                 ALOGV("openOutput_l() created spatializer output: ID %d thread %p",
+                       *output, thread.get());
+-            } else if (*flags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) {
++            } else if (flags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) {
+                 thread = IAfPlaybackThread::createOffloadThread(this, outputStream, *output,
+                         mSystemReady, halConfig->offload_info);
+                 ALOGV("openOutput_l() created offload output: ID %d thread %p",
+                       *output, thread.get());
+-            } else if ((*flags & AUDIO_OUTPUT_FLAG_DIRECT)
++            } else if ((flags & AUDIO_OUTPUT_FLAG_DIRECT)
+                     || !IAfThreadBase::isValidPcmSinkFormat(halConfig->format)
+                     || !IAfThreadBase::isValidPcmSinkChannelMask(halConfig->channel_mask)) {
+                 thread = IAfPlaybackThread::createDirectOutputThread(this, outputStream, *output,
+@@ -3046,7 +3046,7 @@ status_t AudioFlinger::openOutput(const media::OpenOutputRequest& request,
+     audio_utils::lock_guard _l(mutex());
+ 
+     const sp<IAfThreadBase> thread = openOutput_l(module, &output, &halConfig,
+-            &mixerConfig, deviceType, address, &flags, attributes);
++            &mixerConfig, deviceType, address, flags, attributes);
+     if (thread != 0) {
+         uint32_t latencyMs = 0;
+         if ((flags & AUDIO_OUTPUT_FLAG_MMAP_NOIRQ) == 0) {
+diff --git a/services/audioflinger/AudioFlinger.h b/services/audioflinger/AudioFlinger.h
+index 6777075088..21c171dde3 100644
+--- a/services/audioflinger/AudioFlinger.h
++++ b/services/audioflinger/AudioFlinger.h
+@@ -337,7 +337,7 @@ private:
+             audio_config_base_t* mixerConfig,
+             audio_devices_t deviceType,
+             const String8& address,
+-            audio_output_flags_t* flags,
++            audio_output_flags_t flags,
+             audio_attributes_t attributes) final REQUIRES(mutex());
+     const DefaultKeyedVector<audio_module_handle_t, AudioHwDevice*>&
+             getAudioHwDevs_l() const final REQUIRES(mutex(), hardwareMutex()) {
+diff --git a/services/audioflinger/IAfPatchPanel.h b/services/audioflinger/IAfPatchPanel.h
+index 15b6ddfed9..37dce3a424 100644
+--- a/services/audioflinger/IAfPatchPanel.h
++++ b/services/audioflinger/IAfPatchPanel.h
+@@ -82,7 +82,7 @@ public:
+             audio_config_base_t* mixerConfig,
+             audio_devices_t deviceType,
+             const String8& address,
+-            audio_output_flags_t* flags,
++            audio_output_flags_t flags,
+             audio_attributes_t attributes) REQUIRES(mutex()) = 0;
+     virtual audio_utils::mutex& mutex() const
+             RETURN_CAPABILITY(audio_utils::AudioFlinger_Mutex) = 0;
+diff --git a/services/audioflinger/PatchPanel.cpp b/services/audioflinger/PatchPanel.cpp
+index 994dd473b4..35f17c1cc8 100644
+--- a/services/audioflinger/PatchPanel.cpp
++++ b/services/audioflinger/PatchPanel.cpp
+@@ -268,7 +268,7 @@ status_t PatchPanel::createAudioPatch_l(const struct audio_patch* patch,
+                                                             &mixerConfig,
+                                                             outputDevice,
+                                                             outputDeviceAddress,
+-                                                            &flags,
++                                                            flags,
+                                                             attributes);
+                     ALOGV("mAfPatchPanelCallback->openOutput_l() returned %p", thread.get());
+                     if (thread == 0) {
+diff --git a/services/audioflinger/datapath/AudioHwDevice.cpp b/services/audioflinger/datapath/AudioHwDevice.cpp
+index 002aa699bb..5314e9e5e0 100644
+--- a/services/audioflinger/datapath/AudioHwDevice.cpp
++++ b/services/audioflinger/datapath/AudioHwDevice.cpp
+@@ -41,20 +41,19 @@ status_t AudioHwDevice::openOutputStream(
+         AudioStreamOut **ppStreamOut,
+         audio_io_handle_t handle,
+         audio_devices_t deviceType,
+-        audio_output_flags_t *flags,
++        audio_output_flags_t flags,
+         struct audio_config *config,
+         const char *address,
+         const std::vector<playback_track_metadata_v7_t>& sourceMetadata)
+ {
+ 
+     struct audio_config originalConfig = *config;
+-    auto outputStream = new AudioStreamOut(this);
++    auto outputStream = new AudioStreamOut(this, flags);
+ 
+     // Try to open the HAL first using the current format.
+     ALOGV("openOutputStream(), try sampleRate %d, format %#x, channelMask %#x", config->sample_rate,
+             config->format, config->channel_mask);
+-    status_t status = outputStream->open(handle, deviceType, config, flags, address,
+-                                        sourceMetadata);
++    status_t status = outputStream->open(handle, deviceType, config, address, sourceMetadata);
+ 
+     if (status != NO_ERROR) {
+         delete outputStream;
+@@ -68,13 +67,13 @@ status_t AudioHwDevice::openOutputStream(
+ 
+         // If the data is encoded then try again using wrapped PCM.
+         const bool wrapperNeeded = !audio_has_proportional_frames(originalConfig.format)
+-                && ((*flags & AUDIO_OUTPUT_FLAG_DIRECT) != 0)
+-                && ((*flags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) == 0);
++                && ((flags & AUDIO_OUTPUT_FLAG_DIRECT) != 0)
++                && ((flags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) == 0);
+ 
+         if (wrapperNeeded) {
+             if (SPDIFEncoder::isFormatSupported(originalConfig.format)) {
+-                outputStream = new SpdifStreamOut(this, originalConfig.format);
+-                status = outputStream->open(handle, deviceType, &originalConfig, flags, address,
++                outputStream = new SpdifStreamOut(this, flags, originalConfig.format);
++                status = outputStream->open(handle, deviceType, &originalConfig, address,
+                                             sourceMetadata);
+                 if (status != NO_ERROR) {
+                     ALOGE("ERROR - openOutputStream(), SPDIF open returned %d",
+diff --git a/services/audioflinger/datapath/AudioHwDevice.h b/services/audioflinger/datapath/AudioHwDevice.h
+index 6a35b9176c..e1a9018130 100644
+--- a/services/audioflinger/datapath/AudioHwDevice.h
++++ b/services/audioflinger/datapath/AudioHwDevice.h
+@@ -85,7 +85,7 @@ public:
+             AudioStreamOut **ppStreamOut,
+             audio_io_handle_t handle,
+             audio_devices_t deviceType,
+-            audio_output_flags_t *flags,
++            audio_output_flags_t flags,
+             struct audio_config *config,
+             const char *address,
+             const std::vector<playback_track_metadata_v7_t>& sourceMetadata);
+diff --git a/services/audioflinger/datapath/AudioStreamOut.cpp b/services/audioflinger/datapath/AudioStreamOut.cpp
+index 7aadda3953..c65373eb52 100644
+--- a/services/audioflinger/datapath/AudioStreamOut.cpp
++++ b/services/audioflinger/datapath/AudioStreamOut.cpp
+@@ -30,8 +30,9 @@
+ namespace android {
+ 
+ // ----------------------------------------------------------------------------
+-AudioStreamOut::AudioStreamOut(AudioHwDevice *dev)
++AudioStreamOut::AudioStreamOut(AudioHwDevice *dev, audio_output_flags_t flags)
+         : audioHwDev(dev)
++        , flags(flags)
+ {
+ }
+ 
+@@ -92,16 +93,14 @@ status_t AudioStreamOut::open(
+         audio_io_handle_t handle,
+         audio_devices_t deviceType,
+         struct audio_config *config,
+-        audio_output_flags_t *flagsPtr,
+         const char *address,
+         const std::vector<playback_track_metadata_v7_t>& sourceMetadata)
+ {
+     sp<StreamOutHalInterface> outStream;
+ 
+-    audio_output_flags_t customFlags = (config->format == AUDIO_FORMAT_IEC61937)
+-                ? (audio_output_flags_t)(*flagsPtr | AUDIO_OUTPUT_FLAG_IEC958_NONAUDIO)
+-                : *flagsPtr;
+-    *flagsPtr = flags = customFlags;
++    const audio_output_flags_t customFlags = (config->format == AUDIO_FORMAT_IEC61937)
++                ? (audio_output_flags_t)(flags | AUDIO_OUTPUT_FLAG_IEC958_NONAUDIO)
++                : flags;
+ 
+     int status = hwDev()->openOutputStream(
+             handle,
+diff --git a/services/audioflinger/datapath/AudioStreamOut.h b/services/audioflinger/datapath/AudioStreamOut.h
+index 1857099aa6..2bf94a1d7a 100644
+--- a/services/audioflinger/datapath/AudioStreamOut.h
++++ b/services/audioflinger/datapath/AudioStreamOut.h
+@@ -37,17 +37,16 @@ class AudioStreamOut {
+ public:
+     AudioHwDevice * const audioHwDev;
+     sp<StreamOutHalInterface> stream;
+-    audio_output_flags_t flags = AUDIO_OUTPUT_FLAG_NONE;
++    const audio_output_flags_t flags;
+ 
+     [[nodiscard]] sp<DeviceHalInterface> hwDev() const;
+ 
+-    explicit AudioStreamOut(AudioHwDevice *dev);
++    AudioStreamOut(AudioHwDevice *dev, audio_output_flags_t flags);
+ 
+     virtual status_t open(
+             audio_io_handle_t handle,
+             audio_devices_t deviceType,
+             struct audio_config *config,
+-            audio_output_flags_t *flagsPtr,
+             const char *address,
+             const std::vector<playback_track_metadata_v7_t>& sourceMetadata);
+ 
+diff --git a/services/audioflinger/datapath/SpdifStreamOut.cpp b/services/audioflinger/datapath/SpdifStreamOut.cpp
+index 52d66a150f..d3983b0723 100644
+--- a/services/audioflinger/datapath/SpdifStreamOut.cpp
++++ b/services/audioflinger/datapath/SpdifStreamOut.cpp
+@@ -33,8 +33,10 @@ namespace android {
+  * PCM then we need to wrap the data in an SPDIF wrapper.
+  */
+ SpdifStreamOut::SpdifStreamOut(AudioHwDevice *dev,
++            audio_output_flags_t flags,
+             audio_format_t format)
+-        : AudioStreamOut(dev)
++        // Tell the HAL that the data will be compressed audio wrapped in a data burst.
++        : AudioStreamOut(dev, (audio_output_flags_t) (flags | AUDIO_OUTPUT_FLAG_IEC958_NONAUDIO))
+         , mSpdifEncoder(this, format)
+ {
+ }
+@@ -43,7 +45,6 @@ status_t SpdifStreamOut::open(
+         audio_io_handle_t handle,
+         audio_devices_t devices,
+         struct audio_config *config,
+-        audio_output_flags_t *flags,
+         const char *address,
+         const std::vector<playback_track_metadata_v7_t>& sourceMetadata)
+ {
+@@ -62,8 +63,6 @@ status_t SpdifStreamOut::open(
+ 
+     customConfig.format = AUDIO_FORMAT_PCM_16_BIT;
+     customConfig.channel_mask = AUDIO_CHANNEL_OUT_STEREO;
+-    // Tell the HAL that the data will be compressed audio wrapped in a data burst.
+-    *flags = (audio_output_flags_t)(*flags | AUDIO_OUTPUT_FLAG_IEC958_NONAUDIO);
+ 
+     // Always print this because otherwise it could be very confusing if the
+     // HAL and AudioFlinger are using different formats.
+@@ -77,7 +76,6 @@ status_t SpdifStreamOut::open(
+             handle,
+             devices,
+             &customConfig,
+-            flags,
+             address,
+             sourceMetadata);
+ 
+diff --git a/services/audioflinger/datapath/SpdifStreamOut.h b/services/audioflinger/datapath/SpdifStreamOut.h
+index 3241d6f9c8..1cd8f6585d 100644
+--- a/services/audioflinger/datapath/SpdifStreamOut.h
++++ b/services/audioflinger/datapath/SpdifStreamOut.h
+@@ -36,13 +36,13 @@ namespace android {
+ class SpdifStreamOut : public AudioStreamOut {
+ public:
+ 
+-    SpdifStreamOut(AudioHwDevice *dev, audio_format_t format);
++    SpdifStreamOut(AudioHwDevice *dev, audio_output_flags_t flags,
++            audio_format_t format);
+ 
+     status_t open(
+             audio_io_handle_t handle,
+             audio_devices_t devices,
+             struct audio_config *config,
+-            audio_output_flags_t *flags,
+             const char *address,
+             const std::vector<playback_track_metadata_v7_t>& sourceMetadata) override;
+ 
+diff --git a/services/audiopolicy/AudioPolicyInterface.h b/services/audiopolicy/AudioPolicyInterface.h
+index 35973c19d9..1bac25926b 100644
+--- a/services/audiopolicy/AudioPolicyInterface.h
++++ b/services/audiopolicy/AudioPolicyInterface.h
+@@ -477,7 +477,7 @@ public:
+                                 audio_config_base_t *mixerConfig,
+                                 const sp<DeviceDescriptorBase>& device,
+                                 uint32_t *latencyMs,
+-                                audio_output_flags_t *flags,
++                                audio_output_flags_t flags,
+                                 audio_attributes_t audioAttributes) = 0;
+     // creates a special output that is duplicated to the two outputs passed as arguments.
+     // The duplication is performed by a special mixer thread in the AudioFlinger.
+diff --git a/services/audiopolicy/common/managerdefinitions/include/AudioOutputDescriptor.h b/services/audiopolicy/common/managerdefinitions/include/AudioOutputDescriptor.h
+index a18cf1fda0..bfb28a5d19 100644
+--- a/services/audiopolicy/common/managerdefinitions/include/AudioOutputDescriptor.h
++++ b/services/audiopolicy/common/managerdefinitions/include/AudioOutputDescriptor.h
+@@ -412,7 +412,7 @@ public:
+                       const audio_config_base_t *mixerConfig,
+                       const DeviceVector &devices,
+                       audio_stream_type_t stream,
+-                      audio_output_flags_t *flags,
++                      audio_output_flags_t flags,
+                       audio_io_handle_t *output,
+                       audio_attributes_t attributes);
+ 
+diff --git a/services/audiopolicy/common/managerdefinitions/src/AudioOutputDescriptor.cpp b/services/audiopolicy/common/managerdefinitions/src/AudioOutputDescriptor.cpp
+index 3c2f46ade1..a8663fa410 100644
+--- a/services/audiopolicy/common/managerdefinitions/src/AudioOutputDescriptor.cpp
++++ b/services/audiopolicy/common/managerdefinitions/src/AudioOutputDescriptor.cpp
+@@ -587,7 +587,7 @@ status_t SwAudioOutputDescriptor::open(const audio_config_t *halConfig,
+                                        const audio_config_base_t *mixerConfig,
+                                        const DeviceVector &devices,
+                                        audio_stream_type_t stream,
+-                                       audio_output_flags_t *flags,
++                                       audio_output_flags_t flags,
+                                        audio_io_handle_t *output,
+                                        audio_attributes_t attributes)
+ {
+@@ -617,7 +617,7 @@ status_t SwAudioOutputDescriptor::open(const audio_config_t *halConfig,
+     // create a default one
+     if ((mProfile->getFlags() & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) &&
+             lHalConfig.offload_info.format == AUDIO_FORMAT_DEFAULT) {
+-        *flags = (audio_output_flags_t)(*flags | AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD);
++        flags = (audio_output_flags_t)(flags | AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD);
+         lHalConfig.offload_info = AUDIO_INFO_INITIALIZER;
+         lHalConfig.offload_info.sample_rate = lHalConfig.sample_rate;
+         lHalConfig.offload_info.channel_mask = lHalConfig.channel_mask;
+@@ -635,7 +635,7 @@ status_t SwAudioOutputDescriptor::open(const audio_config_t *halConfig,
+         lMixerConfig = *mixerConfig;
+     }
+ 
+-    mFlags = (audio_output_flags_t)(mFlags | *flags);
++    mFlags = (audio_output_flags_t)(mFlags | flags);
+ 
+     // If no mixer config is specified for a spatializer output, default to 5.1 for proper
+     // configuration of the final downmixer or spatializer
+@@ -653,9 +653,8 @@ status_t SwAudioOutputDescriptor::open(const audio_config_t *halConfig,
+                                                    &lMixerConfig,
+                                                    device,
+                                                    &mLatency,
+-                                                   &mFlags,
++                                                   mFlags,
+                                                    attributes);
+-    *flags = mFlags;
+ 
+     if (status == NO_ERROR) {
+         LOG_ALWAYS_FATAL_IF(*output == AUDIO_IO_HANDLE_NONE,
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index 388df9c059..2ff2907d9d 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -1610,7 +1610,7 @@ status_t AudioPolicyManager::openDirectOutput(audio_stream_type_t stream,
+     releaseMsdOutputPatches(devices);
+ 
+     status_t status =
+-            outputDesc->open(config, nullptr /* mixerConfig */, devices, stream, &flags, output,
++            outputDesc->open(config, nullptr /* mixerConfig */, devices, stream, flags, output,
+                              attributes);
+ 
+     // only accept an output with the requested parameters
+@@ -6608,12 +6608,11 @@ void AudioPolicyManager::onNewAudioModulesAvailableInt(DeviceVector *newDevices)
+             sp<SwAudioOutputDescriptor> outputDesc = new SwAudioOutputDescriptor(outProfile,
+                                                                                  mpClientInterface);
+             audio_io_handle_t output = AUDIO_IO_HANDLE_NONE;
+-            audio_output_flags_t flags = AUDIO_OUTPUT_FLAG_NONE;
+             audio_attributes_t attributes = AUDIO_ATTRIBUTES_INITIALIZER;
+             status_t status = outputDesc->open(nullptr /* halConfig */, nullptr /* mixerConfig */,
+                                                DeviceVector(supportedDevice),
+                                                AUDIO_STREAM_DEFAULT,
+-                                               &flags, &output, attributes);
++                                               AUDIO_OUTPUT_FLAG_NONE, &output, attributes);
+             if (status != NO_ERROR) {
+                 ALOGW("Cannot open output stream for devices %s on hw module %s",
+                       supportedDevice->toString().c_str(), hwModule->getName());
+@@ -8828,7 +8827,7 @@ sp<SwAudioOutputDescriptor> AudioPolicyManager::openOutputWithProfileAndDevice(
+     audio_io_handle_t output = AUDIO_IO_HANDLE_NONE;
+     audio_attributes_t attributes = AUDIO_ATTRIBUTES_INITIALIZER;
+     status_t status = desc->open(halConfig, mixerConfig, devices,
+-            AUDIO_STREAM_DEFAULT, &flags, &output, attributes);
++            AUDIO_STREAM_DEFAULT, flags, &output, attributes);
+     if (status != NO_ERROR) {
+         ALOGE("%s failed to open output %d", __func__, status);
+         return nullptr;
+@@ -8866,7 +8865,7 @@ sp<SwAudioOutputDescriptor> AudioPolicyManager::openOutputWithProfileAndDevice(
+         config.offload_info.channel_mask = config.channel_mask;
+         config.offload_info.format = config.format;
+ 
+-        status = desc->open(&config, mixerConfig, devices, AUDIO_STREAM_DEFAULT, &flags, &output,
++        status = desc->open(&config, mixerConfig, devices, AUDIO_STREAM_DEFAULT, flags, &output,
+                             attributes);
+         if (status != NO_ERROR) {
+             return nullptr;
+diff --git a/services/audiopolicy/service/AudioPolicyClientImpl.cpp b/services/audiopolicy/service/AudioPolicyClientImpl.cpp
+index 6d2c77279c..22fc1519d1 100644
+--- a/services/audiopolicy/service/AudioPolicyClientImpl.cpp
++++ b/services/audiopolicy/service/AudioPolicyClientImpl.cpp
+@@ -56,7 +56,7 @@ status_t AudioPolicyService::AudioPolicyClient::openOutput(audio_module_handle_t
+                                                            audio_config_base_t *mixerConfig,
+                                                            const sp<DeviceDescriptorBase>& device,
+                                                            uint32_t *latencyMs,
+-                                                           audio_output_flags_t *flags,
++                                                           audio_output_flags_t flags,
+                                                            audio_attributes_t attributes)
+ {
+     sp<IAudioFlinger> af = AudioSystem::get_audio_flinger();
+@@ -74,7 +74,7 @@ status_t AudioPolicyService::AudioPolicyClient::openOutput(audio_module_handle_t
+     request.mixerConfig = VALUE_OR_RETURN_STATUS(
+             legacy2aidl_audio_config_base_t_AudioConfigBase(*mixerConfig, false /*isInput*/));
+     request.device = VALUE_OR_RETURN_STATUS(legacy2aidl_DeviceDescriptorBase(device));
+-    request.flags = VALUE_OR_RETURN_STATUS(legacy2aidl_audio_output_flags_t_int32_t_mask(*flags));
++    request.flags = VALUE_OR_RETURN_STATUS(legacy2aidl_audio_output_flags_t_int32_t_mask(flags));
+     request.attributes = VALUE_OR_RETURN_STATUS(
+             legacy2aidl_audio_attributes_t_AudioAttributes(attributes));
+ 
+@@ -89,9 +89,7 @@ status_t AudioPolicyService::AudioPolicyClient::openOutput(audio_module_handle_t
+             .channel_mask = halConfig->channel_mask,
+             .format = halConfig->format,
+         };
+-        *flags = VALUE_OR_RETURN_STATUS(
+-                aidl2legacy_int32_t_audio_output_flags_t_mask(response.flags));
+-        mAudioPolicyService->registerOutput(*output, config, *flags);
++        mAudioPolicyService->registerOutput(*output, config, flags);
+     }
+     return status;
+ }
+diff --git a/services/audiopolicy/service/AudioPolicyService.h b/services/audiopolicy/service/AudioPolicyService.h
+index eccefa750f..5d9813fb6a 100644
+--- a/services/audiopolicy/service/AudioPolicyService.h
++++ b/services/audiopolicy/service/AudioPolicyService.h
+@@ -790,7 +790,7 @@ private:
+                                     audio_config_base_t *mixerConfig,
+                                     const sp<DeviceDescriptorBase>& device,
+                                     uint32_t *latencyMs,
+-                                    audio_output_flags_t *flags,
++                                    audio_output_flags_t flags,
+                                     audio_attributes_t attributes);
+         // creates a special output that is duplicated to the two outputs passed as arguments. The duplication is performed by
+         // a special mixer thread in the AudioFlinger.
+diff --git a/services/audiopolicy/tests/AudioPolicyManagerTestClient.h b/services/audiopolicy/tests/AudioPolicyManagerTestClient.h
+index 483f82753f..ca7ad40827 100644
+--- a/services/audiopolicy/tests/AudioPolicyManagerTestClient.h
++++ b/services/audiopolicy/tests/AudioPolicyManagerTestClient.h
+@@ -42,7 +42,7 @@ public:
+                         audio_config_base_t *mixerConfig,
+                         const sp<DeviceDescriptorBase>& /*device*/,
+                         uint32_t * /*latencyMs*/,
+-                        audio_output_flags_t *flags,
++                        audio_output_flags_t flags,
+                         audio_attributes_t /*attributes*/) override {
+         if (module >= mNextModuleHandle) {
+             ALOGE("%s: Module handle %d has not been allocated yet (next is %d)",
+@@ -50,13 +50,13 @@ public:
+             return BAD_VALUE;
+         }
+         *output = mNextIoHandle++;
+-        mOpenedOutputs[*output] = *flags;
++        mOpenedOutputs[*output] = flags;
+         ALOGD("%s: opened output %d: HAL(%s %s %d) Mixer(%s %s %d) %s", __func__, *output,
+               audio_channel_out_mask_to_string(halConfig->channel_mask),
+               audio_format_to_string(halConfig->format), halConfig->sample_rate,
+               audio_channel_out_mask_to_string(mixerConfig->channel_mask),
+               audio_format_to_string(mixerConfig->format), mixerConfig->sample_rate,
+-              android::toString(*flags).c_str());
++              android::toString(flags).c_str());
+         return NO_ERROR;
+     }
+ 
+diff --git a/services/audiopolicy/tests/AudioPolicyTestClient.h b/services/audiopolicy/tests/AudioPolicyTestClient.h
+index 6116eab852..0299160d86 100644
+--- a/services/audiopolicy/tests/AudioPolicyTestClient.h
++++ b/services/audiopolicy/tests/AudioPolicyTestClient.h
+@@ -37,7 +37,7 @@ public:
+                         audio_config_base_t* /*mixerConfig*/,
+                         const sp<DeviceDescriptorBase>& /*device*/,
+                         uint32_t* /*latencyMs*/,
+-                        audio_output_flags_t* /*flags*/,
++                        audio_output_flags_t /*flags*/,
+                         audio_attributes_t /*attributes*/) override { return NO_INIT; }
+     audio_io_handle_t openDuplicateOutput(audio_io_handle_t /*output1*/,
+                                           audio_io_handle_t /*output2*/) override {
+diff --git a/services/audiopolicy/tests/audiopolicymanager_tests.cpp b/services/audiopolicy/tests/audiopolicymanager_tests.cpp
+index 8ce98bb18f..08855c95a1 100644
+--- a/services/audiopolicy/tests/audiopolicymanager_tests.cpp
++++ b/services/audiopolicy/tests/audiopolicymanager_tests.cpp
+@@ -2517,7 +2517,7 @@ class AudioPolicyManagerTestClientOpenFails : public AudioPolicyManagerTestClien
+                         audio_config_base_t * mixerConfig,
+                         const sp<DeviceDescriptorBase>& device,
+                         uint32_t * latencyMs,
+-                        audio_output_flags_t *flags,
++                        audio_output_flags_t flags,
+                         audio_attributes_t attributes) override {
+         return mSimulateFailure ? BAD_VALUE :
+                 AudioPolicyManagerTestClient::openOutput(
+-- 
+2.43.0
+

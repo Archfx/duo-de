@@ -1,0 +1,205 @@
+From 309a0558ff655132e2451f49a9139174106dd714 Mon Sep 17 00:00:00 2001
+From: Sushant <sushant@ittiam.com>
+Date: Tue, 3 Sep 2024 17:18:37 +0530
+Subject: [PATCH 015/436] Extend AmrwbDecoderTest to validate decoded output
+ with reference files
+
+Bug: 357558004
+Test: atest AmrwbDecoderTest
+
+Change-Id: I5eecdee6a8454b3da234cdccc9c60709bc440545
+---
+ .../amrwb/dec/test/AmrwbDecoderTest.cpp       | 65 +++++++++++++++++--
+ .../codecs/amrwb/dec/test/AndroidTest.xml     |  6 +-
+ .../codecs/amrwb/dec/test/DynamicConfig.xml   |  2 +-
+ media/module/codecs/amrwb/dec/test/README.md  |  6 +-
+ 4 files changed, 67 insertions(+), 12 deletions(-)
+
+diff --git a/media/module/codecs/amrwb/dec/test/AmrwbDecoderTest.cpp b/media/module/codecs/amrwb/dec/test/AmrwbDecoderTest.cpp
+index 2cc88ce758..c0e032fdc7 100644
+--- a/media/module/codecs/amrwb/dec/test/AmrwbDecoderTest.cpp
++++ b/media/module/codecs/amrwb/dec/test/AmrwbDecoderTest.cpp
+@@ -23,6 +23,7 @@
+ #include <audio_utils/sndfile.h>
+ #include <memory>
+ #include <stdio.h>
++#include <fstream>
+ 
+ #include "pvamrwbdecoder.h"
+ #include "pvamrwbdecoder_api.h"
+@@ -44,7 +45,7 @@ constexpr int32_t kMaxCount = 10;
+ 
+ static AmrwbDecTestEnvironment *gEnv = nullptr;
+ 
+-class AmrwbDecoderTest : public ::testing::TestWithParam<string> {
++class AmrwbDecoderTest : public ::testing::TestWithParam<std::tuple<string, string>> {
+   public:
+     AmrwbDecoderTest() : mFpInput(nullptr) {}
+ 
+@@ -59,6 +60,7 @@ class AmrwbDecoderTest : public ::testing::TestWithParam<string> {
+     int32_t DecodeFrames(int16_t *decoderCookie, void *decoderBuf, SNDFILE *outFileHandle,
+                          int32_t frameCount = INT32_MAX);
+     SNDFILE *openOutputFile(SF_INFO *sfInfo);
++    bool compareBinaryFiles(const std::string& refFilePath, const std::string& outFilePath);
+ };
+ 
+ SNDFILE *AmrwbDecoderTest::openOutputFile(SF_INFO *sfInfo) {
+@@ -120,6 +122,42 @@ int32_t AmrwbDecoderTest::DecodeFrames(int16_t *decoderCookie, void *decoderBuf,
+     return 0;
+ }
+ 
++bool AmrwbDecoderTest::compareBinaryFiles(const std::string &refFilePath,
++                                          const std::string &outFilePath) {
++    std::ifstream refFile(refFilePath, std::ios::binary | std::ios::ate);
++    std::ifstream outFile(outFilePath, std::ios::binary | std::ios::ate);
++    assert(refFile.is_open() && "Error opening reference file " + refFilePath);
++    assert(outFile.is_open() && "Error opening output file " + outFilePath);
++
++    std::streamsize refFileSize = refFile.tellg();
++    std::streamsize outFileSize = outFile.tellg();
++    if (refFileSize != outFileSize) {
++        ALOGE("Error, File size mismatch: Reference file size = %td bytes,"
++               "but output file size = %td bytes", refFileSize, outFileSize);
++        return false;
++    }
++
++    refFile.seekg(0, std::ios::beg);
++    outFile.seekg(0, std::ios::beg);
++    constexpr std::streamsize kBufferSize = 16 * 1024;
++    char refBuffer[kBufferSize];
++    char outBuffer[kBufferSize];
++
++    while (refFile && outFile) {
++        refFile.read(refBuffer, kBufferSize);
++        outFile.read(outBuffer, kBufferSize);
++
++        std::streamsize refBytesRead = refFile.gcount();
++        std::streamsize outBytesRead = outFile.gcount();
++
++        if (refBytesRead != outBytesRead || memcmp(refBuffer, outBuffer, refBytesRead) != 0) {
++            ALOGE("Error, File content mismatch.");
++            return false;
++        }
++    }
++    return true;
++}
++
+ TEST_F(AmrwbDecoderTest, MultiCreateAmrwbDecoderTest) {
+     uint32_t memRequirements = pvDecoder_AmrWbMemRequirements();
+     std::unique_ptr<char[]> decoderBuf(new char[memRequirements]);
+@@ -147,7 +185,7 @@ TEST_P(AmrwbDecoderTest, DecodeTest) {
+     pvDecoder_AmrWb_Init(&amrHandle, decoderBuf.get(), &decoderCookie);
+     ASSERT_NE(amrHandle, nullptr) << "Failed to initialize decoder";
+ 
+-    string inputFile = gEnv->getRes() + GetParam();
++    string inputFile = gEnv->getRes() + std::get<0>(GetParam());
+     mFpInput = fopen(inputFile.c_str(), "rb");
+     ASSERT_NE(mFpInput, nullptr) << "Error opening input file " << inputFile;
+ 
+@@ -160,6 +198,10 @@ TEST_P(AmrwbDecoderTest, DecodeTest) {
+     ASSERT_EQ(decoderErr, 0) << "DecodeFrames returned error";
+ 
+     sf_close(outFileHandle);
++    string refFilePath = gEnv->getRes() + std::get<1>(GetParam());
++    ASSERT_TRUE(compareBinaryFiles(refFilePath, OUTPUT_FILE))
++    << "Error, Binary file comparison failed: Output file "
++    << OUTPUT_FILE << " does not match the reference file " << refFilePath << ".";
+ }
+ 
+ TEST_P(AmrwbDecoderTest, ResetDecoderTest) {
+@@ -173,7 +215,7 @@ TEST_P(AmrwbDecoderTest, ResetDecoderTest) {
+     pvDecoder_AmrWb_Init(&amrHandle, decoderBuf.get(), &decoderCookie);
+     ASSERT_NE(amrHandle, nullptr) << "Failed to initialize decoder";
+ 
+-    string inputFile = gEnv->getRes() + GetParam();
++    string inputFile = gEnv->getRes() + std::get<0>(GetParam());
+     mFpInput = fopen(inputFile.c_str(), "rb");
+     ASSERT_NE(mFpInput, nullptr) << "Error opening input file " << inputFile;
+ 
+@@ -198,8 +240,21 @@ TEST_P(AmrwbDecoderTest, ResetDecoderTest) {
+ }
+ 
+ INSTANTIATE_TEST_SUITE_P(AmrwbDecoderTestAll, AmrwbDecoderTest,
+-                         ::testing::Values(("bbb_amrwb_1ch_14kbps_16000hz.amrwb"),
+-                                           ("bbb_16000hz_1ch_9kbps_amrwb_30sec.amrwb")));
++                         ::testing::Values(std::make_tuple(
++                                                "bbb_amrwb_1ch_14kbps_16000hz.amrwb",
++                                                "bbb_amrwb_1ch_14kbps_16000hz_ref.pcm"),
++                                           std::make_tuple(
++                                                "bbb_16000hz_1ch_9kbps_amrwb_30sec.amrwb",
++                                                "bbb_16000hz_1ch_9kbps_amrwb_30sec_ref.pcm"),
++                                           std::make_tuple(
++                                                "bbb_16kHz_1ch_16bps_1sec.amrwb",
++                                                "bbb_16kHz_1ch_16bps_1sec_ref.pcm"),
++                                           std::make_tuple(
++                                                "bbb_16kHz_1ch_6.6bps_3sec.amrwb",
++                                                "bbb_16kHz_1ch_6.6bps_3sec_ref.pcm"),
++                                           std::make_tuple(
++                                                "bbb_16kHz_1ch_23.85bps_3sec.amrwb",
++                                                "bbb_16kHz_1ch_23.85bps_3sec_ref.pcm")));
+ 
+ int main(int argc, char **argv) {
+     gEnv = new AmrwbDecTestEnvironment();
+diff --git a/media/module/codecs/amrwb/dec/test/AndroidTest.xml b/media/module/codecs/amrwb/dec/test/AndroidTest.xml
+index 392df03bee..dbd1407b3c 100644
+--- a/media/module/codecs/amrwb/dec/test/AndroidTest.xml
++++ b/media/module/codecs/amrwb/dec/test/AndroidTest.xml
+@@ -23,17 +23,17 @@
+     <target_preparer class="com.android.compatibility.common.tradefed.targetprep.DynamicConfigPusher">
+         <option name="target" value="host" />
+         <option name="config-filename" value="AmrwbDecoderTest" />
+-        <option name="version" value="1.0"/>
++        <option name="version" value="2.0"/>
+     </target_preparer>
+     <target_preparer class="com.android.compatibility.common.tradefed.targetprep.MediaPreparer">
+         <option name="push-all" value="true" />
+-        <option name="media-folder-name" value="AmrwbDecoderTest-1.0" />
++        <option name="media-folder-name" value="AmrwbDecoderTest-2.0" />
+         <option name="dynamic-config-module" value="AmrwbDecoderTest" />
+     </target_preparer>
+ 
+     <test class="com.android.tradefed.testtype.GTest" >
+         <option name="native-test-device-path" value="/data/local/tmp" />
+         <option name="module-name" value="AmrwbDecoderTest" />
+-        <option name="native-test-flag" value="-P /sdcard/test/AmrwbDecoderTest-1.0/" />
++        <option name="native-test-flag" value="-P /sdcard/test/AmrwbDecoderTest-2.0/" />
+     </test>
+ </configuration>
+diff --git a/media/module/codecs/amrwb/dec/test/DynamicConfig.xml b/media/module/codecs/amrwb/dec/test/DynamicConfig.xml
+index 506cc3d75a..52453ee8df 100644
+--- a/media/module/codecs/amrwb/dec/test/DynamicConfig.xml
++++ b/media/module/codecs/amrwb/dec/test/DynamicConfig.xml
+@@ -15,6 +15,6 @@
+ 
+ <dynamicConfig>
+     <entry key="media_files_url">
+-            <value>https://dl.google.com/android-unittest/media/frameworks/av/media/module/codecs/amrwb/dec/test/AmrwbDecoderTest-1.0.zip</value>
++            <value>https://dl.google.com/android-unittest/media/frameworks/av/media/module/codecs/amrwb/dec/test/AmrwbDecoderTest-2.0.zip</value>
+     </entry>
+ </dynamicConfig>
+diff --git a/media/module/codecs/amrwb/dec/test/README.md b/media/module/codecs/amrwb/dec/test/README.md
+index 8e77456845..ed76051b44 100644
+--- a/media/module/codecs/amrwb/dec/test/README.md
++++ b/media/module/codecs/amrwb/dec/test/README.md
+@@ -22,15 +22,15 @@ To test 32-bit binary push binaries from nativetest.
+ adb push ${OUT}/data/nativetest/AmrwbDecoderTest/AmrwbDecoderTest /data/local/tmp/
+ ```
+ 
+-The resource file for the tests is taken from [here](https://dl.google.com/android-unittest/media/frameworks/av/media/module/codecs/amrwb/dec/test/AmrwbDecoderTest-1.0.zip). Download, unzip and push these files into device for testing.
++The resource file for the tests is taken from [here](https://dl.google.com/android-unittest/media/frameworks/av/media/module/codecs/amrwb/dec/test/AmrwbDecoderTest-2.0.zip). Download, unzip and push these files into device for testing.
+ 
+ ```
+-adb push AmrwbDecoderTest-1.0 /data/local/tmp/
++adb push AmrwbDecoderTest-2.0 /data/local/tmp/
+ ```
+ 
+ usage: AmrwbDecoderTest -P \<path_to_folder\>
+ ```
+-adb shell /data/local/tmp/AmrwbDecoderTest -P /data/local/tmp/AmrwbDecoderTest-1.0/
++adb shell /data/local/tmp/AmrwbDecoderTest -P /data/local/tmp/AmrwbDecoderTest-2.0/
+ ```
+ Alternatively, the test can also be run using atest command.
+ 
+-- 
+2.43.0
+

@@ -1,0 +1,31 @@
+From 9a11eaebad408f3f09077d54ac86b591523920cc Mon Sep 17 00:00:00 2001
+From: Abdelrahman Daim <adaim@meta.com>
+Date: Wed, 13 Nov 2024 11:11:22 -0800
+Subject: [PATCH 264/436] Remove old asserts that don't compile with NDEBUG
+
+Summary: This ASSERTS() have not been updated when the code has changed.
+If compiling this module with LOG_NDEBUG 0, it does not build.
+
+Test Plan: Successful build
+
+Change-Id: I71352ad013cedc967d45ceb901233f038c95a008
+Signed-off-by: Abdelrahman Daim <adaim@meta.com>
+---
+ services/audioflinger/Threads.cpp | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/services/audioflinger/Threads.cpp b/services/audioflinger/Threads.cpp
+index ecbd0ae34c..7aed72045c 100644
+--- a/services/audioflinger/Threads.cpp
++++ b/services/audioflinger/Threads.cpp
+@@ -8421,7 +8421,6 @@ reacquire_wakelock:
+                     }
+                     if (invalidate) {
+                         activeTrack->invalidate();
+-                        ALOG_ASSERT(fastTrackToRemove == 0);
+                         fastTrackToRemove = activeTrack;
+                         removeTrack_l(activeTrack);
+                         mActiveTracks.remove(activeTrack);
+-- 
+2.43.0
+

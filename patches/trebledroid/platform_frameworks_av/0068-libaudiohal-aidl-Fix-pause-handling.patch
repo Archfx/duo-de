@@ -1,0 +1,78 @@
+From 49be5e9ec1534fe7986b2be2e19dd62f798baaee Mon Sep 17 00:00:00 2001
+From: Ajender Reddy <quic_ajender@quicinc.com>
+Date: Tue, 8 Oct 2024 20:05:35 +0530
+Subject: [PATCH 068/436] libaudiohal@aidl: Fix 'pause' handling
+
+In case of transient states like DRAINING, the HAL may change its
+StreamDescriptor::State on its own and may not be in synchronization with client. Thus, client can send the unexpected command and HAL returns failure. such failure is natural. The client handles it gracefully.
+
+Example where HAL change its state,
+1) DRAINING -> IDLE (on empty buffer)
+2) DRAINING -> IDLE (on IStreamCallback::onDrainReady)
+
+Also, refactor the resume implementation.
+
+BUG: 363958142
+
+Test: play compress offload playback
+
+Change-Id: I1cd7ec96cfa7e20c69c03ec8aae088d1954adda2
+---
+ media/libaudiohal/impl/StreamHalAidl.cpp | 32 ++++++++++++++++++------
+ 1 file changed, 24 insertions(+), 8 deletions(-)
+
+diff --git a/media/libaudiohal/impl/StreamHalAidl.cpp b/media/libaudiohal/impl/StreamHalAidl.cpp
+index d65701a069..9863fec1db 100644
+--- a/media/libaudiohal/impl/StreamHalAidl.cpp
++++ b/media/libaudiohal/impl/StreamHalAidl.cpp
+@@ -443,9 +443,29 @@ status_t StreamHalAidl::pause(StreamDescriptor::Reply* reply) {
+     if (!mStream) return NO_INIT;
+ 
+     if (const auto state = getState(); isInPlayOrRecordState(state)) {
+-        return sendCommand(
+-                makeHalCommand<HalCommand::Tag::pause>(), reply,
++        StreamDescriptor::Reply localReply{};
++        StreamDescriptor::Reply* innerReply = reply ?: &localReply;
++        auto status = sendCommand(
++                makeHalCommand<HalCommand::Tag::pause>(), innerReply,
+                 true /*safeFromNonWorkerThread*/);  // The workers stops its I/O activity first.
++        if (status == STATUS_INVALID_OPERATION &&
++                !isInPlayOrRecordState(innerReply->state)) {
++            /**
++             * In case of transient states like DRAINING, the HAL may change its
++             * StreamDescriptor::State on its own and may not be in synchronization with client.
++             * Thus, client can send the unexpected command and HAL returns failure. such failure is
++             * natural. The client handles it gracefully.
++             * Example where HAL change its state,
++             * 1) DRAINING -> IDLE (on empty buffer)
++             * 2) DRAINING -> IDLE (on IStreamCallback::onDrainReady)
++             **/
++            AUGMENT_LOG(D,
++                        "HAL failed to handle the 'pause' command, but stream state is in one of"
++                        " the PAUSED kind of states, current state: %s",
++                        toString(state).c_str());
++            return OK;
++        }
++        return status;
+     } else {
+         AUGMENT_LOG(D, "already stream in one of the PAUSED kind of states, current state: %s",
+                 toString(state).c_str());
+@@ -473,13 +493,9 @@ status_t StreamHalAidl::resume(StreamDescriptor::Reply* reply) {
+                 return INVALID_OPERATION;
+             }
+             return OK;
+-        } else if (state == StreamDescriptor::State::PAUSED ||
+-                   state == StreamDescriptor::State::TRANSFER_PAUSED ||
+-                   state == StreamDescriptor::State::DRAIN_PAUSED) {
++        } else if (isInPausedState(state)) {
+             return sendCommand(makeHalCommand<HalCommand::Tag::start>(), reply);
+-        } else if (state == StreamDescriptor::State::ACTIVE ||
+-                   state == StreamDescriptor::State::TRANSFERRING ||
+-                   state == StreamDescriptor::State::DRAINING) {
++        } else if (isInPlayOrRecordState(state)) {
+             AUGMENT_LOG(D, "already in stream state: %s", toString(state).c_str());
+             return OK;
+         } else {
+-- 
+2.43.0
+

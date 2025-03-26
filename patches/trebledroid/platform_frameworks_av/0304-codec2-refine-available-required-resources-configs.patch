@@ -1,0 +1,171 @@
+From 5569b50d3edbed643d192c112da68dd04f73da80 Mon Sep 17 00:00:00 2001
+From: Girish <girishshetty@google.com>
+Date: Thu, 31 Oct 2024 18:18:14 +0000
+Subject: [PATCH 304/436] codec2: refine available/required-resources configs
+
+Bug: 363282971
+Test: none
+Change-Id: I46e18260d28b703b11de0403c64fceea49d5349d
+---
+ media/codec2/core/include/C2Config.h | 119 ++++++++++++++++++++++++---
+ 1 file changed, 109 insertions(+), 10 deletions(-)
+
+diff --git a/media/codec2/core/include/C2Config.h b/media/codec2/core/include/C2Config.h
+index 069d6adf34..fa5ce770ea 100644
+--- a/media/codec2/core/include/C2Config.h
++++ b/media/codec2/core/include/C2Config.h
+@@ -70,6 +70,7 @@ struct C2Config {
+     enum platform_level_t : uint32_t;       ///< platform level
+     enum prepend_header_mode_t : uint32_t;  ///< prepend header operational modes
+     enum profile_t : uint32_t;              ///< coding profile
++    enum resource_kind_t : uint32_t;        ///< resource kinds
+     enum scaling_method_t : uint32_t;       ///< scaling methods
+     enum scan_order_t : uint32_t;           ///< scan orders
+     enum secure_mode_t : uint32_t;          ///< secure/protected modes
+@@ -101,6 +102,7 @@ enum C2ParamIndexKind : C2Param::type_index_t {
+     kParamIndexMasteringDisplayColorVolume,
+     kParamIndexChromaOffset,
+     kParamIndexGopLayer,
++    kParamIndexSystemResource,
+ 
+     /* =================================== parameter indices =================================== */
+ 
+@@ -167,6 +169,10 @@ enum C2ParamIndexKind : C2Param::type_index_t {
+     /* Region of Interest Encoding parameters */
+     kParamIndexQpOffsetMapBuffer, // info-buffer, used to signal qp-offset map for a frame
+ 
++    /* resource capacity and resources excluded */
++    kParamIndexResourcesCapacity,
++    kParamIndexResourcesExcluded,
++
+     // deprecated
+     kParamIndexDelayRequest = kParamIndexDelay | C2Param::CoreIndex::IS_REQUEST_FLAG,
+ 
+@@ -1257,21 +1263,114 @@ constexpr char C2_PARAMKEY_CONFIG_COUNTER[] = "algo.config.counter";
+ /* ----------------------------------------- resources ----------------------------------------- */
+ 
+ /**
+- * Resources needed and resources reserved for current configuration.
++ * Resource kind.
++ */
++C2ENUM(C2Config::resource_kind_t, uint32_t,
++    CONST,
++    PER_FRAME,
++    PER_INPUT_BLOCK,
++    PER_OUTPUT_BLOCK
++)
++
++/**
++ * Definition of a system resource use.
++ *
++ * [PROPOSED]
++ *
++ * System resources are defined by the default component store.
++ * They represent any physical or abstract entities of limited availability
++ * that is required for a component instance to execute and process work.
++ *
++ * Each defined resource has an id.
++ * The use of a resource is specified by the amount and the kind (e.g. whether the amount
++ * of resources is required for each frame processed, or whether they are required
++ * regardless of the processing rate (const amount)).
+  *
+- * Resources are tracked as a vector of positive numbers. Available resources are defined by
+- * the vendor.
++ * Note: implementations can shadow this structure with their own custom resource
++ * structure where a uint32_t based enum is used for id.
++ * This can be used to provide a name for each resource, via parameter descriptors.
++ */
++
++struct C2SystemResourceStruct {
++    C2SystemResourceStruct(uint32_t id_,
++                           C2Config::resource_kind_t kind_,
++                           uint64_t amount_)
++        : id(id_), kind(kind_), amount(amount_) { }
++    uint32_t id;
++    C2Config::resource_kind_t kind;
++    uint64_t amount;
++
++    DEFINE_AND_DESCRIBE_C2STRUCT(SystemResource)
++    C2FIELD(id, "id")
++    C2FIELD(kind, "kind")
++    C2FIELD(amount, "amount")
++};
++
++/**
++ * Total system resource capacity.
+  *
+- * By default, no resources are reserved for a component. If resource reservation is successful,
+- * the component shall be able to use those resources exclusively. If however, the component is
+- * not using all of the reserved resources, those may be shared with other components.
++ * [PROPOSED]
+  *
+- * TODO: define some of the resources.
++ * This setting is implemented by the default component store.
++ * The total resource capacity is specified as the maximum amount for each resource ID
++ * that is supported by the device hardware or firmware.
++ * As such, the kind must be CONST for each element.
+  */
+-typedef C2GlobalParam<C2Tuning, C2Uint64Array, kParamIndexResourcesNeeded> C2ResourcesNeededTuning;
+-typedef C2GlobalParam<C2Tuning, C2Uint64Array, kParamIndexResourcesReserved>
+-        C2ResourcesReservedTuning;
++typedef C2GlobalParam<C2Tuning,
++                      C2SimpleArrayStruct<C2SystemResourceStruct>,
++                      kParamIndexResourcesCapacity> C2ResourcesCapacityTuning;
++constexpr char C2_PARAMKEY_RESOURCES_CAPACITY[] = "resources.capacity";
++
++/**
++ * Excluded system resources.
++ *
++ * [PROPOSED]
++ *
++ * This setting is implemented by the default component store.
++ * Some system resources may be used by components and not tracked by the Codec 2.0 API.
++ * This is communicated by this tuning.
++ * Excluded resources are the total resources that are used by non-Codec 2.0 components.
++ * It is specified as the excluded amount for each resource ID that is used by
++ * a non-Codec 2.0 component. As such, the kind must be CONST for each element.
++ *
++ * The platform can calculate the available resources as total capacity minus
++ * excluded resource minus sum of needed resources for each component.
++ */
++typedef C2GlobalParam<C2Tuning,
++                      C2SimpleArrayStruct<C2SystemResourceStruct>,
++                      kParamIndexResourcesExcluded> C2ResourcesExcludedTuning;
++constexpr char C2_PARAMKEY_RESOURCES_EXCLUDED[] = "resources.excluded";
++
++/**
++ * System resources needed for the current configuration.
++ *
++ * [PROPOSED]
++ *
++ * Resources are tracked as a list of individual resource use specifications.
++ * The resource kind can be CONST, PER_FRAME, PER_INPUT_BLODCK or PER_OUTPUT_BLOCK.
++ */
++typedef C2GlobalParam<C2Tuning,
++                      C2SimpleArrayStruct<C2SystemResourceStruct>,
++                      kParamIndexResourcesNeeded> C2ResourcesNeededTuning;
+ constexpr char C2_PARAMKEY_RESOURCES_NEEDED[] = "resources.needed";
++
++/**
++ * System resources reserved for this component
++ *
++ * [FUTURE]
++ *
++ * This allows the platform to set aside system resources for the component.
++ * Since this is a static resource reservation, kind must be CONST for each element.
++ * This resource reservation only considers CONST and PER_FRAME use.
++ *
++ * By default, no resources are reserved for a component.
++ * If resource reservation is successful, the component shall be able to use those
++ * resources exclusively. If however, the component is not using all of the
++ * reserved resources, those may be shared with other components.
++ */
++typedef C2GlobalParam<C2Tuning,
++                      C2SimpleArrayStruct<C2SystemResourceStruct>,
++                      kParamIndexResourcesReserved> C2ResourcesReservedTuning;
+ constexpr char C2_PARAMKEY_RESOURCES_RESERVED[] = "resources.reserved";
+ 
+ /**
+-- 
+2.43.0
+

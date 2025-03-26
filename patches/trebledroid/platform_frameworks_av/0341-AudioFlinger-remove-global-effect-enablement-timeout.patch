@@ -1,0 +1,82 @@
+From 0bd92881b96c665da4ee48ef035a4d2d462747d2 Mon Sep 17 00:00:00 2001
+From: Shunkai Yao <yaoshunkai@google.com>
+Date: Wed, 20 Nov 2024 01:47:20 +0000
+Subject: [PATCH 341/436] AudioFlinger: remove global effect enablement timeout
+
+`kMinGlobalEffectEnabletimeNs` prevents offload track creation
+whenever there was non-offloadable global effect enabled in last
+2 hours.
+
+After timer removed:
+ - offload tracks can be created as long as there is no
+   non-offloadable global effect enabled
+ - offload tracks will be invalidated when a non-offloadable
+   global effect enables
+
+Flag: EXEMPT bug fix
+Bug: 374010474
+Bug: 372746934
+Test: atest AudioTrackOffloadTest AudioEffectTest --iterations 10
+Test: atest CtsMediaAudioTestCases
+Test: Offload playback with visualizer on/off on Pixel
+
+Change-Id: I2fb7fe98df4dc63972511efe814841668d6645d3
+Merged-In: I2fb7fe98df4dc63972511efe814841668d6645d3
+---
+ services/audioflinger/AudioFlinger.cpp | 11 -----------
+ services/audioflinger/AudioFlinger.h   |  3 ---
+ 2 files changed, 14 deletions(-)
+
+diff --git a/services/audioflinger/AudioFlinger.cpp b/services/audioflinger/AudioFlinger.cpp
+index 82152473ea..282f3fa1f4 100644
+--- a/services/audioflinger/AudioFlinger.cpp
++++ b/services/audioflinger/AudioFlinger.cpp
+@@ -98,10 +98,6 @@ static constexpr char kNoEffectsFactory[] = "Effects Factory is absent\n";
+ 
+ static constexpr char kAudioServiceName[] = "audio";
+ 
+-// In order to avoid invalidating offloaded tracks each time a Visualizer is turned on and off
+-// we define a minimum time during which a global effect is considered enabled.
+-static const nsecs_t kMinGlobalEffectEnabletimeNs = seconds(7200);
+-
+ // Keep a strong reference to media.log service around forever.
+ // The service is within our parent process so it can never die in a way that we could observe.
+ // These two variables are const after initialization.
+@@ -4842,11 +4838,6 @@ Exit:
+ 
+ bool AudioFlinger::isNonOffloadableGlobalEffectEnabled_l() const
+ {
+-    if (mGlobalEffectEnableTime != 0 &&
+-            ((systemTime() - mGlobalEffectEnableTime) < kMinGlobalEffectEnabletimeNs)) {
+-        return true;
+-    }
+-
+     for (size_t i = 0; i < mPlaybackThreads.size(); i++) {
+         const auto thread = mPlaybackThreads.valueAt(i);
+         audio_utils::lock_guard l(thread->mutex());
+@@ -4862,8 +4853,6 @@ void AudioFlinger::onNonOffloadableGlobalEffectEnable()
+ {
+     audio_utils::lock_guard _l(mutex());
+ 
+-    mGlobalEffectEnableTime = systemTime();
+-
+     for (size_t i = 0; i < mPlaybackThreads.size(); i++) {
+         const sp<IAfPlaybackThread> t = mPlaybackThreads.valueAt(i);
+         if (t->type() == IAfThreadBase::OFFLOAD) {
+diff --git a/services/audioflinger/AudioFlinger.h b/services/audioflinger/AudioFlinger.h
+index 6777075088..c229e8321d 100644
+--- a/services/audioflinger/AudioFlinger.h
++++ b/services/audioflinger/AudioFlinger.h
+@@ -760,9 +760,6 @@ private:
+     std::atomic<size_t> mClientSharedHeapSize = kMinimumClientSharedHeapSizeBytes;
+     static constexpr size_t kMinimumClientSharedHeapSizeBytes = 1024 * 1024; // 1MB
+ 
+-    // when a global effect was last enabled
+-    nsecs_t mGlobalEffectEnableTime GUARDED_BY(mutex()) = 0;
+-
+     /* const */ sp<IAfPatchPanel> mPatchPanel;
+ 
+     const sp<EffectsFactoryHalInterface> mEffectsFactoryHal =
+-- 
+2.43.0
+

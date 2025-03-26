@@ -1,0 +1,35 @@
+From 5f900c5de048a01415d44992a2c32c0ab9c330c3 Mon Sep 17 00:00:00 2001
+From: Vadim Caen <caen@google.com>
+Date: Wed, 9 Oct 2024 16:07:37 +0200
+Subject: [PATCH 075/436] Fix timestamp not increasing on repeated frame
+
+When repeating the last drawn frame from the input surface, we were not
+increasing the timestamp if the surface had a timestamp > 0.
+
+Fixes: 372374102
+Test: CtsVirtualDevicesCameraCtsTestCases
+Flag: android.companion.virtualdevice.flags.camera_timestamp_from_surface
+Change-Id: I6e8e08b60965a20a72361ead3e4d82ec173c66e5
+---
+ services/camera/virtualcamera/VirtualCameraRenderThread.cc | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/services/camera/virtualcamera/VirtualCameraRenderThread.cc b/services/camera/virtualcamera/VirtualCameraRenderThread.cc
+index bf4a45d93e..becba905ff 100644
+--- a/services/camera/virtualcamera/VirtualCameraRenderThread.cc
++++ b/services/camera/virtualcamera/VirtualCameraRenderThread.cc
+@@ -557,8 +557,9 @@ std::chrono::nanoseconds VirtualCameraRenderThread::throttleRendering(
+ std::chrono::nanoseconds VirtualCameraRenderThread::getSurfaceTimestamp(
+     std::chrono::nanoseconds timeSinceLastFrame) {
+   std::chrono::nanoseconds surfaceTimestamp = mEglSurfaceTexture->getTimestamp();
+-  if (surfaceTimestamp.count() < 0) {
+-    uint64_t lastSurfaceTimestamp = mLastSurfaceTimestampNanoseconds.load();
++  uint64_t lastSurfaceTimestamp = mLastSurfaceTimestampNanoseconds.load();
++  if (surfaceTimestamp.count() < 0 ||
++      surfaceTimestamp.count() == lastSurfaceTimestamp) {
+     if (lastSurfaceTimestamp > 0) {
+       // The timestamps were provided by the producer but we are
+       // repeating the last frame, so we increase the previous timestamp by
+-- 
+2.43.0
+

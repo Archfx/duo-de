@@ -1,0 +1,205 @@
+From f5e48d413459616251865c00855814846b61dd40 Mon Sep 17 00:00:00 2001
+From: Haripriya Deshmukh <100864@ittiam.com>
+Date: Sun, 1 Sep 2024 21:52:48 +0530
+Subject: [PATCH 004/436] Extend AmrnbDecoderTest to validate decoded output
+ with reference files
+
+Bug: 357558004
+Test: atest AmrnbDecoderTest
+
+Change-Id: Id6965d11a461f3dd32ef1192d53033371f87529a
+---
+ .../amrnb/dec/test/AmrnbDecoderTest.cpp       | 69 +++++++++++++++++--
+ .../codecs/amrnb/dec/test/AndroidTest.xml     |  6 +-
+ .../codecs/amrnb/dec/test/DynamicConfig.xml   |  2 +-
+ media/module/codecs/amrnb/dec/test/README.md  |  6 +-
+ 4 files changed, 71 insertions(+), 12 deletions(-)
+
+diff --git a/media/module/codecs/amrnb/dec/test/AmrnbDecoderTest.cpp b/media/module/codecs/amrnb/dec/test/AmrnbDecoderTest.cpp
+index af620741e9..984baf8c23 100644
+--- a/media/module/codecs/amrnb/dec/test/AmrnbDecoderTest.cpp
++++ b/media/module/codecs/amrnb/dec/test/AmrnbDecoderTest.cpp
+@@ -22,6 +22,7 @@
+ 
+ #include <audio_utils/sndfile.h>
+ #include <stdio.h>
++#include <fstream>
+ 
+ #include "gsmamr_dec.h"
+ 
+@@ -40,7 +41,7 @@ constexpr int32_t kNumFrameReset = 150;
+ 
+ static AmrnbDecTestEnvironment *gEnv = nullptr;
+ 
+-class AmrnbDecoderTest : public ::testing::TestWithParam<string> {
++class AmrnbDecoderTest : public ::testing::TestWithParam<std::tuple<string, string>> {
+   public:
+     AmrnbDecoderTest() : mFpInput(nullptr) {}
+ 
+@@ -54,6 +55,7 @@ class AmrnbDecoderTest : public ::testing::TestWithParam<string> {
+     FILE *mFpInput;
+     SNDFILE *openOutputFile(SF_INFO *sfInfo);
+     int32_t DecodeFrames(void *amrHandle, SNDFILE *outFileHandle, int32_t frameCount = INT32_MAX);
++    bool compareBinaryFiles(const std::string& refFilePath, const std::string& outFilePath);
+ };
+ 
+ SNDFILE *AmrnbDecoderTest::openOutputFile(SF_INFO *sfInfo) {
+@@ -97,6 +99,42 @@ int32_t AmrnbDecoderTest::DecodeFrames(void *amrHandle, SNDFILE *outFileHandle,
+     return 0;
+ }
+ 
++bool AmrnbDecoderTest::compareBinaryFiles(const std::string &refFilePath,
++                                          const std::string &outFilePath) {
++    std::ifstream refFile(refFilePath, std::ios::binary | std::ios::ate);
++    std::ifstream outFile(outFilePath, std::ios::binary | std::ios::ate);
++    assert(refFile.is_open() && "Error opening reference file " + refFilePath);
++    assert(outFile.is_open() && "Error opening output file " + outFilePath);
++
++    std::streamsize refFileSize = refFile.tellg();
++    std::streamsize outFileSize = outFile.tellg();
++    if (refFileSize != outFileSize) {
++        ALOGE("Error, File size mismatch: Reference file size = %td bytes,"
++              " but output file size = %td bytes.", refFileSize, outFileSize);
++        return false;
++    }
++
++    refFile.seekg(0, std::ios::beg);
++    outFile.seekg(0, std::ios::beg);
++    constexpr std::streamsize kBufferSize = 16 * 1024;
++    char refBuffer[kBufferSize];
++    char outBuffer[kBufferSize];
++
++    while (refFile && outFile) {
++        refFile.read(refBuffer, kBufferSize);
++        outFile.read(outBuffer, kBufferSize);
++
++        std::streamsize refBytesRead = refFile.gcount();
++        std::streamsize outBytesRead = outFile.gcount();
++
++        if (refBytesRead != outBytesRead || memcmp(refBuffer, outBuffer, refBytesRead) != 0) {
++            ALOGE("Error, File content mismatch.");
++            return false;
++        }
++    }
++    return true;
++}
++
+ TEST_F(AmrnbDecoderTest, CreateAmrnbDecoderTest) {
+     void *amrHandle;
+     int32_t status = GSMInitDecode(&amrHandle, (Word8 *)"AMRNBDecoder");
+@@ -106,7 +144,7 @@ TEST_F(AmrnbDecoderTest, CreateAmrnbDecoderTest) {
+ }
+ 
+ TEST_P(AmrnbDecoderTest, DecodeTest) {
+-    string inputFile = gEnv->getRes() + GetParam();
++    string inputFile = gEnv->getRes() + std::get<0>(GetParam());
+     mFpInput = fopen(inputFile.c_str(), "rb");
+     ASSERT_NE(mFpInput, nullptr) << "Error opening input file " << inputFile;
+ 
+@@ -126,10 +164,15 @@ TEST_P(AmrnbDecoderTest, DecodeTest) {
+     sf_close(outFileHandle);
+     GSMDecodeFrameExit(&amrHandle);
+     ASSERT_EQ(amrHandle, nullptr) << "Error deleting AMR-NB decoder";
++
++    string refFilePath = gEnv->getRes() + std::get<1>(GetParam());
++    ASSERT_TRUE(compareBinaryFiles(refFilePath, OUTPUT_FILE))
++       << "Error, Binary file comparison failed: Output file " << OUTPUT_FILE
++       << " does not match the reference file " << refFilePath << ".";
+ }
+ 
+ TEST_P(AmrnbDecoderTest, ResetDecodeTest) {
+-    string inputFile = gEnv->getRes() + GetParam();
++    string inputFile = gEnv->getRes() + std::get<0>(GetParam());
+     mFpInput = fopen(inputFile.c_str(), "rb");
+     ASSERT_NE(mFpInput, nullptr) << "Error opening input file " << inputFile;
+ 
+@@ -159,8 +202,24 @@ TEST_P(AmrnbDecoderTest, ResetDecodeTest) {
+ }
+ 
+ INSTANTIATE_TEST_SUITE_P(AmrnbDecoderTestAll, AmrnbDecoderTest,
+-                         ::testing::Values(("bbb_8000hz_1ch_8kbps_amrnb_30sec.amrnb"),
+-                                           ("sine_amrnb_1ch_12kbps_8000hz.amrnb")));
++                         ::testing::Values(std::make_tuple(
++                                                   "bbb_8000hz_1ch_8kbps_amrnb_30sec.amrnb",
++                                                   "bbb_8000hz_1ch_8kbps_amrnb_30sec_ref.pcm"),
++                                           std::make_tuple(
++                                                   "sine_amrnb_1ch_12kbps_8000hz.amrnb",
++                                                   "sine_amrnb_1ch_12kbps_8000hz_ref.pcm"),
++                                           std::make_tuple(
++                                                   "trim_8000hz_1ch_12kpbs_amrnb_200ms.amrnb",
++                                                   "trim_8000hz_1ch_12kpbs_amrnb_200ms_ref.pcm"),
++                                           std::make_tuple(
++                                                   "bbb_8kHz_1ch_4.75kbps_amrnb_3sec.amrnb",
++                                                   "bbb_8kHz_1ch_4.75kbps_amrnb_3sec_ref.pcm"),
++                                           std::make_tuple(
++                                                   "bbb_8kHz_1ch_10kbps_amrnb_1sec.amrnb",
++                                                   "bbb_8kHz_1ch_10kbps_amrnb_1sec_ref.pcm"),
++                                           std::make_tuple(
++                                                   "bbb_8kHz_1ch_12.2kbps_amrnb_3sec.amrnb",
++                                                   "bbb_8kHz_1ch_12.2kbps_amrnb_3sec_ref.pcm")));
+ 
+ int main(int argc, char **argv) {
+     gEnv = new AmrnbDecTestEnvironment();
+diff --git a/media/module/codecs/amrnb/dec/test/AndroidTest.xml b/media/module/codecs/amrnb/dec/test/AndroidTest.xml
+index 539fa5c026..7b2ba15a18 100644
+--- a/media/module/codecs/amrnb/dec/test/AndroidTest.xml
++++ b/media/module/codecs/amrnb/dec/test/AndroidTest.xml
+@@ -23,17 +23,17 @@
+     <target_preparer class="com.android.compatibility.common.tradefed.targetprep.DynamicConfigPusher">
+         <option name="target" value="host" />
+         <option name="config-filename" value="AmrnbDecoderTest" />
+-        <option name="version" value="1.0"/>
++        <option name="version" value="2.0"/>
+     </target_preparer>
+     <target_preparer class="com.android.compatibility.common.tradefed.targetprep.MediaPreparer">
+         <option name="push-all" value="true" />
+-        <option name="media-folder-name" value="AmrnbDecoderTest-1.0" />
++        <option name="media-folder-name" value="AmrnbDecoderTest-2.0" />
+         <option name="dynamic-config-module" value="AmrnbDecoderTest" />
+     </target_preparer>
+ 
+     <test class="com.android.tradefed.testtype.GTest" >
+         <option name="native-test-device-path" value="/data/local/tmp" />
+         <option name="module-name" value="AmrnbDecoderTest" />
+-        <option name="native-test-flag" value="-P /sdcard/test/AmrnbDecoderTest-1.0/" />
++        <option name="native-test-flag" value="-P /sdcard/test/AmrnbDecoderTest-2.0/" />
+     </test>
+ </configuration>
+diff --git a/media/module/codecs/amrnb/dec/test/DynamicConfig.xml b/media/module/codecs/amrnb/dec/test/DynamicConfig.xml
+index 701a75251c..02b869ac41 100644
+--- a/media/module/codecs/amrnb/dec/test/DynamicConfig.xml
++++ b/media/module/codecs/amrnb/dec/test/DynamicConfig.xml
+@@ -15,6 +15,6 @@
+ 
+ <dynamicConfig>
+     <entry key="media_files_url">
+-            <value>https://dl.google.com/android-unittest/media/frameworks/av/media/module/codecs/amrnb/dec/test/AmrnbDecoderTest-1.0.zip</value>
++            <value>https://dl.google.com/android-unittest/media/frameworks/av/media/module/codecs/amrnb/dec/test/AmrnbDecoderTest-2.0.zip</value>
+     </entry>
+ </dynamicConfig>
+diff --git a/media/module/codecs/amrnb/dec/test/README.md b/media/module/codecs/amrnb/dec/test/README.md
+index 41fb80a80d..ea54975b21 100644
+--- a/media/module/codecs/amrnb/dec/test/README.md
++++ b/media/module/codecs/amrnb/dec/test/README.md
+@@ -22,15 +22,15 @@ To test 32-bit binary push binaries from nativetest.
+ adb push ${OUT}/data/nativetest/AmrnbDecoderTest/AmrnbDecoderTest /data/local/tmp/
+ ```
+ 
+-The resource file for the tests is taken from [here](https://dl.google.com/android-unittest/media/frameworks/av/media/module/codecs/amrnb/dec/test/AmrnbDecoderTest-1.0.zip). Download, unzip and push these files into device for testing.
++The resource file for the tests is taken from [here](https://dl.google.com/android-unittest/media/frameworks/av/media/module/codecs/amrnb/dec/test/AmrnbDecoderTest-2.0.zip). Download, unzip and push these files into device for testing.
+ 
+ ```
+-adb push AmrnbDecoderTest-1.0 /data/local/tmp/
++adb push AmrnbDecoderTest-2.0 /data/local/tmp/
+ ```
+ 
+ usage: AmrnbDecoderTest -P \<path_to_folder\>
+ ```
+-adb shell /data/local/tmp/AmrnbDecoderTest -P /data/local/tmp/AmrnbDecoderTest-1.0/
++adb shell /data/local/tmp/AmrnbDecoderTest -P /data/local/tmp/AmrnbDecoderTest-2.0/
+ ```
+ Alternatively, the test can also be run using atest command.
+ 
+-- 
+2.43.0
+

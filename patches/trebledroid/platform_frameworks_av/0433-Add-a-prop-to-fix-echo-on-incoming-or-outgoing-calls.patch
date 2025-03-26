@@ -1,0 +1,46 @@
+From d01fcb3a967200586f96146e1a06278c7a54a241 Mon Sep 17 00:00:00 2001
+From: Alberto Ponces <ponces26@gmail.com>
+Date: Sun, 5 Nov 2023 15:18:03 +0000
+Subject: [PATCH 433/436] Add a prop to fix echo on incoming or outgoing calls
+
+May even fix audio calls altogether.
+
+Change-Id: I3a05608ad7b3f0876160d5f6a12b7c529b8f0961
+---
+ .../common/managerdefinitions/src/Serializer.cpp         | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp b/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp
+index 26edcaa1c4..059e4adfa1 100644
+--- a/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp
++++ b/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp
+@@ -669,6 +669,9 @@ std::variant<status_t, RouteTraits::Element> PolicySerializer::deserialize<Route
+     // This fixes broken mic while video record on some Exynos devices
+     bool disableBackMic = property_get_bool("persist.sys.phh.disable_back_mic", false);
+ 
++    // This may fix echo or non-working audio on calls
++    bool disableVoiceCallIn = property_get_bool("persist.sys.phh.disable_voice_call_in", false);
++
+     std::string sourcesAttr = getXmlAttribute(cur, Attributes::sources);
+     if (sourcesAttr.empty()) {
+         ALOGE("%s: No %s found", __func__, Attributes::sources);
+@@ -685,10 +688,16 @@ std::variant<status_t, RouteTraits::Element> PolicySerializer::deserialize<Route
+             if (source == NULL) {
+                 source = ctx->findPortByTagName(trim(devTag));
+             }
++
+             if (disableBackMic && strcmp(devTag, "Built-In Back Mic") == 0) {
+                 ALOGW("Skipping route source \"%s\" as it breaks video recording mic", devTag);
+                 source = NULL;
++            } else if (disableVoiceCallIn && strcmp(devTag, "Voice Call In") == 0 &&
++                      (sinkAttr == "voice tx" || sinkAttr == "voice_tx")) {
++                ALOGW("Skipping route source \"%s\" as it breaks audio on calls", devTag);
++                source = NULL;
+             }
++
+             if (source == NULL) {
+                 if (false && !mIgnoreVendorExtensions) {
+                     ALOGE("%s: no source found with name \"%s\"", __func__, devTag);
+-- 
+2.43.0
+

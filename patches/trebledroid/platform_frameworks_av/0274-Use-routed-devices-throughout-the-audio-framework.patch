@@ -1,0 +1,3305 @@
+From b7f8edcf5a19a9e69e9e6411061bb5e37f32a6e8 Mon Sep 17 00:00:00 2001
+From: Robert Wu <robertwu@google.com>
+Date: Mon, 4 Nov 2024 19:54:38 +0000
+Subject: [PATCH 274/436] Use routed devices throughout the audio framework
+
+After you open an audio stream, you can call getRoutedDevice() to
+get which output device is actually used.
+
+However, if you play an ALARM with a headset attached, audio comes
+out of both the speaker and the headset. This is not properly reflected
+with our current APIs.
+
+Throughout the audio framework, we should use DeviceIdVector instead
+of a single device when getRoutedDevice(s) are called.
+
+This change touches many files because onAudioDeviceUpdate() has many
+callers.
+
+BYPASS_LARGE_CHANGE_WARNING
+
+Bug: 367816690
+Test: atest AAudioTests
+Test: atest audiorecord_tests
+Test: atest audiosystem_tests
+Test: atest audiotrack_tests
+Test: adb shell /data/fuzz/arm64/libaaudio_fuzzer/libaaudio_fuzzer
+Test: adb shell /data/fuzz/arm64/mediaplayer_fuzzer/mediaplayer_fuzzer
+Test: adb shell /data/fuzz/arm64/mediarecorder_fuzzer/mediarecorder_fuzzer
+Test: OboeTester Test Output with Alarm and USB
+Flag: EXEMPT refactor
+Change-Id: I5e32ac5d1c24229e60112ef00d82af41d8eff6e7
+---
+ media/libaaudio/fuzzer/Android.bp             |   1 +
+ media/libaaudio/include/aaudio/AAudio.h       |  24 ++++-
+ media/libaaudio/src/Android.bp                |   2 +
+ .../src/binding/AAudioStreamConfiguration.cpp |  21 +++-
+ .../binding/aidl/aaudio/StreamParameters.aidl |   2 +-
+ .../src/client/AudioStreamInternal.cpp        |   4 +-
+ media/libaaudio/src/core/AAudioAudio.cpp      |  34 +++++-
+ .../src/core/AAudioStreamParameters.cpp       |  14 ++-
+ .../src/core/AAudioStreamParameters.h         |  11 +-
+ media/libaaudio/src/core/AudioStream.cpp      |   4 +-
+ media/libaaudio/src/core/AudioStream.h        |  13 +--
+ .../libaaudio/src/core/AudioStreamBuilder.cpp |   4 +-
+ .../src/legacy/AudioStreamLegacy.cpp          |  29 ++---
+ .../libaaudio/src/legacy/AudioStreamLegacy.h  |   2 +-
+ .../src/legacy/AudioStreamRecord.cpp          |   9 +-
+ .../libaaudio/src/legacy/AudioStreamTrack.cpp |  11 +-
+ media/libaaudio/src/libaaudio.map.txt         |   1 +
+ media/libaudioclient/AudioRecord.cpp          |  40 ++++---
+ media/libaudioclient/AudioSystem.cpp          |  27 ++---
+ media/libaudioclient/AudioTrack.cpp           |  37 ++++---
+ media/libaudioclient/IAudioFlinger.cpp        |   8 +-
+ media/libaudioclient/PlayerBase.cpp           |  35 +++---
+ media/libaudioclient/TrackPlayerBase.cpp      |   4 +-
+ .../android/media/CreateTrackResponse.aidl    |   4 +-
+ .../fuzzer/audioflinger_fuzzer.cpp            |   2 +-
+ .../include/media/AudioIoDescriptor.h         |  27 +++--
+ .../include/media/AudioRecord.h               |  18 ++--
+ .../include/media/AudioSystem.h               |   7 +-
+ .../libaudioclient/include/media/AudioTrack.h |  16 +--
+ .../include/media/IAudioFlinger.h             |   2 +-
+ .../libaudioclient/include/media/PlayerBase.h |  11 +-
+ .../include/media/TrackPlayerBase.h           |   2 +-
+ .../libaudioclient/tests/audio_test_utils.cpp |  33 +++---
+ media/libaudioclient/tests/audio_test_utils.h |  10 +-
+ .../tests/audioeffect_analyser.cpp            |   3 +-
+ .../tests/audiorecord_tests.cpp               |   8 +-
+ .../tests/audiorouting_tests.cpp              |  28 ++---
+ .../tests/audiosystem_tests.cpp               |   4 +-
+ .../libaudioclient/tests/audiotrack_tests.cpp |  13 +--
+ media/libaudiofoundation/AudioContainers.cpp  |   6 ++
+ .../include/media/AudioContainers.h           |   9 +-
+ media/libmedia/Android.bp                     |  92 ++++++++--------
+ media/libmedia/IMediaPlayer.cpp               |  28 ++---
+ media/libmedia/IMediaRecorder.cpp             |  37 ++++---
+ media/libmedia/include/media/IMediaPlayer.h   |   5 +-
+ media/libmedia/include/media/IMediaRecorder.h |   3 +-
+ .../include/media/MediaRecorderBase.h         |   2 +-
+ media/libmedia/include/media/mediaplayer.h    |   2 +-
+ media/libmedia/include/media/mediarecorder.h  |   3 +-
+ media/libmedia/mediaplayer.cpp                |  13 +--
+ media/libmedia/mediarecorder.cpp              |   8 +-
+ .../include/MediaMetricsConstants.h           |   1 +
+ media/libmediaplayerservice/Android.bp        |  15 +--
+ .../MediaPlayerService.cpp                    |  22 ++--
+ .../MediaPlayerService.h                      |   9 +-
+ .../MediaRecorderClient.cpp                   |  13 ++-
+ .../MediaRecorderClient.h                     |   4 +-
+ .../StagefrightRecorder.cpp                   |   6 +-
+ .../StagefrightRecorder.h                     |   2 +-
+ media/libmediaplayerservice/fuzzer/Android.bp |   2 +
+ .../fuzzer/mediaplayer_fuzzer.cpp             |   4 +-
+ .../fuzzer/mediarecorder_fuzzer.cpp           |   6 +-
+ .../include/MediaPlayerInterface.h            |   3 +-
+ media/libstagefright/Android.bp               | 101 +++++++++---------
+ media/libstagefright/AudioSource.cpp          |   4 +-
+ .../include/media/stagefright/AudioSource.h   |   2 +-
+ media/libstagefright/webm/Android.bp          |   8 +-
+ services/audioflinger/AudioFlinger.cpp        |   2 +-
+ services/audioflinger/Threads.cpp             |   7 +-
+ .../oboeservice/AAudioEndpointManager.cpp     |  29 ++---
+ .../oboeservice/AAudioServiceEndpoint.cpp     |   6 +-
+ .../oboeservice/AAudioServiceEndpointMMAP.cpp |  55 +++++-----
+ .../AAudioServiceEndpointShared.cpp           |   6 +-
+ .../oboeservice/AAudioServiceStreamBase.cpp   |   3 +-
+ .../oboeservice/fuzzer/oboeservice_fuzzer.cpp |   3 +-
+ 75 files changed, 601 insertions(+), 445 deletions(-)
+
+diff --git a/media/libaaudio/fuzzer/Android.bp b/media/libaaudio/fuzzer/Android.bp
+index 3b50744e2a..5b48401ae3 100644
+--- a/media/libaaudio/fuzzer/Android.bp
++++ b/media/libaaudio/fuzzer/Android.bp
+@@ -60,6 +60,7 @@ cc_fuzz {
+         "libaaudio",
+         "libaaudio_internal",
+         "libaudioclient",
++        "libaudiofoundation",
+         "libaudioutils",
+         "libbase_ndk",
+         "libcutils",
+diff --git a/media/libaaudio/include/aaudio/AAudio.h b/media/libaaudio/include/aaudio/AAudio.h
+index e19d526864..136edcc446 100644
+--- a/media/libaaudio/include/aaudio/AAudio.h
++++ b/media/libaaudio/include/aaudio/AAudio.h
+@@ -1909,10 +1909,32 @@ AAUDIO_API int32_t AAudioStream_getSamplesPerFrame(AAudioStream* _Nonnull stream
+  * Available since API level 26.
+  *
+  * @param stream reference provided by AAudioStreamBuilder_openStream()
+- * @return actual device ID
++ * @return actual device id. If there are multiple device ids used, the first device picked by
++ *         the audio policy engine will be returned.
+  */
+ AAUDIO_API int32_t AAudioStream_getDeviceId(AAudioStream* _Nonnull stream) __INTRODUCED_IN(26);
+ 
++/**
++ * Available since API level 36.
++ *
++ * Call this function after AAudioStreamBuilder_openStream().
++ * This function will crash if stream is null.
++ * An array of size 16 should generally be large enough to fit all device identifiers.
++ *
++ * @param stream reference provided by AAudioStreamBuilder_openStream().
++ * @param ids reference to an array of ids.
++ * @params numIds size allocated to the array of ids.
++ *         The input should be the size of the ids array.
++ *         The output will be the actual number of device ids.
++ * @return {@link #AAUDIO_OK} or an error code.
++ *         If numIds is null, return {@link #AAUDIO_ERROR_ILLEGAL_ARGUMENT}.
++ *         If numIds is smaller than the number of device ids, return
++ *         {@link #AAUDIO_ERROR_OUT_OF_RANGE}. The value of numIds will still be updated.
++ *         Otherwise, if ids is null, return {@link #AAUDIO_ERROR_ILLEGAL_ARGUMENT}.
++ */
++AAUDIO_API aaudio_result_t AAudioStream_getDeviceIds(AAudioStream* _Nonnull stream,
++        int32_t* _Nonnull ids, int32_t* _Nonnull numIds) __INTRODUCED_IN(36);
++
+ /**
+  * Available since API level 26.
+  *
+diff --git a/media/libaaudio/src/Android.bp b/media/libaaudio/src/Android.bp
+index ebb7637bb2..cccb096b5d 100644
+--- a/media/libaaudio/src/Android.bp
++++ b/media/libaaudio/src/Android.bp
+@@ -103,6 +103,7 @@ cc_library {
+         "framework-permission-aidl-cpp",
+         "libaaudio_internal",
+         "libaudioclient",
++        "libaudiofoundation",
+         "libaudioutils",
+         "libbinder",
+         "libcutils",
+@@ -166,6 +167,7 @@ cc_library {
+         "framework-permission-aidl-cpp",
+         "libaudioclient",
+         "libaudioclient_aidl_conversion",
++        "libaudiofoundation",
+         "libaudioutils",
+         "libbinder",
+         "libcutils",
+diff --git a/media/libaaudio/src/binding/AAudioStreamConfiguration.cpp b/media/libaaudio/src/binding/AAudioStreamConfiguration.cpp
+index c53a897f67..37c1a98473 100644
+--- a/media/libaaudio/src/binding/AAudioStreamConfiguration.cpp
++++ b/media/libaaudio/src/binding/AAudioStreamConfiguration.cpp
+@@ -34,7 +34,16 @@ using android::media::audio::common::AudioFormatDescription;
+ AAudioStreamConfiguration::AAudioStreamConfiguration(const StreamParameters& parcelable) {
+     setChannelMask(parcelable.channelMask);
+     setSampleRate(parcelable.sampleRate);
+-    setDeviceId(parcelable.deviceId);
++    auto deviceIds = android::convertContainer<android::DeviceIdVector>(
++            parcelable.deviceIds, android::aidl2legacy_int32_t_audio_port_handle_t);
++    if (deviceIds.ok()) {
++        setDeviceIds(deviceIds.value());
++    } else {
++        ALOGE("deviceIds (%s) aidl2legacy conversion failed",
++              android::toString(parcelable.deviceIds).c_str());
++        android::DeviceIdVector emptyDeviceIds;
++        setDeviceIds(emptyDeviceIds);
++    }
+     static_assert(sizeof(aaudio_sharing_mode_t) == sizeof(parcelable.sharingMode));
+     setSharingMode(parcelable.sharingMode);
+     auto convFormat = android::aidl2legacy_AudioFormatDescription_audio_format_t(
+@@ -87,7 +96,15 @@ StreamParameters AAudioStreamConfiguration::parcelable() const {
+     StreamParameters result;
+     result.channelMask = getChannelMask();
+     result.sampleRate = getSampleRate();
+-    result.deviceId = getDeviceId();
++    auto deviceIds = android::convertContainer<std::vector<int32_t>>(
++            getDeviceIds(), android::legacy2aidl_audio_port_handle_t_int32_t);
++    if (deviceIds.ok()) {
++        result.deviceIds = deviceIds.value();
++    } else {
++        ALOGE("deviceIds (%s) legacy2aidl conversion failed",
++              android::toString(getDeviceIds()).c_str());
++        result.deviceIds = {};
++    }
+     static_assert(sizeof(aaudio_sharing_mode_t) == sizeof(result.sharingMode));
+     result.sharingMode = getSharingMode();
+     auto convAudioFormat = android::legacy2aidl_audio_format_t_AudioFormatDescription(getFormat());
+diff --git a/media/libaaudio/src/binding/aidl/aaudio/StreamParameters.aidl b/media/libaaudio/src/binding/aidl/aaudio/StreamParameters.aidl
+index a301da81c4..7d7abce72a 100644
+--- a/media/libaaudio/src/binding/aidl/aaudio/StreamParameters.aidl
++++ b/media/libaaudio/src/binding/aidl/aaudio/StreamParameters.aidl
+@@ -21,7 +21,7 @@ import android.media.audio.common.AudioFormatDescription;
+ parcelable StreamParameters {
+     int                                       channelMask;  //          = AAUDIO_UNSPECIFIED;
+     int                                       sampleRate;  //           = AAUDIO_UNSPECIFIED;
+-    int                                       deviceId;  //             = AAUDIO_UNSPECIFIED;
++    int[]                                     deviceIds;  //            = null;
+     int /* aaudio_sharing_mode_t */           sharingMode;  //          = AAUDIO_SHARING_MODE_SHARED;
+     AudioFormatDescription                    audioFormat;  //          = AUDIO_FORMAT_DEFAULT;
+     int /* aaudio_direction_t */              direction;  //            = AAUDIO_DIRECTION_OUTPUT;
+diff --git a/media/libaaudio/src/client/AudioStreamInternal.cpp b/media/libaaudio/src/client/AudioStreamInternal.cpp
+index 99b90e26d5..6bc7dc2018 100644
+--- a/media/libaaudio/src/client/AudioStreamInternal.cpp
++++ b/media/libaaudio/src/client/AudioStreamInternal.cpp
+@@ -121,7 +121,7 @@ aaudio_result_t AudioStreamInternal::open(const AudioStreamBuilder &builder) {
+     request.setSharingModeMatchRequired(isSharingModeMatchRequired());
+     request.setInService(isInService());
+ 
+-    request.getConfiguration().setDeviceId(getDeviceId());
++    request.getConfiguration().setDeviceIds(getDeviceIds());
+     request.getConfiguration().setSampleRate(getSampleRate());
+     request.getConfiguration().setDirection(getDirection());
+     request.getConfiguration().setSharingMode(getSharingMode());
+@@ -180,7 +180,7 @@ aaudio_result_t AudioStreamInternal::open(const AudioStreamBuilder &builder) {
+         setChannelMask(configurationOutput.getChannelMask());
+     }
+ 
+-    setDeviceId(configurationOutput.getDeviceId());
++    setDeviceIds(configurationOutput.getDeviceIds());
+     setSessionId(configurationOutput.getSessionId());
+     setSharingMode(configurationOutput.getSharingMode());
+ 
+diff --git a/media/libaaudio/src/core/AAudioAudio.cpp b/media/libaaudio/src/core/AAudioAudio.cpp
+index fb87dd95c5..64152f07bd 100644
+--- a/media/libaaudio/src/core/AAudioAudio.cpp
++++ b/media/libaaudio/src/core/AAudioAudio.cpp
+@@ -95,7 +95,11 @@ AAUDIO_API void AAudioStreamBuilder_setDeviceId(AAudioStreamBuilder* builder,
+                                                 int32_t deviceId)
+ {
+     AudioStreamBuilder *streamBuilder = convertAAudioBuilderToStreamBuilder(builder);
+-    streamBuilder->setDeviceId(deviceId);
++    android::DeviceIdVector deviceIds;
++    if (deviceId != AAUDIO_UNSPECIFIED) {
++        deviceIds.push_back(deviceId);
++    }
++    streamBuilder->setDeviceIds(deviceIds);
+ }
+ 
+ AAUDIO_API void AAudioStreamBuilder_setPackageName(AAudioStreamBuilder* builder,
+@@ -537,7 +541,33 @@ AAUDIO_API aaudio_performance_mode_t AAudioStream_getPerformanceMode(AAudioStrea
+ AAUDIO_API int32_t AAudioStream_getDeviceId(AAudioStream* stream)
+ {
+     AudioStream *audioStream = convertAAudioStreamToAudioStream(stream);
+-    return audioStream->getDeviceId();
++    auto deviceIds = audioStream->getDeviceIds();
++    if (deviceIds.empty()) {
++        return AAUDIO_UNSPECIFIED;
++    }
++    return deviceIds[0];
++}
++
++AAUDIO_API aaudio_result_t AAudioStream_getDeviceIds(AAudioStream* stream, int32_t* ids,
++                                                     int32_t* numIds)
++{
++    if (numIds == nullptr) {
++        return AAUDIO_ERROR_ILLEGAL_ARGUMENT;
++    }
++    AudioStream *audioStream = convertAAudioStreamToAudioStream(stream);
++    auto deviceIds = audioStream->getDeviceIds();
++    if (*numIds < deviceIds.size()) {
++        *numIds = deviceIds.size();
++        return AAUDIO_ERROR_OUT_OF_RANGE;
++    }
++    if (ids == nullptr) {
++        return AAUDIO_ERROR_ILLEGAL_ARGUMENT;
++    }
++    for (int i = 0; i < deviceIds.size(); i++) {
++        ids[i] = deviceIds[i];
++    }
++    *numIds = deviceIds.size();
++    return AAUDIO_OK;
+ }
+ 
+ AAUDIO_API aaudio_sharing_mode_t AAudioStream_getSharingMode(AAudioStream* stream)
+diff --git a/media/libaaudio/src/core/AAudioStreamParameters.cpp b/media/libaaudio/src/core/AAudioStreamParameters.cpp
+index 056918aafc..f504fa902a 100644
+--- a/media/libaaudio/src/core/AAudioStreamParameters.cpp
++++ b/media/libaaudio/src/core/AAudioStreamParameters.cpp
+@@ -27,7 +27,7 @@ using namespace aaudio;
+ void AAudioStreamParameters::copyFrom(const AAudioStreamParameters &other) {
+     mSamplesPerFrame      = other.mSamplesPerFrame;
+     mSampleRate           = other.mSampleRate;
+-    mDeviceId             = other.mDeviceId;
++    mDeviceIds            = other.mDeviceIds;
+     mSessionId            = other.mSessionId;
+     mSharingMode          = other.mSharingMode;
+     mAudioFormat          = other.mAudioFormat;
+@@ -74,9 +74,13 @@ aaudio_result_t AAudioStreamParameters::validate() const {
+         return AAUDIO_ERROR_OUT_OF_RANGE;
+     }
+ 
+-    if (mDeviceId < 0) {
+-        ALOGD("deviceId out of range = %d", mDeviceId);
+-        return AAUDIO_ERROR_OUT_OF_RANGE;
++    // TODO(b/379139078): Query AudioSystem::listAudioPorts
++    for (auto deviceId : mDeviceIds) {
++        if (deviceId < 0) {
++            ALOGE("deviceId out of range = %d, deviceIds = %s", deviceId,
++                      android::toString(mDeviceIds).c_str());
++            return AAUDIO_ERROR_OUT_OF_RANGE;
++        }
+     }
+ 
+     // All Session ID values are legal.
+@@ -296,7 +300,7 @@ aaudio_result_t AAudioStreamParameters::validateChannelMask() const {
+ }
+ 
+ void AAudioStreamParameters::dump() const {
+-    ALOGD("mDeviceId             = %6d", mDeviceId);
++    ALOGD("mDeviceIds            = %s",  android::toString(mDeviceIds).c_str());
+     ALOGD("mSessionId            = %6d", mSessionId);
+     ALOGD("mSampleRate           = %6d", mSampleRate);
+     ALOGD("mSamplesPerFrame      = %6d", mSamplesPerFrame);
+diff --git a/media/libaaudio/src/core/AAudioStreamParameters.h b/media/libaaudio/src/core/AAudioStreamParameters.h
+index cad27a7031..c4c0a4f45a 100644
+--- a/media/libaaudio/src/core/AAudioStreamParameters.h
++++ b/media/libaaudio/src/core/AAudioStreamParameters.h
+@@ -20,6 +20,7 @@
+ #include <stdint.h>
+ 
+ #include <aaudio/AAudio.h>
++#include <media/AudioContainers.h>
+ #include <utility/AAudioUtilities.h>
+ 
+ namespace aaudio {
+@@ -29,12 +30,12 @@ public:
+     AAudioStreamParameters() = default;
+     virtual ~AAudioStreamParameters() = default;
+ 
+-    int32_t getDeviceId() const {
+-        return mDeviceId;
++    android::DeviceIdVector getDeviceIds() const {
++        return mDeviceIds;
+     }
+ 
+-    void setDeviceId(int32_t deviceId) {
+-        mDeviceId = deviceId;
++    void setDeviceIds(const android::DeviceIdVector& deviceIds) {
++        mDeviceIds = deviceIds;
+     }
+ 
+     int32_t getSampleRate() const {
+@@ -225,7 +226,7 @@ private:
+ 
+     int32_t                         mSamplesPerFrame      = AAUDIO_UNSPECIFIED;
+     int32_t                         mSampleRate           = AAUDIO_UNSPECIFIED;
+-    int32_t                         mDeviceId             = AAUDIO_UNSPECIFIED;
++    android::DeviceIdVector         mDeviceIds;
+     aaudio_sharing_mode_t           mSharingMode          = AAUDIO_SHARING_MODE_SHARED;
+     audio_format_t                  mAudioFormat          = AUDIO_FORMAT_DEFAULT;
+     aaudio_direction_t              mDirection            = AAUDIO_DIRECTION_OUTPUT;
+diff --git a/media/libaaudio/src/core/AudioStream.cpp b/media/libaaudio/src/core/AudioStream.cpp
+index a75a2a1be2..8e3bcf7808 100644
+--- a/media/libaaudio/src/core/AudioStream.cpp
++++ b/media/libaaudio/src/core/AudioStream.cpp
+@@ -79,7 +79,7 @@ aaudio_result_t AudioStream::open(const AudioStreamBuilder& builder)
+     mSamplesPerFrame = builder.getSamplesPerFrame();
+     mChannelMask = builder.getChannelMask();
+     mSampleRate = builder.getSampleRate();
+-    mDeviceId = builder.getDeviceId();
++    mDeviceIds = builder.getDeviceIds();
+     mFormat = builder.getFormat();
+     mSharingMode = builder.getSharingMode();
+     mSharingModeMatchRequired = builder.isSharingModeMatchRequired();
+@@ -204,7 +204,7 @@ aaudio_result_t AudioStream::systemStart() {
+     aaudio_result_t result = requestStart_l();
+     if (result == AAUDIO_OK) {
+         // We only call this for logging in "dumpsys audio". So ignore return code.
+-        (void) mPlayerBase->startWithStatus(getDeviceId());
++        (void) mPlayerBase->startWithStatus(getDeviceIds());
+     }
+     return result;
+ }
+diff --git a/media/libaaudio/src/core/AudioStream.h b/media/libaaudio/src/core/AudioStream.h
+index 32718827a7..3354adf284 100644
+--- a/media/libaaudio/src/core/AudioStream.h
++++ b/media/libaaudio/src/core/AudioStream.h
+@@ -27,6 +27,7 @@
+ #include <utils/StrongPointer.h>
+ 
+ #include <aaudio/AAudio.h>
++#include <media/AudioContainers.h>
+ #include <media/AudioSystem.h>
+ #include <media/PlayerBase.h>
+ #include <media/VolumeShaper.h>
+@@ -268,8 +269,8 @@ public:
+         mPerformanceMode = performanceMode;
+     }
+ 
+-    int32_t getDeviceId() const {
+-        return mDeviceId;
++    android::DeviceIdVector getDeviceIds() const {
++        return mDeviceIds;
+     }
+ 
+     aaudio_sharing_mode_t getSharingMode() const {
+@@ -411,7 +412,7 @@ public:
+ 
+     // Implement AudioDeviceCallback
+     void onAudioDeviceUpdate(audio_io_handle_t audioIo,
+-            audio_port_handle_t deviceId) override {};
++            const android::DeviceIdVector& deviceIds) override {};
+ 
+     // ============== I/O ===========================
+     // A Stream will only implement read() or write() depending on its direction.
+@@ -632,8 +633,8 @@ protected:
+     }
+     void setDisconnected();
+ 
+-    void setDeviceId(int32_t deviceId) {
+-        mDeviceId = deviceId;
++    void setDeviceIds(const android::DeviceIdVector& deviceIds) {
++        mDeviceIds = deviceIds;
+     }
+ 
+     // This should not be called after the open() call.
+@@ -774,7 +775,7 @@ private:
+     int32_t                     mSampleRate = AAUDIO_UNSPECIFIED;
+     int32_t                     mDeviceSampleRate = AAUDIO_UNSPECIFIED;
+     int32_t                     mHardwareSampleRate = AAUDIO_UNSPECIFIED;
+-    int32_t                     mDeviceId = AAUDIO_UNSPECIFIED;
++    android::DeviceIdVector     mDeviceIds;
+     aaudio_sharing_mode_t       mSharingMode = AAUDIO_SHARING_MODE_SHARED;
+     bool                        mSharingModeMatchRequired = false; // must match sharing mode requested
+     audio_format_t              mFormat = AUDIO_FORMAT_DEFAULT;
+diff --git a/media/libaaudio/src/core/AudioStreamBuilder.cpp b/media/libaaudio/src/core/AudioStreamBuilder.cpp
+index b0dc669506..73bd69f527 100644
+--- a/media/libaaudio/src/core/AudioStreamBuilder.cpp
++++ b/media/libaaudio/src/core/AudioStreamBuilder.cpp
+@@ -307,8 +307,8 @@ void AudioStreamBuilder::logParameters() const {
+           getSampleRate(), getSamplesPerFrame(), getChannelMask(), getFormat(),
+           AAudio_convertSharingModeToShortText(getSharingMode()),
+           AAudio_convertDirectionToText(getDirection()));
+-    ALOGI("device = %6d, sessionId = %d, perfMode = %d, callback: %s with frames = %d",
+-          getDeviceId(),
++    ALOGI("devices = %s, sessionId = %d, perfMode = %d, callback: %s with frames = %d",
++          android::toString(getDeviceIds()).c_str(),
+           getSessionId(),
+           getPerformanceMode(),
+           ((getDataCallbackProc() != nullptr) ? "ON" : "OFF"),
+diff --git a/media/libaaudio/src/legacy/AudioStreamLegacy.cpp b/media/libaaudio/src/legacy/AudioStreamLegacy.cpp
+index 255bd0f857..dfb9a01c25 100644
+--- a/media/libaaudio/src/legacy/AudioStreamLegacy.cpp
++++ b/media/libaaudio/src/legacy/AudioStreamLegacy.cpp
+@@ -260,36 +260,41 @@ aaudio_result_t AudioStreamLegacy::getBestTimestamp(clockid_t clockId,
+ }
+ 
+ void AudioStreamLegacy::onAudioDeviceUpdate(audio_io_handle_t /* audioIo */,
+-            audio_port_handle_t deviceId) {
+-    // Check for an invalid deviceId. Why change to UNSPECIFIED?
+-    if (deviceId == AAUDIO_UNSPECIFIED) {
+-        ALOGE("%s(, deviceId = AAUDIO_UNSPECIFIED)! Why?", __func__);
++            const android::DeviceIdVector& deviceIds) {
++    // Check for empty deviceIds. Callbacks for duplicating threads returns empty devices.
++    if (deviceIds.empty()) {
++        ALOGW("%s(empty deviceIds", __func__);
+         return;
+     }
++    android::DeviceIdVector oldDeviceIds = getDeviceIds();
+     // Device routing is a common source of errors and DISCONNECTS.
+     // Please leave this log in place. If there is a bug then this might
+     // get called after the stream has been deleted so log before we
+     // touch the stream object.
+-    ALOGD("%s(deviceId = %d)", __func__, (int)deviceId);
+-    if (getDeviceId() != AAUDIO_UNSPECIFIED
+-            && getDeviceId() != deviceId
++    ALOGD("%s() devices %s => %s",
++            __func__, android::toString(oldDeviceIds).c_str(),
++            android::toString(deviceIds).c_str());
++    if (!oldDeviceIds.empty()
++            && !android::areDeviceIdsEqual(oldDeviceIds, deviceIds)
+             && !isDisconnected()
+             ) {
+         // Note that isDataCallbackActive() is affected by state so call it before DISCONNECTING.
+         // If we have a data callback and the stream is active, then ask the data callback
+         // to DISCONNECT and call the error callback.
+         if (isDataCallbackActive()) {
+-            ALOGD("%s() request DISCONNECT in data callback, device %d => %d",
+-                  __func__, (int) getDeviceId(), (int) deviceId);
++            ALOGD("%s() request DISCONNECT in data callback, devices %s => %s",
++                    __func__, android::toString(oldDeviceIds).c_str(),
++                    android::toString(deviceIds).c_str());
+             // If the stream is stopped before the data callback has a chance to handle the
+             // request then the requestStop_l() and requestPause() methods will handle it after
+             // the callback has stopped.
+             mRequestDisconnect.request();
+         } else {
+-            ALOGD("%s() DISCONNECT the stream now, device %d => %d",
+-                  __func__, (int) getDeviceId(), (int) deviceId);
++            ALOGD("%s() DISCONNECT the stream now, devices %s => %s",
++                    __func__, android::toString(oldDeviceIds).c_str(),
++                    android::toString(deviceIds).c_str());
+             forceDisconnect();
+         }
+     }
+-    setDeviceId(deviceId);
++    setDeviceIds(deviceIds);
+ }
+diff --git a/media/libaaudio/src/legacy/AudioStreamLegacy.h b/media/libaaudio/src/legacy/AudioStreamLegacy.h
+index 53f6e06f44..a729161681 100644
+--- a/media/libaaudio/src/legacy/AudioStreamLegacy.h
++++ b/media/libaaudio/src/legacy/AudioStreamLegacy.h
+@@ -95,7 +95,7 @@ protected:
+                                      android::ExtendedTimestamp *extendedTimestamp);
+ 
+     void onAudioDeviceUpdate(audio_io_handle_t audioIo,
+-            audio_port_handle_t deviceId) override;
++            const android::DeviceIdVector& deviceIds) override;
+ 
+     /*
+      * Check to see whether a callback thread has requested a disconnected.
+diff --git a/media/libaaudio/src/legacy/AudioStreamRecord.cpp b/media/libaaudio/src/legacy/AudioStreamRecord.cpp
+index fe4bf2c770..1591f7daba 100644
+--- a/media/libaaudio/src/legacy/AudioStreamRecord.cpp
++++ b/media/libaaudio/src/legacy/AudioStreamRecord.cpp
+@@ -112,9 +112,7 @@ aaudio_result_t AudioStreamRecord::open(const AudioStreamBuilder& builder)
+     mCallbackBufferSize = builder.getFramesPerDataCallback();
+ 
+     // Don't call mAudioRecord->setInputDevice() because it will be overwritten by set()!
+-    audio_port_handle_t selectedDeviceId = (getDeviceId() == AAUDIO_UNSPECIFIED)
+-                                           ? AUDIO_PORT_HANDLE_NONE
+-                                           : getDeviceId();
++    audio_port_handle_t selectedDeviceId = getFirstDeviceId(getDeviceIds());
+ 
+     const audio_content_type_t contentType =
+             AAudioConvert_contentTypeToInternal(builder.getContentType());
+@@ -198,7 +196,8 @@ aaudio_result_t AudioStreamRecord::open(const AudioStreamBuilder& builder)
+                  AudioGlobal_convertPerformanceModeToText(builder.getPerformanceMode()))
+             .set(AMEDIAMETRICS_PROP_SHARINGMODE,
+                  AudioGlobal_convertSharingModeToText(builder.getSharingMode()))
+-            .set(AMEDIAMETRICS_PROP_ENCODINGCLIENT, toString(requestedFormat).c_str()).record();
++            .set(AMEDIAMETRICS_PROP_ENCODINGCLIENT,
++                 android::toString(requestedFormat).c_str()).record();
+ 
+     // Get the actual values from the AudioRecord.
+     setChannelMask(AAudioConvert_androidToAAudioChannelMask(
+@@ -275,7 +274,7 @@ aaudio_result_t AudioStreamRecord::open(const AudioStreamBuilder& builder)
+              perfMode, actualPerformanceMode);
+ 
+     setState(AAUDIO_STREAM_STATE_OPEN);
+-    setDeviceId(mAudioRecord->getRoutedDeviceId());
++    setDeviceIds(mAudioRecord->getRoutedDeviceIds());
+ 
+     aaudio_session_id_t actualSessionId =
+             (requestedSessionId == AAUDIO_SESSION_ID_NONE)
+diff --git a/media/libaaudio/src/legacy/AudioStreamTrack.cpp b/media/libaaudio/src/legacy/AudioStreamTrack.cpp
+index 16c0bcd4eb..2e57f0d716 100644
+--- a/media/libaaudio/src/legacy/AudioStreamTrack.cpp
++++ b/media/libaaudio/src/legacy/AudioStreamTrack.cpp
+@@ -132,9 +132,7 @@ aaudio_result_t AudioStreamTrack::open(const AudioStreamBuilder& builder)
+           notificationFrames, (uint)frameCount);
+ 
+     // Don't call mAudioTrack->setDeviceId() because it will be overwritten by set()!
+-    audio_port_handle_t selectedDeviceId = (getDeviceId() == AAUDIO_UNSPECIFIED)
+-                                           ? AUDIO_PORT_HANDLE_NONE
+-                                           : getDeviceId();
++    audio_port_handle_t selectedDeviceId = getFirstDeviceId(getDeviceIds());
+ 
+     const audio_content_type_t contentType =
+             AAudioConvert_contentTypeToInternal(builder.getContentType());
+@@ -197,7 +195,8 @@ aaudio_result_t AudioStreamTrack::open(const AudioStreamBuilder& builder)
+                  AudioGlobal_convertPerformanceModeToText(builder.getPerformanceMode()))
+             .set(AMEDIAMETRICS_PROP_SHARINGMODE,
+                  AudioGlobal_convertSharingModeToText(builder.getSharingMode()))
+-            .set(AMEDIAMETRICS_PROP_ENCODINGCLIENT, toString(getFormat()).c_str()).record();
++            .set(AMEDIAMETRICS_PROP_ENCODINGCLIENT,
++                 android::toString(getFormat()).c_str()).record();
+ 
+     doSetVolume();
+ 
+@@ -233,7 +232,7 @@ aaudio_result_t AudioStreamTrack::open(const AudioStreamBuilder& builder)
+         mBlockAdapter = nullptr;
+     }
+ 
+-    setDeviceId(mAudioTrack->getRoutedDeviceId());
++    setDeviceIds(mAudioTrack->getRoutedDeviceIds());
+ 
+     aaudio_session_id_t actualSessionId =
+             (requestedSessionId == AAUDIO_SESSION_ID_NONE)
+@@ -317,7 +316,7 @@ void AudioStreamTrack::onNewIAudioTrack() {
+     if (mAudioTrack->channelCount() != getSamplesPerFrame()
+           || mAudioTrack->format() != getFormat()
+           || mAudioTrack->getSampleRate() != getSampleRate()
+-          || mAudioTrack->getRoutedDeviceId() != getDeviceId()
++          || !areDeviceIdsEqual(mAudioTrack->getRoutedDeviceIds(), getDeviceIds())
+           || getBufferCapacityFromDevice() != getBufferCapacity()
+           || getFramesPerBurstFromDevice() != getFramesPerBurst()) {
+         AudioStreamLegacy::onNewIAudioTrack();
+diff --git a/media/libaaudio/src/libaaudio.map.txt b/media/libaaudio/src/libaaudio.map.txt
+index 13c19a137b..36d76aa556 100644
+--- a/media/libaaudio/src/libaaudio.map.txt
++++ b/media/libaaudio/src/libaaudio.map.txt
+@@ -72,6 +72,7 @@ LIBAAUDIO {
+     AAudioStream_getHardwareSampleRate;   # introduced=UpsideDownCake
+     AAudio_getPlatformMMapPolicy; # introduced=36
+     AAudio_getPlatformMMapExclusivePolicy; #introduced=36
++    AAudioStream_getDeviceIds; # introduced=36
+ 
+     AAudioStreamBuilder_setTags; # systemapi
+     AAudioStream_getTags; # systemapi
+diff --git a/media/libaudioclient/AudioRecord.cpp b/media/libaudioclient/AudioRecord.cpp
+index 1e6be68e7d..9a4b45d3bf 100644
+--- a/media/libaudioclient/AudioRecord.cpp
++++ b/media/libaudioclient/AudioRecord.cpp
+@@ -731,7 +731,7 @@ status_t AudioRecord::setInputDevice(audio_port_handle_t deviceId) {
+         mSelectedDeviceId = deviceId;
+         if (mStatus == NO_ERROR) {
+             if (mActive) {
+-                if (mSelectedDeviceId != mRoutedDeviceId) {
++                if (getFirstDeviceId(mRoutedDeviceIds) != mSelectedDeviceId) {
+                     // stop capture so that audio policy manager does not reject the new instance
+                     // start request as only one capture can be active at a time.
+                     if (mAudioRecord != 0) {
+@@ -758,7 +758,7 @@ audio_port_handle_t AudioRecord::getInputDevice() {
+ }
+ 
+ // must be called with mLock held
+-void AudioRecord::updateRoutedDeviceId_l()
++void AudioRecord::updateRoutedDeviceIds_l()
+ {
+     // if the record is inactive, do not update actual device as the input stream maybe routed
+     // from a device not relevant to this client because of other active use cases.
+@@ -766,17 +766,21 @@ void AudioRecord::updateRoutedDeviceId_l()
+         return;
+     }
+     if (mInput != AUDIO_IO_HANDLE_NONE) {
+-        audio_port_handle_t deviceId = AudioSystem::getDeviceIdForIo(mInput);
+-        if (deviceId != AUDIO_PORT_HANDLE_NONE) {
+-            mRoutedDeviceId = deviceId;
++        DeviceIdVector deviceIds;
++        status_t result = AudioSystem::getDeviceIdsForIo(mInput, deviceIds);
++        if (result != OK) {
++            ALOGW("%s: getDeviceIdsForIo returned: %d", __func__, result);
++        }
++        if (!deviceIds.empty()) {
++            mRoutedDeviceIds = deviceIds;
+         }
+      }
+ }
+ 
+-audio_port_handle_t AudioRecord::getRoutedDeviceId() {
++DeviceIdVector AudioRecord::getRoutedDeviceIds() {
+     AutoMutex lock(mLock);
+-    updateRoutedDeviceId_l();
+-    return mRoutedDeviceId;
++    updateRoutedDeviceIds_l();
++    return mRoutedDeviceIds;
+ }
+ 
+ status_t AudioRecord::dump(int fd, const Vector<String16>& args __unused) const
+@@ -794,10 +798,11 @@ status_t AudioRecord::dump(int fd, const Vector<String16>& args __unused) const
+                   mFrameCount, mReqFrameCount);
+     result.appendFormat("  notif. frame count(%u), req. notif. frame count(%u)\n",
+              mNotificationFramesAct, mNotificationFramesReq);
+-    result.appendFormat("  input(%d), latency(%u), selected device Id(%d), routed device Id(%d)\n",
+-                        mInput, mLatency, mSelectedDeviceId, mRoutedDeviceId);
+-    result.appendFormat("  mic direction(%d) mic field dimension(%f)",
+-                        mSelectedMicDirection, mSelectedMicFieldDimension);
++    result.appendFormat("  input(%d), latency(%u), selected device Id(%d)\n",
++                        mInput, mLatency, mSelectedDeviceId);
++    result.appendFormat("  routed device Ids(%s), mic direction(%d) mic field dimension(%f)",
++                        toString(mRoutedDeviceIds).c_str(), mSelectedMicDirection,
++                        mSelectedMicFieldDimension);
+     ::write(fd, result.c_str(), result.size());
+     return NO_ERROR;
+ }
+@@ -940,7 +945,7 @@ status_t AudioRecord::createRecord_l(const Modulo<uint32_t> &epoch)
+         mAwaitBoost = true;
+     }
+     mFlags = output.flags;
+-    mRoutedDeviceId = output.selectedDeviceId;
++    mRoutedDeviceIds = { output.selectedDeviceId };
+     mSessionId = output.sessionId;
+     mSampleRate = output.sampleRate;
+     mServerConfig = output.serverConfig;
+@@ -1063,7 +1068,8 @@ status_t AudioRecord::createRecord_l(const Modulo<uint32_t> &epoch)
+         .set(AMEDIAMETRICS_PROP_SOURCE, toString(mAttributes.source).c_str())
+         .set(AMEDIAMETRICS_PROP_THREADID, (int32_t)output.inputId)
+         .set(AMEDIAMETRICS_PROP_SELECTEDDEVICEID, (int32_t)mSelectedDeviceId)
+-        .set(AMEDIAMETRICS_PROP_ROUTEDDEVICEID, (int32_t)mRoutedDeviceId)
++        .set(AMEDIAMETRICS_PROP_ROUTEDDEVICEID, (int32_t)(getFirstDeviceId(mRoutedDeviceIds)))
++        .set(AMEDIAMETRICS_PROP_ROUTEDDEVICEIDS, toString(mRoutedDeviceIds).c_str())
+         .set(AMEDIAMETRICS_PROP_ENCODING, toString(mFormat).c_str())
+         .set(AMEDIAMETRICS_PROP_CHANNELMASK, (int32_t)mChannelMask)
+         .set(AMEDIAMETRICS_PROP_FRAMECOUNT, (int32_t)mFrameCount)
+@@ -1656,7 +1662,7 @@ status_t AudioRecord::removeAudioDeviceCallback(
+ }
+ 
+ void AudioRecord::onAudioDeviceUpdate(audio_io_handle_t audioIo,
+-                                 audio_port_handle_t deviceId)
++                                      const DeviceIdVector& deviceIds)
+ {
+     sp<AudioSystem::AudioDeviceCallback> callback;
+     {
+@@ -1668,11 +1674,11 @@ void AudioRecord::onAudioDeviceUpdate(audio_io_handle_t audioIo,
+         // only update device if the record is active as route changes due to other use cases are
+         // irrelevant for this client
+         if (mActive) {
+-            mRoutedDeviceId = deviceId;
++            mRoutedDeviceIds = deviceIds;
+         }
+     }
+     if (callback.get() != nullptr) {
+-        callback->onAudioDeviceUpdate(mInput, mRoutedDeviceId);
++        callback->onAudioDeviceUpdate(mInput, mRoutedDeviceIds);
+     }
+ }
+ 
+diff --git a/media/libaudioclient/AudioSystem.cpp b/media/libaudioclient/AudioSystem.cpp
+index 47d5dd5528..b8dadb4786 100644
+--- a/media/libaudioclient/AudioSystem.cpp
++++ b/media/libaudioclient/AudioSystem.cpp
+@@ -683,7 +683,7 @@ Status AudioSystem::AudioFlingerClient::ioConfigChanged(
+ 
+     if (ioDesc->getIoHandle() == AUDIO_IO_HANDLE_NONE) return Status::ok();
+ 
+-    audio_port_handle_t deviceId = AUDIO_PORT_HANDLE_NONE;
++    DeviceIdVector deviceIds;
+     std::vector<sp<AudioDeviceCallback>> callbacksToCall;
+     {
+         std::lock_guard _l(mMutex);
+@@ -695,12 +695,12 @@ Status AudioSystem::AudioFlingerClient::ioConfigChanged(
+             case AUDIO_INPUT_OPENED:
+             case AUDIO_INPUT_REGISTERED: {
+                 if (sp<AudioIoDescriptor> oldDesc = getIoDescriptor_l(ioDesc->getIoHandle())) {
+-                    deviceId = oldDesc->getDeviceId();
++                    deviceIds = oldDesc->getDeviceIds();
+                 }
+                 mIoDescriptors[ioDesc->getIoHandle()] = ioDesc;
+ 
+-                if (ioDesc->getDeviceId() != AUDIO_PORT_HANDLE_NONE) {
+-                    deviceId = ioDesc->getDeviceId();
++                if (!ioDesc->getDeviceIds().empty()) {
++                    deviceIds = ioDesc->getDeviceIds();
+                     if (event == AUDIO_OUTPUT_OPENED || event == AUDIO_INPUT_OPENED) {
+                         auto it = mAudioDeviceCallbacks.find(ioDesc->getIoHandle());
+                         if (it != mAudioDeviceCallbacks.end()) {
+@@ -741,11 +741,12 @@ Status AudioSystem::AudioFlingerClient::ioConfigChanged(
+                     break;
+                 }
+ 
+-                deviceId = oldDesc->getDeviceId();
++                deviceIds = oldDesc->getDeviceIds();
+                 mIoDescriptors[ioDesc->getIoHandle()] = ioDesc;
+ 
+-                if (deviceId != ioDesc->getDeviceId()) {
+-                    deviceId = ioDesc->getDeviceId();
++                DeviceIdVector ioDescDeviceIds = ioDesc->getDeviceIds();
++                if (!areDeviceIdsEqual(deviceIds, ioDescDeviceIds)) {
++                    deviceIds = ioDescDeviceIds;
+                     auto it = mAudioDeviceCallbacks.find(ioDesc->getIoHandle());
+                     if (it != mAudioDeviceCallbacks.end()) {
+                         callbacks = it->second;
+@@ -773,7 +774,7 @@ Status AudioSystem::AudioFlingerClient::ioConfigChanged(
+                     auto it2 = cbks.find(ioDesc->getPortId());
+                     if (it2 != cbks.end()) {
+                         callbacks.emplace(ioDesc->getPortId(), it2->second);
+-                        deviceId = oldDesc->getDeviceId();
++                        deviceIds = oldDesc->getDeviceIds();
+                     }
+                 }
+             }
+@@ -792,7 +793,7 @@ Status AudioSystem::AudioFlingerClient::ioConfigChanged(
+     // example getRoutedDevice that updates the device and tries to acquire mMutex.
+     for (auto cb  : callbacksToCall) {
+         // If callbacksToCall is not empty, it implies ioDesc->getIoHandle() and deviceId are valid
+-        cb->onAudioDeviceUpdate(ioDesc->getIoHandle(), deviceId);
++        cb->onAudioDeviceUpdate(ioDesc->getIoHandle(), deviceIds);
+     }
+ 
+     return Status::ok();
+@@ -1964,14 +1965,16 @@ status_t AudioSystem::removeSupportedLatencyModesCallback(
+     return afc->removeSupportedLatencyModesCallback(callback);
+ }
+ 
+-audio_port_handle_t AudioSystem::getDeviceIdForIo(audio_io_handle_t audioIo) {
++status_t AudioSystem::getDeviceIdsForIo(audio_io_handle_t audioIo, DeviceIdVector& deviceIds) {
+     const sp<IAudioFlinger> af = get_audio_flinger();
+     if (af == nullptr) return AudioFlingerServiceTraits::getError();
+     const sp<AudioIoDescriptor> desc = getIoDescriptor(audioIo);
+     if (desc == 0) {
+-        return AUDIO_PORT_HANDLE_NONE;
++        deviceIds.clear();
++    } else {
++        deviceIds = desc->getDeviceIds();
+     }
+-    return desc->getDeviceId();
++    return OK;
+ }
+ 
+ status_t AudioSystem::acquireSoundTriggerSession(audio_session_t* session,
+diff --git a/media/libaudioclient/AudioTrack.cpp b/media/libaudioclient/AudioTrack.cpp
+index a9409eb1f8..3591fbf585 100644
+--- a/media/libaudioclient/AudioTrack.cpp
++++ b/media/libaudioclient/AudioTrack.cpp
+@@ -1736,7 +1736,7 @@ status_t AudioTrack::setOutputDevice(audio_port_handle_t deviceId) {
+                 // allow track invalidation when track is not playing to propagate
+                 // the updated mSelectedDeviceId
+                 if (isPlaying_l()) {
+-                    if (mSelectedDeviceId != mRoutedDeviceId) {
++                    if (getFirstDeviceId(mRoutedDeviceIds) != mSelectedDeviceId) {
+                         android_atomic_or(CBLK_INVALID, &mCblk->mFlags);
+                         mProxy->interrupt();
+                     }
+@@ -1759,7 +1759,7 @@ audio_port_handle_t AudioTrack::getOutputDevice() {
+ }
+ 
+ // must be called with mLock held
+-void AudioTrack::updateRoutedDeviceId_l()
++void AudioTrack::updateRoutedDeviceIds_l()
+ {
+     // if the track is inactive, do not update actual device as the output stream maybe routed
+     // to a device not relevant to this client because of other active use cases.
+@@ -1767,17 +1767,21 @@ void AudioTrack::updateRoutedDeviceId_l()
+         return;
+     }
+     if (mOutput != AUDIO_IO_HANDLE_NONE) {
+-        audio_port_handle_t deviceId = AudioSystem::getDeviceIdForIo(mOutput);
+-        if (deviceId != AUDIO_PORT_HANDLE_NONE) {
+-            mRoutedDeviceId = deviceId;
++        DeviceIdVector deviceIds;
++        status_t result = AudioSystem::getDeviceIdsForIo(mOutput, deviceIds);
++        if (result != OK) {
++            ALOGW("%s: getDeviceIdsForIo returned: %d", __func__, result);
++        }
++        if (!deviceIds.empty()) {
++            mRoutedDeviceIds = deviceIds;
+         }
+     }
+ }
+ 
+-audio_port_handle_t AudioTrack::getRoutedDeviceId() {
++DeviceIdVector AudioTrack::getRoutedDeviceIds() {
+     AutoMutex lock(mLock);
+-    updateRoutedDeviceId_l();
+-    return mRoutedDeviceId;
++    updateRoutedDeviceIds_l();
++    return mRoutedDeviceIds;
+ }
+ 
+ status_t AudioTrack::attachAuxEffect(int effectId)
+@@ -1937,7 +1941,7 @@ status_t AudioTrack::createTrack_l()
+ 
+     mFrameCount = output.frameCount;
+     mNotificationFramesAct = (uint32_t)output.notificationFrameCount;
+-    mRoutedDeviceId = output.selectedDeviceId;
++    mRoutedDeviceIds = output.selectedDeviceIds;
+     mSessionId = output.sessionId;
+     mStreamType = output.streamType;
+ 
+@@ -2106,7 +2110,8 @@ status_t AudioTrack::createTrack_l()
+         .set(AMEDIAMETRICS_PROP_USAGE, toString(mAttributes.usage).c_str())
+         .set(AMEDIAMETRICS_PROP_THREADID, (int32_t)output.outputId)
+         .set(AMEDIAMETRICS_PROP_SELECTEDDEVICEID, (int32_t)mSelectedDeviceId)
+-        .set(AMEDIAMETRICS_PROP_ROUTEDDEVICEID, (int32_t)mRoutedDeviceId)
++        .set(AMEDIAMETRICS_PROP_ROUTEDDEVICEID, (int32_t)(getFirstDeviceId(mRoutedDeviceIds)))
++        .set(AMEDIAMETRICS_PROP_ROUTEDDEVICEIDS, toString(mRoutedDeviceIds).c_str())
+         .set(AMEDIAMETRICS_PROP_ENCODING, toString(mFormat).c_str())
+         .set(AMEDIAMETRICS_PROP_CHANNELMASK, (int32_t)mChannelMask)
+         .set(AMEDIAMETRICS_PROP_FRAMECOUNT, (int32_t)mFrameCount)
+@@ -3555,8 +3560,8 @@ status_t AudioTrack::dump(int fd, const Vector<String16>& args __unused) const
+     result.appendFormat("  notif. frame count(%u), req. notif. frame count(%u),"
+             " req. notif. per buff(%u)\n",
+              mNotificationFramesAct, mNotificationFramesReq, mNotificationsPerBufferReq);
+-    result.appendFormat("  latency (%d), selected device Id(%d), routed device Id(%d)\n",
+-                        mLatency, mSelectedDeviceId, mRoutedDeviceId);
++    result.appendFormat("  latency (%d), selected device Id(%d), routed device Ids(%s)\n",
++                        mLatency, mSelectedDeviceId, toString(mRoutedDeviceIds).c_str());
+     result.appendFormat("  output(%d) AF latency (%u) AF frame count(%zu) AF SampleRate(%u)\n",
+                         mOutput, mAfLatency, mAfFrameCount, mAfSampleRate);
+     ::write(fd, result.c_str(), result.size());
+@@ -3623,7 +3628,7 @@ void AudioTrack::triggerPortIdUpdate_l() {
+ 
+     // first time when the track is created we do not have a valid piid
+     if (mPlayerIId != PLAYER_PIID_INVALID) {
+-        mAudioManager->playerEvent(mPlayerIId, PLAYER_UPDATE_PORT_ID, mPortId);
++        mAudioManager->playerEvent(mPlayerIId, PLAYER_UPDATE_PORT_ID, {mPortId});
+     }
+ }
+ 
+@@ -3672,7 +3677,7 @@ status_t AudioTrack::removeAudioDeviceCallback(
+ 
+ 
+ void AudioTrack::onAudioDeviceUpdate(audio_io_handle_t audioIo,
+-                                 audio_port_handle_t deviceId)
++                                     const DeviceIdVector& deviceIds)
+ {
+     sp<AudioSystem::AudioDeviceCallback> callback;
+     {
+@@ -3684,12 +3689,12 @@ void AudioTrack::onAudioDeviceUpdate(audio_io_handle_t audioIo,
+         // only update device if the track is active as route changes due to other use cases are
+         // irrelevant for this client
+         if (mState == STATE_ACTIVE) {
+-            mRoutedDeviceId = deviceId;
++            mRoutedDeviceIds = deviceIds;
+         }
+     }
+ 
+     if (callback.get() != nullptr) {
+-        callback->onAudioDeviceUpdate(mOutput, mRoutedDeviceId);
++        callback->onAudioDeviceUpdate(mOutput, mRoutedDeviceIds);
+     }
+ }
+ 
+diff --git a/media/libaudioclient/IAudioFlinger.cpp b/media/libaudioclient/IAudioFlinger.cpp
+index 168b47e119..152360770f 100644
+--- a/media/libaudioclient/IAudioFlinger.cpp
++++ b/media/libaudioclient/IAudioFlinger.cpp
+@@ -103,8 +103,8 @@ IAudioFlinger::CreateTrackOutput::toAidl() const {
+     aidl.flags = VALUE_OR_RETURN(legacy2aidl_audio_output_flags_t_int32_t_mask(flags));
+     aidl.frameCount = VALUE_OR_RETURN(convertIntegral<int64_t>(frameCount));
+     aidl.notificationFrameCount = VALUE_OR_RETURN(convertIntegral<int64_t>(notificationFrameCount));
+-    aidl.selectedDeviceId = VALUE_OR_RETURN(
+-            legacy2aidl_audio_port_handle_t_int32_t(selectedDeviceId));
++    aidl.selectedDeviceIds = VALUE_OR_RETURN(convertContainer<std::vector<int32_t>>(
++            selectedDeviceIds, legacy2aidl_audio_port_handle_t_int32_t));
+     aidl.sessionId = VALUE_OR_RETURN(legacy2aidl_audio_session_t_int32_t(sessionId));
+     aidl.sampleRate = VALUE_OR_RETURN(convertIntegral<int32_t>(sampleRate));
+     aidl.streamType =  VALUE_OR_RETURN(
+@@ -132,8 +132,8 @@ IAudioFlinger::CreateTrackOutput::fromAidl(
+     legacy.frameCount = VALUE_OR_RETURN(convertIntegral<size_t>(aidl.frameCount));
+     legacy.notificationFrameCount = VALUE_OR_RETURN(
+             convertIntegral<size_t>(aidl.notificationFrameCount));
+-    legacy.selectedDeviceId = VALUE_OR_RETURN(
+-            aidl2legacy_int32_t_audio_port_handle_t(aidl.selectedDeviceId));
++    legacy.selectedDeviceIds = VALUE_OR_RETURN(convertContainer<DeviceIdVector>(
++            aidl.selectedDeviceIds, aidl2legacy_int32_t_audio_port_handle_t));
+     legacy.sessionId = VALUE_OR_RETURN(aidl2legacy_int32_t_audio_session_t(aidl.sessionId));
+     legacy.sampleRate = VALUE_OR_RETURN(convertIntegral<uint32_t>(aidl.sampleRate));
+     legacy.streamType = VALUE_OR_RETURN(
+diff --git a/media/libaudioclient/PlayerBase.cpp b/media/libaudioclient/PlayerBase.cpp
+index 651255aa27..5999040eb5 100644
+--- a/media/libaudioclient/PlayerBase.cpp
++++ b/media/libaudioclient/PlayerBase.cpp
+@@ -30,8 +30,7 @@ using media::VolumeShaperOperation;
+ PlayerBase::PlayerBase() : BnPlayer(),
+         mPanMultiplierL(1.0f), mPanMultiplierR(1.0f),
+         mVolumeMultiplierL(1.0f), mVolumeMultiplierR(1.0f),
+-        mPIId(PLAYER_PIID_INVALID), mLastReportedEvent(PLAYER_STATE_UNKNOWN),
+-        mLastReportedDeviceId(AUDIO_PORT_HANDLE_NONE)
++        mPIId(PLAYER_PIID_INVALID), mLastReportedEvent(PLAYER_STATE_UNKNOWN)
+ {
+     ALOGD("PlayerBase::PlayerBase()");
+     // use checkService() to avoid blocking if audio service is not up yet
+@@ -68,7 +67,7 @@ void PlayerBase::triggerPortIdUpdate(audio_port_handle_t portId) const {
+     }
+ 
+     if (mPIId != PLAYER_PIID_INVALID && portId != AUDIO_PORT_HANDLE_NONE) {
+-        mAudioManager->playerEvent(mPIId, android::PLAYER_UPDATE_PORT_ID, portId);
++        mAudioManager->playerEvent(mPIId, android::PLAYER_UPDATE_PORT_ID, { portId });
+     }
+ }
+ 
+@@ -80,13 +79,13 @@ void PlayerBase::baseDestroy() {
+ }
+ 
+ //------------------------------------------------------------------------------
+-void PlayerBase::servicePlayerEvent(player_state_t event, audio_port_handle_t deviceId) {
++void PlayerBase::servicePlayerEvent(player_state_t event, const DeviceIdVector& deviceIds) {
+     if (mAudioManager != 0) {
+         bool changed = false;
+         {
+             Mutex::Autolock _l(mDeviceIdLock);
+-            changed = mLastReportedDeviceId != deviceId;
+-            mLastReportedDeviceId = deviceId;
++            changed = !areDeviceIdsEqual(deviceIds, mLastReportedDeviceIds);
++            mLastReportedDeviceIds = deviceIds;
+         }
+ 
+         {
+@@ -99,7 +98,7 @@ void PlayerBase::servicePlayerEvent(player_state_t event, audio_port_handle_t de
+             }
+         }
+         if (changed && (mPIId != PLAYER_PIID_INVALID)) {
+-            mAudioManager->playerEvent(mPIId, event, deviceId);
++            mAudioManager->playerEvent(mPIId, event, deviceIds);
+         }
+     }
+ }
+@@ -112,18 +111,18 @@ void PlayerBase::serviceReleasePlayer() {
+ }
+ 
+ //FIXME temporary method while some player state is outside of this class
+-void PlayerBase::reportEvent(player_state_t event, audio_port_handle_t deviceId) {
+-    servicePlayerEvent(event, deviceId);
++void PlayerBase::reportEvent(player_state_t event, const DeviceIdVector& deviceIds) {
++    servicePlayerEvent(event, deviceIds);
+ }
+ 
+-void PlayerBase::baseUpdateDeviceId(audio_port_handle_t deviceId) {
+-    servicePlayerEvent(PLAYER_UPDATE_DEVICE_ID, deviceId);
++void PlayerBase::baseUpdateDeviceIds(const DeviceIdVector& deviceIds) {
++    servicePlayerEvent(PLAYER_UPDATE_DEVICE_ID, deviceIds);
+ }
+ 
+-status_t PlayerBase::startWithStatus(audio_port_handle_t deviceId) {
++status_t PlayerBase::startWithStatus(const DeviceIdVector& deviceIds) {
+     status_t status = playerStart();
+     if (status == NO_ERROR) {
+-        servicePlayerEvent(PLAYER_STATE_STARTED, deviceId);
++        servicePlayerEvent(PLAYER_STATE_STARTED, deviceIds);
+     } else {
+         ALOGW("PlayerBase::start() error %d", status);
+     }
+@@ -133,7 +132,7 @@ status_t PlayerBase::startWithStatus(audio_port_handle_t deviceId) {
+ status_t PlayerBase::pauseWithStatus() {
+     status_t status = playerPause();
+     if (status == NO_ERROR) {
+-        servicePlayerEvent(PLAYER_STATE_PAUSED, AUDIO_PORT_HANDLE_NONE);
++        servicePlayerEvent(PLAYER_STATE_PAUSED, {});
+     } else {
+         ALOGW("PlayerBase::pause() error %d", status);
+     }
+@@ -144,7 +143,7 @@ status_t PlayerBase::stopWithStatus() {
+     status_t status = playerStop();
+ 
+     if (status == NO_ERROR) {
+-        servicePlayerEvent(PLAYER_STATE_STOPPED, AUDIO_PORT_HANDLE_NONE);
++        servicePlayerEvent(PLAYER_STATE_STOPPED, {});
+     } else {
+         ALOGW("PlayerBase::stop() error %d", status);
+     }
+@@ -155,12 +154,12 @@ status_t PlayerBase::stopWithStatus() {
+ // Implementation of IPlayer
+ binder::Status PlayerBase::start() {
+     ALOGD("PlayerBase::start() from IPlayer");
+-    audio_port_handle_t deviceId;
++    DeviceIdVector deviceIds;
+     {
+         Mutex::Autolock _l(mDeviceIdLock);
+-        deviceId = mLastReportedDeviceId;
++        deviceIds = mLastReportedDeviceIds;
+     }
+-    (void)startWithStatus(deviceId);
++    (void)startWithStatus(deviceIds);
+     return binder::Status::ok();
+ }
+ 
+diff --git a/media/libaudioclient/TrackPlayerBase.cpp b/media/libaudioclient/TrackPlayerBase.cpp
+index bc38251d29..7928c6599b 100644
+--- a/media/libaudioclient/TrackPlayerBase.cpp
++++ b/media/libaudioclient/TrackPlayerBase.cpp
+@@ -60,8 +60,8 @@ TrackPlayerBase::SelfAudioDeviceCallback::~SelfAudioDeviceCallback() {
+ }
+ 
+ void TrackPlayerBase::SelfAudioDeviceCallback::onAudioDeviceUpdate(audio_io_handle_t __unused,
+-                                                                   audio_port_handle_t deviceId) {
+-    mSelf.baseUpdateDeviceId(deviceId);
++        const DeviceIdVector& deviceIds) {
++    mSelf.baseUpdateDeviceIds(deviceIds);
+ }
+ 
+ void TrackPlayerBase::doDestroy() {
+diff --git a/media/libaudioclient/aidl/android/media/CreateTrackResponse.aidl b/media/libaudioclient/aidl/android/media/CreateTrackResponse.aidl
+index ab60461419..0c9a947ba5 100644
+--- a/media/libaudioclient/aidl/android/media/CreateTrackResponse.aidl
++++ b/media/libaudioclient/aidl/android/media/CreateTrackResponse.aidl
+@@ -33,8 +33,8 @@ parcelable CreateTrackResponse {
+     int flags;
+     long frameCount;
+     long notificationFrameCount;
+-    /** Interpreted as audio_port_handle_t. */
+-    int selectedDeviceId;
++    /** Interpreted as audio_port_handle_t[]. */
++    int[] selectedDeviceIds;
+     int sessionId;
+     int sampleRate;
+     AudioStreamType streamType;
+diff --git a/media/libaudioclient/fuzzer/audioflinger_fuzzer.cpp b/media/libaudioclient/fuzzer/audioflinger_fuzzer.cpp
+index b0b7e03b46..ba5b3b1786 100644
+--- a/media/libaudioclient/fuzzer/audioflinger_fuzzer.cpp
++++ b/media/libaudioclient/fuzzer/audioflinger_fuzzer.cpp
+@@ -396,7 +396,7 @@ void AudioFlingerFuzzer::invokeAudioRecord() {
+         static_cast<audio_port_handle_t>(mFdp.ConsumeIntegral<int32_t>());
+     record->setInputDevice(deviceId);
+     record->getInputDevice();
+-    record->getRoutedDeviceId();
++    record->getRoutedDeviceIds();
+     record->getPortId();
+ }
+ 
+diff --git a/media/libaudioclient/include/media/AudioIoDescriptor.h b/media/libaudioclient/include/media/AudioIoDescriptor.h
+index 405ec7d440..961cc1cd85 100644
+--- a/media/libaudioclient/include/media/AudioIoDescriptor.h
++++ b/media/libaudioclient/include/media/AudioIoDescriptor.h
+@@ -69,12 +69,21 @@ public:
+     size_t getFrameCountHAL() const { return mFrameCountHAL; }
+     uint32_t getLatency() const { return mLatency; }
+     audio_port_handle_t getPortId() const { return mPortId; }
+-    audio_port_handle_t getDeviceId() const {
+-        if (mPatch.num_sources != 0 && mPatch.num_sinks != 0) {
+-            // FIXME: the API only returns the first device in case of multiple device selection
+-            return mIsInput ? mPatch.sources[0].id : mPatch.sinks[0].id;
++    std::vector<audio_port_handle_t> getDeviceIds() const {
++        std::vector<audio_port_handle_t> deviceIds;
++        if (mPatch.num_sources == 0 || mPatch.num_sinks == 0) {
++            return deviceIds;
+         }
+-        return AUDIO_PORT_HANDLE_NONE;
++        if (mIsInput) {
++            for (unsigned int i = 0; i < mPatch.num_sources; i++) {
++                deviceIds.push_back(mPatch.sources[i].id);
++            }
++        } else {
++            for (unsigned int i = 0; i < mPatch.num_sinks; i++) {
++                deviceIds.push_back(mPatch.sinks[i].id);
++            }
++        }
++        return deviceIds;
+     }
+     void setPatch(const audio_patch& patch) { mPatch = patch; }
+ 
+@@ -88,7 +97,13 @@ public:
+                    (mIsInput ? audio_channel_in_mask_to_string(mChannelMask) :
+                            audio_channel_out_mask_to_string(mChannelMask)))
+            << ", frameCount " << mFrameCount << ", frameCountHAL " << mFrameCountHAL
+-           << ", deviceId " << getDeviceId();
++           << ", deviceIds ";
++
++        std::vector<audio_port_handle_t> deviceIds = getDeviceIds();
++        for (auto deviceId : deviceIds) {
++            ss << deviceId << " ";
++        }
++
+         return ss.str();
+     }
+ 
+diff --git a/media/libaudioclient/include/media/AudioRecord.h b/media/libaudioclient/include/media/AudioRecord.h
+index 25d91d3af4..80a756e9eb 100644
+--- a/media/libaudioclient/include/media/AudioRecord.h
++++ b/media/libaudioclient/include/media/AudioRecord.h
+@@ -495,19 +495,19 @@ public:
+      */
+             audio_port_handle_t getInputDevice();
+ 
+-     /* Returns the ID of the audio device actually used by the input to which this AudioRecord
++     /* Returns the IDs of the audio devices actually used by the input to which this AudioRecord
+       * is attached.
+-      * The device ID is relevant only if the AudioRecord is active.
+-      * When the AudioRecord is inactive, the device ID returned can be either:
+-      * - AUDIO_PORT_HANDLE_NONE if the AudioRecord is not attached to any output.
+-      * - The device ID used before paused or stopped.
++      * The device IDs is relevant only if the AudioRecord is active.
++      * When the AudioRecord is inactive, the device IDs returned can be either:
++      * - An empty vector if the AudioRecord is not attached to any output.
++      * - The device IDs used before paused or stopped.
+       * - The device ID selected by audio policy manager of setOutputDevice() if the AudioRecord
+       * has not been started yet.
+       *
+       * Parameters:
+       *  none.
+       */
+-     audio_port_handle_t getRoutedDeviceId();
++     DeviceIdVector getRoutedDeviceIds();
+ 
+     /* Add an AudioDeviceCallback. The caller will be notified when the audio device
+      * to which this AudioRecord is routed is updated.
+@@ -534,7 +534,7 @@ public:
+ 
+             // AudioSystem::AudioDeviceCallback> virtuals
+             virtual void onAudioDeviceUpdate(audio_io_handle_t audioIo,
+-                                             audio_port_handle_t deviceId);
++                                             const DeviceIdVector& deviceIds);
+ 
+ private:
+     /* If nonContig is non-NULL, it is an output parameter that will be set to the number of
+@@ -678,7 +678,7 @@ private:
+             // FIXME enum is faster than strcmp() for parameter 'from'
+             status_t restoreRecord_l(const char *from);
+ 
+-            void     updateRoutedDeviceId_l();
++            void     updateRoutedDeviceIds_l();
+ 
+     sp<AudioRecordThread>   mAudioRecordThread;
+     mutable Mutex           mLock;
+@@ -810,7 +810,7 @@ private:
+     audio_port_handle_t     mSelectedDeviceId = AUDIO_PORT_HANDLE_NONE;
+     // Device actually selected by AudioPolicyManager: This may not match the app
+     // selection depending on other activity and connected devices
+-    audio_port_handle_t     mRoutedDeviceId = AUDIO_PORT_HANDLE_NONE;
++    DeviceIdVector          mRoutedDeviceIds;
+ 
+     wp<AudioSystem::AudioDeviceCallback> mDeviceCallback;
+ 
+diff --git a/media/libaudioclient/include/media/AudioSystem.h b/media/libaudioclient/include/media/AudioSystem.h
+index fbc7629a44..45ede3c6da 100644
+--- a/media/libaudioclient/include/media/AudioSystem.h
++++ b/media/libaudioclient/include/media/AudioSystem.h
+@@ -767,7 +767,7 @@ public:
+         virtual ~AudioDeviceCallback() {}
+ 
+         virtual void onAudioDeviceUpdate(audio_io_handle_t audioIo,
+-                                         audio_port_handle_t deviceId) = 0;
++                                         const DeviceIdVector& deviceIds) = 0;
+     };
+ 
+     static status_t addAudioDeviceCallback(const wp<AudioDeviceCallback>& callback,
+@@ -793,7 +793,7 @@ public:
+     static status_t removeSupportedLatencyModesCallback(
+             const sp<SupportedLatencyModesCallback>& callback);
+ 
+-    static audio_port_handle_t getDeviceIdForIo(audio_io_handle_t audioIo);
++    static status_t getDeviceIdsForIo(audio_io_handle_t audioIo, DeviceIdVector& deviceIds);
+ 
+     static status_t setVibratorInfos(const std::vector<media::AudioVibratorInfo>& vibratorInfos);
+ 
+@@ -842,7 +842,8 @@ public:
+         status_t removeSupportedLatencyModesCallback(
+                 const sp<SupportedLatencyModesCallback>& callback) EXCLUDES(mMutex);
+ 
+-        audio_port_handle_t getDeviceIdForIo(audio_io_handle_t audioIo) EXCLUDES(mMutex);
++        status_t getDeviceIdsForIo(audio_io_handle_t audioIo, DeviceIdVector& deviceIds)
++                EXCLUDES(mMutex);
+ 
+     private:
+         mutable std::mutex mMutex;
+diff --git a/media/libaudioclient/include/media/AudioTrack.h b/media/libaudioclient/include/media/AudioTrack.h
+index de978639c9..330b5eee83 100644
+--- a/media/libaudioclient/include/media/AudioTrack.h
++++ b/media/libaudioclient/include/media/AudioTrack.h
+@@ -835,18 +835,18 @@ public:
+      */
+      audio_port_handle_t getOutputDevice();
+ 
+-     /* Returns the ID of the audio device actually used by the output to which this AudioTrack is
++     /* Returns the IDs of the audio devices actually used by the output to which this AudioTrack is
+       * attached.
+       * When the AudioTrack is inactive, the device ID returned can be either:
+-      * - AUDIO_PORT_HANDLE_NONE if the AudioTrack is not attached to any output.
+-      * - The device ID used before paused or stopped.
++      * - An empty vector if the AudioTrack is not attached to any output.
++      * - The device IDs used before paused or stopped.
+       * - The device ID selected by audio policy manager of setOutputDevice() if the AudioTrack
+       * has not been started yet.
+       *
+       * Parameters:
+       *  none.
+       */
+-     audio_port_handle_t getRoutedDeviceId();
++     DeviceIdVector getRoutedDeviceIds();
+ 
+     /* Returns the unique session ID associated with this track.
+      *
+@@ -1089,7 +1089,7 @@ public:
+ 
+             // AudioSystem::AudioDeviceCallback> virtuals
+             virtual void onAudioDeviceUpdate(audio_io_handle_t audioIo,
+-                                             audio_port_handle_t deviceId);
++                                             const DeviceIdVector& deviceIds);
+ 
+     /* Obtain the pending duration in milliseconds for playback of pure PCM
+      * (mixable without embedded timing) data remaining in AudioTrack.
+@@ -1258,7 +1258,7 @@ public:
+ 
+             void     restartIfDisabled();
+ 
+-            void     updateRoutedDeviceId_l();
++            void     updateRoutedDeviceIds_l();
+ 
+             /* Sets the Dual Mono mode presentation on the output device. */
+             status_t setDualMonoMode_l(audio_dual_mono_mode_t mode);
+@@ -1482,9 +1482,9 @@ public:
+     // Device requested by the application.
+     audio_port_handle_t mSelectedDeviceId = AUDIO_PORT_HANDLE_NONE;
+ 
+-    // Device actually selected by AudioPolicyManager: This may not match the app
++    // Devices actually selected by AudioPolicyManager: This may not match the app
+     // selection depending on other activity and connected devices.
+-    audio_port_handle_t mRoutedDeviceId = AUDIO_PORT_HANDLE_NONE;
++    DeviceIdVector             mRoutedDeviceIds;
+ 
+     sp<media::VolumeHandler>       mVolumeHandler;
+ 
+diff --git a/media/libaudioclient/include/media/IAudioFlinger.h b/media/libaudioclient/include/media/IAudioFlinger.h
+index 21ecb096fd..8292eef6e0 100644
+--- a/media/libaudioclient/include/media/IAudioFlinger.h
++++ b/media/libaudioclient/include/media/IAudioFlinger.h
+@@ -109,7 +109,7 @@ public:
+         audio_output_flags_t flags;
+         size_t frameCount;
+         size_t notificationFrameCount;
+-        audio_port_handle_t selectedDeviceId;
++        DeviceIdVector selectedDeviceIds;
+         audio_session_t sessionId;
+ 
+         /* output */
+diff --git a/media/libaudioclient/include/media/PlayerBase.h b/media/libaudioclient/include/media/PlayerBase.h
+index 5475f76462..5df1a6e21c 100644
+--- a/media/libaudioclient/include/media/PlayerBase.h
++++ b/media/libaudioclient/include/media/PlayerBase.h
+@@ -22,6 +22,7 @@
+ #include <utils/Mutex.h>
+ 
+ #include "android/media/BnPlayer.h"
++#include "media/AudioContainers.h"
+ 
+ namespace android {
+ 
+@@ -44,14 +45,14 @@ public:
+             const media::VolumeShaperConfiguration& configuration,
+             const media::VolumeShaperOperation& operation) override;
+ 
+-            status_t startWithStatus(audio_port_handle_t deviceId);
++            status_t startWithStatus(const DeviceIdVector& deviceIds);
+             status_t pauseWithStatus();
+             status_t stopWithStatus();
+ 
+             //FIXME temporary method while some player state is outside of this class
+-            void reportEvent(player_state_t event, audio_port_handle_t deviceId);
++            void reportEvent(player_state_t event, const DeviceIdVector& deviceIds);
+ 
+-            void baseUpdateDeviceId(audio_port_handle_t deviceId);
++            void baseUpdateDeviceIds(const DeviceIdVector& deviceIds);
+ 
+             /**
+              * Updates the mapping in the AudioService between portId and piid
+@@ -80,7 +81,7 @@ protected:
+     audio_unique_id_t mPIId;
+ private:
+             // report events to AudioService
+-            void servicePlayerEvent(player_state_t event, audio_port_handle_t deviceId);
++            void servicePlayerEvent(player_state_t event, const DeviceIdVector& deviceIds);
+             void serviceReleasePlayer();
+ 
+     // native interface to AudioService
+@@ -91,7 +92,7 @@ private:
+     player_state_t mLastReportedEvent;
+ 
+     Mutex mDeviceIdLock;
+-    audio_port_handle_t mLastReportedDeviceId;
++    DeviceIdVector mLastReportedDeviceIds GUARDED_BY(mDeviceIdLock);
+ };
+ 
+ } // namespace android
+diff --git a/media/libaudioclient/include/media/TrackPlayerBase.h b/media/libaudioclient/include/media/TrackPlayerBase.h
+index 8df9ff8ecb..575b14cda6 100644
+--- a/media/libaudioclient/include/media/TrackPlayerBase.h
++++ b/media/libaudioclient/include/media/TrackPlayerBase.h
+@@ -60,7 +60,7 @@ private:
+             public:
+                 SelfAudioDeviceCallback(PlayerBase& self);
+                 virtual void onAudioDeviceUpdate(audio_io_handle_t audioIo,
+-                                                         audio_port_handle_t deviceId);
++                                                 const DeviceIdVector& deviceIds);
+             private:
+                 virtual ~SelfAudioDeviceCallback();
+                 PlayerBase& mSelf;
+diff --git a/media/libaudioclient/tests/audio_test_utils.cpp b/media/libaudioclient/tests/audio_test_utils.cpp
+index 1599839683..7d1393956e 100644
+--- a/media/libaudioclient/tests/audio_test_utils.cpp
++++ b/media/libaudioclient/tests/audio_test_utils.cpp
+@@ -27,12 +27,12 @@
+ #define MAX_WAIT_TIME_MS 5000
+ 
+ void OnAudioDeviceUpdateNotifier::onAudioDeviceUpdate(audio_io_handle_t audioIo,
+-                                                      audio_port_handle_t deviceId) {
+-    ALOGI("%s: audioIo=%d deviceId=%d", __func__, audioIo, deviceId);
++                                                      const DeviceIdVector& deviceIds) {
++    ALOGI("%s: audioIo=%d deviceIds=%s", __func__, audioIo, toString(deviceIds).c_str());
+     {
+         std::lock_guard lock(mMutex);
+         mAudioIo = audioIo;
+-        mDeviceId = deviceId;
++        mDeviceIds = deviceIds;
+     }
+     mCondition.notify_all();
+ }
+@@ -41,20 +41,23 @@ status_t OnAudioDeviceUpdateNotifier::waitForAudioDeviceCb(audio_port_handle_t e
+     std::unique_lock lock(mMutex);
+     android::base::ScopedLockAssertion lock_assertion(mMutex);
+     if (mAudioIo == AUDIO_IO_HANDLE_NONE ||
+-        (expDeviceId != AUDIO_PORT_HANDLE_NONE && expDeviceId != mDeviceId)) {
++        (expDeviceId != AUDIO_PORT_HANDLE_NONE &&
++         std::find(mDeviceIds.begin(), mDeviceIds.end(), expDeviceId) == mDeviceIds.end())) {
+         mCondition.wait_for(lock, std::chrono::milliseconds(500));
+         if (mAudioIo == AUDIO_IO_HANDLE_NONE ||
+-            (expDeviceId != AUDIO_PORT_HANDLE_NONE && expDeviceId != mDeviceId)) {
++            (expDeviceId != AUDIO_PORT_HANDLE_NONE &&
++             std::find(mDeviceIds.begin(), mDeviceIds.end(), expDeviceId) == mDeviceIds.end())) {
+             return TIMED_OUT;
+         }
+     }
+     return OK;
+ }
+ 
+-std::pair<audio_io_handle_t, audio_port_handle_t>
+-OnAudioDeviceUpdateNotifier::getLastPortAndDevice() const {
++std::pair<audio_io_handle_t, DeviceIdVector> OnAudioDeviceUpdateNotifier::getLastPortAndDevices()
++        const {
+     std::lock_guard lock(mMutex);
+-    return {mAudioIo, mDeviceId};
++    ALOGI("%s: audioIo=%d deviceIds=%s", __func__, mAudioIo, toString(mDeviceIds).c_str());
++    return {mAudioIo, mDeviceIds};
+ }
+ 
+ AudioPlayback::AudioPlayback(uint32_t sampleRate, audio_format_t format,
+@@ -761,13 +764,15 @@ status_t getPatchForInputMix(audio_io_handle_t audioIo, audio_patch& patch) {
+     return BAD_VALUE;
+ }
+ 
+-bool patchContainsOutputDevice(audio_port_handle_t deviceId, audio_patch patch) {
++// Check if the patch matches all the output devices in the deviceIds vector.
++bool patchMatchesOutputDevices(const DeviceIdVector& deviceIds, audio_patch patch) {
++    DeviceIdVector patchDeviceIds;
+     for (auto j = 0; j < patch.num_sinks; j++) {
+-        if (patch.sinks[j].type == AUDIO_PORT_TYPE_DEVICE && patch.sinks[j].id == deviceId) {
+-            return true;
++        if (patch.sinks[j].type == AUDIO_PORT_TYPE_DEVICE) {
++            patchDeviceIds.push_back(patch.sinks[j].id);
+         }
+     }
+-    return false;
++    return areDeviceIdsEqual(deviceIds, patchDeviceIds);
+ }
+ 
+ bool patchContainsInputDevice(audio_port_handle_t deviceId, audio_patch patch) {
+@@ -779,10 +784,10 @@ bool patchContainsInputDevice(audio_port_handle_t deviceId, audio_patch patch) {
+     return false;
+ }
+ 
+-bool checkPatchPlayback(audio_io_handle_t audioIo, audio_port_handle_t deviceId) {
++bool checkPatchPlayback(audio_io_handle_t audioIo, const DeviceIdVector& deviceIds) {
+     struct audio_patch patch;
+     if (getPatchForOutputMix(audioIo, patch) == OK) {
+-        return patchContainsOutputDevice(deviceId, patch);
++        return patchMatchesOutputDevices(deviceIds, patch);
+     }
+     return false;
+ }
+diff --git a/media/libaudioclient/tests/audio_test_utils.h b/media/libaudioclient/tests/audio_test_utils.h
+index 022ecf3a09..9ccc7dadf8 100644
+--- a/media/libaudioclient/tests/audio_test_utils.h
++++ b/media/libaudioclient/tests/audio_test_utils.h
+@@ -52,9 +52,9 @@ status_t getPortByAttributes(audio_port_role_t role, audio_port_type_t type,
+                              audio_port_v7& port);
+ status_t getPatchForOutputMix(audio_io_handle_t audioIo, audio_patch& patch);
+ status_t getPatchForInputMix(audio_io_handle_t audioIo, audio_patch& patch);
+-bool patchContainsOutputDevice(audio_port_handle_t deviceId, audio_patch patch);
++bool patchContainsOutputDevices(DeviceIdVector deviceIds, audio_patch patch);
+ bool patchContainsInputDevice(audio_port_handle_t deviceId, audio_patch patch);
+-bool checkPatchPlayback(audio_io_handle_t audioIo, audio_port_handle_t deviceId);
++bool checkPatchPlayback(audio_io_handle_t audioIo, const DeviceIdVector& deviceIds);
+ bool checkPatchCapture(audio_io_handle_t audioIo, audio_port_handle_t deviceId);
+ std::string dumpPort(const audio_port_v7& port);
+ std::string dumpPortConfig(const audio_port_config& port);
+@@ -62,13 +62,13 @@ std::string dumpPatch(const audio_patch& patch);
+ 
+ class OnAudioDeviceUpdateNotifier : public AudioSystem::AudioDeviceCallback {
+   public:
+-    void onAudioDeviceUpdate(audio_io_handle_t audioIo, audio_port_handle_t deviceId) override;
++    void onAudioDeviceUpdate(audio_io_handle_t audioIo, const DeviceIdVector& deviceIds) override;
+     status_t waitForAudioDeviceCb(audio_port_handle_t expDeviceId = AUDIO_PORT_HANDLE_NONE);
+-    std::pair<audio_io_handle_t, audio_port_handle_t> getLastPortAndDevice() const;
++    std::pair<audio_io_handle_t, DeviceIdVector> getLastPortAndDevices() const;
+ 
+   private:
+     audio_io_handle_t mAudioIo GUARDED_BY(mMutex) = AUDIO_IO_HANDLE_NONE;
+-    audio_port_handle_t mDeviceId GUARDED_BY(mMutex) = AUDIO_PORT_HANDLE_NONE;
++    DeviceIdVector mDeviceIds GUARDED_BY(mMutex);
+     mutable std::mutex mMutex;
+     std::condition_variable mCondition;
+ };
+diff --git a/media/libaudioclient/tests/audioeffect_analyser.cpp b/media/libaudioclient/tests/audioeffect_analyser.cpp
+index 199fb8b895..3df5fd87da 100644
+--- a/media/libaudioclient/tests/audioeffect_analyser.cpp
++++ b/media/libaudioclient/tests/audioeffect_analyser.cpp
+@@ -119,7 +119,8 @@ void CaptureEnv::capture() {
+     CHECK_OK(capture->start(), "start recording failed")
+     CHECK_OK(capture->audioProcess(), "recording process failed")
+     CHECK_OK(cbCapture->waitForAudioDeviceCb(), "audio device callback notification timed out");
+-    if (port.id != capture->getAudioRecordHandle()->getRoutedDeviceId()) {
++    DeviceIdVector routedDeviceIds = capture->getAudioRecordHandle()->getRoutedDeviceIds();
++    if (port.id != routedDeviceIds[0]) {
+         CHECK_OK(BAD_VALUE, "Capture NOT routed on expected port")
+     }
+     CHECK_OK(getPortByAttributes(AUDIO_PORT_ROLE_SINK, AUDIO_PORT_TYPE_DEVICE,
+diff --git a/media/libaudioclient/tests/audiorecord_tests.cpp b/media/libaudioclient/tests/audiorecord_tests.cpp
+index f2fee8bca0..550ce6cc32 100644
+--- a/media/libaudioclient/tests/audiorecord_tests.cpp
++++ b/media/libaudioclient/tests/audiorecord_tests.cpp
+@@ -123,12 +123,12 @@ TEST_F(AudioRecordTest, TestAudioCbNotifier) {
+     EXPECT_EQ(OK, mAC->getAudioRecordHandle()->addAudioDeviceCallback(cb));
+     EXPECT_EQ(OK, mAC->start()) << "record creation failed";
+     EXPECT_EQ(OK, cb->waitForAudioDeviceCb());
+-    const auto [oldAudioIo, oldDeviceId] = cbOld->getLastPortAndDevice();
++    const auto [oldAudioIo, oldDeviceIds] = cbOld->getLastPortAndDevices();
+     EXPECT_EQ(AUDIO_IO_HANDLE_NONE, oldAudioIo);
+-    EXPECT_EQ(AUDIO_PORT_HANDLE_NONE, oldDeviceId);
+-    const auto [audioIo, deviceId] = cb->getLastPortAndDevice();
++    EXPECT_TRUE(oldDeviceIds.empty());
++    const auto [audioIo, deviceIds] = cb->getLastPortAndDevices();
+     EXPECT_NE(AUDIO_IO_HANDLE_NONE, audioIo);
+-    EXPECT_NE(AUDIO_PORT_HANDLE_NONE, deviceId);
++    EXPECT_FALSE(deviceIds.empty());
+     EXPECT_EQ(BAD_VALUE, mAC->getAudioRecordHandle()->removeAudioDeviceCallback(nullptr));
+     EXPECT_EQ(INVALID_OPERATION, mAC->getAudioRecordHandle()->removeAudioDeviceCallback(cbOld));
+     EXPECT_EQ(OK, mAC->getAudioRecordHandle()->removeAudioDeviceCallback(cb));
+diff --git a/media/libaudioclient/tests/audiorouting_tests.cpp b/media/libaudioclient/tests/audiorouting_tests.cpp
+index a3ab9d2e7d..7957c1037a 100644
+--- a/media/libaudioclient/tests/audiorouting_tests.cpp
++++ b/media/libaudioclient/tests/audiorouting_tests.cpp
+@@ -64,8 +64,8 @@ TEST(AudioTrackTest, TestPerformanceMode) {
+         EXPECT_EQ(OK, ap->start()) << "audio track start failed";
+         EXPECT_EQ(OK, ap->onProcess());
+         EXPECT_EQ(OK, cb->waitForAudioDeviceCb());
+-        const auto [audioIo, deviceId] = cb->getLastPortAndDevice();
+-        EXPECT_TRUE(checkPatchPlayback(audioIo, deviceId));
++        const auto [audioIo, deviceIds] = cb->getLastPortAndDevices();
++        EXPECT_TRUE(checkPatchPlayback(audioIo, deviceIds));
+         EXPECT_NE(0, ap->getAudioTrackHandle()->getFlags() & output_flags[i]);
+         audio_patch patch;
+         EXPECT_EQ(OK, getPatchForOutputMix(audioIo, patch));
+@@ -127,8 +127,8 @@ TEST_P(AudioTrackTest, DefaultRoutingTest) {
+     // capture should be routed to submix in port
+     EXPECT_EQ(OK, capture->start()) << "start recording failed";
+     EXPECT_EQ(OK, cbCapture->waitForAudioDeviceCb());
+-    EXPECT_EQ(port.id, capture->getAudioRecordHandle()->getRoutedDeviceId())
+-            << "Capture NOT routed on expected port";
++    DeviceIdVector routedDeviceIds = capture->getAudioRecordHandle()->getRoutedDeviceIds();
++    EXPECT_EQ(port.id, routedDeviceIds[0]) << "Capture NOT routed on expected port";
+ 
+     // capture start should create submix out port
+     status_t status = getPortByAttributes(AUDIO_PORT_ROLE_SINK, AUDIO_PORT_TYPE_DEVICE,
+@@ -138,8 +138,8 @@ TEST_P(AudioTrackTest, DefaultRoutingTest) {
+     // playback should be routed to submix out as long as capture is active
+     EXPECT_EQ(OK, playback->start()) << "audio track start failed";
+     EXPECT_EQ(OK, cbPlayback->waitForAudioDeviceCb());
+-    EXPECT_EQ(port.id, playback->getAudioTrackHandle()->getRoutedDeviceId())
+-            << "Playback NOT routed on expected port";
++    routedDeviceIds = playback->getAudioTrackHandle()->getRoutedDeviceIds();
++    EXPECT_EQ(port.id, routedDeviceIds[0]) << "Playback NOT routed on expected port";
+ 
+     capture->stop();
+     playback->stop();
+@@ -235,13 +235,13 @@ TEST_F(AudioRoutingTest, ConcurrentDynamicRoutingTest) {
+     // launch
+     EXPECT_EQ(OK, captureA->start()) << "start recording failed";
+     EXPECT_EQ(OK, cbCaptureA->waitForAudioDeviceCb());
+-    EXPECT_EQ(port.id, captureA->getAudioRecordHandle()->getRoutedDeviceId())
+-            << "Capture NOT routed on expected port";
++    DeviceIdVector routedDeviceIds = captureA->getAudioRecordHandle()->getRoutedDeviceIds();
++    EXPECT_EQ(port.id, routedDeviceIds[0]) << "Capture NOT routed on expected port";
+ 
+     EXPECT_EQ(OK, captureB->start()) << "start recording failed";
+     EXPECT_EQ(OK, cbCaptureB->waitForAudioDeviceCb());
+-    EXPECT_EQ(port_mix.id, captureB->getAudioRecordHandle()->getRoutedDeviceId())
+-            << "Capture NOT routed on expected port";
++    routedDeviceIds = captureB->getAudioRecordHandle()->getRoutedDeviceIds();
++    EXPECT_EQ(port_mix.id, routedDeviceIds[0]) << "Capture NOT routed on expected port";
+ 
+     // as record started, expect submix out ports to be connected
+     status = getPortByAttributes(AUDIO_PORT_ROLE_SINK, AUDIO_PORT_TYPE_DEVICE,
+@@ -255,8 +255,8 @@ TEST_F(AudioRoutingTest, ConcurrentDynamicRoutingTest) {
+     // check if playback routed to desired port
+     EXPECT_EQ(OK, playback->start());
+     EXPECT_EQ(OK, cbPlayback->waitForAudioDeviceCb());
+-    EXPECT_EQ(port_mix.id, playback->getAudioTrackHandle()->getRoutedDeviceId())
+-            << "Playback NOT routed on expected port";
++    routedDeviceIds = playback->getAudioTrackHandle()->getRoutedDeviceIds();
++    EXPECT_EQ(port_mix.id, routedDeviceIds[0]) << "Playback NOT routed on expected port";
+ 
+     captureB->stop();
+ 
+@@ -282,8 +282,8 @@ TEST_F(AudioRoutingTest, ConcurrentDynamicRoutingTest) {
+     playback->onProcess();
+     // as captureA is active, it should re route to legacy submix
+     EXPECT_EQ(OK, cbPlayback->waitForAudioDeviceCb(port.id));
+-    EXPECT_EQ(port.id, playback->getAudioTrackHandle()->getRoutedDeviceId())
+-            << "Playback NOT routed on expected port";
++    routedDeviceIds = playback->getAudioTrackHandle()->getRoutedDeviceIds();
++    EXPECT_EQ(port.id, routedDeviceIds[0]) << "Playback NOT routed on expected port";
+ 
+     captureA->stop();
+     playback->stop();
+diff --git a/media/libaudioclient/tests/audiosystem_tests.cpp b/media/libaudioclient/tests/audiosystem_tests.cpp
+index 742ca48543..31cab78a9d 100644
+--- a/media/libaudioclient/tests/audiosystem_tests.cpp
++++ b/media/libaudioclient/tests/audiosystem_tests.cpp
+@@ -108,7 +108,7 @@ void AudioSystemTest::createRecordSession(void) {
+ // UNIT TESTS
+ TEST_F(AudioSystemTest, CheckServerSideValues) {
+     ASSERT_NO_FATAL_FAILURE(createPlaybackSession());
+-    const auto [pbAudioIo, _] = mCbPlayback->getLastPortAndDevice();
++    const auto [pbAudioIo, _] = mCbPlayback->getLastPortAndDevices();
+     EXPECT_GT(mAF->sampleRate(pbAudioIo), 0);
+     EXPECT_NE(mAF->format(pbAudioIo), AUDIO_FORMAT_INVALID);
+     EXPECT_GT(mAF->frameCount(pbAudioIo), 0);
+@@ -122,7 +122,7 @@ TEST_F(AudioSystemTest, CheckServerSideValues) {
+     EXPECT_LE(mAF->latency(pbAudioIo), mPlayback->getAudioTrackHandle()->latency());
+ 
+     ASSERT_NO_FATAL_FAILURE(createRecordSession());
+-    const auto [recAudioIo, __] = mCbRecord->getLastPortAndDevice();
++    const auto [recAudioIo, __] = mCbRecord->getLastPortAndDevices();
+     EXPECT_GT(mAF->sampleRate(recAudioIo), 0);
+     // EXPECT_NE(mAF->format(recAudioIo), AUDIO_FORMAT_INVALID);
+     EXPECT_GT(mAF->frameCount(recAudioIo), 0);
+diff --git a/media/libaudioclient/tests/audiotrack_tests.cpp b/media/libaudioclient/tests/audiotrack_tests.cpp
+index cf7d92676c..d283c6c766 100644
+--- a/media/libaudioclient/tests/audiotrack_tests.cpp
++++ b/media/libaudioclient/tests/audiotrack_tests.cpp
+@@ -157,20 +157,21 @@ TEST(AudioTrackTest, TestAudioCbNotifier) {
+     EXPECT_EQ(OK, ap->start()) << "audio track start failed";
+     EXPECT_EQ(OK, ap->onProcess());
+     EXPECT_EQ(OK, cb->waitForAudioDeviceCb());
+-    const auto [oldAudioIo, oldDeviceId] = cbOld->getLastPortAndDevice();
++    const auto [oldAudioIo, oldDeviceIds] = cbOld->getLastPortAndDevices();
+     EXPECT_EQ(AUDIO_IO_HANDLE_NONE, oldAudioIo);
+-    EXPECT_EQ(AUDIO_PORT_HANDLE_NONE, oldDeviceId);
+-    const auto [audioIo, deviceId] = cb->getLastPortAndDevice();
++    EXPECT_TRUE(oldDeviceIds.empty());
++    const auto [audioIo, deviceIds] = cb->getLastPortAndDevices();
+     EXPECT_NE(AUDIO_IO_HANDLE_NONE, audioIo);
+-    EXPECT_NE(AUDIO_PORT_HANDLE_NONE, deviceId);
++    EXPECT_FALSE(deviceIds.empty());
+     EXPECT_EQ(audioIo, ap->getAudioTrackHandle()->getOutput());
+-    EXPECT_EQ(deviceId, ap->getAudioTrackHandle()->getRoutedDeviceId());
++    DeviceIdVector routedDeviceIds = ap->getAudioTrackHandle()->getRoutedDeviceIds();
++    EXPECT_TRUE(areDeviceIdsEqual(routedDeviceIds, deviceIds));
+     String8 keys;
+     keys = ap->getAudioTrackHandle()->getParameters(keys);
+     if (!keys.empty()) {
+         std::cerr << "track parameters :: " << keys << std::endl;
+     }
+-    EXPECT_TRUE(checkPatchPlayback(audioIo, deviceId));
++    EXPECT_TRUE(checkPatchPlayback(audioIo, deviceIds));
+     EXPECT_EQ(BAD_VALUE, ap->getAudioTrackHandle()->removeAudioDeviceCallback(nullptr));
+     EXPECT_EQ(INVALID_OPERATION, ap->getAudioTrackHandle()->removeAudioDeviceCallback(cbOld));
+     EXPECT_EQ(OK, ap->getAudioTrackHandle()->removeAudioDeviceCallback(cb));
+diff --git a/media/libaudiofoundation/AudioContainers.cpp b/media/libaudiofoundation/AudioContainers.cpp
+index 3e2066b477..f3d295b311 100644
+--- a/media/libaudiofoundation/AudioContainers.cpp
++++ b/media/libaudiofoundation/AudioContainers.cpp
+@@ -151,6 +151,12 @@ audio_port_handle_t getFirstDeviceId(const DeviceIdVector& deviceIds) {
+     return deviceIds[0];
+ }
+ 
++bool areDeviceIdsEqual(const DeviceIdVector& first, const DeviceIdVector& second) {
++    const std::set<audio_port_handle_t> firstSet(first.begin(), first.end());
++    const std::set<audio_port_handle_t> secondSet(second.begin(), second.end());
++    return firstSet == secondSet;
++}
++
+ AudioProfileAttributesMultimap createAudioProfilesAttrMap(audio_profile profiles[],
+                                                           uint32_t first,
+                                                           uint32_t last) {
+diff --git a/media/libaudiofoundation/include/media/AudioContainers.h b/media/libaudiofoundation/include/media/AudioContainers.h
+index 8d4665e2c1..b6c04443f3 100644
+--- a/media/libaudiofoundation/include/media/AudioContainers.h
++++ b/media/libaudiofoundation/include/media/AudioContainers.h
+@@ -140,15 +140,20 @@ inline std::string toString(const DeviceTypeSet& deviceTypes) {
+ }
+ 
+ /**
+- * Returns human readable string for a set of device ids.
++ * Returns human readable string for a vector of device ids.
+  */
+ std::string toString(const DeviceIdVector& deviceIds);
+ 
+ /**
+- * Returns the first device id of a set of device ids or AUDIO_PORT_HANDLE_NONE when its empty.
++ * Returns the first device id of a vector of device ids or AUDIO_PORT_HANDLE_NONE when its empty.
+  */
+ audio_port_handle_t getFirstDeviceId(const DeviceIdVector& deviceIds);
+ 
++/**
++ * Returns whether two vectors of device ids have the same elements.
++ */
++bool areDeviceIdsEqual(const DeviceIdVector& first, const DeviceIdVector& second);
++
+ /**
+  * Create audio profile attributes map by given audio profile array from the range of [first, last).
+  *
+diff --git a/media/libmedia/Android.bp b/media/libmedia/Android.bp
+index 8a962c6b9e..06dd27be03 100644
+--- a/media/libmedia/Android.bp
++++ b/media/libmedia/Android.bp
+@@ -104,8 +104,8 @@ cc_library_shared {
+     ],
+ 
+     shared_libs: [
+-        "android.hidl.token@1.0-utils",
+         "android.hardware.media.omx@1.0",
++        "android.hidl.token@1.0-utils",
+         "libbinder",
+         "libcutils",
+         "libhidlbase",
+@@ -116,8 +116,8 @@ cc_library_shared {
+     ],
+ 
+     export_shared_lib_headers: [
+-        "android.hidl.token@1.0-utils",
+         "android.hardware.media.omx@1.0",
++        "android.hidl.token@1.0-utils",
+         "libstagefright_foundation",
+         "libui",
+     ],
+@@ -138,15 +138,15 @@ cc_library_shared {
+     ],
+ 
+     cflags: [
++        "-Wall",
+         "-Werror",
+         "-Wno-error=deprecated-declarations",
+-        "-Wall",
+     ],
+ 
+     sanitize: {
+         misc_undefined: [
+-            "unsigned-integer-overflow",
+             "signed-integer-overflow",
++            "unsigned-integer-overflow",
+         ],
+         cfi: true,
+     },
+@@ -197,15 +197,15 @@ cc_library_shared {
+     ],
+ 
+     cflags: [
++        "-Wall",
+         "-Werror",
+         "-Wno-error=deprecated-declarations",
+-        "-Wall",
+     ],
+ 
+     sanitize: {
+         misc_undefined: [
+-            "unsigned-integer-overflow",
+             "signed-integer-overflow",
++            "unsigned-integer-overflow",
+         ],
+         cfi: true,
+     },
+@@ -232,15 +232,15 @@ cc_library_static {
+     ],
+ 
+     cflags: [
++        "-Wall",
+         "-Werror",
+         "-Wno-error=deprecated-declarations",
+-        "-Wall",
+     ],
+ 
+     sanitize: {
+         misc_undefined: [
+-            "unsigned-integer-overflow",
+             "signed-integer-overflow",
++            "unsigned-integer-overflow",
+         ],
+         cfi: true,
+     },
+@@ -279,15 +279,15 @@ cc_library_shared {
+     ],
+ 
+     cflags: [
++        "-Wall",
+         "-Werror",
+         "-Wno-error=deprecated-declarations",
+-        "-Wall",
+     ],
+ 
+     sanitize: {
+         misc_undefined: [
+-            "unsigned-integer-overflow",
+             "signed-integer-overflow",
++            "unsigned-integer-overflow",
+         ],
+         cfi: true,
+     },
+@@ -323,15 +323,15 @@ cc_library_shared {
+     ],
+ 
+     cflags: [
++        "-Wall",
+         "-Werror",
+         "-Wno-error=deprecated-declarations",
+-        "-Wall",
+     ],
+ 
+     sanitize: {
+         misc_undefined: [
+-            "unsigned-integer-overflow",
+             "signed-integer-overflow",
++            "unsigned-integer-overflow",
+         ],
+         cfi: true,
+     },
+@@ -346,35 +346,35 @@ cc_library {
+ 
+     srcs: [
+         ":mediaextractorservice_aidl",
+-        "IDataSource.cpp",
+         "BufferingSettings.cpp",
+-        "mediaplayer.cpp",
++        "CharacterEncodingDetector.cpp",
++        "IDataSource.cpp",
++        "IMediaDeathNotifier.cpp",
++        "IMediaExtractor.cpp",
+         "IMediaHTTPConnection.cpp",
+         "IMediaHTTPService.cpp",
+-        "IMediaExtractor.cpp",
+-        "IMediaPlayerService.cpp",
+-        "IMediaPlayerClient.cpp",
+-        "IMediaRecorderClient.cpp",
++        "IMediaMetadataRetriever.cpp",
+         "IMediaPlayer.cpp",
++        "IMediaPlayerClient.cpp",
++        "IMediaPlayerService.cpp",
+         "IMediaRecorder.cpp",
++        "IMediaRecorderClient.cpp",
+         "IMediaSource.cpp",
+         "IRemoteDisplay.cpp",
+         "IRemoteDisplayClient.cpp",
+         "IStreamSource.cpp",
+-        "Metadata.cpp",
+-        "mediarecorder.cpp",
+-        "IMediaMetadataRetriever.cpp",
+-        "mediametadataretriever.cpp",
+-        "MediaScanner.cpp",
+-        "MediaScannerClient.cpp",
+-        "CharacterEncodingDetector.cpp",
+-        "IMediaDeathNotifier.cpp",
+         "MediaProfiles.cpp",
+         "MediaResource.cpp",
+         "MediaResourcePolicy.cpp",
+-        "StringArray.cpp",
+-        "NdkMediaFormatPriv.cpp",
++        "MediaScanner.cpp",
++        "MediaScannerClient.cpp",
++        "Metadata.cpp",
+         "NdkMediaErrorPriv.cpp",
++        "NdkMediaFormatPriv.cpp",
++        "StringArray.cpp",
++        "mediametadataretriever.cpp",
++        "mediaplayer.cpp",
++        "mediarecorder.cpp",
+     ],
+ 
+     aidl: {
+@@ -383,55 +383,57 @@ cc_library {
+     },
+ 
+     header_libs: [
++        "jni_headers",
+         "libstagefright_headers",
+         "media_ndk_headers",
+-        "jni_headers",
+     ],
+ 
+     export_header_lib_headers: [
++        "jni_headers",
+         "libstagefright_headers",
+         "media_ndk_headers",
+-        "jni_headers",
+     ],
+ 
+     shared_libs: [
+         "android.hidl.token@1.0-utils",
+         "audioclient-types-aidl-cpp",
+         "av-types-aidl-cpp",
+-        "liblog",
+-        "libcutils",
+-        "libutils",
+         "libbinder",
+         "libbinder_ndk",
+         //"libsonivox",
++        "libcutils",
++        "liblog",
++        "libutils",
++        "framework-permission-aidl-cpp",
+         "libandroidicu",
+-        "libexpat",
++        "libaudioclient",
++        "libaudiofoundation",
+         "libcamera_client",
+-        "libstagefright_foundation",
+-        "libgui",
+         "libdl",
+-        "libaudioclient",
++        "libexpat",
++        "libgui",
+         "libmedia_codeclist",
+         "libmedia_omx",
+-        "framework-permission-aidl-cpp",
++        "libstagefright_foundation",
+     ],
+ 
+     export_shared_lib_headers: [
+         "libaudioclient",
++        "libaudiofoundation",
+         "libbinder",
+         //"libsonivox",
+-        "libmedia_omx",
+         "framework-permission-aidl-cpp",
++        "libmedia_omx",
+     ],
+ 
+     static_libs: [
+-        "resourcemanager_aidl_interface-ndk",
+         "framework-permission-aidl-cpp",
++        "resourcemanager_aidl_interface-ndk",
+     ],
+ 
+     export_static_lib_headers: [
+-        "resourcemanager_aidl_interface-ndk",
+         "framework-permission-aidl-cpp",
++        "resourcemanager_aidl_interface-ndk",
+     ],
+ 
+     export_include_dirs: [
+@@ -439,17 +441,17 @@ cc_library {
+     ],
+ 
+     cflags: [
++        "-Wall",
+         "-Werror",
+         "-Wno-error=deprecated-declarations",
+-        "-Wall",
+     ],
+ 
+     version_script: "exports.lds",
+ 
+     sanitize: {
+         misc_undefined: [
+-            "unsigned-integer-overflow",
+             "signed-integer-overflow",
++            "unsigned-integer-overflow",
+         ],
+         cfi: true,
+     },
+@@ -461,8 +463,8 @@ cc_library_static {
+     host_supported: true,
+ 
+     srcs: [
+-        "NdkMediaFormatPriv.cpp",
+         "NdkMediaErrorPriv.cpp",
++        "NdkMediaFormatPriv.cpp",
+     ],
+ 
+     header_libs: [
+@@ -473,8 +475,8 @@ cc_library_static {
+ 
+     cflags: [
+         "-DEXPORT=__attribute__((visibility(\"default\")))",
+-        "-Werror",
+         "-Wall",
++        "-Werror",
+     ],
+ 
+     export_include_dirs: ["include"],
+diff --git a/media/libmedia/IMediaPlayer.cpp b/media/libmedia/IMediaPlayer.cpp
+index c9f361e075..4967dda9bd 100644
+--- a/media/libmedia/IMediaPlayer.cpp
++++ b/media/libmedia/IMediaPlayer.cpp
+@@ -567,23 +567,24 @@ public:
+         return reply.readInt32();
+     }
+ 
+-    status_t getRoutedDeviceId(audio_port_handle_t* deviceId)
++    status_t getRoutedDeviceIds(DeviceIdVector& deviceIds)
+     {
+         Parcel data, reply;
+         data.writeInterfaceToken(IMediaPlayer::getInterfaceDescriptor());
++        deviceIds.clear();
+ 
+-        status_t status = remote()->transact(GET_ROUTED_DEVICE_ID, data, &reply);
++        status_t status = remote()->transact(GET_ROUTED_DEVICE_IDS, data, &reply);
+         if (status != OK) {
+-            ALOGE("getRoutedDeviceid: binder call failed: %d", status);
+-            *deviceId = AUDIO_PORT_HANDLE_NONE;
++            ALOGE("getRoutedDeviceIds: binder call failed: %d", status);
+             return status;
+         }
+ 
+         status = reply.readInt32();
+-        if (status != NO_ERROR) {
+-            *deviceId = AUDIO_PORT_HANDLE_NONE;
+-        } else {
+-            *deviceId = reply.readInt32();
++        if (status == NO_ERROR) {
++            int size = reply.readInt32();
++            for (int i = 0; i < size; i++) {
++                deviceIds.push_back(reply.readInt32());
++            }
+         }
+         return status;
+     }
+@@ -983,13 +984,16 @@ status_t BnMediaPlayer::onTransact(
+             }
+             return NO_ERROR;
+         }
+-        case GET_ROUTED_DEVICE_ID: {
++        case GET_ROUTED_DEVICE_IDS: {
+             CHECK_INTERFACE(IMediaPlayer, data, reply);
+-            audio_port_handle_t deviceId;
+-            status_t ret = getRoutedDeviceId(&deviceId);
++            DeviceIdVector deviceIds;
++            status_t ret = getRoutedDeviceIds(deviceIds);
+             reply->writeInt32(ret);
+             if (ret == NO_ERROR) {
+-                reply->writeInt32(deviceId);
++                reply->writeInt32(deviceIds.size());
++                for (auto deviceId : deviceIds) {
++                    reply->writeInt32(deviceId);
++                }
+             }
+             return NO_ERROR;
+         } break;
+diff --git a/media/libmedia/IMediaRecorder.cpp b/media/libmedia/IMediaRecorder.cpp
+index 755a147fec..1f042172b7 100644
+--- a/media/libmedia/IMediaRecorder.cpp
++++ b/media/libmedia/IMediaRecorder.cpp
+@@ -62,7 +62,7 @@ enum {
+     RESUME,
+     GET_METRICS,
+     SET_INPUT_DEVICE,
+-    GET_ROUTED_DEVICE_ID,
++    GET_ROUTED_DEVICE_IDS,
+     ENABLE_AUDIO_DEVICE_CALLBACK,
+     GET_ACTIVE_MICROPHONES,
+     GET_PORT_ID,
+@@ -392,24 +392,24 @@ public:
+         return reply.readInt32();;
+     }
+ 
+-    audio_port_handle_t getRoutedDeviceId(audio_port_handle_t *deviceId)
++    status_t getRoutedDeviceIds(DeviceIdVector& deviceIds)
+     {
+-        ALOGV("getRoutedDeviceId");
+         Parcel data, reply;
+         data.writeInterfaceToken(IMediaRecorder::getInterfaceDescriptor());
++        deviceIds.clear();
+ 
+-        status_t status = remote()->transact(GET_ROUTED_DEVICE_ID, data, &reply);
++        status_t status = remote()->transact(GET_ROUTED_DEVICE_IDS, data, &reply);
+         if (status != OK) {
+-            ALOGE("getRoutedDeviceid binder call failed: %d", status);
+-            *deviceId = AUDIO_PORT_HANDLE_NONE;
++            ALOGE("getRoutedDeviceIds: binder call failed: %d", status);
+             return status;
+         }
+ 
+         status = reply.readInt32();
+-        if (status != NO_ERROR) {
+-            *deviceId = AUDIO_PORT_HANDLE_NONE;
+-        } else {
+-            *deviceId = reply.readInt32();
++        if (status == NO_ERROR) {
++            int size = reply.readInt32();
++            for (int i = 0; i < size; i++) {
++                deviceIds.push_back(reply.readInt32());
++            }
+         }
+         return status;
+     }
+@@ -730,14 +730,17 @@ status_t BnMediaRecorder::onTransact(
+             }
+             return NO_ERROR;
+         } break;
+-        case GET_ROUTED_DEVICE_ID: {
+-            ALOGV("GET_ROUTED_DEVICE_ID");
++        case GET_ROUTED_DEVICE_IDS: {
++            ALOGV("GET_ROUTED_DEVICE_IDS");
+             CHECK_INTERFACE(IMediaRecorder, data, reply);
+-            audio_port_handle_t deviceId;
+-            status_t status = getRoutedDeviceId(&deviceId);
+-            reply->writeInt32(status);
+-            if (status == NO_ERROR) {
+-                reply->writeInt32(deviceId);
++            DeviceIdVector deviceIds;
++            status_t ret = getRoutedDeviceIds(deviceIds);
++            reply->writeInt32(ret);
++            if (ret == NO_ERROR) {
++                reply->writeInt32(deviceIds.size());
++                for (auto deviceId : deviceIds) {
++                    reply->writeInt32(deviceId);
++                }
+             }
+             return NO_ERROR;
+         } break;
+diff --git a/media/libmedia/include/media/IMediaPlayer.h b/media/libmedia/include/media/IMediaPlayer.h
+index 28684d1d73..4c6f32c6b4 100644
+--- a/media/libmedia/include/media/IMediaPlayer.h
++++ b/media/libmedia/include/media/IMediaPlayer.h
+@@ -23,6 +23,7 @@
+ #include <utils/KeyedVector.h>
+ #include <system/audio.h>
+ 
++#include <media/AudioContainers.h>
+ #include <media/AudioResamplerPublic.h>
+ #include <media/stagefright/MediaSource.h>
+ #include <media/VolumeShaper.h>
+@@ -135,7 +136,7 @@ public:
+ 
+     // AudioRouting
+     virtual status_t        setOutputDevice(audio_port_handle_t deviceId) = 0;
+-    virtual status_t        getRoutedDeviceId(audio_port_handle_t *deviceId) = 0;
++    virtual status_t        getRoutedDeviceIds(DeviceIdVector& deviceIds) = 0;
+     virtual status_t        enableAudioDeviceCallback(bool enabled) = 0;
+ protected:
+ 
+@@ -184,7 +185,7 @@ protected:
+         RELEASE_DRM,
+         // AudioRouting
+         SET_OUTPUT_DEVICE,
+-        GET_ROUTED_DEVICE_ID,
++        GET_ROUTED_DEVICE_IDS,
+         ENABLE_AUDIO_DEVICE_CALLBACK,
+     };
+ };
+diff --git a/media/libmedia/include/media/IMediaRecorder.h b/media/libmedia/include/media/IMediaRecorder.h
+index 05da5c28ac..8411ca70d6 100644
+--- a/media/libmedia/include/media/IMediaRecorder.h
++++ b/media/libmedia/include/media/IMediaRecorder.h
+@@ -20,6 +20,7 @@
+ 
+ #include <android/media/MicrophoneInfoFw.h>
+ #include <binder/IInterface.h>
++#include <media/AudioContainers.h>
+ #include <system/audio.h>
+ #include <vector>
+ 
+@@ -71,7 +72,7 @@ public:
+     virtual sp<IGraphicBufferProducer> querySurfaceMediaSource() = 0;
+ 
+     virtual status_t setInputDevice(audio_port_handle_t deviceId) = 0;
+-    virtual status_t getRoutedDeviceId(audio_port_handle_t *deviceId) = 0;
++    virtual status_t getRoutedDeviceIds(DeviceIdVector& deviceIds) = 0;
+     virtual status_t enableAudioDeviceCallback(bool enabled) = 0;
+     virtual status_t getActiveMicrophones(
+                         std::vector<media::MicrophoneInfoFw>* activeMicrophones) = 0;
+diff --git a/media/libmedia/include/media/MediaRecorderBase.h b/media/libmedia/include/media/MediaRecorderBase.h
+index 82ec9c559e..e3698e3be2 100644
+--- a/media/libmedia/include/media/MediaRecorderBase.h
++++ b/media/libmedia/include/media/MediaRecorderBase.h
+@@ -69,7 +69,7 @@ struct MediaRecorderBase {
+     virtual status_t setInputSurface(const sp<PersistentSurface>& surface) = 0;
+     virtual sp<IGraphicBufferProducer> querySurfaceMediaSource() const = 0;
+     virtual status_t setInputDevice(audio_port_handle_t deviceId) = 0;
+-    virtual status_t getRoutedDeviceId(audio_port_handle_t* deviceId) = 0;
++    virtual status_t getRoutedDeviceIds(DeviceIdVector& deviceIds) = 0;
+     virtual void setAudioDeviceCallback(const sp<AudioSystem::AudioDeviceCallback>& callback) = 0;
+     virtual status_t enableAudioDeviceCallback(bool enabled) = 0;
+     virtual status_t getActiveMicrophones(
+diff --git a/media/libmedia/include/media/mediaplayer.h b/media/libmedia/include/media/mediaplayer.h
+index 2f9b85e666..7c612c3915 100644
+--- a/media/libmedia/include/media/mediaplayer.h
++++ b/media/libmedia/include/media/mediaplayer.h
+@@ -281,7 +281,7 @@ public:
+             status_t        releaseDrm();
+             // AudioRouting
+             status_t        setOutputDevice(audio_port_handle_t deviceId);
+-            audio_port_handle_t getRoutedDeviceId();
++            status_t        getRoutedDeviceIds(DeviceIdVector& deviceIds);
+             status_t        enableAudioDeviceCallback(bool enabled);
+ 
+ private:
+diff --git a/media/libmedia/include/media/mediarecorder.h b/media/libmedia/include/media/mediarecorder.h
+index 602f72e986..1377d61053 100644
+--- a/media/libmedia/include/media/mediarecorder.h
++++ b/media/libmedia/include/media/mediarecorder.h
+@@ -22,6 +22,7 @@
+ #include <utils/threads.h>
+ #include <utils/List.h>
+ #include <utils/Errors.h>
++#include <media/AudioContainers.h>
+ #include <media/IMediaRecorderClient.h>
+ #include <media/IMediaDeathNotifier.h>
+ #include <android/media/MicrophoneInfoFw.h>
+@@ -266,7 +267,7 @@ public:
+     sp<IGraphicBufferProducer>     querySurfaceMediaSourceFromMediaServer();
+     status_t    getMetrics(Parcel *reply);
+     status_t    setInputDevice(audio_port_handle_t deviceId);
+-    status_t    getRoutedDeviceId(audio_port_handle_t *deviceId);
++    status_t    getRoutedDeviceIds(DeviceIdVector& deviceIds);
+     status_t    enableAudioDeviceCallback(bool enabled);
+     status_t    getActiveMicrophones(std::vector<media::MicrophoneInfoFw>* activeMicrophones);
+     status_t    setPreferredMicrophoneDirection(audio_microphone_direction_t direction);
+diff --git a/media/libmedia/mediaplayer.cpp b/media/libmedia/mediaplayer.cpp
+index b5c75b3bb8..9d3fce70b2 100644
+--- a/media/libmedia/mediaplayer.cpp
++++ b/media/libmedia/mediaplayer.cpp
+@@ -1105,19 +1105,14 @@ status_t MediaPlayer::setOutputDevice(audio_port_handle_t deviceId)
+     return mPlayer->setOutputDevice(deviceId);
+ }
+ 
+-audio_port_handle_t MediaPlayer::getRoutedDeviceId()
++status_t MediaPlayer::getRoutedDeviceIds(DeviceIdVector& deviceIds)
+ {
+     Mutex::Autolock _l(mLock);
+     if (mPlayer == NULL) {
+-        ALOGV("getRoutedDeviceId: player not init");
+-        return AUDIO_PORT_HANDLE_NONE;
+-    }
+-    audio_port_handle_t deviceId;
+-    status_t status = mPlayer->getRoutedDeviceId(&deviceId);
+-    if (status != NO_ERROR) {
+-        return AUDIO_PORT_HANDLE_NONE;
++        ALOGV("getRoutedDeviceIds: player not init");
++        return NO_INIT;
+     }
+-    return deviceId;
++    return mPlayer->getRoutedDeviceIds(deviceIds);
+ }
+ 
+ status_t MediaPlayer::enableAudioDeviceCallback(bool enabled)
+diff --git a/media/libmedia/mediarecorder.cpp b/media/libmedia/mediarecorder.cpp
+index 48f5e4b37d..e676d5a328 100644
+--- a/media/libmedia/mediarecorder.cpp
++++ b/media/libmedia/mediarecorder.cpp
+@@ -858,17 +858,17 @@ status_t MediaRecorder::setInputDevice(audio_port_handle_t deviceId)
+     return mMediaRecorder->setInputDevice(deviceId);
+ }
+ 
+-status_t MediaRecorder::getRoutedDeviceId(audio_port_handle_t* deviceId)
++status_t MediaRecorder::getRoutedDeviceIds(DeviceIdVector& deviceIds)
+ {
+-    ALOGV("getRoutedDeviceId");
++    ALOGV("getRoutedDeviceIds");
+ 
+     if (mMediaRecorder == NULL) {
+         ALOGE("media recorder is not initialized yet");
+         return INVALID_OPERATION;
+     }
+-    status_t status = mMediaRecorder->getRoutedDeviceId(deviceId);
++    status_t status = mMediaRecorder->getRoutedDeviceIds(deviceIds);
+     if (status != NO_ERROR) {
+-        *deviceId = AUDIO_PORT_HANDLE_NONE;
++        deviceIds.clear();
+     }
+     return status;
+ }
+diff --git a/media/libmediametrics/include/MediaMetricsConstants.h b/media/libmediametrics/include/MediaMetricsConstants.h
+index 98c3382557..a7b2077953 100644
+--- a/media/libmediametrics/include/MediaMetricsConstants.h
++++ b/media/libmediametrics/include/MediaMetricsConstants.h
+@@ -183,6 +183,7 @@
+ #define AMEDIAMETRICS_PROP_PLAYBACK_SPEED "playback.speed" // double value (AudioTrack)
+ #define AMEDIAMETRICS_PROP_PLAYERIID      "playerIId"      // int32 (-1 invalid/unset IID)
+ #define AMEDIAMETRICS_PROP_ROUTEDDEVICEID "routedDeviceId" // int32
++#define AMEDIAMETRICS_PROP_ROUTEDDEVICEIDS "routedDeviceIds" // string value
+ #define AMEDIAMETRICS_PROP_SAMPLERATE     "sampleRate"     // int32
+ #define AMEDIAMETRICS_PROP_SAMPLERATECLIENT "sampleRateClient" // int32
+ #define AMEDIAMETRICS_PROP_SAMPLERATEHARDWARE "sampleRateHardware" // int32
+diff --git a/media/libmediaplayerservice/Android.bp b/media/libmediaplayerservice/Android.bp
+index a10c50955c..1d493e2a39 100644
+--- a/media/libmediaplayerservice/Android.bp
++++ b/media/libmediaplayerservice/Android.bp
+@@ -46,13 +46,14 @@ cc_defaults {
+         "av-types-aidl-cpp",
+         "framework-permission-aidl-cpp",
+         "libaconfig_storage_read_api_cc",
+-        "libaudioclient_aidl_conversion",
+-        "libbase",
+-        "libbinder_ndk",
+         "libactivitymanager_aidl",
+         "libandroid_net",
+         "libaudioclient",
++        "libaudioclient_aidl_conversion",
++        "libaudiofoundation",
++        "libbase",
+         "libbinder",
++        "libbinder_ndk",
+         "libcamera_client",
+         "libcodec2_client",
+         "libcrypto",
+@@ -81,25 +82,25 @@ cc_defaults {
+     ],
+ 
+     header_libs: [
+-        "media_plugin_headers",
+         "libmediautils_headers",
+         "libstagefright_rtsp_headers",
+         "libstagefright_webm_headers",
++        "media_plugin_headers",
+     ],
+ 
+     static_libs: [
+         "com.android.media.flags.editing-aconfig-cc",
++        "framework-permission-aidl-cpp",
+         "libplayerservice_datasource",
+         "libstagefright_nuplayer",
+         "libstagefright_rtsp",
+         "libstagefright_timedtext",
+-        "framework-permission-aidl-cpp",
+     ],
+ 
+     cflags: [
++        "-Wall",
+         "-Werror",
+         "-Wno-error=deprecated-declarations",
+-        "-Wall",
+     ],
+ 
+     sanitize: {
+@@ -115,8 +116,8 @@ cc_library {
+     ],
+ 
+     export_shared_lib_headers: [
+-        "libmedia",
+         "framework-permission-aidl-cpp",
++        "libmedia",
+     ],
+ 
+     export_header_lib_headers: [
+diff --git a/media/libmediaplayerservice/MediaPlayerService.cpp b/media/libmediaplayerservice/MediaPlayerService.cpp
+index b267c08f0f..0067344dcc 100644
+--- a/media/libmediaplayerservice/MediaPlayerService.cpp
++++ b/media/libmediaplayerservice/MediaPlayerService.cpp
+@@ -856,10 +856,13 @@ sp<MediaPlayerBase> MediaPlayerService::Client::createPlayer(player_type playerT
+ 
+ void MediaPlayerService::Client::AudioDeviceUpdatedNotifier::onAudioDeviceUpdate(
+         audio_io_handle_t audioIo,
+-        audio_port_handle_t deviceId) {
++        const DeviceIdVector& deviceIds) {
++    ALOGD("onAudioDeviceUpdate deviceIds: %s", toString(deviceIds).c_str());
+     sp<MediaPlayerBase> listener = mListener.promote();
+     if (listener != NULL) {
+-        listener->sendEvent(MEDIA_AUDIO_ROUTING_CHANGED, audioIo, deviceId);
++        // Java should query the new device ids once it gets the event.
++        // TODO(b/378505346): Pass the deviceIds to Java to avoid race conditions.
++        listener->sendEvent(MEDIA_AUDIO_ROUTING_CHANGED, audioIo);
+     } else {
+         ALOGW("listener for process %d death is gone", MEDIA_AUDIO_ROUTING_CHANGED);
+     }
+@@ -1750,13 +1753,13 @@ status_t MediaPlayerService::Client::setOutputDevice(audio_port_handle_t deviceI
+     return NO_INIT;
+ }
+ 
+-status_t MediaPlayerService::Client::getRoutedDeviceId(audio_port_handle_t* deviceId)
++status_t MediaPlayerService::Client::getRoutedDeviceIds(DeviceIdVector& deviceIds)
+ {
+-    ALOGV("[%d] getRoutedDeviceId", mConnId);
++    ALOGV("[%d] getRoutedDeviceIds", mConnId);
+     {
+         Mutex::Autolock l(mLock);
+         if (mAudioOutput.get() != nullptr) {
+-            return mAudioOutput->getRoutedDeviceId(deviceId);
++            return mAudioOutput->getRoutedDeviceIds(deviceIds);
+         }
+     }
+     return NO_INIT;
+@@ -1830,7 +1833,6 @@ MediaPlayerService::AudioOutput::AudioOutput(audio_session_t sessionId,
+       mFlags(AUDIO_OUTPUT_FLAG_NONE),
+       mVolumeHandler(new media::VolumeHandler()),
+       mSelectedDeviceId(AUDIO_PORT_HANDLE_NONE),
+-      mRoutedDeviceId(AUDIO_PORT_HANDLE_NONE),
+       mDeviceCallbackEnabled(false),
+       mDeviceCallback(deviceCallback)
+ {
+@@ -2604,14 +2606,14 @@ status_t MediaPlayerService::AudioOutput::setOutputDevice(audio_port_handle_t de
+     return NO_ERROR;
+ }
+ 
+-status_t MediaPlayerService::AudioOutput::getRoutedDeviceId(audio_port_handle_t* deviceId)
++status_t MediaPlayerService::AudioOutput::getRoutedDeviceIds(DeviceIdVector& deviceIds)
+ {
+-    ALOGV("getRoutedDeviceId");
++    ALOGV("getRoutedDeviceIds");
+     Mutex::Autolock lock(mLock);
+     if (mTrack != 0) {
+-        mRoutedDeviceId = mTrack->getRoutedDeviceId();
++        mRoutedDeviceIds = mTrack->getRoutedDeviceIds();
+     }
+-    *deviceId = mRoutedDeviceId;
++    deviceIds = mRoutedDeviceIds;
+     return NO_ERROR;
+ }
+ 
+diff --git a/media/libmediaplayerservice/MediaPlayerService.h b/media/libmediaplayerservice/MediaPlayerService.h
+index 76b7bcfda0..497ef798f2 100644
+--- a/media/libmediaplayerservice/MediaPlayerService.h
++++ b/media/libmediaplayerservice/MediaPlayerService.h
+@@ -28,6 +28,7 @@
+ #include <utils/Vector.h>
+ 
+ #include <media/AidlConversion.h>
++#include <media/AudioContainers.h>
+ #include <media/AudioResamplerPublic.h>
+ #include <media/AudioSystem.h>
+ #include <media/AudioTrack.h>
+@@ -148,7 +149,7 @@ class MediaPlayerService : public BnMediaPlayerService
+ 
+         // AudioRouting
+         virtual status_t        setOutputDevice(audio_port_handle_t deviceId);
+-        virtual status_t        getRoutedDeviceId(audio_port_handle_t* deviceId);
++        virtual status_t        getRoutedDeviceIds(DeviceIdVector& deviceIds);
+         virtual status_t        enableAudioDeviceCallback(bool enabled);
+ 
+     private:
+@@ -181,7 +182,7 @@ class MediaPlayerService : public BnMediaPlayerService
+         audio_output_flags_t    mFlags;
+         sp<media::VolumeHandler>       mVolumeHandler;
+         audio_port_handle_t     mSelectedDeviceId;
+-        audio_port_handle_t     mRoutedDeviceId;
++        DeviceIdVector          mRoutedDeviceIds;
+         bool                    mDeviceCallbackEnabled;
+         wp<AudioSystem::AudioDeviceCallback>        mDeviceCallback;
+         mutable Mutex           mLock;
+@@ -401,7 +402,7 @@ private:
+         virtual status_t releaseDrm();
+         // AudioRouting
+         virtual status_t setOutputDevice(audio_port_handle_t deviceId);
+-        virtual status_t getRoutedDeviceId(audio_port_handle_t* deviceId);
++        virtual status_t getRoutedDeviceIds(DeviceIdVector& deviceIds);
+         virtual status_t enableAudioDeviceCallback(bool enabled);
+ 
+     private:
+@@ -414,7 +415,7 @@ private:
+             ~AudioDeviceUpdatedNotifier() {}
+ 
+             virtual void onAudioDeviceUpdate(audio_io_handle_t audioIo,
+-                                             audio_port_handle_t deviceId);
++                                             const DeviceIdVector& deviceIds);
+ 
+         private:
+             wp<MediaPlayerBase> mListener;
+diff --git a/media/libmediaplayerservice/MediaRecorderClient.cpp b/media/libmediaplayerservice/MediaRecorderClient.cpp
+index ed3ec8971c..53f4e61117 100644
+--- a/media/libmediaplayerservice/MediaRecorderClient.cpp
++++ b/media/libmediaplayerservice/MediaRecorderClient.cpp
+@@ -409,10 +409,13 @@ MediaRecorderClient::AudioDeviceUpdatedNotifier::~AudioDeviceUpdatedNotifier() {
+ 
+ void MediaRecorderClient::AudioDeviceUpdatedNotifier::onAudioDeviceUpdate(
+         audio_io_handle_t audioIo,
+-        audio_port_handle_t deviceId) {
++        const DeviceIdVector& deviceIds) {
++    ALOGD("onAudioDeviceUpdate deviceIds: %s", toString(deviceIds).c_str());
+     sp<IMediaRecorderClient> listener = mListener.promote();
+     if (listener != NULL) {
+-        listener->notify(MEDIA_RECORDER_AUDIO_ROUTING_CHANGED, audioIo, deviceId);
++        // Java should query the new device ids once it gets the event.
++        // TODO(b/378505346): Pass the deviceIds to Java to avoid race conditions.
++        listener->notify(MEDIA_RECORDER_AUDIO_ROUTING_CHANGED, audioIo, 0 /*ext2*/);
+     } else {
+         ALOGW("listener for process %d death is gone", MEDIA_RECORDER_AUDIO_ROUTING_CHANGED);
+     }
+@@ -550,11 +553,11 @@ status_t MediaRecorderClient::setInputDevice(audio_port_handle_t deviceId) {
+     return NO_INIT;
+ }
+ 
+-status_t MediaRecorderClient::getRoutedDeviceId(audio_port_handle_t* deviceId) {
+-    ALOGV("getRoutedDeviceId");
++status_t MediaRecorderClient::getRoutedDeviceIds(DeviceIdVector& deviceIds) {
++    ALOGV("getRoutedDeviceIds");
+     Mutex::Autolock lock(mLock);
+     if (mRecorder != NULL) {
+-        return mRecorder->getRoutedDeviceId(deviceId);
++        return mRecorder->getRoutedDeviceIds(deviceIds);
+     }
+     return NO_INIT;
+ }
+diff --git a/media/libmediaplayerservice/MediaRecorderClient.h b/media/libmediaplayerservice/MediaRecorderClient.h
+index dec0c99184..3b9ab078f4 100644
+--- a/media/libmediaplayerservice/MediaRecorderClient.h
++++ b/media/libmediaplayerservice/MediaRecorderClient.h
+@@ -41,7 +41,7 @@ class MediaRecorderClient : public BnMediaRecorder
+         virtual ~AudioDeviceUpdatedNotifier();
+         virtual void onAudioDeviceUpdate(
+                 audio_io_handle_t audioIo,
+-                audio_port_handle_t deviceId);
++                const DeviceIdVector& deviceIds);
+     private:
+         wp<IMediaRecorderClient> mListener;
+     };
+@@ -80,7 +80,7 @@ public:
+     virtual     status_t   setInputSurface(const sp<PersistentSurface>& surface);
+     virtual     sp<IGraphicBufferProducer> querySurfaceMediaSource();
+     virtual     status_t   setInputDevice(audio_port_handle_t deviceId);
+-    virtual     status_t   getRoutedDeviceId(audio_port_handle_t* deviceId);
++    virtual     status_t   getRoutedDeviceIds(DeviceIdVector& deviceIds);
+     virtual     status_t   enableAudioDeviceCallback(bool enabled);
+     virtual     status_t   getActiveMicrophones(
+                               std::vector<media::MicrophoneInfoFw>* activeMicrophones);
+diff --git a/media/libmediaplayerservice/StagefrightRecorder.cpp b/media/libmediaplayerservice/StagefrightRecorder.cpp
+index 23e7a479bb..fa42da2eb4 100644
+--- a/media/libmediaplayerservice/StagefrightRecorder.cpp
++++ b/media/libmediaplayerservice/StagefrightRecorder.cpp
+@@ -2595,11 +2595,11 @@ status_t StagefrightRecorder::setInputDevice(audio_port_handle_t deviceId) {
+     return NO_ERROR;
+ }
+ 
+-status_t StagefrightRecorder::getRoutedDeviceId(audio_port_handle_t* deviceId) {
+-    ALOGV("getRoutedDeviceId");
++status_t StagefrightRecorder::getRoutedDeviceIds(DeviceIdVector& deviceIds) {
++    ALOGV("getRoutedDeviceIds");
+ 
+     if (mAudioSourceNode != 0) {
+-        status_t status = mAudioSourceNode->getRoutedDeviceId(deviceId);
++        status_t status = mAudioSourceNode->getRoutedDeviceIds(deviceIds);
+         return status;
+     }
+     return NO_INIT;
+diff --git a/media/libmediaplayerservice/StagefrightRecorder.h b/media/libmediaplayerservice/StagefrightRecorder.h
+index 0b6a5bb5db..4c5e62fab1 100644
+--- a/media/libmediaplayerservice/StagefrightRecorder.h
++++ b/media/libmediaplayerservice/StagefrightRecorder.h
+@@ -80,7 +80,7 @@ struct StagefrightRecorder : public MediaRecorderBase {
+     // Querying a SurfaceMediaSourcer
+     virtual sp<IGraphicBufferProducer> querySurfaceMediaSource() const;
+     virtual status_t setInputDevice(audio_port_handle_t deviceId);
+-    virtual status_t getRoutedDeviceId(audio_port_handle_t* deviceId);
++    virtual status_t getRoutedDeviceIds(DeviceIdVector& deviceIds);
+     virtual void setAudioDeviceCallback(const sp<AudioSystem::AudioDeviceCallback>& callback);
+     virtual status_t enableAudioDeviceCallback(bool enabled);
+     virtual status_t getActiveMicrophones(std::vector<media::MicrophoneInfoFw>* activeMicrophones);
+diff --git a/media/libmediaplayerservice/fuzzer/Android.bp b/media/libmediaplayerservice/fuzzer/Android.bp
+index e413241c5c..a3285ee392 100644
+--- a/media/libmediaplayerservice/fuzzer/Android.bp
++++ b/media/libmediaplayerservice/fuzzer/Android.bp
+@@ -82,6 +82,7 @@ cc_fuzz {
+         "libactivitymanager_aidl",
+         "libandroid_net",
+         "libaudioflinger",
++        "libaudiofoundation",
+         "libcamera_client",
+         "libcodec2_client",
+         "libcrypto",
+@@ -160,6 +161,7 @@ cc_fuzz {
+         "libactivitymanager_aidl",
+         "libandroid_net",
+         "libaudioclient",
++        "libaudiofoundation",
+         "libcamera_client",
+         "libcodec2_client",
+         "libcrypto",
+diff --git a/media/libmediaplayerservice/fuzzer/mediaplayer_fuzzer.cpp b/media/libmediaplayerservice/fuzzer/mediaplayer_fuzzer.cpp
+index 15265bffb1..a52d751aec 100644
+--- a/media/libmediaplayerservice/fuzzer/mediaplayer_fuzzer.cpp
++++ b/media/libmediaplayerservice/fuzzer/mediaplayer_fuzzer.cpp
+@@ -482,8 +482,8 @@ void MediaPlayerServiceFuzzer::invokeMediaPlayer() {
+                     mMediaPlayer->setOutputDevice(deviceId);
+                 },
+                 [&]() {
+-                    audio_port_handle_t deviceId;
+-                    mMediaPlayer->getRoutedDeviceId(&deviceId);
++                    DeviceIdVector deviceIds;
++                    mMediaPlayer->getRoutedDeviceIds(deviceIds);
+                 },
+                 [&]() { mMediaPlayer->enableAudioDeviceCallback(mFdp.ConsumeBool()); },
+                 [&]() {
+diff --git a/media/libmediaplayerservice/fuzzer/mediarecorder_fuzzer.cpp b/media/libmediaplayerservice/fuzzer/mediarecorder_fuzzer.cpp
+index 3339ae8e69..b95cae7260 100644
+--- a/media/libmediaplayerservice/fuzzer/mediarecorder_fuzzer.cpp
++++ b/media/libmediaplayerservice/fuzzer/mediarecorder_fuzzer.cpp
+@@ -116,7 +116,7 @@ class TestAudioDeviceCallback : public AudioSystem::AudioDeviceCallback {
+     virtual ~TestAudioDeviceCallback() = default;
+ 
+     void onAudioDeviceUpdate(audio_io_handle_t /*audioIo*/,
+-                             audio_port_handle_t /*deviceId*/) override{};
++                             const DeviceIdVector& /*deviceIds*/) override{};
+ };
+ 
+ class TestCamera : public ICamera {
+@@ -185,8 +185,8 @@ void MediaRecorderClientFuzzer::getConfig() {
+     int32_t max;
+     mStfRecorder->getMaxAmplitude(&max);
+ 
+-    int32_t deviceId;
+-    mStfRecorder->getRoutedDeviceId(&deviceId);
++    DeviceIdVector deviceIds;
++    mStfRecorder->getRoutedDeviceIds(deviceIds);
+ 
+     vector<android::media::MicrophoneInfoFw> activeMicrophones{};
+     mStfRecorder->getActiveMicrophones(&activeMicrophones);
+diff --git a/media/libmediaplayerservice/include/MediaPlayerInterface.h b/media/libmediaplayerservice/include/MediaPlayerInterface.h
+index 495cf004cf..9fe0e95019 100644
+--- a/media/libmediaplayerservice/include/MediaPlayerInterface.h
++++ b/media/libmediaplayerservice/include/MediaPlayerInterface.h
+@@ -26,6 +26,7 @@
+ #include <utils/RefBase.h>
+ 
+ #include <media/mediaplayer.h>
++#include <media/AudioContainers.h>
+ #include <media/AudioResamplerPublic.h>
+ #include <media/AudioTimestamp.h>
+ #include <media/AVSyncSettings.h>
+@@ -185,7 +186,7 @@ public:
+ 
+         // AudioRouting
+         virtual status_t    setOutputDevice(audio_port_handle_t deviceId) = 0;
+-        virtual status_t    getRoutedDeviceId(audio_port_handle_t* deviceId) = 0;
++        virtual status_t    getRoutedDeviceIds(DeviceIdVector& deviceIds) = 0;
+         virtual status_t    enableAudioDeviceCallback(bool enabled) = 0;
+     };
+ 
+diff --git a/media/libstagefright/Android.bp b/media/libstagefright/Android.bp
+index 92bf35df32..b466f18faa 100644
+--- a/media/libstagefright/Android.bp
++++ b/media/libstagefright/Android.bp
+@@ -47,8 +47,8 @@ cc_library_shared {
+     ],
+ 
+     cflags: [
+-        "-Werror",
+         "-Wall",
++        "-Werror",
+     ],
+ 
+     header_libs: [
+@@ -57,6 +57,8 @@ cc_library_shared {
+     ],
+ 
+     shared_libs: [
++        "android.hardware.cas.native@1.0",
++        "android.hardware.drm@1.0",
+         "libaudioutils",
+         "libgui",
+         "libhidlallocatorutils",
+@@ -66,15 +68,13 @@ cc_library_shared {
+         "libstagefright_foundation",
+         "libui",
+         "libutils",
+-        "android.hardware.cas.native@1.0",
+-        "android.hardware.drm@1.0",
+     ],
+ 
+     sanitize: {
+         cfi: true,
+         misc_undefined: [
+-            "unsigned-integer-overflow",
+             "signed-integer-overflow",
++            "unsigned-integer-overflow",
+         ],
+     },
+ }
+@@ -88,9 +88,9 @@ cc_library_static {
+     min_sdk_version: "29",
+ 
+     srcs: [
+-        "Utils.cpp",
+-        "MediaSource.cpp",
+         "HevcUtils.cpp",
++        "MediaSource.cpp",
++        "Utils.cpp",
+     ],
+ 
+     shared_libs: [
+@@ -114,17 +114,17 @@ cc_library_static {
+     ],
+ 
+     cflags: [
+-        "-Wno-multichar",
++        "-Wall",
+         "-Werror",
+         "-Wno-error=deprecated-declarations",
+-        "-Wall",
++        "-Wno-multichar",
+     ],
+ 
+     sanitize: {
+         cfi: true,
+         misc_undefined: [
+-            "unsigned-integer-overflow",
+             "signed-integer-overflow",
++            "unsigned-integer-overflow",
+         ],
+     },
+ 
+@@ -150,12 +150,11 @@ cc_library_shared {
+     ],
+ 
+     shared_libs: [
+-        "libbase",
+-        "libcutils",
+         "libEGL",
+         "libGLESv1_CM",
+         "libGLESv2",
+-        "libvulkan",
++        "libbase",
++        "libcutils",
+         "libgui",
+         "liblog",
+         "libprocessgroup",
+@@ -163,6 +162,7 @@ cc_library_shared {
+         "libsync",
+         "libui",
+         "libutils",
++        "libvulkan",
+     ],
+ 
+     static_libs: [
+@@ -174,18 +174,18 @@ cc_library_shared {
+     ],
+ 
+     cflags: [
+-        "-Wno-multichar",
++        "-Wall",
+         "-Werror",
+         "-Wno-error=deprecated-declarations",
+-        "-Wall",
++        "-Wno-multichar",
+     ],
+ 
+     sanitize: {
+         // TODO: re-enabled cfi for this lib after b/139945549 fixed
+         cfi: false,
+         misc_undefined: [
+-            "unsigned-integer-overflow",
+             "signed-integer-overflow",
++            "unsigned-integer-overflow",
+         ],
+     },
+ }
+@@ -209,16 +209,16 @@ cc_library_shared {
+     ],
+ 
+     cflags: [
+-        "-Wno-multichar",
+-        "-Werror",
+         "-Wall",
++        "-Werror",
++        "-Wno-multichar",
+     ],
+ 
+     sanitize: {
+         cfi: true,
+         misc_undefined: [
+-            "unsigned-integer-overflow",
+             "signed-integer-overflow",
++            "unsigned-integer-overflow",
+         ],
+     },
+ }
+@@ -255,13 +255,13 @@ cc_library {
+         "MediaCodecSource.cpp",
+         "MediaExtractor.cpp",
+         "MediaExtractorFactory.cpp",
++        "MediaMuxer.cpp",
+         "MediaSource.cpp",
+         "MediaSync.cpp",
+         "MediaTrack.cpp",
+-        "MediaMuxer.cpp",
+         "NuMediaExtractor.cpp",
+-        "OggWriter.cpp",
+         "OMXClient.cpp",
++        "OggWriter.cpp",
+         "OmxInfoBuilder.cpp",
+         "RemoteMediaExtractor.cpp",
+         "RemoteMediaSource.cpp",
+@@ -270,13 +270,22 @@ cc_library {
+         "SurfaceUtils.cpp",
+         "ThrottledSource.cpp",
+         "Utils.cpp",
+-        "VideoFrameSchedulerBase.cpp",
+         "VideoFrameScheduler.cpp",
++        "VideoFrameSchedulerBase.cpp",
+         "VideoRenderQualityTracker.cpp",
+     ],
+ 
+     shared_libs: [
+-        "libstagefright_framecapture_utils",
++        "aconfig_mediacodec_flags_c_lib",
++        "android.hardware.cas.native@1.0",
++        "android.hardware.drm@1.0",
++        "android.hardware.media.omx@1.0",
++        "android.hidl.allocator@1.0",
++        "framework-permission-aidl-cpp",
++        "libaconfig_storage_read_api_cc",
++        "libaudioclient",
++        "libaudioclient_aidl_conversion",
++        "libaudiofoundation",
+         "libaudioutils",
+         "libbase",
+         "libbinder",
+@@ -289,30 +298,24 @@ cc_library {
+         "libdl",
+         "libdl_android",
+         "libgui",
++        "libhidlallocatorutils",
++        "libhidlbase",
++        "libhidlmemory",
+         "liblog",
+         "libmedia",
+         "libmedia_codeclist",
++        "libmedia_helper",
+         "libmedia_omx",
+         "libmedia_omx_client",
+-        "libaudioclient",
+         "libmediametrics",
+-        "libui",
+-        "libutils",
+-        "libmedia_helper",
+         "libsfplugin_ccodec",
+         "libsfplugin_ccodec_utils",
+         "libstagefright_codecbase",
+         "libstagefright_foundation",
++        "libstagefright_framecapture_utils",
+         "libstagefright_omx_utils",
+-        "libhidlallocatorutils",
+-        "libhidlbase",
+-        "libhidlmemory",
+-        "android.hidl.allocator@1.0",
+-        "android.hardware.cas.native@1.0",
+-        "android.hardware.drm@1.0",
+-        "android.hardware.media.omx@1.0",
+-        "framework-permission-aidl-cpp",
+-        "libaudioclient_aidl_conversion",
++        "libui",
++        "libutils",
+         "packagemanager_aidl-cpp",
+         "server_configurable_flags",
+         "libaconfig_storage_read_api_cc",
+@@ -323,32 +326,32 @@ cc_library {
+     static_libs: [
+         "android.media.codec-aconfig-cc",
+         "com.android.media.flags.editing-aconfig-cc",
+-        "libstagefright_esds",
+-        "libstagefright_color_conversion",
+-        "libyuv",
+-        "libstagefright_webm",
+-        "libstagefright_timedtext",
+-        "libogg",
+-        "libstagefright_id3",
+         "framework-permission-aidl-cpp",
+-        "libmediandk_format",
+         "libmedia_ndkformatpriv",
++        "libmediandk_format",
++        "libogg",
++        "libstagefright_color_conversion",
++        "libstagefright_esds",
++        "libstagefright_id3",
++        "libstagefright_timedtext",
++        "libstagefright_webm",
++        "libyuv",
+     ],
+ 
+     header_libs: [
+         "libmediadrm_headers",
++        "libmediaformatshaper_headers",
+         "libnativeloader-headers",
+         "libstagefright_xmlparser_headers",
+         "media_ndk_headers",
+-        "libmediaformatshaper_headers",
+     ],
+ 
+     export_shared_lib_headers: [
++        "android.hidl.allocator@1.0",
++        "framework-permission-aidl-cpp",
+         "libgui",
+         "libhidlmemory",
+         "libmedia",
+-        "android.hidl.allocator@1.0",
+-        "framework-permission-aidl-cpp",
+     ],
+ 
+     export_include_dirs: [
+@@ -356,10 +359,10 @@ cc_library {
+     ],
+ 
+     cflags: [
+-        "-Wno-multichar",
++        "-Wall",
+         "-Werror",
+         "-Wno-error=deprecated-declarations",
+-        "-Wall",
++        "-Wno-multichar",
+     ],
+ 
+     version_script: "exports.lds",
+@@ -374,8 +377,8 @@ cc_library {
+     sanitize: {
+         cfi: true,
+         misc_undefined: [
+-            "unsigned-integer-overflow",
+             "signed-integer-overflow",
++            "unsigned-integer-overflow",
+         ],
+     },
+ }
+diff --git a/media/libstagefright/AudioSource.cpp b/media/libstagefright/AudioSource.cpp
+index 584dad650c..f658d846c4 100644
+--- a/media/libstagefright/AudioSource.cpp
++++ b/media/libstagefright/AudioSource.cpp
+@@ -497,9 +497,9 @@ status_t AudioSource::setInputDevice(audio_port_handle_t deviceId) {
+     return NO_INIT;
+ }
+ 
+-status_t AudioSource::getRoutedDeviceId(audio_port_handle_t* deviceId) {
++status_t AudioSource::getRoutedDeviceIds(DeviceIdVector& deviceIds) {
+     if (mRecord != 0) {
+-        *deviceId = mRecord->getRoutedDeviceId();
++        deviceIds = mRecord->getRoutedDeviceIds();
+         return NO_ERROR;
+     }
+     return NO_INIT;
+diff --git a/media/libstagefright/include/media/stagefright/AudioSource.h b/media/libstagefright/include/media/stagefright/AudioSource.h
+index 65d5246c35..51f6ac45cc 100644
+--- a/media/libstagefright/include/media/stagefright/AudioSource.h
++++ b/media/libstagefright/include/media/stagefright/AudioSource.h
+@@ -78,7 +78,7 @@ struct AudioSource : public MediaSource,
+     virtual void signalBufferReturned(MediaBufferBase *buffer);
+ 
+     status_t setInputDevice(audio_port_handle_t deviceId);
+-    status_t getRoutedDeviceId(audio_port_handle_t* deviceId);
++    status_t getRoutedDeviceIds(DeviceIdVector& deviceIds);
+     status_t addAudioDeviceCallback(const sp<AudioSystem::AudioDeviceCallback>& callback);
+     status_t removeAudioDeviceCallback(const sp<AudioSystem::AudioDeviceCallback>& callback);
+ 
+diff --git a/media/libstagefright/webm/Android.bp b/media/libstagefright/webm/Android.bp
+index 723131dc86..c3bd36ee57 100644
+--- a/media/libstagefright/webm/Android.bp
++++ b/media/libstagefright/webm/Android.bp
+@@ -11,8 +11,8 @@ cc_library_static {
+     name: "libstagefright_webm",
+ 
+     cflags: [
+-        "-Werror",
+         "-Wall",
++        "-Werror",
+     ],
+ 
+     sanitize: {
+@@ -38,11 +38,12 @@ cc_library_static {
+     export_include_dirs: ["include"],
+ 
+     shared_libs: [
++        "framework-permission-aidl-cpp",
++        "libaudiofoundation",
+         "libdatasource",
++        "liblog",
+         "libstagefright_foundation",
+         "libutils",
+-        "liblog",
+-        "framework-permission-aidl-cpp",
+     ],
+ 
+     header_libs: [
+@@ -51,7 +52,6 @@ cc_library_static {
+     ],
+ }
+ 
+-
+ cc_library_headers {
+     name: "libstagefright_webm_headers",
+     export_include_dirs: ["include"],
+diff --git a/services/audioflinger/AudioFlinger.cpp b/services/audioflinger/AudioFlinger.cpp
+index 2322780f34..b2edaf740d 100644
+--- a/services/audioflinger/AudioFlinger.cpp
++++ b/services/audioflinger/AudioFlinger.cpp
+@@ -1190,7 +1190,7 @@ status_t AudioFlinger::createTrack(const media::CreateTrackRequest& _input,
+                                             adjAttributionSource, &input.config, input.flags,
+                                             &selectedDeviceIds, &portId, &secondaryOutputs,
+                                             &isSpatialized, &isBitPerfect, &volume, &muted);
+-    output.selectedDeviceId = getFirstDeviceId(selectedDeviceIds);
++    output.selectedDeviceIds = selectedDeviceIds;
+ 
+     if (lStatus != NO_ERROR || output.outputId == AUDIO_IO_HANDLE_NONE) {
+         ALOGE("createTrack() getOutputForAttr() return error %d or invalid output handle", lStatus);
+diff --git a/services/audioflinger/Threads.cpp b/services/audioflinger/Threads.cpp
+index e42b39e55f..200175b54a 100644
+--- a/services/audioflinger/Threads.cpp
++++ b/services/audioflinger/Threads.cpp
+@@ -10921,7 +10921,7 @@ NO_THREAD_SAFETY_ANALYSIS  // elease and re-acquire mutex()
+ 
+     // For mmap streams, once the routing has changed, they will be disconnected. It should be
+     // okay to notify the client earlier before the new patch creation.
+-    if (mDeviceIds != deviceIds) {
++    if (!areDeviceIdsEqual(deviceIds, mDeviceIds)) {
+         if (const sp<MmapStreamCallback> callback = mCallback.promote()) {
+             // The aaudioservice handle the routing changed event asynchronously. In that case,
+             // it is safe to hold the lock here.
+@@ -10945,7 +10945,7 @@ NO_THREAD_SAFETY_ANALYSIS  // elease and re-acquire mutex()
+         *handle = AUDIO_PATCH_HANDLE_NONE;
+     }
+ 
+-    if (numDevices == 0 || mDeviceIds != deviceIds) {
++    if (numDevices == 0 || (!areDeviceIdsEqual(deviceIds, mDeviceIds))) {
+         if (isOutput()) {
+             sendIoConfigEvent_l(AUDIO_OUTPUT_CONFIG_CHANGED);
+             mOutDeviceTypeAddrs = sinkDeviceTypeAddrs;
+@@ -11110,8 +11110,7 @@ void MmapThread::checkInvalidTracks_l()
+             if (const sp<MmapStreamCallback> callback = mCallback.promote()) {
+                 // The aaudioservice handle the routing changed event asynchronously. In that case,
+                 // it is safe to hold the lock here.
+-                DeviceIdVector emptyDeviceIdVector;
+-                callback->onRoutingChanged(emptyDeviceIdVector);
++                callback->onRoutingChanged({});
+             } else if (mNoCallbackWarningCount < kMaxNoCallbackWarnings) {
+                 ALOGW("Could not notify MMAP stream tear down: no onRoutingChanged callback!");
+                 mNoCallbackWarningCount++;
+diff --git a/services/oboeservice/AAudioEndpointManager.cpp b/services/oboeservice/AAudioEndpointManager.cpp
+index b5ee2f29d2..243f1f18e8 100644
+--- a/services/oboeservice/AAudioEndpointManager.cpp
++++ b/services/oboeservice/AAudioEndpointManager.cpp
+@@ -119,8 +119,9 @@ sp<AAudioServiceEndpoint> AAudioEndpointManager::findExclusiveEndpoint_l(
+         }
+     }
+ 
+-    ALOGV("findExclusiveEndpoint_l(), found %p for device = %d, sessionId = %d",
+-          endpoint.get(), configuration.getDeviceId(), configuration.getSessionId());
++    ALOGV("findExclusiveEndpoint_l(), found %p for devices = %s, sessionId = %d",
++          endpoint.get(), toString(configuration.getDeviceIds()).c_str(),
++          configuration.getSessionId());
+     return endpoint;
+ }
+ 
+@@ -137,8 +138,9 @@ sp<AAudioServiceEndpointShared> AAudioEndpointManager::findSharedEndpoint_l(
+         }
+     }
+ 
+-    ALOGV("findSharedEndpoint_l(), found %p for device = %d, sessionId = %d",
+-          endpoint.get(), configuration.getDeviceId(), configuration.getSessionId());
++    ALOGV("findSharedEndpoint_l(), found %p for devices = %s, sessionId = %d",
++          endpoint.get(), toString(configuration.getDeviceIds()).c_str(),
++          configuration.getSessionId());
+     return endpoint;
+ }
+ 
+@@ -192,8 +194,8 @@ sp<AAudioServiceEndpoint> AAudioEndpointManager::openExclusiveEndpoint(
+     } else {
+         const sp<AAudioServiceEndpointMMAP> endpointMMap =
+                 new AAudioServiceEndpointMMAP(aaudioService);
+-        ALOGV("%s(), no match so try to open MMAP %p for dev %d",
+-              __func__, endpointMMap.get(), configuration.getDeviceId());
++        ALOGV("%s(), no match so try to open MMAP %p for devices %s",
++              __func__, endpointMMap.get(), toString(configuration.getDeviceIds()).c_str());
+         endpoint = endpointMMap;
+ 
+         const aaudio_result_t result = endpoint->open(request);
+@@ -250,8 +252,9 @@ sp<AAudioServiceEndpoint> AAudioEndpointManager::openSharedEndpoint(
+                 mSharedOpenCount++;
+             }
+         }
+-        ALOGV("%s(), created endpoint %p, requested device = %d, dir = %d",
+-              __func__, endpoint.get(), configuration.getDeviceId(), (int)direction);
++        ALOGV("%s(), created endpoint %p, requested device = %s, dir = %d",
++              __func__, endpoint.get(), android::toString(configuration.getDeviceIds()).c_str(),
++              (int)direction);
+         IPCThreadState::self()->restoreCallingIdentity(token);
+     }
+ 
+@@ -289,8 +292,9 @@ void AAudioEndpointManager::closeExclusiveEndpoint(
+ 
+         serviceEndpoint->close();
+         mExclusiveCloseCount++;
+-        ALOGV("%s() %p for device %d",
+-              __func__, serviceEndpoint.get(), serviceEndpoint->getDeviceId());
++        ALOGV("%s() %p for devices %s",
++              __func__, serviceEndpoint.get(),
++              android::toString(serviceEndpoint->getDeviceIds()).c_str());
+     }
+ }
+ 
+@@ -313,7 +317,8 @@ void AAudioEndpointManager::closeSharedEndpoint(const sp<AAudioServiceEndpoint>&
+         serviceEndpoint->close();
+ 
+         mSharedCloseCount++;
+-        ALOGV("%s(%p) closed for device %d",
+-              __func__, serviceEndpoint.get(), serviceEndpoint->getDeviceId());
++        ALOGV("%s(%p) closed for device %s",
++              __func__, serviceEndpoint.get(),
++              android::toString(serviceEndpoint->getDeviceIds()).c_str());
+     }
+ }
+diff --git a/services/oboeservice/AAudioServiceEndpoint.cpp b/services/oboeservice/AAudioServiceEndpoint.cpp
+index e49e9e7107..c677619354 100644
+--- a/services/oboeservice/AAudioServiceEndpoint.cpp
++++ b/services/oboeservice/AAudioServiceEndpoint.cpp
+@@ -57,7 +57,7 @@ std::string AAudioServiceEndpoint::dump() const NO_THREAD_SAFETY_ANALYSIS {
+     result << "    Direction:            " << ((getDirection() == AAUDIO_DIRECTION_OUTPUT)
+                                    ? "OUTPUT" : "INPUT") << "\n";
+     result << "    Requested Device Id:  " << mRequestedDeviceId << "\n";
+-    result << "    Device Id:            " << getDeviceId() << "\n";
++    result << "    Device Ids:           " << android::toString(getDeviceIds()).c_str() << "\n";
+     result << "    Sample Rate:          " << getSampleRate() << "\n";
+     result << "    Channel Count:        " << getSamplesPerFrame() << "\n";
+     result << "    Channel Mask:         0x" << std::hex << getChannelMask() << std::dec << "\n";
+@@ -155,8 +155,8 @@ bool AAudioServiceEndpoint::matches(const AAudioStreamConfiguration& configurati
+     if (configuration.getDirection() != getDirection()) {
+         return false;
+     }
+-    if (configuration.getDeviceId() != AAUDIO_UNSPECIFIED &&
+-        configuration.getDeviceId() != getDeviceId()) {
++    if (!configuration.getDeviceIds().empty() &&
++        !android::areDeviceIdsEqual(configuration.getDeviceIds(), getDeviceIds())) {
+         return false;
+     }
+     if (configuration.getSessionId() != AAUDIO_SESSION_ID_ALLOCATE &&
+diff --git a/services/oboeservice/AAudioServiceEndpointMMAP.cpp b/services/oboeservice/AAudioServiceEndpointMMAP.cpp
+index 59bb98e080..66918c185b 100644
+--- a/services/oboeservice/AAudioServiceEndpointMMAP.cpp
++++ b/services/oboeservice/AAudioServiceEndpointMMAP.cpp
+@@ -105,7 +105,7 @@ aaudio_result_t AAudioServiceEndpointMMAP::open(const aaudio::AAudioStreamReques
+     aaudio_result_t result = AAUDIO_OK;
+     mAudioDataWrapper = std::make_unique<SharedMemoryWrapper>();
+     copyFrom(request.getConstantConfiguration());
+-    mRequestedDeviceId = getDeviceId();
++    mRequestedDeviceId = android::getFirstDeviceId(getDeviceIds());
+ 
+     mMmapClient.attributionSource = request.getAttributionSource();
+     // TODO b/182392769: use attribution source util
+@@ -173,11 +173,13 @@ aaudio_result_t AAudioServiceEndpointMMAP::openWithConfig(
+         audio_config_base_t* config) {
+     aaudio_result_t result = AAUDIO_OK;
+     audio_config_base_t currentConfig = *config;
+-    audio_port_handle_t deviceId;
++    android::DeviceIdVector deviceIds;
+ 
+     const audio_attributes_t attributes = getAudioAttributesFrom(this);
+ 
+-    deviceId = mRequestedDeviceId;
++    if (mRequestedDeviceId != AAUDIO_UNSPECIFIED) {
++        deviceIds.push_back(mRequestedDeviceId);
++    }
+ 
+     const aaudio_direction_t direction = getDirection();
+ 
+@@ -202,14 +204,9 @@ aaudio_result_t AAudioServiceEndpointMMAP::openWithConfig(
+ 
+     // Open HAL stream. Set mMmapStream
+     ALOGD("%s trying to open MMAP stream with format=%#x, "
+-          "sample_rate=%u, channel_mask=%#x, device=%d",
++          "sample_rate=%u, channel_mask=%#x, device=%s",
+           __func__, config->format, config->sample_rate,
+-          config->channel_mask, deviceId);
+-
+-    android::DeviceIdVector deviceIds;
+-    if (deviceId != AAUDIO_UNSPECIFIED) {
+-        deviceIds.push_back(deviceId);
+-    }
++          config->channel_mask, android::toString(deviceIds).c_str());
+ 
+     const std::lock_guard<std::mutex> lock(mMmapStreamLock);
+     const status_t status = MmapStreamInterface::openMmapStream(streamDirection,
+@@ -233,12 +230,11 @@ aaudio_result_t AAudioServiceEndpointMMAP::openWithConfig(
+         config->channel_mask = currentConfig.channel_mask;
+         return AAUDIO_ERROR_UNAVAILABLE;
+     }
+-    deviceId = android::getFirstDeviceId(deviceIds);
+ 
+-    if (deviceId == AAUDIO_UNSPECIFIED) {
+-        ALOGW("%s() - openMmapStream() failed to set deviceId", __func__);
++    if (deviceIds.empty()) {
++        ALOGW("%s() - openMmapStream() failed to set deviceIds", __func__);
+     }
+-    setDeviceId(deviceId);
++    setDeviceIds(deviceIds);
+ 
+     if (sessionId == AUDIO_SESSION_ALLOCATE) {
+         ALOGW("%s() - openMmapStream() failed to set sessionId", __func__);
+@@ -250,8 +246,8 @@ aaudio_result_t AAudioServiceEndpointMMAP::openWithConfig(
+             : (aaudio_session_id_t) sessionId;
+     setSessionId(actualSessionId);
+ 
+-    ALOGD("%s(format = 0x%X) deviceId = %d, sessionId = %d",
+-          __func__, config->format, getDeviceId(), getSessionId());
++    ALOGD("%s(format = 0x%X) deviceIds = %s, sessionId = %d",
++          __func__, config->format, toString(getDeviceIds()).c_str(), getSessionId());
+ 
+     // Create MMAP/NOIRQ buffer.
+     result = createMmapBuffer_l();
+@@ -280,9 +276,9 @@ aaudio_result_t AAudioServiceEndpointMMAP::openWithConfig(
+ 
+     mDataReportOffsetNanos = ((int64_t)mTimestampGracePeriodMs) * AAUDIO_NANOS_PER_MILLISECOND;
+ 
+-    ALOGD("%s() got rate = %d, channels = %d channelMask = %#x, deviceId = %d, capacity = %d\n",
++    ALOGD("%s() got rate = %d, channels = %d channelMask = %#x, deviceIds = %s, capacity = %d\n",
+           __func__, getSampleRate(), getSamplesPerFrame(), getChannelMask(),
+-          deviceId, getBufferCapacity());
++          android::toString(deviceIds).c_str(), getBufferCapacity());
+ 
+     ALOGD("%s() got format = 0x%X = %s, frame size = %d, burst size = %d",
+           __func__, getFormat(), audio_format_to_string(getFormat()),
+@@ -293,7 +289,11 @@ aaudio_result_t AAudioServiceEndpointMMAP::openWithConfig(
+ error:
+     close_l();
+     // restore original requests
+-    setDeviceId(mRequestedDeviceId);
++    android::DeviceIdVector requestedDeviceIds;
++    if (mRequestedDeviceId != AAUDIO_UNSPECIFIED) {
++        requestedDeviceIds.push_back(mRequestedDeviceId);
++    }
++    setDeviceIds(requestedDeviceIds);
+     setSessionId(requestedSessionId);
+     return result;
+ }
+@@ -491,27 +491,26 @@ void AAudioServiceEndpointMMAP::onVolumeChanged(float volume) {
+ };
+ 
+ void AAudioServiceEndpointMMAP::onRoutingChanged(const android::DeviceIdVector& deviceIds) {
+-    const auto deviceId = android::getFirstDeviceId(deviceIds);
+-    // TODO(b/367816690): Compare the new and saved device sets.
+-    ALOGD("%s() called with dev %d, old = %d", __func__, deviceId, getDeviceId());
+-    if (getDeviceId() != deviceId) {
+-        if (getDeviceId() != AUDIO_PORT_HANDLE_NONE) {
++    ALOGD("%s() called with dev %s, old = %s", __func__, android::toString(deviceIds).c_str(),
++          android::toString(getDeviceIds()).c_str());
++    if (!android::areDeviceIdsEqual(getDeviceIds(), deviceIds)) {
++        if (!getDeviceIds().empty()) {
+             // When there is a routing changed, mmap stream should be disconnected. Set `mConnected`
+-            // as false here so that there won't be a new stream connect to this endpoint.
++            // as false here so that there won't be a new stream connected to this endpoint.
+             mConnected.store(false);
+             const android::sp<AAudioServiceEndpointMMAP> holdEndpoint(this);
+-            std::thread asyncTask([holdEndpoint, deviceId]() {
++            std::thread asyncTask([holdEndpoint, deviceIds]() {
+                 ALOGD("onRoutingChanged() asyncTask launched");
+                 // When routing changed, the stream is disconnected and cannot be used except for
+                 // closing. In that case, it should be safe to release all registered streams.
+                 // This can help release service side resource in case the client doesn't close
+                 // the stream after receiving disconnect event.
+                 holdEndpoint->releaseRegisteredStreams();
+-                holdEndpoint->setDeviceId(deviceId);
++                holdEndpoint->setDeviceIds(deviceIds);
+             });
+             asyncTask.detach();
+         } else {
+-            setDeviceId(deviceId);
++            setDeviceIds(deviceIds);
+         }
+     }
+ };
+diff --git a/services/oboeservice/AAudioServiceEndpointShared.cpp b/services/oboeservice/AAudioServiceEndpointShared.cpp
+index 5e1e594fed..f54de5eab8 100644
+--- a/services/oboeservice/AAudioServiceEndpointShared.cpp
++++ b/services/oboeservice/AAudioServiceEndpointShared.cpp
+@@ -64,7 +64,7 @@ aaudio_result_t AAudioServiceEndpointShared::open(const aaudio::AAudioStreamRequ
+     const AAudioStreamConfiguration &configuration = request.getConstantConfiguration();
+ 
+     copyFrom(configuration);
+-    mRequestedDeviceId = configuration.getDeviceId();
++    mRequestedDeviceId = android::getFirstDeviceId(configuration.getDeviceIds());
+ 
+     AudioStreamBuilder builder;
+     builder.copyFrom(configuration);
+@@ -79,7 +79,7 @@ aaudio_result_t AAudioServiceEndpointShared::open(const aaudio::AAudioStreamRequ
+ 
+     setSampleRate(mStreamInternal->getSampleRate());
+     setChannelMask(mStreamInternal->getChannelMask());
+-    setDeviceId(mStreamInternal->getDeviceId());
++    setDeviceIds(mStreamInternal->getDeviceIds());
+     setSessionId(mStreamInternal->getSessionId());
+     setFormat(AUDIO_FORMAT_PCM_FLOAT); // force for mixer
+     setHardwareSampleRate(mStreamInternal->getHardwareSampleRate());
+@@ -220,7 +220,7 @@ aaudio_result_t AAudioServiceEndpointShared::getTimestamp(int64_t *positionFrame
+ void AAudioServiceEndpointShared::handleDisconnectRegisteredStreamsAsync() {
+     android::sp<AAudioServiceEndpointShared> holdEndpoint(this);
+     // When there is a routing changed, mmap stream should be disconnected. Set `mConnected`
+-    // as false here so that there won't be a new stream connect to this endpoint.
++    // as false here so that there won't be a new stream connected to this endpoint.
+     mConnected.store(false);
+     std::thread asyncTask([holdEndpoint]() {
+         // When handling disconnection, the service side has disconnected. In that case,
+diff --git a/services/oboeservice/AAudioServiceStreamBase.cpp b/services/oboeservice/AAudioServiceStreamBase.cpp
+index 78cf70621c..1c24f186ba 100644
+--- a/services/oboeservice/AAudioServiceStreamBase.cpp
++++ b/services/oboeservice/AAudioServiceStreamBase.cpp
+@@ -127,7 +127,8 @@ void AAudioServiceStreamBase::logOpen(aaudio_handle_t streamHandle) {
+         .set(AMEDIAMETRICS_PROP_DIRECTION,
+                 AudioGlobal_convertDirectionToText(getDirection()))
+         .set(AMEDIAMETRICS_PROP_ENCODING, toString(getFormat()).c_str())
+-        .set(AMEDIAMETRICS_PROP_ROUTEDDEVICEID, (int32_t)getDeviceId())
++        .set(AMEDIAMETRICS_PROP_ROUTEDDEVICEID, android::getFirstDeviceId(getDeviceIds()))
++        .set(AMEDIAMETRICS_PROP_ROUTEDDEVICEIDS, android::toString(getDeviceIds()).c_str())
+         .set(AMEDIAMETRICS_PROP_SAMPLERATE, (int32_t)getSampleRate())
+         .set(AMEDIAMETRICS_PROP_SESSIONID, (int32_t)getSessionId())
+         .set(AMEDIAMETRICS_PROP_SOURCE, toString(attributes.source).c_str())
+diff --git a/services/oboeservice/fuzzer/oboeservice_fuzzer.cpp b/services/oboeservice/fuzzer/oboeservice_fuzzer.cpp
+index f5c2e6c0a1..e80f51d6fd 100644
+--- a/services/oboeservice/fuzzer/oboeservice_fuzzer.cpp
++++ b/services/oboeservice/fuzzer/oboeservice_fuzzer.cpp
+@@ -372,7 +372,8 @@ void OboeserviceFuzzer::process(const uint8_t *data, size_t size) {
+     request.setAttributionSource(attributionSource);
+     request.setInService(fdp.ConsumeBool());
+ 
+-    request.getConfiguration().setDeviceId(fdp.ConsumeIntegral<int32_t>());
++    android::DeviceIdVector DeviceIdVector = { fdp.ConsumeIntegral<int32_t>() };
++    request.getConfiguration().setDeviceIds(DeviceIdVector);
+     request.getConfiguration().setSampleRate(fdp.ConsumeIntegral<int32_t>());
+     request.getConfiguration().setChannelMask((aaudio_channel_mask_t)(
+         fdp.ConsumeBool()
+-- 
+2.43.0
+

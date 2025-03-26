@@ -1,0 +1,180 @@
+From 2a3f9a719e01c87fa939911d45facb8a22296b77 Mon Sep 17 00:00:00 2001
+From: Austin Borger <borgera@google.com>
+Date: Thu, 7 Nov 2024 12:24:49 -0800
+Subject: [PATCH 228/436] Replace use_context_attribution_source /
+ check_full_attribution_source_chain flags with read-only flag
+
+The VDM team needs the data delivery permission checks to be enabled in
+trunkfood to move forward. Due to b/373966108, enabling the flags through
+teamfood is a risk. Replace these runtime flags with a single compile-time
+flag, which does not carry that risk.
+
+Bug: 190657833
+Test: Ran CameraPermissionTest
+Flag: com.android.internal.camera.flags.data_delivery_permission_checks
+Change-Id: Ic870ba644f0aee0de4e562f7ef750fcd021be24c
+---
+ camera/camera_platform.aconfig                 | 12 +++---------
+ .../camera/libcameraservice/CameraService.cpp  | 18 +++++++++---------
+ .../utils/AttributionAndPermissionUtils.cpp    |  6 +++---
+ .../utils/AttributionAndPermissionUtils.h      |  4 ++--
+ 4 files changed, 17 insertions(+), 23 deletions(-)
+
+diff --git a/camera/camera_platform.aconfig b/camera/camera_platform.aconfig
+index 4e36e01232..227420c670 100644
+--- a/camera/camera_platform.aconfig
++++ b/camera/camera_platform.aconfig
+@@ -175,16 +175,10 @@ flag {
+ 
+ flag {
+     namespace: "camera_platform"
+-    name: "use_context_attribution_source"
+-    description: "Use the context-provided AttributionSource when checking for client permissions"
+-    bug: "190657833"
+-}
+-
+-flag {
+-    namespace: "camera_platform"
+-    name: "check_full_attribution_source_chain"
+-    description: "Pass the full AttributionSource chain to PermissionChecker"
++    name: "data_delivery_permission_checks"
++    description: "Pass the full AttributionSource chain to PermissionChecker for data delivery"
+     bug: "190657833"
++    is_fixed_read_only: true
+ }
+ 
+ flag {
+diff --git a/services/camera/libcameraservice/CameraService.cpp b/services/camera/libcameraservice/CameraService.cpp
+index bdd7cbcce2..8d44e06906 100644
+--- a/services/camera/libcameraservice/CameraService.cpp
++++ b/services/camera/libcameraservice/CameraService.cpp
+@@ -2275,7 +2275,7 @@ Status CameraService::connectDevice(
+ 
+     bool isNonSystemNdk = clientPackageNameMaybe.size() == 0;
+ 
+-    if (!flags::use_context_attribution_source()) {
++    if (!flags::data_delivery_permission_checks()) {
+         resolvedClientAttribution.pid = USE_CALLING_PID;
+     }
+ 
+@@ -4281,7 +4281,7 @@ status_t CameraService::BasicClient::notifyCameraOpening() {
+     ATRACE_CALL();
+ 
+     // Don't start watching until we're streaming when using permissionChecker for data delivery
+-    if (!flags::check_full_attribution_source_chain()) {
++    if (!flags::data_delivery_permission_checks()) {
+         ALOGD("%s: Start camera ops, package name = %s, client UID = %d", __FUNCTION__,
+               getPackageName().c_str(), getClientUid());
+ 
+@@ -4303,7 +4303,7 @@ status_t CameraService::BasicClient::notifyCameraOpening() {
+             }
+         }
+     } else {
+-        // TODO: Remove when removing the check_full_attribution_source_chain flag
++        // TODO: Remove when removing the data_delivery_permission_checks flag
+         ALOGD("%s: Bypassing checkOp for uid %d", __FUNCTION__, getClientUid());
+     }
+ 
+@@ -4337,7 +4337,7 @@ status_t CameraService::BasicClient::startCameraStreamingOps() {
+           getPackageName().c_str(), getClientUid());
+ 
+     if (mAppOpsManager != nullptr) {
+-        if (flags::check_full_attribution_source_chain()) {
++        if (flags::data_delivery_permission_checks()) {
+             ALOGD("%s: Start data delivery for uid %d", __FUNCTION__, getClientUid());
+ 
+             const PermissionChecker::PermissionResult result =
+@@ -4381,7 +4381,7 @@ status_t CameraService::BasicClient::noteAppOp() {
+ 
+     // noteAppOp is only used for when camera mute is not supported, in order
+     // to trigger the sensor privacy "Unblock" dialog
+-    if (flags::check_full_attribution_source_chain()) {
++    if (flags::data_delivery_permission_checks()) {
+         // Ignore the result, since we're only triggering the dialog
+         ALOGD("%s: Check data delivery permissions for uid %d", __FUNCTION__, getClientUid());
+         hasPermissionsForCameraForDataDelivery(std::string(), mClientAttribution);
+@@ -4413,7 +4413,7 @@ status_t CameraService::BasicClient::finishCameraStreamingOps() {
+     }
+ 
+     if (mAppOpsManager != nullptr) {
+-        if (flags::check_full_attribution_source_chain()) {
++        if (flags::data_delivery_permission_checks()) {
+             ALOGD("%s: finishDataDelivery for uid %d", __FUNCTION__, getClientUid());
+             finishDataDelivery(mClientAttribution);
+ 
+@@ -4458,7 +4458,7 @@ status_t CameraService::BasicClient::notifyCameraClosing() {
+     }
+ 
+     // When using the data delivery permission checks, the open state does not involve AppOps
+-    if (!flags::check_full_attribution_source_chain()) {
++    if (!flags::data_delivery_permission_checks()) {
+         // Always stop watching, even if no camera op is active
+         if (mOpsCallback != nullptr && mAppOpsManager != nullptr) {
+             mAppOpsManager->stopWatchingMode(mOpsCallback);
+@@ -4486,7 +4486,7 @@ void CameraService::BasicClient::opChanged(int32_t op, const String16&) {
+     }
+ 
+     PermissionChecker::PermissionResult res;
+-    if (flags::check_full_attribution_source_chain()) {
++    if (flags::data_delivery_permission_checks()) {
+         int32_t appOpMode = AppOpsManager::MODE_ALLOWED;
+         std::for_each(AttrSourceItr{mClientAttribution}, AttrSourceItr::end(),
+                 [&](const auto& attr) {
+@@ -4522,7 +4522,7 @@ void CameraService::BasicClient::opChanged(int32_t op, const String16&) {
+         // Uid may be active, but not visible to the user (e.g. PROCESS_STATE_FOREGROUND_SERVICE).
+         // If not visible, but still active, then we want to block instead of muting the camera.
+         int32_t procState = ActivityManager::PROCESS_STATE_NONEXISTENT;
+-        if (flags::check_full_attribution_source_chain()) {
++        if (flags::data_delivery_permission_checks()) {
+             // Use the proc state of the last uid in the chain (ultimately receiving the data)
+             // when determining whether to mute or block
+             int32_t uid = -1;
+diff --git a/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.cpp b/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.cpp
+index 4b63704d4e..80af1404d0 100644
+--- a/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.cpp
++++ b/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.cpp
+@@ -138,7 +138,7 @@ PermissionChecker::PermissionResult AttributionAndPermissionUtils::checkPermissi
+         int32_t attributedOpCode, bool forDataDelivery, bool startDataDelivery,
+         bool checkAutomotive) {
+     AttributionSourceState clientAttribution = attributionSource;
+-    if (!flags::check_full_attribution_source_chain() && !clientAttribution.next.empty()) {
++    if (!flags::data_delivery_permission_checks() && !clientAttribution.next.empty()) {
+         clientAttribution.next.clear();
+     }
+ 
+@@ -408,7 +408,7 @@ bool AttributionAndPermissionUtils::resolveClientUid(/*inout*/ int& clientUid) {
+         clientUid = callingUid;
+     } else {
+         validUid = isTrustedCallingUid(callingUid);
+-        if (flags::use_context_attribution_source()) {
++        if (flags::data_delivery_permission_checks()) {
+             validUid = validUid || (clientUid == callingUid);
+         }
+     }
+@@ -426,7 +426,7 @@ bool AttributionAndPermissionUtils::resolveClientPid(/*inout*/ int& clientPid) {
+         clientPid = callingPid;
+     } else {
+         validPid = isTrustedCallingUid(callingUid);
+-        if (flags::use_context_attribution_source()) {
++        if (flags::data_delivery_permission_checks()) {
+             validPid = validPid || (clientPid == callingPid);
+         }
+     }
+diff --git a/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.h b/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.h
+index 8b2804d42a..1c5d6da5a7 100644
+--- a/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.h
++++ b/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.h
+@@ -92,8 +92,8 @@ class AttributionAndPermissionUtils {
+     virtual void restoreCallingIdentity(int64_t token);
+ 
+     /**
+-     * If flag::use_context_attribution_source() is enabled, check the calling attribution source
+-     * and resolve its package name, or fill in the pid/uid/package name if necessary.
++     * If flags::data_delivery_permission_checks() is enabled, check the calling attribution
++     * source and resolve its package name, or fill in the pid/uid/package name if necessary.
+      *
+      * @param resolvedAttributionSource The resolved attribution source.
+      * @param methodName The name of the method calling this function (for logging only).
+-- 
+2.43.0
+

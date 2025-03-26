@@ -1,0 +1,40 @@
+From b894244302ebce1eea507713c407ed77e634e8b1 Mon Sep 17 00:00:00 2001
+From: Ravneet Dhanjal <rdhanjal@google.com>
+Date: Wed, 20 Nov 2024 22:47:31 +0000
+Subject: [PATCH 315/436] Camera: Remove AE_PRIORITY_MODE setting in
+ CaptureRequest
+
+- Remove default OFF in capture request
+- HAL can assume unless AE priority mode is explicitly
+requested, it is not enabled
+
+Test: m, open camera
+Bug: 379333302
+Flag: EXEMPT bug fix
+Change-Id: I6183b2f6ac7095b5496be39a58620b029ad33a00
+---
+ .../libcameraservice/utils/SessionConfigurationUtils.cpp  | 8 --------
+ 1 file changed, 8 deletions(-)
+
+diff --git a/services/camera/libcameraservice/utils/SessionConfigurationUtils.cpp b/services/camera/libcameraservice/utils/SessionConfigurationUtils.cpp
+index ee4df4e11c..202ab96edc 100644
+--- a/services/camera/libcameraservice/utils/SessionConfigurationUtils.cpp
++++ b/services/camera/libcameraservice/utils/SessionConfigurationUtils.cpp
+@@ -1253,14 +1253,6 @@ status_t overrideDefaultRequestKeys(CameraMetadata *request) {
+         request->update(ANDROID_CONTROL_AUTOFRAMING, &kDefaultAutoframingMode, 1);
+     }
+ 
+-    if (flags::ae_priority()) {
+-        // Fill in CONTROL_AE_PRIORITY_MODE if not available
+-        if (!request->exists(ANDROID_CONTROL_AE_PRIORITY_MODE)) {
+-            static const uint8_t kDefaultAePriorityMode = ANDROID_CONTROL_AE_PRIORITY_MODE_OFF;
+-            request->update(ANDROID_CONTROL_AE_PRIORITY_MODE, &kDefaultAePriorityMode, 1);
+-        }
+-    }
+-
+     return OK;
+ }
+ 
+-- 
+2.43.0
+

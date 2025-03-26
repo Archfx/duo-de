@@ -1,0 +1,32 @@
+From 6de075389e0e81945805e2dabfb1a5232fcbe90f Mon Sep 17 00:00:00 2001
+From: Eric Lin <ericth@google.com>
+Date: Tue, 26 Nov 2024 07:05:41 +0000
+Subject: [PATCH 350/436] Update comments to point to the new location of
+ event.logtags.
+
+event.logtags was moved from system/core/logcat to system/logging/logcat in Android 12 by aosp/1454058.
+
+Change-Id: Ia80eeb4927177652823e98b20e1aef0ae37d8bb8
+BUG: 168791309
+Flag: DOCS_ONLY
+Test: Local build
+---
+ media/utils/EventLogTags.logtags | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/media/utils/EventLogTags.logtags b/media/utils/EventLogTags.logtags
+index c397f34eee..5b98b0fca3 100644
+--- a/media/utils/EventLogTags.logtags
++++ b/media/utils/EventLogTags.logtags
+@@ -31,7 +31,7 @@
+ # 6: Percent
+ # Default value for data of type int/long is 2 (bytes).
+ #
+-# See system/core/logcat/event.logtags for the original definition of the tags.
++# See system/logging/logcat/event.logtags for the original definition of the tags.
+ 
+ # 61000 - 61199 reserved for audioserver
+ 
+-- 
+2.43.0
+

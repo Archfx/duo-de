@@ -1,0 +1,54 @@
+From 52df07b5ac8e26229c29d46310e5504d542e4329 Mon Sep 17 00:00:00 2001
+From: Andrew Lewis <andrewlewis@google.com>
+Date: Fri, 25 Oct 2024 10:30:33 +0000
+Subject: [PATCH 146/436] Update media_solutions_OWNERS
+
+Simplify headings and update owners:
+- Remove adadukin@
+- Remove bishoygendy@
+- Remove christosts@
+- Add sheenachhabra@
+- Add simakova@
+
+Change-Id: Idaac9c9997a2d7b5f62757f87904b289f23e7048
+---
+ media/janitors/media_solutions_OWNERS | 18 +++++++-----------
+ 1 file changed, 7 insertions(+), 11 deletions(-)
+
+diff --git a/media/janitors/media_solutions_OWNERS b/media/janitors/media_solutions_OWNERS
+index 17bc7dd1de..3243726c4f 100644
+--- a/media/janitors/media_solutions_OWNERS
++++ b/media/janitors/media_solutions_OWNERS
+@@ -1,22 +1,18 @@
+ # Bug component: 1344
+ # go/android-fwk-media-solutions for info on areas of ownership.
+ 
+-# MediaRouter and native mirroring only:
+-adadukin@google.com
+-aquilescanta@google.com
+-bishoygendy@google.com
+-ivanbuper@google.com
+-
+-# MediaMuxer, MediaRecorder, and seamless transcoding only:
+ andrewlewis@google.com
+-claincly@google.com
+-
+-# Everything in go/android-fwk-media-solutions not covered above:
+ bachinger@google.com
+-christosts@google.com
++claincly@google.com
+ ibaker@google.com
++ivanbuper@google.com
+ jbibik@google.com
+ michaelkatz@google.com
+ rohks@google.com
++sheenachhabra@google.com
++simakova@google.com
+ tianyifeng@google.com
+ tonihei@google.com
++
++# MediaRouter and native mirroring only:
++aquilescanta@google.com
+-- 
+2.43.0
+

@@ -1,0 +1,35 @@
+From d3c0eb43eb95f72201582e5d4509139346b91a81 Mon Sep 17 00:00:00 2001
+From: Imran Ziad <imranziad@google.com>
+Date: Mon, 2 Dec 2024 13:54:09 +0800
+Subject: [PATCH 376/436] Camera: Add desktop_effects feature flag
+
+Flag: com.android.internal.camera.flags.desktop_effects
+
+Test: None
+Bug: 376797335
+Change-Id: Ibf7d58233a217ca4e106f6be36d497ad2278ce50
+---
+ camera/camera_platform.aconfig | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/camera/camera_platform.aconfig b/camera/camera_platform.aconfig
+index 5682ad2040..627b225cf4 100644
+--- a/camera/camera_platform.aconfig
++++ b/camera/camera_platform.aconfig
+@@ -272,4 +272,11 @@ flag {
+     metadata {
+         purpose: PURPOSE_BUGFIX
+     }
+-}
+\ No newline at end of file
++}
++
++flag {
++    namespace: "camera_platform"
++    name: "desktop_effects"
++    description: "Applies system controlled effects targetting video conferencing"
++    bug: "376797335"
++}
+-- 
+2.43.0
+

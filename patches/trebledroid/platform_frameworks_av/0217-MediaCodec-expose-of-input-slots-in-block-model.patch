@@ -1,0 +1,156 @@
+From 38d0b3db8916229de93250f896171906c2ac3715 Mon Sep 17 00:00:00 2001
+From: Wonsik Kim <wonsik@google.com>
+Date: Wed, 6 Nov 2024 23:09:55 +0000
+Subject: [PATCH 217/436] MediaCodec: expose # of input slots in block model
+
+Bug: 159891571
+Bug: 363384866
+Test: atest CtsMediaV2TestCases:android.mediav2.cts.CodecUnitTest
+Change-Id: I2c060a260f2f8553111eaa4193fc0d6a44b7a0e1
+---
+ media/aconfig/codec_fwk.aconfig                     |  7 +++++++
+ media/codec2/sfplugin/CCodec.cpp                    |  5 ++++-
+ media/codec2/sfplugin/CCodecBufferChannel.cpp       | 13 +++++++++++--
+ media/codec2/sfplugin/CCodecBufferChannel.h         | 13 +++++++++----
+ .../include/media/stagefright/MediaCodecConstants.h |  1 +
+ 5 files changed, 32 insertions(+), 7 deletions(-)
+
+diff --git a/media/aconfig/codec_fwk.aconfig b/media/aconfig/codec_fwk.aconfig
+index b5c7edf137..dce5333082 100644
+--- a/media/aconfig/codec_fwk.aconfig
++++ b/media/aconfig/codec_fwk.aconfig
+@@ -110,6 +110,13 @@ flag {
+   bug: "325550522"
+ }
+ 
++flag {
++  name: "num_input_slots"
++  namespace: "codec_fwk"
++  description: "Feature flag for exposing number of input slots"
++  bug: "159891571"
++}
++
+ flag {
+   name: "p210_format_support"
+   is_exported: true
+diff --git a/media/codec2/sfplugin/CCodec.cpp b/media/codec2/sfplugin/CCodec.cpp
+index 632eaed0ad..72b5a617f7 100644
+--- a/media/codec2/sfplugin/CCodec.cpp
++++ b/media/codec2/sfplugin/CCodec.cpp
+@@ -2877,6 +2877,7 @@ void CCodec::onMessageReceived(const sp<AMessage> &msg) {
+ 
+             // handle configuration changes in work done
+             std::shared_ptr<const C2StreamInitDataInfo::output> initData;
++            sp<AMessage> inputFormat = nullptr;
+             sp<AMessage> outputFormat = nullptr;
+             {
+                 Mutexed<std::unique_ptr<Config>>::Locked configLocked(mConfig);
+@@ -2964,10 +2965,12 @@ void CCodec::onMessageReceived(const sp<AMessage> &msg) {
+                             initData->m.value, initData->flexCount(), config->mCodingMediaType,
+                             config->mOutputFormat);
+                 }
++                inputFormat = config->mInputFormat;
+                 outputFormat = config->mOutputFormat;
+             }
+             mChannel->onWorkDone(
+-                    std::move(work), outputFormat, initData ? initData.get() : nullptr);
++                    std::move(work), inputFormat, outputFormat,
++                    initData ? initData.get() : nullptr);
+             // log metrics to MediaCodec
+             if (mMetrics->countEntries() == 0) {
+                 Mutexed<std::unique_ptr<Config>>::Locked configLocked(mConfig);
+diff --git a/media/codec2/sfplugin/CCodecBufferChannel.cpp b/media/codec2/sfplugin/CCodecBufferChannel.cpp
+index e2b28dcf2b..d67a876d97 100644
+--- a/media/codec2/sfplugin/CCodecBufferChannel.cpp
++++ b/media/codec2/sfplugin/CCodecBufferChannel.cpp
+@@ -1836,6 +1836,9 @@ status_t CCodecBufferChannel::start(
+                     channelCount.value,
+                     pcmEncoding ? pcmEncoding.value : C2Config::PCM_16);
+         }
++        if (!buffersBoundToCodec) {
++            inputFormat->setInt32(KEY_NUM_SLOTS, numInputSlots);
++        }
+         bool conforming = (apiFeatures & API_SAME_INPUT_BUFFER);
+         // For encrypted content, framework decrypts source buffer (ashmem) into
+         // C2Buffers. Thus non-conforming codecs can process these.
+@@ -2356,9 +2359,11 @@ void CCodecBufferChannel::flush(const std::list<std::unique_ptr<C2Work>> &flushe
+ }
+ 
+ void CCodecBufferChannel::onWorkDone(
+-        std::unique_ptr<C2Work> work, const sp<AMessage> &outputFormat,
++        std::unique_ptr<C2Work> work,
++        const sp<AMessage> &inputFormat,
++        const sp<AMessage> &outputFormat,
+         const C2StreamInitDataInfo::output *initData) {
+-    if (handleWork(std::move(work), outputFormat, initData)) {
++    if (handleWork(std::move(work), inputFormat, outputFormat, initData)) {
+         feedInputBufferIfAvailable();
+     }
+ }
+@@ -2388,6 +2393,7 @@ void CCodecBufferChannel::onInputBufferDone(
+ 
+ bool CCodecBufferChannel::handleWork(
+         std::unique_ptr<C2Work> work,
++        const sp<AMessage> &inputFormat,
+         const sp<AMessage> &outputFormat,
+         const C2StreamInitDataInfo::output *initData) {
+     {
+@@ -2561,6 +2567,9 @@ bool CCodecBufferChannel::handleWork(
+         } else {
+             input->numSlots = newNumSlots;
+         }
++        if (inputFormat->contains(KEY_NUM_SLOTS)) {
++            inputFormat->setInt32(KEY_NUM_SLOTS, input->numSlots);
++        }
+     }
+     size_t numOutputSlots = 0;
+     uint32_t reorderDepth = 0;
+diff --git a/media/codec2/sfplugin/CCodecBufferChannel.h b/media/codec2/sfplugin/CCodecBufferChannel.h
+index 4d296fd1cc..6493b875ec 100644
+--- a/media/codec2/sfplugin/CCodecBufferChannel.h
++++ b/media/codec2/sfplugin/CCodecBufferChannel.h
+@@ -193,12 +193,15 @@ public:
+     /**
+      * Notify input client about work done.
+      *
+-     * @param workItems   finished work item.
++     * @param workItems    finished work item.
++     * @param inputFormat  input format
+      * @param outputFormat new output format if it has changed, otherwise nullptr
+-     * @param initData    new init data (CSD) if it has changed, otherwise nullptr
++     * @param initData     new init data (CSD) if it has changed, otherwise nullptr
+      */
+     void onWorkDone(
+-            std::unique_ptr<C2Work> work, const sp<AMessage> &outputFormat,
++            std::unique_ptr<C2Work> work,
++            const sp<AMessage> &inputFormat,
++            const sp<AMessage> &outputFormat,
+             const C2StreamInitDataInfo::output *initData);
+ 
+     /**
+@@ -311,7 +314,9 @@ private:
+                                       std::shared_ptr<C2LinearBlock> encryptedBlock = nullptr,
+                                       size_t blockSize = 0);
+     bool handleWork(
+-            std::unique_ptr<C2Work> work, const sp<AMessage> &outputFormat,
++            std::unique_ptr<C2Work> work,
++            const sp<AMessage> &inputFormat,
++            const sp<AMessage> &outputFormat,
+             const C2StreamInitDataInfo::output *initData);
+     void sendOutputBuffers();
+     void ensureDecryptDestination(size_t size);
+diff --git a/media/libstagefright/include/media/stagefright/MediaCodecConstants.h b/media/libstagefright/include/media/stagefright/MediaCodecConstants.h
+index b1cf66570a..dc43c7de2a 100644
+--- a/media/libstagefright/include/media/stagefright/MediaCodecConstants.h
++++ b/media/libstagefright/include/media/stagefright/MediaCodecConstants.h
+@@ -847,6 +847,7 @@ inline constexpr char KEY_MAX_OUTPUT_CHANNEL_COUNT[] = "max-output-channel-count
+ inline constexpr char KEY_MAX_PTS_GAP_TO_ENCODER[] = "max-pts-gap-to-encoder";
+ inline constexpr char KEY_MAX_WIDTH[] = "max-width";
+ inline constexpr char KEY_MIME[] = "mime";
++inline constexpr char KEY_NUM_SLOTS[] = "num-slots";
+ inline constexpr char KEY_OPERATING_RATE[] = "operating-rate";
+ inline constexpr char KEY_OUTPUT_REORDER_DEPTH[] = "output-reorder-depth";
+ inline constexpr char KEY_PCM_ENCODING[] = "pcm-encoding";
+-- 
+2.43.0
+

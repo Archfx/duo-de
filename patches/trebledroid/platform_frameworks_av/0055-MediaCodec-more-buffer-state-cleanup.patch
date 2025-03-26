@@ -1,0 +1,165 @@
+From b7561416b64bf9b2a251d31ca3a30c96e435b0ad Mon Sep 17 00:00:00 2001
+From: Wonsik Kim <wonsik@google.com>
+Date: Thu, 3 Oct 2024 18:06:09 +0000
+Subject: [PATCH 055/436] MediaCodec: more buffer state cleanup
+
+* CSD and leftover buffer clean up at stop/release
+* return codec buffers at additional states (initialized / uninitialized)
+
+Bug: 343502509
+Test: atest MctsMediaV2TestCases MctsMediaCodecTestCases \
+          MctsMediaDecoderTestCases MctsMediaEncoderTestCases -- \
+          --feature-flags:flag-value \
+          codec_fwk/android.media.codec.codec_buffer_state_cleanup=true
+Change-Id: I4383819ff63d829d650674285524f07a0120a798
+---
+ media/aconfig/codec_fwk.aconfig     | 10 +++++++
+ media/libstagefright/MediaCodec.cpp | 41 +++++++++++++++++++++++------
+ 2 files changed, 43 insertions(+), 8 deletions(-)
+
+diff --git a/media/aconfig/codec_fwk.aconfig b/media/aconfig/codec_fwk.aconfig
+index 2bf53f9e05..ed1522b94e 100644
+--- a/media/aconfig/codec_fwk.aconfig
++++ b/media/aconfig/codec_fwk.aconfig
+@@ -12,6 +12,16 @@ flag {
+   bug: "201479783"
+ }
+ 
++flag {
++  name: "codec_buffer_state_cleanup"
++  namespace: "codec_fwk"
++  description: "Bugfix flag for more buffer state cleanup in MediaCodec"
++  bug: "343502509"
++  metadata {
++    purpose: PURPOSE_BUGFIX
++  }
++}
++
+ flag {
+   name: "dataspace_v0_partial"
+   namespace: "codec_fwk"
+diff --git a/media/libstagefright/MediaCodec.cpp b/media/libstagefright/MediaCodec.cpp
+index eea5242758..7d478371cd 100644
+--- a/media/libstagefright/MediaCodec.cpp
++++ b/media/libstagefright/MediaCodec.cpp
+@@ -2015,6 +2015,7 @@ bool MediaCodec::discardDecodeOnlyOutputBuffer(size_t index) {
+     int32_t flags;
+     CHECK(buffer->meta()->findInt32("flags", &flags));
+     if (flags & BUFFER_FLAG_DECODE_ONLY) {
++        ALOGV("discardDecodeOnlyOutputBuffer: mPortBuffers[out][%zu] NOT owned by client", index);
+         info->mOwnedByClient = false;
+         info->mData.clear();
+         mBufferChannel->discardBuffer(buffer);
+@@ -4494,9 +4495,16 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
+                 {
+                     /* size_t index = */updateBuffers(kPortIndexInput, msg);
+ 
+-                    if (mState == FLUSHING
+-                            || mState == STOPPING
+-                            || mState == RELEASING) {
++                    bool inStateToReturnBuffers =
++                        mState == FLUSHING || mState == STOPPING || mState == RELEASING;
++                    if (android::media::codec::provider_->codec_buffer_state_cleanup()) {
++                        // Late callbacks from the codec could arrive here
++                        // after the codec is already stopped or released.
++                        inStateToReturnBuffers = mState == FLUSHING ||
++                                                 mState == STOPPING || mState == INITIALIZED ||
++                                                 mState == RELEASING || mState == UNINITIALIZED;
++                    }
++                    if (inStateToReturnBuffers) {
+                         returnBuffersToCodecOnPort(kPortIndexInput);
+                         break;
+                     }
+@@ -4575,9 +4583,16 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
+ 
+                     /* size_t index = */updateBuffers(kPortIndexOutput, msg);
+ 
+-                    if (mState == FLUSHING
+-                            || mState == STOPPING
+-                            || mState == RELEASING) {
++                    bool inStateToReturnBuffers =
++                        mState == FLUSHING || mState == STOPPING || mState == RELEASING;
++                    if (android::media::codec::provider_->codec_buffer_state_cleanup()) {
++                        // Late callbacks from the codec could arrive here
++                        // after the codec is already stopped or released.
++                        inStateToReturnBuffers = mState == FLUSHING ||
++                                                 mState == STOPPING || mState == INITIALIZED ||
++                                                 mState == RELEASING || mState == UNINITIALIZED;
++                    }
++                    if (inStateToReturnBuffers) {
+                         returnBuffersToCodecOnPort(kPortIndexOutput);
+                         break;
+                     }
+@@ -5943,7 +5958,7 @@ void MediaCodec::handleOutputFormatChangeIfNeeded(const sp<MediaCodecBuffer> &bu
+     }
+ 
+     updateHdrMetrics(false /* isConfig */);
+- }
++}
+ 
+ void MediaCodec::extractCSD(const sp<AMessage> &format) {
+     mCSD.clear();
+@@ -6022,7 +6037,6 @@ status_t MediaCodec::queueCSDInputBuffer(size_t bufferIndex) {
+             return -EINVAL;
+         }
+         if (codecInputData->data() == NULL) {
+-            ALOGV("Input buffer %zu is not properly allocated", bufferIndex);
+             mErrorLog.log(LOG_TAG, base::StringPrintf(
+                     "Fatal error: input buffer %zu is not properly allocated", bufferIndex));
+             return -EINVAL;
+@@ -6068,6 +6082,10 @@ void MediaCodec::setState(State newState) {
+ 
+         mInputFormat.clear();
+         mOutputFormat.clear();
++        if (android::media::codec::provider_->codec_buffer_state_cleanup()) {
++            mCSD.clear();
++            mLeftover.clear();
++        }
+         mFlags &= ~kFlagOutputFormatChanged;
+         mFlags &= ~kFlagOutputBuffersChanged;
+         mFlags &= ~kFlagStickyError;
+@@ -6126,6 +6144,8 @@ void MediaCodec::returnBuffersToCodecOnPort(int32_t portIndex, bool isReclaim) {
+                 ALOGD("port %d buffer %zu still owned by client when codec is reclaimed",
+                         portIndex, i);
+             } else {
++                ALOGV("returnBuffersToCodecOnPort: mPortBuffers[%s][%zu] NOT owned by client",
++                      portIndex == kPortIndexInput ? "in" : "out", i);
+                 info->mOwnedByClient = false;
+                 info->mData.clear();
+             }
+@@ -6478,6 +6498,7 @@ status_t MediaCodec::onQueueInputBuffer(const sp<AMessage> &msg) {
+ 
+         // synchronization boundary for getBufferAndFormat
+         Mutex::Autolock al(mBufferLock);
++        ALOGV("onQueueInputBuffer: mPortBuffers[in][%zu] NOT owned by client", index);
+         info->mOwnedByClient = false;
+         info->mData.clear();
+ 
+@@ -6494,6 +6515,7 @@ status_t MediaCodec::handleLeftover(size_t index) {
+     sp<AMessage> msg = mLeftover.front();
+     mLeftover.pop_front();
+     msg->setSize("index", index);
++    ALOGV("handleLeftover(%zu)", index);
+     return onQueueInputBuffer(msg);
+ }
+ 
+@@ -6562,6 +6584,7 @@ status_t MediaCodec::onReleaseOutputBuffer(const sp<AMessage> &msg) {
+     sp<MediaCodecBuffer> buffer;
+     {
+         Mutex::Autolock al(mBufferLock);
++        ALOGV("onReleaseOutputBuffer: mPortBuffers[out][%zu] NOT owned by client", index);
+         info->mOwnedByClient = false;
+         buffer = info->mData;
+         info->mData.clear();
+@@ -6674,6 +6697,8 @@ ssize_t MediaCodec::dequeuePortBuffer(int32_t portIndex) {
+ 
+     {
+         Mutex::Autolock al(mBufferLock);
++        ALOGV("dequeuePortBuffer: mPortBuffers[%s][%zu] checking if not owned by client",
++              portIndex == kPortIndexInput ? "in" : "out", index);
+         CHECK(!info->mOwnedByClient);
+         info->mOwnedByClient = true;
+ 
+-- 
+2.43.0
+

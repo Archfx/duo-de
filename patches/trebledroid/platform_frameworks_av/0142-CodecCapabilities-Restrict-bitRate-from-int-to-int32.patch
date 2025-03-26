@@ -1,0 +1,164 @@
+From ad936af3dbe4db69a74472874ada08739b564ac3 Mon Sep 17 00:00:00 2001
+From: Songyue Han <songyueh@google.com>
+Date: Mon, 14 Oct 2024 23:53:58 +0000
+Subject: [PATCH 142/436] CodecCapabilities: Restrict bitRate from int to
+ int32_t.
+
+Prevent potential mul overflow issue.
+
+Test: MediaCodecListTest
+Bug: 306023029
+Change-Id: Id4a0fc1473d6aa1b8ffdb453180fb0fc7de92d40
+---
+ media/libmedia/AudioCapabilities.cpp                   | 10 +++++-----
+ media/libmedia/CodecCapabilities.cpp                   |  2 +-
+ media/libmedia/include/media/AudioCapabilities.h       |  6 +++---
+ media/libmedia/include/media/CodecCapabilities.h       |  2 +-
+ media/libmedia/include/media/CodecCapabilitiesUtils.h  |  2 +-
+ .../tests/codeccapabilities/CodecCapabilitiesTest.cpp  |  4 ++--
+ 6 files changed, 13 insertions(+), 13 deletions(-)
+
+diff --git a/media/libmedia/AudioCapabilities.cpp b/media/libmedia/AudioCapabilities.cpp
+index 908989fd8b..1a923076c6 100644
+--- a/media/libmedia/AudioCapabilities.cpp
++++ b/media/libmedia/AudioCapabilities.cpp
+@@ -26,7 +26,7 @@
+ 
+ namespace android {
+ 
+-const Range<int>& AudioCapabilities::getBitrateRange() const {
++const Range<int32_t>& AudioCapabilities::getBitrateRange() const {
+     return mBitrateRange;
+ }
+ 
+@@ -86,7 +86,7 @@ void AudioCapabilities::init(std::string mediaType, std::vector<ProfileLevel> pr
+ }
+ 
+ void AudioCapabilities::initWithPlatformLimits() {
+-    mBitrateRange = Range<int>(0, INT_MAX);
++    mBitrateRange = Range<int>(0, INT32_MAX);
+     mInputChannelRanges.push_back(Range<int>(1, MAX_INPUT_CHANNEL_COUNT));
+ 
+     const int minSampleRate = base::GetIntProperty("ro.mediacodec.min_sample_rate", 7350);
+@@ -281,7 +281,7 @@ void AudioCapabilities::applyLevelLimits() {
+ 
+ void AudioCapabilities::applyLimits(
+         const std::vector<Range<int>> &inputChannels,
+-        const std::optional<Range<int>> &bitRates) {
++        const std::optional<Range<int32_t>> &bitRates) {
+     // clamp & make a local copy
+     std::vector<Range<int>> inputChannelsCopy(inputChannels.size());
+     for (int i = 0; i < inputChannels.size(); i++) {
+@@ -302,7 +302,7 @@ void AudioCapabilities::applyLimits(
+ void AudioCapabilities::parseFromInfo(const sp<AMessage> &format) {
+     int maxInputChannels = MAX_INPUT_CHANNEL_COUNT;
+     std::vector<Range<int>> channels = { Range<int>(1, maxInputChannels) };
+-    std::optional<Range<int>> bitRates = POSITIVE_INTEGERS;
++    std::optional<Range<int32_t>> bitRates = POSITIVE_INT32;
+ 
+     AString rateAString;
+     if (format->findString("sample-rate-ranges", &rateAString)) {
+@@ -349,7 +349,7 @@ void AudioCapabilities::parseFromInfo(const sp<AMessage> &format) {
+     }
+ 
+     if (format->findString("bitrate-range", &valueStr)) {
+-        std::optional<Range<int>> parsedBitrate = ParseIntRange(valueStr.c_str());
++        std::optional<Range<int32_t>> parsedBitrate = ParseIntRange(valueStr.c_str());
+         if (parsedBitrate) {
+             bitRates = bitRates.value().intersect(parsedBitrate.value());
+         }
+diff --git a/media/libmedia/CodecCapabilities.cpp b/media/libmedia/CodecCapabilities.cpp
+index 5bed1c4d86..87eb4bcff3 100644
+--- a/media/libmedia/CodecCapabilities.cpp
++++ b/media/libmedia/CodecCapabilities.cpp
+@@ -25,7 +25,7 @@
+ 
+ namespace android {
+ 
+-bool CodecCapabilities::SupportsBitrate(Range<int> bitrateRange,
++bool CodecCapabilities::SupportsBitrate(Range<int32_t> bitrateRange,
+         const sp<AMessage> &format) {
+     // consider max bitrate over average bitrate for support
+     int32_t maxBitrate = 0;
+diff --git a/media/libmedia/include/media/AudioCapabilities.h b/media/libmedia/include/media/AudioCapabilities.h
+index 2cb957ed03..d2bd9d7b58 100644
+--- a/media/libmedia/include/media/AudioCapabilities.h
++++ b/media/libmedia/include/media/AudioCapabilities.h
+@@ -37,7 +37,7 @@ struct AudioCapabilities {
+     /**
+      * Returns the range of supported bitrates in bits/second.
+      */
+-    const Range<int>& getBitrateRange() const;
++    const Range<int32_t>& getBitrateRange() const;
+ 
+     /**
+      * Returns the array of supported sample rates if the codec
+@@ -110,7 +110,7 @@ private:
+     std::string mMediaType;
+     std::vector<ProfileLevel> mProfileLevels;
+ 
+-    Range<int> mBitrateRange;
++    Range<int32_t> mBitrateRange;
+ 
+     std::vector<int> mSampleRates;
+     std::vector<Range<int>> mSampleRateRanges;
+@@ -127,7 +127,7 @@ private:
+     void limitSampleRates(std::vector<Range<int>> rateRanges);
+     void applyLevelLimits();
+     void applyLimits(const std::vector<Range<int>> &inputChannels,
+-            const std::optional<Range<int>> &bitRates);
++            const std::optional<Range<int32_t>> &bitRates);
+     void parseFromInfo(const sp<AMessage> &format);
+ 
+     friend struct CodecCapabilities;
+diff --git a/media/libmedia/include/media/CodecCapabilities.h b/media/libmedia/include/media/CodecCapabilities.h
+index 9d1c4ea183..570c8b590d 100644
+--- a/media/libmedia/include/media/CodecCapabilities.h
++++ b/media/libmedia/include/media/CodecCapabilities.h
+@@ -34,7 +34,7 @@ namespace android {
+ 
+ struct CodecCapabilities {
+ 
+-    static bool SupportsBitrate(Range<int> bitrateRange,
++    static bool SupportsBitrate(Range<int32_t> bitrateRange,
+             const sp<AMessage> &format);
+ 
+     /**
+diff --git a/media/libmedia/include/media/CodecCapabilitiesUtils.h b/media/libmedia/include/media/CodecCapabilitiesUtils.h
+index 2bf822af1e..89a452c550 100644
+--- a/media/libmedia/include/media/CodecCapabilitiesUtils.h
++++ b/media/libmedia/include/media/CodecCapabilitiesUtils.h
+@@ -118,7 +118,7 @@ private:
+     T upper_;
+ };
+ 
+-static const Range<int> POSITIVE_INTEGERS = Range<int>(1, INT_MAX);
++static const Range<int32_t> POSITIVE_INT32 = Range<int32_t>(1, INT32_MAX);
+ 
+ // found stuff that is not supported by framework (=> this should not happen)
+ constexpr int ERROR_CAPABILITIES_UNRECOGNIZED   = (1 << 0);
+diff --git a/media/libmedia/tests/codeccapabilities/CodecCapabilitiesTest.cpp b/media/libmedia/tests/codeccapabilities/CodecCapabilitiesTest.cpp
+index 89c9739eb0..02e43a41d6 100644
+--- a/media/libmedia/tests/codeccapabilities/CodecCapabilitiesTest.cpp
++++ b/media/libmedia/tests/codeccapabilities/CodecCapabilitiesTest.cpp
+@@ -64,7 +64,7 @@ protected:
+ };
+ 
+ TEST_F(AudioCapsAacTest, AudioCaps_Aac_Bitrate) {
+-    const Range<int>& bitrateRange = audioCaps->getBitrateRange();
++    const Range<int32_t>& bitrateRange = audioCaps->getBitrateRange();
+     EXPECT_EQ(bitrateRange.lower(), 8000) << "bitrate range1 does not match. lower: "
+             << bitrateRange.lower();
+     EXPECT_EQ(bitrateRange.upper(), 510000) << "bitrate range1 does not match. upper: "
+@@ -114,7 +114,7 @@ protected:
+ };
+ 
+ TEST_F(AudioCapsRawTest, AudioCaps_Raw_Bitrate) {
+-    const Range<int>& bitrateRange = audioCaps->getBitrateRange();
++    const Range<int32_t>& bitrateRange = audioCaps->getBitrateRange();
+     EXPECT_EQ(bitrateRange.lower(), 1);
+     EXPECT_EQ(bitrateRange.upper(), 10000000);
+ }
+-- 
+2.43.0
+

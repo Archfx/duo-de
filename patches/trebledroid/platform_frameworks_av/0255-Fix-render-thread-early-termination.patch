@@ -1,0 +1,34 @@
+From 1a43965a3018154cd1f2750e3ecade1e380fbdcf Mon Sep 17 00:00:00 2001
+From: Kwangkyu Park <kk48.park@samsung.com>
+Date: Thu, 17 Oct 2024 02:37:33 +0900
+Subject: [PATCH 255/436] Fix render thread early termination
+
+Status variables in the render thread were not initialized.
+Therefore, it contained garbage values, resulting in the thread
+termination and causing eglCreateWindowSurface to fail.
+
+Bug:373830419
+Change-Id: I3a33e8f20eae9474c725988988a5d9950c0b248b
+(cherry picked from commit 3774b59be27672c2f6d7a053ad4e50ae91c5c9c8)
+---
+ services/camera/virtualcamera/VirtualCameraRenderThread.h | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/services/camera/virtualcamera/VirtualCameraRenderThread.h b/services/camera/virtualcamera/VirtualCameraRenderThread.h
+index 5a5966b635..c6b58fb0a4 100644
+--- a/services/camera/virtualcamera/VirtualCameraRenderThread.h
++++ b/services/camera/virtualcamera/VirtualCameraRenderThread.h
+@@ -216,8 +216,8 @@ class VirtualCameraRenderThread {
+   std::mutex mLock;
+   std::deque<std::unique_ptr<ProcessCaptureRequestTask>> mQueue GUARDED_BY(mLock);
+   std::condition_variable mCondVar;
+-  volatile bool mTextureUpdateRequested GUARDED_BY(mLock);
+-  volatile bool mPendingExit GUARDED_BY(mLock);
++  volatile bool GUARDED_BY(mLock) mTextureUpdateRequested = false;
++  volatile bool GUARDED_BY(mLock) mPendingExit = false;
+ 
+   // Acquisition timestamp of last frame.
+   std::atomic<uint64_t> mLastAcquisitionTimestampNanoseconds;
+-- 
+2.43.0
+

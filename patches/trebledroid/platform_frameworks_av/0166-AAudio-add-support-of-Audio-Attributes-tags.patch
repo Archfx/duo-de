@@ -1,0 +1,569 @@
+From 5b8947647a8b2f2a7e15d076fb1624c6604d99d0 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Fran=C3=A7ois=20Gaffie?= <francois.gaffie@renault.com>
+Date: Fri, 2 Dec 2022 10:25:39 +0100
+Subject: [PATCH 166/436] AAudio: add support of Audio Attributes tags
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Bug: 260884284
+Bug: 367825869
+Test: test_attributes
+Test: atest AAudioTests
+Flag: EXEMPT NDK
+Change-Id: Id87c6c3c43eb77e4bba841e2f7c774042d489aff
+Signed-off-by: François Gaffie <francois.gaffie@renault.com>
+---
+ .../libaaudio/include/system/aaudio/AAudio.h  | 80 +++++++++++++++++++
+ .../src/binding/AAudioStreamConfiguration.cpp |  4 +-
+ .../binding/aidl/aaudio/StreamParameters.aidl |  1 +
+ .../src/client/AudioStreamInternal.cpp        |  2 +
+ media/libaaudio/src/core/AAudioAudio.cpp      | 28 +++++++
+ .../src/core/AAudioStreamParameters.cpp       |  7 ++
+ .../src/core/AAudioStreamParameters.h         |  9 +++
+ media/libaaudio/src/core/AudioStream.cpp      |  1 +
+ media/libaaudio/src/core/AudioStream.h        | 12 +++
+ .../libaaudio/src/legacy/AudioStreamTrack.cpp | 16 ++--
+ media/libaaudio/src/libaaudio.map.txt         |  3 +
+ media/libaaudio/tests/test_attributes.cpp     | 56 +++++++++++++
+ .../oboeservice/AAudioServiceEndpoint.cpp     | 13 ++-
+ 13 files changed, 221 insertions(+), 11 deletions(-)
+ create mode 100644 media/libaaudio/include/system/aaudio/AAudio.h
+
+diff --git a/media/libaaudio/include/system/aaudio/AAudio.h b/media/libaaudio/include/system/aaudio/AAudio.h
+new file mode 100644
+index 0000000000..933ad35e0c
+--- /dev/null
++++ b/media/libaaudio/include/system/aaudio/AAudio.h
+@@ -0,0 +1,80 @@
++/*
++ * Copyright (C) 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++/**
++ * This is the system APIs for AAudio.
++ */
++#ifndef SYSTEM_AAUDIO_H
++#define SYSTEM_AAUDIO_H
++
++#include <aaudio/AAudio.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/**
++ * The tags string attributes allows OEMs to extend the
++ * <a href="/reference/android/media/AudioAttributes">AudioAttributes</a>.
++ *
++ * Note that the maximum length includes all tags combined with delimiters and null terminator.
++ *
++ * Note that it matches the equivalent value in
++ * <a href="/reference/android/system/media/audio">AUDIO_ATTRIBUTES_TAGS_MAX_SIZE</a>
++ * in the Android native API.
++ */
++#define AAUDIO_ATTRIBUTES_TAGS_MAX_SIZE 256
++
++/**
++ * Set one or more vendor extension tags that the output stream will carry.
++ *
++ * The tags can be used by the audio policy engine for routing purpose.
++ * Routing is based on audio attributes, translated into legacy stream type.
++ * The stream types cannot be extended, so the product strategies have been introduced to allow
++ * vendor extension of routing capabilities.
++ * This could, for example, affect how volume and routing is handled for the stream.
++ *
++ * The tags can also be used by a System App to pass vendor specific information through the
++ * framework to the HAL. That info could affect routing, ducking or other audio behavior in the HAL.
++ *
++ * By default, audio attributes tags are empty if this method is not called.
++ *
++ * @param builder reference provided by AAudio_createStreamBuilder()
++ * @param tags the desired tags to add, which must be UTF-8 format and null-terminated. The size
++ *             of the tags must be at most {@link #AAUDIO_ATTRIBUTES_TAGS_MAX_SIZE}. Multiple tags
++ *             must be separated by semicolons.
++ * @return {@link #AAUDIO_OK} on success or {@link #AAUDIO_ERROR_ILLEGAL_ARGUMENT} if the given
++ *         tags is null or its length is greater than {@link #AAUDIO_ATTRIBUTES_TAGS_MAX_SIZE}.
++ */
++aaudio_result_t AAudioStreamBuilder_setTags(AAudioStreamBuilder* _Nonnull builder,
++                                            const char* _Nonnull tags);
++
++/**
++ * Read the audio attributes' tags for the stream into a buffer.
++ * The caller is responsible for allocating and freeing the returned data.
++ *
++ * @param stream reference provided by AAudioStreamBuilder_openStream()
++ * @param tags pointer to write the value to in UTF-8 that containing OEM extension tags. It must
++ *             be sized with {@link #AAUDIO_ATTRIBUTES_TAGS_MAX_SIZE}.
++ * @return {@link #AAUDIO_OK} or {@link #AAUDIO_ERROR_ILLEGAL_ARGUMENT} if the given tags is null.
++ */
++aaudio_result_t AAudioStream_getTags(AAudioStream* _Nonnull stream, char* _Nonnull tags);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif //SYSTEM_AAUDIO_H
+diff --git a/media/libaaudio/src/binding/AAudioStreamConfiguration.cpp b/media/libaaudio/src/binding/AAudioStreamConfiguration.cpp
+index c4692ce262..c53a897f67 100644
+--- a/media/libaaudio/src/binding/AAudioStreamConfiguration.cpp
++++ b/media/libaaudio/src/binding/AAudioStreamConfiguration.cpp
+@@ -50,7 +50,7 @@ AAudioStreamConfiguration::AAudioStreamConfiguration(const StreamParameters& par
+     setUsage(parcelable.usage);
+     static_assert(sizeof(aaudio_content_type_t) == sizeof(parcelable.contentType));
+     setContentType(parcelable.contentType);
+-
++    setTags(parcelable.tags);
+     static_assert(sizeof(aaudio_spatialization_behavior_t) ==
+             sizeof(parcelable.spatializationBehavior));
+     setSpatializationBehavior(parcelable.spatializationBehavior);
+@@ -106,6 +106,8 @@ StreamParameters AAudioStreamConfiguration::parcelable() const {
+     result.usage = getUsage();
+     static_assert(sizeof(aaudio_content_type_t) == sizeof(result.contentType));
+     result.contentType = getContentType();
++    std::optional<std::string> tags = getTags();
++    result.tags = tags.has_value() ? tags.value() : "";
+     static_assert(
+             sizeof(aaudio_spatialization_behavior_t) == sizeof(result.spatializationBehavior));
+     result.spatializationBehavior = getSpatializationBehavior();
+diff --git a/media/libaaudio/src/binding/aidl/aaudio/StreamParameters.aidl b/media/libaaudio/src/binding/aidl/aaudio/StreamParameters.aidl
+index fa46e0dbd5..a301da81c4 100644
+--- a/media/libaaudio/src/binding/aidl/aaudio/StreamParameters.aidl
++++ b/media/libaaudio/src/binding/aidl/aaudio/StreamParameters.aidl
+@@ -27,6 +27,7 @@ parcelable StreamParameters {
+     int /* aaudio_direction_t */              direction;  //            = AAUDIO_DIRECTION_OUTPUT;
+     int /* aaudio_usage_t */                  usage;  //                = AAUDIO_UNSPECIFIED;
+     int /* aaudio_content_type_t */           contentType;  //          = AAUDIO_UNSPECIFIED;
++    @utf8InCpp String                         tags;                     /* UTF8 */
+     int /* aaudio_spatialization_behavior_t */spatializationBehavior; //= AAUDIO_UNSPECIFIED;
+     boolean                                   isContentSpatialized;  // = false;
+     int /* aaudio_input_preset_t */           inputPreset;  //          = AAUDIO_UNSPECIFIED;
+diff --git a/media/libaaudio/src/client/AudioStreamInternal.cpp b/media/libaaudio/src/client/AudioStreamInternal.cpp
+index fa3f5a0023..99b90e26d5 100644
+--- a/media/libaaudio/src/client/AudioStreamInternal.cpp
++++ b/media/libaaudio/src/client/AudioStreamInternal.cpp
+@@ -129,6 +129,7 @@ aaudio_result_t AudioStreamInternal::open(const AudioStreamBuilder &builder) {
+ 
+     request.getConfiguration().setUsage(getUsage());
+     request.getConfiguration().setContentType(getContentType());
++    request.getConfiguration().setTags(getTags());
+     request.getConfiguration().setSpatializationBehavior(getSpatializationBehavior());
+     request.getConfiguration().setIsContentSpatialized(isContentSpatialized());
+     request.getConfiguration().setInputPreset(getInputPreset());
+@@ -185,6 +186,7 @@ aaudio_result_t AudioStreamInternal::open(const AudioStreamBuilder &builder) {
+ 
+     setUsage(configurationOutput.getUsage());
+     setContentType(configurationOutput.getContentType());
++    setTags(configurationOutput.getTags());
+     setSpatializationBehavior(configurationOutput.getSpatializationBehavior());
+     setIsContentSpatialized(configurationOutput.isContentSpatialized());
+     setInputPreset(configurationOutput.getInputPreset());
+diff --git a/media/libaaudio/src/core/AAudioAudio.cpp b/media/libaaudio/src/core/AAudioAudio.cpp
+index 3315344c42..fb87dd95c5 100644
+--- a/media/libaaudio/src/core/AAudioAudio.cpp
++++ b/media/libaaudio/src/core/AAudioAudio.cpp
+@@ -25,6 +25,7 @@
+ 
+ #include <aaudio/AAudio.h>
+ #include <aaudio/AAudioTesting.h>
++#include <system/aaudio/AAudio.h>
+ #include "AudioClock.h"
+ #include "AudioGlobal.h"
+ #include "AudioStreamBuilder.h"
+@@ -177,6 +178,17 @@ AAUDIO_API void AAudioStreamBuilder_setContentType(AAudioStreamBuilder* builder,
+     streamBuilder->setContentType(contentType);
+ }
+ 
++AAUDIO_API aaudio_result_t AAudioStreamBuilder_setTags(AAudioStreamBuilder* builder,
++                                                       const char* tags) {
++    if (tags == nullptr || strlen(tags) >= AAUDIO_ATTRIBUTES_TAGS_MAX_SIZE) {
++        return AAUDIO_ERROR_ILLEGAL_ARGUMENT;
++    }
++    AudioStreamBuilder *streamBuilder = convertAAudioBuilderToStreamBuilder(builder);
++    std::optional<std::string> optionalTags = std::string(tags);
++    streamBuilder->setTags(optionalTags);
++    return AAUDIO_OK;
++}
++
+ AAUDIO_API void AAudioStreamBuilder_setSpatializationBehavior(AAudioStreamBuilder* builder,
+         aaudio_spatialization_behavior_t spatializationBehavior) {
+     AudioStreamBuilder *streamBuilder = convertAAudioBuilderToStreamBuilder(builder);
+@@ -546,6 +558,22 @@ AAUDIO_API aaudio_content_type_t AAudioStream_getContentType(AAudioStream* strea
+     return audioStream->getContentType();
+ }
+ 
++AAUDIO_API aaudio_result_t AAudioStream_getTags(AAudioStream* stream, char* tags)
++{
++    if (tags == nullptr) {
++        return AAUDIO_ERROR_ILLEGAL_ARGUMENT;
++    }
++    AudioStream *audioStream = convertAAudioStreamToAudioStream(stream);
++    std::optional<std::string> optTags = audioStream->getTags();
++    if (optTags.has_value() && !optTags->empty()) {
++        strncpy(tags, optTags.value().c_str(), AAUDIO_ATTRIBUTES_TAGS_MAX_SIZE);
++        tags[AAUDIO_ATTRIBUTES_TAGS_MAX_SIZE-1] = '\0';
++    } else {
++        tags[0] = '\0';
++    }
++    return AAUDIO_OK;
++}
++
+ AAUDIO_API aaudio_spatialization_behavior_t AAudioStream_getSpatializationBehavior(
+         AAudioStream* stream)
+ {
+diff --git a/media/libaaudio/src/core/AAudioStreamParameters.cpp b/media/libaaudio/src/core/AAudioStreamParameters.cpp
+index 67fc668713..056918aafc 100644
+--- a/media/libaaudio/src/core/AAudioStreamParameters.cpp
++++ b/media/libaaudio/src/core/AAudioStreamParameters.cpp
+@@ -18,6 +18,7 @@
+ #define LOG_TAG "AAudioStreamParameters"
+ #include <utils/Log.h>
+ #include <system/audio.h>
++#include <system/aaudio/AAudio.h>
+ 
+ #include "AAudioStreamParameters.h"
+ 
+@@ -34,6 +35,7 @@ void AAudioStreamParameters::copyFrom(const AAudioStreamParameters &other) {
+     mBufferCapacity       = other.mBufferCapacity;
+     mUsage                = other.mUsage;
+     mContentType          = other.mContentType;
++    mTags                 = other.mTags;
+     mSpatializationBehavior = other.mSpatializationBehavior;
+     mIsContentSpatialized = other.mIsContentSpatialized;
+     mInputPreset          = other.mInputPreset;
+@@ -199,6 +201,10 @@ aaudio_result_t AAudioStreamParameters::validate() const {
+             // break;
+     }
+ 
++    if (mTags.has_value() && mTags->size() >= AAUDIO_ATTRIBUTES_TAGS_MAX_SIZE) {
++        return AAUDIO_ERROR_ILLEGAL_ARGUMENT;
++    }
++
+     return validateChannelMask();
+ }
+ 
+@@ -301,6 +307,7 @@ void AAudioStreamParameters::dump() const {
+     ALOGD("mBufferCapacity       = %6d", mBufferCapacity);
+     ALOGD("mUsage                = %6d", mUsage);
+     ALOGD("mContentType          = %6d", mContentType);
++    ALOGD("mTags                 = %s",  mTags.has_value() ? mTags.value().c_str() : "");
+     ALOGD("mSpatializationBehavior = %6d", mSpatializationBehavior);
+     ALOGD("mIsContentSpatialized = %s", mIsContentSpatialized ? "true" : "false");
+     ALOGD("mInputPreset          = %6d", mInputPreset);
+diff --git a/media/libaaudio/src/core/AAudioStreamParameters.h b/media/libaaudio/src/core/AAudioStreamParameters.h
+index 7c78f034b8..cad27a7031 100644
+--- a/media/libaaudio/src/core/AAudioStreamParameters.h
++++ b/media/libaaudio/src/core/AAudioStreamParameters.h
+@@ -97,6 +97,14 @@ public:
+         mContentType = contentType;
+     }
+ 
++    void setTags(const std::optional<std::string>& tags) {
++        mTags = tags;
++    }
++
++    const std::optional<std::string> getTags() const {
++        return mTags;
++    }
++
+     aaudio_spatialization_behavior_t getSpatializationBehavior() const {
+         return mSpatializationBehavior;
+     }
+@@ -223,6 +231,7 @@ private:
+     aaudio_direction_t              mDirection            = AAUDIO_DIRECTION_OUTPUT;
+     aaudio_usage_t                  mUsage                = AAUDIO_UNSPECIFIED;
+     aaudio_content_type_t           mContentType          = AAUDIO_UNSPECIFIED;
++    std::optional<std::string>      mTags                 = {};
+     aaudio_spatialization_behavior_t mSpatializationBehavior
+                                                           = AAUDIO_UNSPECIFIED;
+     bool                            mIsContentSpatialized = false;
+diff --git a/media/libaaudio/src/core/AudioStream.cpp b/media/libaaudio/src/core/AudioStream.cpp
+index e0fd32575d..a75a2a1be2 100644
+--- a/media/libaaudio/src/core/AudioStream.cpp
++++ b/media/libaaudio/src/core/AudioStream.cpp
+@@ -93,6 +93,7 @@ aaudio_result_t AudioStream::open(const AudioStreamBuilder& builder)
+     if (mContentType == AAUDIO_UNSPECIFIED) {
+         mContentType = AAUDIO_CONTENT_TYPE_MUSIC;
+     }
++    mTags = builder.getTags();
+     mSpatializationBehavior = builder.getSpatializationBehavior();
+     // for consistency with other properties, note UNSPECIFIED is the same as AUTO
+     if (mSpatializationBehavior == AAUDIO_UNSPECIFIED) {
+diff --git a/media/libaaudio/src/core/AudioStream.h b/media/libaaudio/src/core/AudioStream.h
+index 49a63c4242..32718827a7 100644
+--- a/media/libaaudio/src/core/AudioStream.h
++++ b/media/libaaudio/src/core/AudioStream.h
+@@ -290,6 +290,10 @@ public:
+         return mContentType;
+     }
+ 
++    const std::optional<std::string> getTags() const {
++        return mTags;
++    }
++
+     aaudio_spatialization_behavior_t getSpatializationBehavior() const {
+         return mSpatializationBehavior;
+     }
+@@ -687,6 +691,13 @@ protected:
+         mContentType = contentType;
+     }
+ 
++    /**
++     * This should not be called after the open() call.
++     */
++    void setTags(const std::optional<std::string> &tags) {
++        mTags = tags;
++    }
++
+     void setSpatializationBehavior(aaudio_spatialization_behavior_t spatializationBehavior) {
+         mSpatializationBehavior = spatializationBehavior;
+     }
+@@ -776,6 +787,7 @@ private:
+ 
+     aaudio_usage_t              mUsage           = AAUDIO_UNSPECIFIED;
+     aaudio_content_type_t       mContentType     = AAUDIO_UNSPECIFIED;
++    std::optional<std::string>  mTags            = {};
+     aaudio_spatialization_behavior_t mSpatializationBehavior = AAUDIO_UNSPECIFIED;
+     bool                        mIsContentSpatialized = false;
+     aaudio_input_preset_t       mInputPreset     = AAUDIO_UNSPECIFIED;
+diff --git a/media/libaaudio/src/legacy/AudioStreamTrack.cpp b/media/libaaudio/src/legacy/AudioStreamTrack.cpp
+index d729047b0d..16c0bcd4eb 100644
+--- a/media/libaaudio/src/legacy/AudioStreamTrack.cpp
++++ b/media/libaaudio/src/legacy/AudioStreamTrack.cpp
+@@ -146,14 +146,14 @@ aaudio_result_t AudioStreamTrack::open(const AudioStreamBuilder& builder)
+                                                             builder.isContentSpatialized(),
+                                                             flags);
+ 
+-    const audio_attributes_t attributes = {
+-            .content_type = contentType,
+-            .usage = usage,
+-            .source = AUDIO_SOURCE_DEFAULT, // only used for recording
+-            .flags = attributesFlags,
+-            .tags = ""
+-    };
+-
++    const std::optional<std::string> tags = builder.getTags();
++    audio_attributes_t attributes = AUDIO_ATTRIBUTES_INITIALIZER;
++    attributes.content_type = contentType;
++    attributes.usage = usage;
++    attributes.flags = attributesFlags;
++    if (tags.has_value() && !tags.value().empty()) {
++        strcpy(attributes.tags, tags.value().c_str());
++    }
+     mAudioTrack = new AudioTrack();
+     // TODO b/182392769: use attribution source util
+     mAudioTrack->set(
+diff --git a/media/libaaudio/src/libaaudio.map.txt b/media/libaaudio/src/libaaudio.map.txt
+index 7213393b6e..13c19a137b 100644
+--- a/media/libaaudio/src/libaaudio.map.txt
++++ b/media/libaaudio/src/libaaudio.map.txt
+@@ -72,6 +72,9 @@ LIBAAUDIO {
+     AAudioStream_getHardwareSampleRate;   # introduced=UpsideDownCake
+     AAudio_getPlatformMMapPolicy; # introduced=36
+     AAudio_getPlatformMMapExclusivePolicy; #introduced=36
++
++    AAudioStreamBuilder_setTags; # systemapi
++    AAudioStream_getTags; # systemapi
+   local:
+     *;
+ };
+diff --git a/media/libaaudio/tests/test_attributes.cpp b/media/libaaudio/tests/test_attributes.cpp
+index e5676a78b6..045c2366c7 100644
+--- a/media/libaaudio/tests/test_attributes.cpp
++++ b/media/libaaudio/tests/test_attributes.cpp
+@@ -26,6 +26,8 @@
+ 
+ #include <aaudio/AAudio.h>
+ #include <gtest/gtest.h>
++#include <system/audio.h>
++#include <system/aaudio/AAudio.h>
+ 
+ constexpr int64_t kNanosPerSecond = 1000000000;
+ constexpr int kNumFrames = 256;
+@@ -36,6 +38,7 @@ constexpr int32_t DONT_SET = -1000;
+ static void checkAttributes(aaudio_performance_mode_t perfMode,
+                             aaudio_usage_t usage,
+                             aaudio_content_type_t contentType,
++                            const char * tags = nullptr,
+                             aaudio_input_preset_t preset = DONT_SET,
+                             aaudio_allowed_capture_policy_t capturePolicy = DONT_SET,
+                             int privacyMode = DONT_SET,
+@@ -45,6 +48,7 @@ static void checkAttributes(aaudio_performance_mode_t perfMode,
+ 
+     AAudioStreamBuilder *aaudioBuilder = nullptr;
+     AAudioStream *aaudioStream = nullptr;
++    aaudio_result_t expectedSetTagsResult = AAUDIO_OK;
+ 
+     // Use an AAudioStreamBuilder to contain requested parameters.
+     ASSERT_EQ(AAUDIO_OK, AAudio_createStreamBuilder(&aaudioBuilder));
+@@ -60,6 +64,12 @@ static void checkAttributes(aaudio_performance_mode_t perfMode,
+     if (contentType != DONT_SET) {
+         AAudioStreamBuilder_setContentType(aaudioBuilder, contentType);
+     }
++    if (tags != nullptr) {
++        aaudio_result_t result = AAudioStreamBuilder_setTags(aaudioBuilder, tags);
++        expectedSetTagsResult =  (strlen(tags) >= AUDIO_ATTRIBUTES_TAGS_MAX_SIZE) ?
++                AAUDIO_ERROR_ILLEGAL_ARGUMENT : AAUDIO_OK;
++        EXPECT_EQ(result, expectedSetTagsResult);
++    }
+     if (preset != DONT_SET) {
+         AAudioStreamBuilder_setInputPreset(aaudioBuilder, preset);
+     }
+@@ -87,6 +97,20 @@ static void checkAttributes(aaudio_performance_mode_t perfMode,
+             : contentType;
+     EXPECT_EQ(expectedContentType, AAudioStream_getContentType(aaudioStream));
+ 
++    char readTags[AAUDIO_ATTRIBUTES_TAGS_MAX_SIZE] = {};
++    EXPECT_EQ(AAUDIO_OK, AAudioStream_getTags(aaudioStream, readTags))
++            << "Expected tags=" << (tags != nullptr ? tags : "null") << ", got tags=" << readTags;;
++    EXPECT_LT(strlen(readTags), AUDIO_ATTRIBUTES_TAGS_MAX_SIZE)
++            << "expected tags len " << strlen(readTags) << " less than "
++            << AUDIO_ATTRIBUTES_TAGS_MAX_SIZE;
++
++    // Null tags or failed to set, empty tags expected (default initializer)
++    const char * expectedTags = tags == nullptr ?
++                "" : (expectedSetTagsResult != AAUDIO_OK ? "" : tags);
++    // Oversized tags will be discarded
++    EXPECT_TRUE(std::strcmp(expectedTags, readTags) == 0)
++                << "Expected tags=" << expectedTags << ", got tags=" << readTags;
++
+     aaudio_input_preset_t expectedPreset =
+             (preset == DONT_SET || preset == AAUDIO_UNSPECIFIED)
+             ? AAUDIO_INPUT_PRESET_VOICE_RECOGNITION // default
+@@ -139,6 +163,21 @@ static const aaudio_usage_t sUsages[] = {
+     // Note that the AAUDIO_SYSTEM_USAGE_* values requires special permission.
+ };
+ 
++static const std::string oversizedTags2 = std::string(AUDIO_ATTRIBUTES_TAGS_MAX_SIZE + 1, 'A');
++static const std::string oversizedTags = std::string(AUDIO_ATTRIBUTES_TAGS_MAX_SIZE, 'B');
++static const std::string maxSizeTags = std::string(AUDIO_ATTRIBUTES_TAGS_MAX_SIZE - 1, 'C');
++
++static const char * const sTags[] = {
++    nullptr,
++    "",
++    "oem=routing_extension",
++    "VX_OEM_ROUTING_EXTENSION",
++    maxSizeTags.c_str(),
++    // intentionnaly use oversized tags
++    oversizedTags.c_str(),
++    oversizedTags2.c_str()
++};
++
+ static const aaudio_content_type_t sContentypes[] = {
+     DONT_SET,
+     AAUDIO_UNSPECIFIED,
+@@ -185,11 +224,18 @@ static void checkAttributesContentType(aaudio_performance_mode_t perfMode) {
+     }
+ }
+ 
++static void checkAttributesTags(aaudio_performance_mode_t perfMode) {
++    for (const char * const tags : sTags) {
++        checkAttributes(perfMode, DONT_SET, DONT_SET, tags);
++    }
++}
++
+ static void checkAttributesInputPreset(aaudio_performance_mode_t perfMode) {
+     for (aaudio_input_preset_t inputPreset : sInputPresets) {
+         checkAttributes(perfMode,
+                         DONT_SET,
+                         DONT_SET,
++                        nullptr,
+                         inputPreset,
+                         DONT_SET,
+                         DONT_SET,
+@@ -202,6 +248,7 @@ static void checkAttributesAllowedCapturePolicy(aaudio_performance_mode_t perfMo
+         checkAttributes(perfMode,
+                         DONT_SET,
+                         DONT_SET,
++                        nullptr,
+                         DONT_SET,
+                         policy,
+                         AAUDIO_DIRECTION_INPUT);
+@@ -213,6 +260,7 @@ static void checkAttributesPrivacySensitive(aaudio_performance_mode_t perfMode)
+         checkAttributes(perfMode,
+                         DONT_SET,
+                         DONT_SET,
++                        nullptr,
+                         DONT_SET,
+                         DONT_SET,
+                         privacyMode,
+@@ -228,6 +276,10 @@ TEST(test_attributes, aaudio_content_type_perfnone) {
+     checkAttributesContentType(AAUDIO_PERFORMANCE_MODE_NONE);
+ }
+ 
++TEST(test_attributes, aaudio_tags_perfnone) {
++    checkAttributesTags(AAUDIO_PERFORMANCE_MODE_NONE);
++}
++
+ TEST(test_attributes, aaudio_input_preset_perfnone) {
+     checkAttributesInputPreset(AAUDIO_PERFORMANCE_MODE_NONE);
+ }
+@@ -244,6 +296,10 @@ TEST(test_attributes, aaudio_content_type_lowlat) {
+     checkAttributesContentType(AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
+ }
+ 
++TEST(test_attributes, aaudio_tags_lowlat) {
++    checkAttributesTags(AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
++}
++
+ TEST(test_attributes, aaudio_input_preset_lowlat) {
+     checkAttributesInputPreset(AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
+ }
+diff --git a/services/oboeservice/AAudioServiceEndpoint.cpp b/services/oboeservice/AAudioServiceEndpoint.cpp
+index e7d14a08fa..e49e9e7107 100644
+--- a/services/oboeservice/AAudioServiceEndpoint.cpp
++++ b/services/oboeservice/AAudioServiceEndpoint.cpp
+@@ -25,6 +25,7 @@
+ #include <sstream>
+ #include <vector>
+ 
++#include <system/aaudio/AAudio.h>
+ #include <utils/Singleton.h>
+ 
+ 
+@@ -195,20 +196,28 @@ audio_attributes_t AAudioServiceEndpoint::getAudioAttributesFrom(
+             ? AAudioConvert_inputPresetToAudioSource(params->getInputPreset())
+             : AUDIO_SOURCE_DEFAULT;
+     audio_flags_mask_t flags;
++    std::optional<std::string> optTags = {};
+     if (direction == AAUDIO_DIRECTION_OUTPUT) {
+         flags = AAudio_computeAudioFlagsMask(
+                         params->getAllowedCapturePolicy(),
+                         params->getSpatializationBehavior(),
+                         params->isContentSpatialized(),
+                         AUDIO_OUTPUT_FLAG_FAST);
++        optTags = params->getTags();
+     } else {
+         flags = static_cast<audio_flags_mask_t>(AUDIO_FLAG_LOW_LATENCY
+                 | AAudioConvert_privacySensitiveToAudioFlagsMask(params->isPrivacySensitive()));
+     }
+-    return {
++    audio_attributes_t nativeAttributes = {
+             .content_type = contentType,
+             .usage = usage,
+             .source = source,
+             .flags = flags,
+-            .tags = "" };
++            .tags = ""
++    };
++    if (optTags.has_value() && !optTags->empty()) {
++        strncpy(nativeAttributes.tags, optTags.value().c_str(), AAUDIO_ATTRIBUTES_TAGS_MAX_SIZE);
++        nativeAttributes.tags[AAUDIO_ATTRIBUTES_TAGS_MAX_SIZE - 1] = '\0';
++    }
++    return nativeAttributes;
+ }
+-- 
+2.43.0
+

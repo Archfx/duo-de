@@ -1,0 +1,879 @@
+From 25fbcf21f7bcf122080f725aa0840551ab4f6543 Mon Sep 17 00:00:00 2001
+From: Atneya Nair <atneya@google.com>
+Date: Tue, 19 Nov 2024 19:53:23 -0800
+Subject: [PATCH 301/436] getInputForAttr perm check cleanup pt2
+
+Update param types for AudioPolicyManager::getInputForAttr to avoid
+ptrs/inout for clarity.
+
+No behavior changes for now.
+
+Test: CtsMediaAudioTestCases
+Bug: 374870131
+Bug: 343523722
+Flag: EXEMPT mechanical refactoring
+
+Change-Id: Ic179b09159b47b5af5a56811af9ef759e47eea0c
+---
+ .../media/GetInputForAttrResponse.aidl        |   2 +
+ services/audiopolicy/AudioPolicyInterface.h   |  33 +-
+ .../audiopolicy/fuzzer/audiopolicy_fuzzer.cpp |  13 +-
+ .../audiopolicy/managerdefault/Android.bp     |   1 +
+ .../managerdefault/AudioPolicyManager.cpp     | 285 +++++++++---------
+ .../managerdefault/AudioPolicyManager.h       |  19 +-
+ services/audiopolicy/service/Android.bp       |   5 +-
+ .../service/AudioPolicyInterfaceImpl.cpp      |  71 ++---
+ services/audiopolicy/tests/Android.bp         |   3 +
+ .../tests/audiopolicymanager_tests.cpp        |  64 ++--
+ 10 files changed, 248 insertions(+), 248 deletions(-)
+
+diff --git a/media/libaudioclient/aidl/android/media/GetInputForAttrResponse.aidl b/media/libaudioclient/aidl/android/media/GetInputForAttrResponse.aidl
+index 347bf79aec..9e578206d5 100644
+--- a/media/libaudioclient/aidl/android/media/GetInputForAttrResponse.aidl
++++ b/media/libaudioclient/aidl/android/media/GetInputForAttrResponse.aidl
+@@ -28,6 +28,8 @@ parcelable GetInputForAttrResponse {
+     int selectedDeviceId;
+     /** Interpreted as audio_port_handle_t. */
+     int portId;
++    /** The virtual device id corresponding to the opened input. */
++    int virtualDeviceId;
+     /** The suggested config if fails to get an input. **/
+     AudioConfigBase config;
+ }
+diff --git a/services/audiopolicy/AudioPolicyInterface.h b/services/audiopolicy/AudioPolicyInterface.h
+index 8dd247abaa..33194b7dbc 100644
+--- a/services/audiopolicy/AudioPolicyInterface.h
++++ b/services/audiopolicy/AudioPolicyInterface.h
+@@ -19,15 +19,17 @@
+ 
+ #include <android/media/DeviceConnectedState.h>
+ #include <android/media/TrackInternalMuteInfo.h>
++#include <android/media/audio/common/AudioConfigBase.h>
+ #include <android/media/audio/common/AudioMMapPolicyInfo.h>
+ #include <android/media/audio/common/AudioMMapPolicyType.h>
++#include <android/media/GetInputForAttrResponse.h>
++#include <android/content/AttributionSourceState.h>
+ #include <media/AudioCommonTypes.h>
+ #include <media/AudioContainers.h>
+ #include <media/AudioDeviceTypeAddr.h>
+-#include <media/AudioSystem.h>
+ #include <media/AudioPolicy.h>
++#include <media/AudioSystem.h>
+ #include <media/DeviceDescriptorBase.h>
+-#include <android/content/AttributionSourceState.h>
+ #include <utils/String8.h>
+ 
+ namespace android {
+@@ -161,18 +163,27 @@ public:
+     // releases the output, return true if the output descriptor is reopened.
+     virtual bool releaseOutput(audio_port_handle_t portId) = 0;
+ 
+-    // request an input appropriate for record from the supplied device with supplied parameters.
+-    virtual status_t getInputForAttr(const audio_attributes_t *attr,
+-                                     audio_io_handle_t *input,
++    // Request an input appropriate for record from the supplied device with supplied parameters.
++    // attr -- attributes for the requested record
++    // requestedInput -- input only for MMAP mode where an input is re-used, otherwise output param
++    // requestedDeviceId, config, flags -- additional params for matching
++    // riid, session, attributionSource -- params which encapsulate client info to associate with
++    // this input
++    //
++    // On most errors, return a Status describing the error in the error object.
++    // However, in cases where an appropriate device cannot be found for a config, the error side of
++    // the unexpected will contain a suggested config.
++    virtual base::expected<media::GetInputForAttrResponse,
++            std::variant<binder::Status, media::audio::common::AudioConfigBase>>
++                     getInputForAttr(audio_attributes_t attributes,
++                                     audio_io_handle_t requestedInput,
++                                     audio_port_handle_t requestedDeviceId,
++                                     audio_config_base_t config,
++                                     audio_input_flags_t flags,
+                                      audio_unique_id_t riid,
+                                      audio_session_t session,
+                                      const AttributionSourceState& attributionSource,
+-                                     audio_config_base_t *config,
+-                                     audio_input_flags_t flags,
+-                                     audio_port_handle_t *selectedDeviceId,
+-                                     input_type_t *inputType,
+-                                     audio_port_handle_t *portId,
+-                                     uint32_t *virtualDeviceId) = 0;
++                                     input_type_t *inputType /* out param */) = 0;
+     // indicates to the audio policy manager that the input starts being used.
+     virtual status_t startInput(audio_port_handle_t portId) = 0;
+     // indicates to the audio policy manager that the input stops being used.
+diff --git a/services/audiopolicy/fuzzer/audiopolicy_fuzzer.cpp b/services/audiopolicy/fuzzer/audiopolicy_fuzzer.cpp
+index 1c6248a606..84ad60495f 100644
+--- a/services/audiopolicy/fuzzer/audiopolicy_fuzzer.cpp
++++ b/services/audiopolicy/fuzzer/audiopolicy_fuzzer.cpp
+@@ -286,7 +286,7 @@ bool AudioPolicyManagerFuzzer::getOutputForAttr(
+ bool AudioPolicyManagerFuzzer::getInputForAttr(
+     const audio_attributes_t &attr, audio_unique_id_t riid, audio_port_handle_t *selectedDeviceId,
+     audio_format_t format, audio_channel_mask_t channelMask, int sampleRate,
+-    audio_input_flags_t flags, audio_port_handle_t *portId, uint32_t *virtualDeviceId) {
++    audio_input_flags_t flags, audio_port_handle_t *portId, uint32_t*) {
+     audio_io_handle_t input = AUDIO_IO_HANDLE_NONE;
+     audio_config_base_t config = AUDIO_CONFIG_BASE_INITIALIZER;
+     config.sample_rate = sampleRate;
+@@ -300,11 +300,12 @@ bool AudioPolicyManagerFuzzer::getInputForAttr(
+     AttributionSourceState attributionSource;
+     attributionSource.uid = 0;
+     attributionSource.token = sp<BBinder>::make();
+-    if (mManager->getInputForAttr(&attr, &input, riid, AUDIO_SESSION_NONE, attributionSource,
+-            &config, flags, selectedDeviceId, &inputType, portId, virtualDeviceId) != OK) {
+-        return false;
+-    }
+-    if (*portId == AUDIO_PORT_HANDLE_NONE || input == AUDIO_IO_HANDLE_NONE) {
++    const auto inputRes =
++            mManager->getInputForAttr(attr, input, *selectedDeviceId, config, flags, riid,
++                                      AUDIO_SESSION_NONE, attributionSource, &inputType);
++    if (!inputRes.has_value()) return false;
++
++    if (inputRes->portId == AUDIO_PORT_HANDLE_NONE || inputRes->input == AUDIO_IO_HANDLE_NONE) {
+         return false;
+     }
+     return true;
+diff --git a/services/audiopolicy/managerdefault/Android.bp b/services/audiopolicy/managerdefault/Android.bp
+index e6f63746e6..94be786c37 100644
+--- a/services/audiopolicy/managerdefault/Android.bp
++++ b/services/audiopolicy/managerdefault/Android.bp
+@@ -41,6 +41,7 @@ cc_library_shared {
+         // a dependency on it in the device makefile. There will be no build time
+         // conflict with libaudiopolicyenginedefault.
+         "audioclient-types-aidl-cpp",
++        "audiopolicy-aidl-cpp",
+         // Flag support
+         "android.media.audiopolicy-aconfig-cc",
+         "com.android.media.audioserver-aconfig-cc",
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index 0ebf8d19f5..88bced6db4 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -14,7 +14,6 @@
+  * limitations under the License.
+  */
+ 
+-#include "utils/Errors.h"
+ #define LOG_TAG "APM_AudioPolicyManager"
+ 
+ // Need to keep the log statements even in production builds
+@@ -46,6 +45,7 @@
+ #include <android_media_audiopolicy.h>
+ #include <com_android_media_audioserver.h>
+ #include <cutils/bitops.h>
++#include <error/expected_utils.h>
+ #include <media/AudioParameter.h>
+ #include <policy.h>
+ #include <private/android_filesystem_config.h>
+@@ -71,6 +71,8 @@ using android::media::audio::common::AudioMMapPolicyInfo;
+ using android::media::audio::common::AudioMMapPolicyType;
+ using android::media::audio::common::AudioPortDeviceExt;
+ using android::media::audio::common::AudioPortExt;
++using android::media::audio::common::AudioConfigBase;
++using binder::Status;
+ using com::android::media::audioserver::fix_call_audio_patch;
+ using content::AttributionSourceState;
+ 
+@@ -2925,63 +2927,57 @@ bool AudioPolicyManager::releaseOutput(audio_port_handle_t portId)
+     return false;
+ }
+ 
+-status_t AudioPolicyManager::getInputForAttr(const audio_attributes_t *attr,
+-                                             audio_io_handle_t *input,
+-                                             audio_unique_id_t riid,
+-                                             audio_session_t session,
+-                                             const AttributionSourceState& attributionSource,
+-                                             audio_config_base_t *config,
+-                                             audio_input_flags_t flags,
+-                                             audio_port_handle_t *selectedDeviceId,
+-                                             input_type_t *inputType,
+-                                             audio_port_handle_t *portId,
+-                                             uint32_t *virtualDeviceId)
++base::expected<media::GetInputForAttrResponse, std::variant<binder::Status, AudioConfigBase>>
++AudioPolicyManager::getInputForAttr(audio_attributes_t attributes,
++                                     audio_io_handle_t requestedInput,
++                                     audio_port_handle_t requestedDeviceId,
++                                     audio_config_base_t config,
++                                     audio_input_flags_t flags,
++                                     audio_unique_id_t riid,
++                                     audio_session_t session,
++                                     const AttributionSourceState& attributionSource,
++                                     input_type_t *inputType)
+ {
+     ALOGV("%s() source %d, sampling rate %d, format %#x, channel mask %#x, session %d, "
+           "flags %#x attributes=%s requested device ID %d",
+-          __func__, attr->source, config->sample_rate, config->format, config->channel_mask,
+-          session, flags, toString(*attr).c_str(), *selectedDeviceId);
++          __func__, attributes.source, config.sample_rate, config.format, config.channel_mask,
++          session, flags, toString(attributes).c_str(), requestedDeviceId);
+ 
+-    status_t status = NO_ERROR;
+-    audio_attributes_t attributes = *attr;
+     sp<AudioPolicyMix> policyMix;
+     sp<DeviceDescriptor> device;
+     sp<AudioInputDescriptor> inputDesc;
+     sp<AudioInputDescriptor> previousInputDesc;
+     sp<RecordClientDescriptor> clientDesc;
+-    audio_port_handle_t requestedDeviceId = *selectedDeviceId;
+-    uid_t uid = VALUE_OR_RETURN_STATUS(aidl2legacy_int32_t_uid_t(attributionSource.uid));
++    uid_t uid = static_cast<uid_t>(attributionSource.uid);
+     bool isSoundTrigger;
++    int vdi = 0 /* default device id */;
++    audio_io_handle_t input = AUDIO_IO_HANDLE_NONE;
+ 
+-    // The supplied portId must be AUDIO_PORT_HANDLE_NONE
+-    if (*portId != AUDIO_PORT_HANDLE_NONE) {
+-        return INVALID_OPERATION;
+-    }
+-
+-    if (attr->source == AUDIO_SOURCE_DEFAULT) {
++    if (attributes.source == AUDIO_SOURCE_DEFAULT) {
+         attributes.source = AUDIO_SOURCE_MIC;
+     }
+ 
+     // Explicit routing?
+     sp<DeviceDescriptor> explicitRoutingDevice =
+-            mAvailableInputDevices.getDeviceFromId(*selectedDeviceId);
++            mAvailableInputDevices.getDeviceFromId(requestedDeviceId);
+ 
+     // special case for mmap capture: if an input IO handle is specified, we reuse this input if
+     // possible
+     if ((flags & AUDIO_INPUT_FLAG_MMAP_NOIRQ) == AUDIO_INPUT_FLAG_MMAP_NOIRQ &&
+-            *input != AUDIO_IO_HANDLE_NONE) {
+-        ssize_t index = mInputs.indexOfKey(*input);
++            requestedInput != AUDIO_IO_HANDLE_NONE) {
++        input = requestedInput;
++        ssize_t index = mInputs.indexOfKey(requestedInput);
+         if (index < 0) {
+-            ALOGW("getInputForAttr() unknown MMAP input %d", *input);
+-            status = BAD_VALUE;
+-            goto error;
++            return base::unexpected{Status::fromExceptionCode(
++                    EX_ILLEGAL_ARGUMENT,
++                    String8::format("%s unknown MMAP input %d", __func__, requestedInput))};
+         }
+         sp<AudioInputDescriptor> inputDesc = mInputs.valueAt(index);
+         RecordClientVector clients = inputDesc->getClientsForSession(session);
+         if (clients.size() == 0) {
+-            ALOGW("getInputForAttr() unknown session %d on input %d", session, *input);
+-            status = BAD_VALUE;
+-            goto error;
++            return base::unexpected{Status::fromExceptionCode(
++                    EX_ILLEGAL_ARGUMENT, String8::format("%s unknown session %d on input %d",
++                                                         __func__, session, requestedInput))};
+         }
+         // For MMAP mode, the first call to getInputForAttr() is made on behalf of audioflinger.
+         // The second call is for the first active client and sets the UID. Any further call
+@@ -2997,146 +2993,139 @@ status_t AudioPolicyManager::getInputForAttr(const audio_attributes_t *attr,
+                     continue;
+                 }
+                 if (uid != client->uid() && !client->isSilenced()) {
+-                    ALOGW("getInputForAttr() bad uid %d for client %d uid %d",
+-                          uid, client->portId(), client->uid());
+-                    status = INVALID_OPERATION;
+-                    goto error;
++                    return base::unexpected{Status::fromExceptionCode(
++                            EX_ILLEGAL_STATE,
++                            String8::format("%s bad uid %d for client %d uid %d", __func__, uid,
++                                            client->portId(), client->uid()))};
+                 }
+             }
+         }
+         *inputType = API_INPUT_LEGACY;
+         device = inputDesc->getDevice();
+-
+-        ALOGV("%s reusing MMAP input %d for session %d", __FUNCTION__, *input, session);
+-        goto exit;
+-    }
+-
+-    *input = AUDIO_IO_HANDLE_NONE;
+-    *inputType = API_INPUT_INVALID;
+-
+-    if (attributes.source == AUDIO_SOURCE_REMOTE_SUBMIX &&
+-            extractAddressFromAudioAttributes(attributes).has_value()) {
+-        status = mPolicyMixes.getInputMixForAttr(attributes, &policyMix);
+-        if (status != NO_ERROR) {
+-            ALOGW("%s could not find input mix for attr %s",
+-                    __func__, toString(attributes).c_str());
+-            goto error;
+-        }
+-        device = mAvailableInputDevices.getDevice(AUDIO_DEVICE_IN_REMOTE_SUBMIX,
+-                                                  String8(attr->tags + strlen("addr=")),
+-                                                  AUDIO_FORMAT_DEFAULT);
+-        if (device == nullptr) {
+-            ALOGW("%s could not find in Remote Submix device for source %d, tags %s",
+-                    __func__, attributes.source, attributes.tags);
+-            status = BAD_VALUE;
+-            goto error;
+-        }
+-
+-        if (is_mix_loopback_render(policyMix->mRouteFlags)) {
+-            *inputType = API_INPUT_MIX_PUBLIC_CAPTURE_PLAYBACK;
+-        } else {
+-            *inputType = API_INPUT_MIX_EXT_POLICY_REROUTE;
+-        }
+-        if (virtualDeviceId) {
+-            *virtualDeviceId = policyMix->mVirtualDeviceId;
+-        }
++        ALOGV("%s reusing MMAP input %d for session %d", __FUNCTION__, requestedInput, session);
++        // TODO perm check
+     } else {
+-        if (explicitRoutingDevice != nullptr) {
+-            device = explicitRoutingDevice;
+-        } else {
+-            // Prevent from storing invalid requested device id in clients
+-            requestedDeviceId = AUDIO_PORT_HANDLE_NONE;
+-            device = mEngine->getInputDeviceForAttributes(attributes, uid, session, &policyMix);
+-            ALOGV_IF(device != nullptr, "%s found device type is 0x%X",
+-                __FUNCTION__, device->type());
+-        }
+-        if (device == nullptr) {
+-            ALOGW("getInputForAttr() could not find device for source %d", attributes.source);
+-            status = BAD_VALUE;
+-            goto error;
+-        }
+-        if (device->type() == AUDIO_DEVICE_IN_ECHO_REFERENCE) {
+-            *inputType = API_INPUT_MIX_CAPTURE;
+-        } else if (policyMix) {
+-            ALOG_ASSERT(policyMix->mMixType == MIX_TYPE_RECORDERS, "Invalid Mix Type");
+-            // there is an external policy, but this input is attached to a mix of recorders,
+-            // meaning it receives audio injected into the framework, so the recorder doesn't
+-            // know about it and is therefore considered "legacy"
+-            *inputType = API_INPUT_LEGACY;
+-
+-            if (virtualDeviceId) {
+-                *virtualDeviceId = policyMix->mVirtualDeviceId;
+-            }
+-        } else if (audio_is_remote_submix_device(device->type())) {
+-            *inputType = API_INPUT_MIX_CAPTURE;
+-        } else if (device->type() == AUDIO_DEVICE_IN_TELEPHONY_RX) {
+-            *inputType = API_INPUT_TELEPHONY_RX;
+-        } else {
+-            *inputType = API_INPUT_LEGACY;
+-        }
++        *inputType = API_INPUT_INVALID;
+ 
+-    }
++        if (attributes.source == AUDIO_SOURCE_REMOTE_SUBMIX &&
++                extractAddressFromAudioAttributes(attributes).has_value()) {
++            status_t status = mPolicyMixes.getInputMixForAttr(attributes, &policyMix);
++            if (status != NO_ERROR) {
++                ALOGW("%s could not find input mix for attr %s",
++                        __func__, toString(attributes).c_str());
++                return base::unexpected {aidl_utils::binderStatusFromStatusT(status)};
++            }
++            device = mAvailableInputDevices.getDevice(AUDIO_DEVICE_IN_REMOTE_SUBMIX,
++                                                      String8(attributes.tags + strlen("addr=")),
++                                                      AUDIO_FORMAT_DEFAULT);
++            if (device == nullptr) {
++                return base::unexpected{Status::fromExceptionCode(
++                        EX_ILLEGAL_ARGUMENT,
++                        String8::format(
++                                "%s could not find in Remote Submix device for source %d, tags %s",
++                                __func__, attributes.source, attributes.tags))};
++            }
+ 
+-    *input = getInputForDevice(device, session, attributes, config, flags, policyMix);
+-    if (*input == AUDIO_IO_HANDLE_NONE) {
+-        status = INVALID_OPERATION;
+-        AudioProfileVector profiles;
+-        status_t ret = getProfilesForDevices(
+-                DeviceVector(device), profiles, flags, true /*isInput*/);
+-        if (ret == NO_ERROR && !profiles.empty()) {
+-            const auto channels = profiles[0]->getChannels();
+-            if (!channels.empty() && (channels.find(config->channel_mask) == channels.end())) {
+-                config->channel_mask = *channels.begin();
++            if (is_mix_loopback_render(policyMix->mRouteFlags)) {
++                *inputType = API_INPUT_MIX_PUBLIC_CAPTURE_PLAYBACK;
++            } else {
++                *inputType = API_INPUT_MIX_EXT_POLICY_REROUTE;
+             }
+-            const auto sampleRates = profiles[0]->getSampleRates();
+-            if (!sampleRates.empty() &&
+-                    (sampleRates.find(config->sample_rate) == sampleRates.end())) {
+-                config->sample_rate = *sampleRates.begin();
++            // TODO is this correct?
++            vdi = policyMix->mVirtualDeviceId;
++        } else {
++            if (explicitRoutingDevice != nullptr) {
++                device = explicitRoutingDevice;
++            } else {
++                // Prevent from storing invalid requested device id in clients
++                requestedDeviceId = AUDIO_PORT_HANDLE_NONE;
++                device = mEngine->getInputDeviceForAttributes(attributes, uid, session, &policyMix);
++                ALOGV_IF(device != nullptr, "%s found device type is 0x%X",
++                    __FUNCTION__, device->type());
++            }
++            if (device == nullptr) {
++                return base::unexpected{Status::fromExceptionCode(
++                        EX_ILLEGAL_ARGUMENT,
++                        String8::format("%s could not find device for source %d", __func__,
++                                        attributes.source))};
++            }
++            if (device->type() == AUDIO_DEVICE_IN_ECHO_REFERENCE) {
++                *inputType = API_INPUT_MIX_CAPTURE;
++            } else if (policyMix) {
++                ALOG_ASSERT(policyMix->mMixType == MIX_TYPE_RECORDERS, "Invalid Mix Type");
++                // there is an external policy, but this input is attached to a mix of recorders,
++                // meaning it receives audio injected into the framework, so the recorder doesn't
++                // know about it and is therefore considered "legacy"
++                *inputType = API_INPUT_LEGACY;
++                vdi = policyMix->mVirtualDeviceId;
++            } else if (audio_is_remote_submix_device(device->type())) {
++                *inputType = API_INPUT_MIX_CAPTURE;
++            } else if (device->type() == AUDIO_DEVICE_IN_TELEPHONY_RX) {
++                *inputType = API_INPUT_TELEPHONY_RX;
++            } else {
++                *inputType = API_INPUT_LEGACY;
+             }
+-            config->format = profiles[0]->getFormat();
+         }
+-        goto error;
+-    }
+ 
++        // TODO perm check
+ 
+-    if (policyMix != nullptr && virtualDeviceId != nullptr) {
+-        *virtualDeviceId = policyMix->mVirtualDeviceId;
++        input = getInputForDevice(device, session, attributes, config, flags, policyMix);
++        if (input == AUDIO_IO_HANDLE_NONE) {
++            AudioProfileVector profiles;
++            status_t ret = getProfilesForDevices(
++                    DeviceVector(device), profiles, flags, true /*isInput*/);
++            if (ret == NO_ERROR && !profiles.empty()) {
++                const auto channels = profiles[0]->getChannels();
++                if (!channels.empty() && (channels.find(config.channel_mask) == channels.end())) {
++                    config.channel_mask = *channels.begin();
++                }
++                const auto sampleRates = profiles[0]->getSampleRates();
++                if (!sampleRates.empty() &&
++                        (sampleRates.find(config.sample_rate) == sampleRates.end())) {
++                    config.sample_rate = *sampleRates.begin();
++                }
++                config.format = profiles[0]->getFormat();
++            }
++            const auto suggestedConfig = VALUE_OR_FATAL(
++                legacy2aidl_audio_config_base_t_AudioConfigBase(config, true /*isInput*/));
++            return base::unexpected {suggestedConfig};
++        }
+     }
+ 
+-exit:
+-
+-    *selectedDeviceId = mAvailableInputDevices.contains(device) ?
++    auto selectedDeviceId = mAvailableInputDevices.contains(device) ?
+                 device->getId() : AUDIO_PORT_HANDLE_NONE;
+ 
+     isSoundTrigger = attributes.source == AUDIO_SOURCE_HOTWORD &&
+         mSoundTriggerSessions.indexOfKey(session) >= 0;
+-    *portId = PolicyAudioPort::getNextUniqueId();
+ 
+-    clientDesc = new RecordClientDescriptor(*portId, riid, uid, session, attributes, *config,
++    const auto allocatedPortId = PolicyAudioPort::getNextUniqueId();
++
++    clientDesc = new RecordClientDescriptor(allocatedPortId, riid, uid, session, attributes, config,
+                                             requestedDeviceId, attributes.source, flags,
+                                             isSoundTrigger);
+-    inputDesc = mInputs.valueFor(*input);
++    inputDesc = mInputs.valueFor(input);
+     // Move (if found) effect for the client session to its input
+-    mEffects.moveEffectsForIo(session, *input, &mInputs, mpClientInterface);
++    mEffects.moveEffectsForIo(session, input, &mInputs, mpClientInterface);
+     inputDesc->addClient(clientDesc);
+ 
+     ALOGV("getInputForAttr() returns input %d type %d selectedDeviceId %d for port ID %d",
+-            *input, *inputType, *selectedDeviceId, *portId);
+-
+-    return NO_ERROR;
++            input, *inputType, selectedDeviceId, allocatedPortId);
+ 
+-error:
+-    return status;
++    auto ret = media::GetInputForAttrResponse {};
++    ret.input = input;
++    ret.selectedDeviceId = selectedDeviceId;
++    ret.portId = allocatedPortId;
++    ret.virtualDeviceId = vdi;
++    ret.config = legacy2aidl_audio_config_base_t_AudioConfigBase(config, true /*isInput*/).value();
++    return ret;
+ }
+ 
+-
+-audio_io_handle_t AudioPolicyManager::getInputForDevice(const sp<DeviceDescriptor> &device,
++audio_io_handle_t AudioPolicyManager::getInputForDevice(const sp<DeviceDescriptor>& device,
+                                                         audio_session_t session,
+-                                                        const audio_attributes_t &attributes,
+-                                                        audio_config_base_t *config,
++                                                        const audio_attributes_t& attributes,
++                                                        const audio_config_base_t& config,
+                                                         audio_input_flags_t flags,
+-                                                        const sp<AudioPolicyMix> &policyMix)
+-{
++                                                        const sp<AudioPolicyMix>& policyMix) {
+     audio_io_handle_t input = AUDIO_IO_HANDLE_NONE;
+     audio_source_t halInputSource = attributes.source;
+     bool isSoundTrigger = false;
+@@ -3152,7 +3141,7 @@ audio_io_handle_t AudioPolicyManager::getInputForDevice(const sp<DeviceDescripto
+             halInputSource = AUDIO_SOURCE_VOICE_RECOGNITION;
+         }
+     } else if (attributes.source == AUDIO_SOURCE_VOICE_COMMUNICATION &&
+-               audio_is_linear_pcm(config->format)) {
++               audio_is_linear_pcm(config.format)) {
+         flags = (audio_input_flags_t)(flags | AUDIO_INPUT_FLAG_VOIP_TX);
+     }
+ 
+@@ -3161,10 +3150,10 @@ audio_io_handle_t AudioPolicyManager::getInputForDevice(const sp<DeviceDescripto
+     }
+ 
+     // sampling rate and flags may be updated by getInputProfile
+-    uint32_t profileSamplingRate = (config->sample_rate == 0) ?
+-            SAMPLE_RATE_HZ_DEFAULT : config->sample_rate;
+-    audio_format_t profileFormat = config->format;
+-    audio_channel_mask_t profileChannelMask = config->channel_mask;
++    uint32_t profileSamplingRate = (config.sample_rate == 0) ?
++            SAMPLE_RATE_HZ_DEFAULT : config.sample_rate;
++    audio_format_t profileFormat = config.format;
++    audio_channel_mask_t profileChannelMask = config.channel_mask;
+     audio_input_flags_t profileFlags = flags;
+     // find a compatible input profile (not necessarily identical in parameters)
+     sp<IOProfile> profile = getInputProfile(
+@@ -3174,7 +3163,7 @@ audio_io_handle_t AudioPolicyManager::getInputForDevice(const sp<DeviceDescripto
+     }
+ 
+     // Pick input sampling rate if not specified by client
+-    uint32_t samplingRate = config->sample_rate;
++    uint32_t samplingRate = config.sample_rate;
+     if (samplingRate == 0) {
+         samplingRate = profileSamplingRate;
+     }
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.h b/services/audiopolicy/managerdefault/AudioPolicyManager.h
+index e0cafd4f27..28bf5cbf5a 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.h
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.h
+@@ -134,17 +134,18 @@ public:
+         virtual status_t startOutput(audio_port_handle_t portId);
+         virtual status_t stopOutput(audio_port_handle_t portId);
+         virtual bool releaseOutput(audio_port_handle_t portId);
+-        virtual status_t getInputForAttr(const audio_attributes_t *attr,
+-                                         audio_io_handle_t *input,
++
++        base::expected<media::GetInputForAttrResponse, std::variant<binder::Status,
++            media::audio::common::AudioConfigBase>>
++                         getInputForAttr(audio_attributes_t attributes,
++                                         audio_io_handle_t requestedInput,
++                                         audio_port_handle_t requestedDeviceId,
++                                         audio_config_base_t config,
++                                         audio_input_flags_t flags,
+                                          audio_unique_id_t riid,
+                                          audio_session_t session,
+                                          const AttributionSourceState& attributionSource,
+-                                         audio_config_base_t *config,
+-                                         audio_input_flags_t flags,
+-                                         audio_port_handle_t *selectedDeviceId,
+-                                         input_type_t *inputType,
+-                                         audio_port_handle_t *portId,
+-                                         uint32_t *virtualDeviceId);
++                                         input_type_t *inputType /* out param */) override;
+ 
+         // indicates to the audio policy manager that the input starts being used.
+         virtual status_t startInput(audio_port_handle_t portId);
+@@ -1226,7 +1227,7 @@ private:
+         audio_io_handle_t getInputForDevice(const sp<DeviceDescriptor> &device,
+                 audio_session_t session,
+                 const audio_attributes_t &attributes,
+-                audio_config_base_t *config,
++                const audio_config_base_t &config,
+                 audio_input_flags_t flags,
+                 const sp<AudioPolicyMix> &policyMix);
+ 
+diff --git a/services/audiopolicy/service/Android.bp b/services/audiopolicy/service/Android.bp
+index 619c924235..79e328e370 100644
+--- a/services/audiopolicy/service/Android.bp
++++ b/services/audiopolicy/service/Android.bp
+@@ -11,6 +11,10 @@ package {
+ cc_defaults {
+     name: "libaudiopolicyservice_dependencies",
+ 
++    defaults: [
++        "latest_android_media_audio_common_types_cpp_shared",
++    ],
++
+     include_dirs: [
+         "frameworks/av/services/audiopolicy", // include path outside of libaudiopolicyservice
+     ],
+@@ -64,7 +68,6 @@ cc_library {
+     name: "libaudiopolicyservice",
+ 
+     defaults: [
+-        "latest_android_media_audio_common_types_cpp_shared",
+         "libaudiopolicyservice_dependencies",
+     ],
+ 
+diff --git a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+index 20bc78861b..9d9836f98e 100644
+--- a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
++++ b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+@@ -815,23 +815,21 @@ Status AudioPolicyService::getInputForAttr(const media::audio::common::AudioAttr
+                                            int32_t selectedDeviceIdAidl,
+                                            media::GetInputForAttrResponse* _aidl_return) {
+     auto inputSource = attrAidl.source;
+-    audio_attributes_t attr = VALUE_OR_RETURN_BINDER_STATUS(
++    const audio_attributes_t attr = VALUE_OR_RETURN_BINDER_STATUS(
+             aidl2legacy_AudioAttributes_audio_attributes_t(attrAidl));
+-    audio_io_handle_t input = VALUE_OR_RETURN_BINDER_STATUS(
++    const audio_io_handle_t requestedInput = VALUE_OR_RETURN_BINDER_STATUS(
+             aidl2legacy_int32_t_audio_io_handle_t(inputAidl));
+-    audio_unique_id_t riid = VALUE_OR_RETURN_BINDER_STATUS(
++    const audio_unique_id_t riid = VALUE_OR_RETURN_BINDER_STATUS(
+             aidl2legacy_int32_t_audio_unique_id_t(riidAidl));
+-    audio_session_t session = VALUE_OR_RETURN_BINDER_STATUS(
++    const audio_session_t session = VALUE_OR_RETURN_BINDER_STATUS(
+             aidl2legacy_int32_t_audio_session_t(sessionAidl));
+-    audio_config_base_t config = VALUE_OR_RETURN_BINDER_STATUS(
++    const audio_config_base_t config = VALUE_OR_RETURN_BINDER_STATUS(
+             aidl2legacy_AudioConfigBase_audio_config_base_t(configAidl, true /*isInput*/));
+-    audio_input_flags_t flags = VALUE_OR_RETURN_BINDER_STATUS(
++    const audio_input_flags_t flags = VALUE_OR_RETURN_BINDER_STATUS(
+             aidl2legacy_int32_t_audio_input_flags_t_mask(flagsAidl));
+-    audio_port_handle_t selectedDeviceId = VALUE_OR_RETURN_BINDER_STATUS(
++    const audio_port_handle_t requestedDeviceId = VALUE_OR_RETURN_BINDER_STATUS(
+                 aidl2legacy_int32_t_audio_port_handle_t(selectedDeviceIdAidl));
+ 
+-    audio_port_handle_t portId;
+-
+     if (mAudioPolicyManager == NULL) {
+         return binderStatusFromStatusT(NO_INIT);
+     }
+@@ -881,77 +879,72 @@ Status AudioPolicyService::getInputForAttr(const media::audio::common::AudioAttr
+                                              toString(inputSource).c_str()));
+     }
+ 
+-    uint32_t virtualDeviceId = kDefaultVirtualDeviceId;
+-
+-    sp<AudioPolicyEffects>audioPolicyEffects;
++    sp<AudioPolicyEffects> audioPolicyEffects;
++    base::expected<media::GetInputForAttrResponse, std::variant<binder::Status, AudioConfigBase>>
++            res;
+     {
+-        status_t status;
+         AudioPolicyInterface::input_type_t inputType;
+ 
+         audio_utils::lock_guard _l(mMutex);
+         {
+             AutoCallerClear acc;
+             // the audio_in_acoustics_t parameter is ignored by get_input()
+-            status = mAudioPolicyManager->getInputForAttr(&attr, &input, riid, session,
+-                                                          attributionSource, &config,
+-                                                          flags, &selectedDeviceId,
+-                                                          &inputType, &portId,
+-                                                          &virtualDeviceId);
++            res = mAudioPolicyManager->getInputForAttr(attr, requestedInput, requestedDeviceId,
++                    config, flags, riid, session, attributionSource, &inputType);
+ 
+         }
+         audioPolicyEffects = mAudioPolicyEffects;
+ 
+-        if (status == NO_ERROR) {
++        if (res.has_value()) {
+             const auto permResult = evaluatePermsForDevice(attributionSource,
+-                    inputSource, inputType, virtualDeviceId,
++                    inputSource, inputType, res->virtualDeviceId,
+                     isCallRedir);
+ 
+             if (!permResult.has_value()) {
+                 AutoCallerClear acc;
+-                mAudioPolicyManager->releaseInput(portId);
++                mAudioPolicyManager->releaseInput(res->portId);
+                 return permResult.error();
+             } else if (!permResult.value()) {
+                 AutoCallerClear acc;
+-                mAudioPolicyManager->releaseInput(portId);
++                mAudioPolicyManager->releaseInput(res->portId);
+                 return Status::fromExceptionCode(
+                         EX_SECURITY,
+                         String8::format(
+                                 "%s: %s missing perms for input type %d, inputSource %d, vdi %d",
+                                 __func__, attributionSource.toString().c_str(), inputType,
+-                                inputSource, virtualDeviceId));
++                                inputSource, res->virtualDeviceId));
+             }
+         }
+ 
+-        if (status != NO_ERROR) {
+-            _aidl_return->config = VALUE_OR_RETURN_BINDER_STATUS(
+-                    legacy2aidl_audio_config_base_t_AudioConfigBase(config, true /*isInput*/));
+-            return binderStatusFromStatusT(status);
++        if (!res.has_value()) {
++            if (res.error().index() == 1) {
++                _aidl_return->config = std::get<1>(res.error());
++                return Status::fromExceptionCode(EX_ILLEGAL_STATE);
++            } else {
++                return std::get<0>(res.error());
++            }
+         }
+ 
+-        DeviceIdVector selectedDeviceIds = { selectedDeviceId };
+-        sp<AudioRecordClient> client = new AudioRecordClient(attr, input, session, portId,
++        DeviceIdVector selectedDeviceIds = { res->selectedDeviceId };
++        sp<AudioRecordClient> client = new AudioRecordClient(attr, res->input, session, res->portId,
+                                                              selectedDeviceIds, attributionSource,
+-                                                             virtualDeviceId,
++                                                             res->virtualDeviceId,
+                                                              canBypassConcurrentPolicy,
+                                                              mOutputCommandThread);
+-        mAudioRecordClients.add(portId, client);
++        mAudioRecordClients.add(res->portId, client);
+     }
+ 
+     if (audioPolicyEffects != 0) {
+         // create audio pre processors according to input source
+-        status_t status = audioPolicyEffects->addInputEffects(input,
++        status_t status = audioPolicyEffects->addInputEffects(res->input,
+                 aidl2legacy_AudioSource_audio_source_t(inputSource).value(), session);
+         if (status != NO_ERROR && status != ALREADY_EXISTS) {
+-            ALOGW("Failed to add effects on input %d", input);
++            ALOGW("Failed to add effects on input %d", res->input);
+         }
+     }
+ 
+-    _aidl_return->input = VALUE_OR_RETURN_BINDER_STATUS(
+-            legacy2aidl_audio_io_handle_t_int32_t(input));
+-    _aidl_return->selectedDeviceId = VALUE_OR_RETURN_BINDER_STATUS(
+-            legacy2aidl_audio_port_handle_t_int32_t(selectedDeviceId));
+-    _aidl_return->portId = VALUE_OR_RETURN_BINDER_STATUS(
+-            legacy2aidl_audio_port_handle_t_int32_t(portId));
++    *_aidl_return = res.value();
++
+     return Status::ok();
+ }
+ 
+diff --git a/services/audiopolicy/tests/Android.bp b/services/audiopolicy/tests/Android.bp
+index 182dc618c9..a6e5c75ab5 100644
+--- a/services/audiopolicy/tests/Android.bp
++++ b/services/audiopolicy/tests/Android.bp
+@@ -21,6 +21,7 @@ cc_test {
+     ],
+ 
+     shared_libs: [
++        "audiopolicy-aidl-cpp",
+         "framework-permission-aidl-cpp",
+         "libaudioclient",
+         "libaudiofoundation",
+@@ -32,6 +33,7 @@ cc_test {
+         "libhidlbase",
+         "liblog",
+         "libmedia_helper",
++        "libstagefright_foundation",
+         "libutils",
+         "libxml2",
+         "server_configurable_flags",
+@@ -42,6 +44,7 @@ cc_test {
+         "audioclient-types-aidl-cpp",
+         "com.android.media.audio-aconfig-cc",
+         "com.android.media.audioserver-aconfig-cc",
++        "libaudio_aidl_conversion_common_cpp",
+         "libaudiopolicycomponents",
+         "libflagtest",
+         "libgmock",
+diff --git a/services/audiopolicy/tests/audiopolicymanager_tests.cpp b/services/audiopolicy/tests/audiopolicymanager_tests.cpp
+index f8f91fc65c..3cdf6a1e41 100644
+--- a/services/audiopolicy/tests/audiopolicymanager_tests.cpp
++++ b/services/audiopolicy/tests/audiopolicymanager_tests.cpp
+@@ -97,13 +97,6 @@ AttributionSourceState createAttributionSourceState(uid_t uid) {
+     attributionSourceState.token = sp<BBinder>::make();
+     return attributionSourceState;
+ }
+-
+-bool equals(const audio_config_base_t& config1, const audio_config_base_t& config2) {
+-    return config1.format == config2.format
+-            && config1.sample_rate == config2.sample_rate
+-            && config1.channel_mask == config2.channel_mask;
+-}
+-
+ } // namespace
+ 
+ TEST(AudioPolicyConfigTest, DefaultConfigForTestsIsEmpty) {
+@@ -343,10 +336,14 @@ void AudioPolicyManagerTest::getInputForAttr(
+     if (!virtualDeviceId) virtualDeviceId = 0;
+     AudioPolicyInterface::input_type_t inputType;
+     AttributionSourceState attributionSource = createAttributionSourceState(/*uid=*/ 0);
+-    ASSERT_EQ(OK, mManager->getInputForAttr(
+-            &attr, input, riid, session, attributionSource, &config, flags,
+-            selectedDeviceId, &inputType, portId, virtualDeviceId));
+-    ASSERT_NE(AUDIO_PORT_HANDLE_NONE, *portId);
++    auto inputRes = mManager->getInputForAttr(attr, *input, *selectedDeviceId,
++        config, flags, riid, session, attributionSource, &inputType);
++    ASSERT_TRUE(inputRes.has_value());
++    ASSERT_NE(inputRes->portId, AUDIO_PORT_HANDLE_NONE);
++    *input = inputRes->input;
++    if (selectedDeviceId != nullptr) *selectedDeviceId = inputRes->selectedDeviceId;
++    *portId = inputRes->portId;
++    if (virtualDeviceId != nullptr) *virtualDeviceId = inputRes->virtualDeviceId;
+ }
+ 
+ void AudioPolicyManagerTest::getAudioPorts(audio_port_type_t type, audio_port_role_t role,
+@@ -1231,40 +1228,39 @@ TEST_F(AudioPolicyManagerTestWithConfigurationFile, PreferExactConfigForInput) {
+                                                            AUDIO_POLICY_DEVICE_STATE_AVAILABLE,
+                                                            "", "", AUDIO_FORMAT_DEFAULT));
+ 
+-    audio_port_handle_t selectedDeviceId = AUDIO_PORT_HANDLE_NONE;
++    const audio_port_handle_t requestedDeviceId = AUDIO_PORT_HANDLE_NONE;
++    const audio_io_handle_t requestedInput = AUDIO_PORT_HANDLE_NONE;
++    const AttributionSourceState attributionSource = createAttributionSourceState(/*uid=*/ 0);
++    AudioPolicyInterface::input_type_t inputType;
++
+     audio_attributes_t attr = {AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_UNKNOWN,
+                                AUDIO_SOURCE_VOICE_COMMUNICATION,AUDIO_FLAG_NONE, ""};
+-    AudioPolicyInterface::input_type_t inputType;
+-    audio_io_handle_t input = AUDIO_PORT_HANDLE_NONE;
+-    AttributionSourceState attributionSource = createAttributionSourceState(/*uid=*/ 0);
+     audio_config_base_t requestedConfig = {
+             .sample_rate = k48000SamplingRate,
+             .channel_mask = AUDIO_CHANNEL_IN_STEREO,
+             .format = AUDIO_FORMAT_PCM_16_BIT,
+     };
+-    audio_config_base_t config = requestedConfig;
+-    audio_port_handle_t portId = AUDIO_PORT_HANDLE_NONE;
+-    uint32_t *virtualDeviceId = 0;
+-    ASSERT_EQ(OK, mManager->getInputForAttr(
+-            &attr, &input, 1 /*riid*/, AUDIO_SESSION_NONE, attributionSource, &config,
+-            AUDIO_INPUT_FLAG_NONE,
+-            &selectedDeviceId, &inputType, &portId, virtualDeviceId));
+-    ASSERT_NE(AUDIO_PORT_HANDLE_NONE, portId);
+-    ASSERT_TRUE(equals(requestedConfig, config));
++    auto inputRes = mManager->getInputForAttr(attr, requestedInput, requestedDeviceId,
++                                              requestedConfig, AUDIO_INPUT_FLAG_NONE, 1 /*riid*/,
++                                              AUDIO_SESSION_NONE, attributionSource, &inputType);
++    ASSERT_TRUE(inputRes.has_value());
++    ASSERT_NE(inputRes->portId, AUDIO_PORT_HANDLE_NONE);
++    ASSERT_EQ(VALUE_OR_FATAL(legacy2aidl_audio_config_base_t_AudioConfigBase(
++                               requestedConfig, true /* isInput */)),
++                       inputRes->config);
+ 
+     attr = {AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_UNKNOWN,
+             AUDIO_SOURCE_VOICE_COMMUNICATION, AUDIO_FLAG_NONE, ""};
+     requestedConfig.channel_mask = deviceChannelMask;
+-    config = requestedConfig;
+-    selectedDeviceId = AUDIO_PORT_HANDLE_NONE;
+-    input = AUDIO_PORT_HANDLE_NONE;
+-    portId = AUDIO_PORT_HANDLE_NONE;
+-    ASSERT_EQ(OK, mManager->getInputForAttr(
+-            &attr, &input, 1 /*riid*/, AUDIO_SESSION_NONE, attributionSource, &config,
+-            AUDIO_INPUT_FLAG_NONE,
+-            &selectedDeviceId, &inputType, &portId, virtualDeviceId));
+-    ASSERT_NE(AUDIO_PORT_HANDLE_NONE, portId);
+-    ASSERT_TRUE(equals(requestedConfig, config));
++
++    inputRes = mManager->getInputForAttr(attr, requestedInput, requestedDeviceId, requestedConfig,
++                                         AUDIO_INPUT_FLAG_NONE, 1 /*riid*/, AUDIO_SESSION_NONE,
++                                         attributionSource, &inputType);
++    ASSERT_TRUE(inputRes.has_value());
++    ASSERT_NE(inputRes->portId, AUDIO_PORT_HANDLE_NONE);
++    ASSERT_EQ(VALUE_OR_FATAL(legacy2aidl_audio_config_base_t_AudioConfigBase(requestedConfig,
++                                                                             true /* isInput */)),
++              inputRes->config);
+ 
+     ASSERT_EQ(NO_ERROR, mManager->setDeviceConnectionState(AUDIO_DEVICE_IN_USB_DEVICE,
+                                                            AUDIO_POLICY_DEVICE_STATE_UNAVAILABLE,
+-- 
+2.43.0
+

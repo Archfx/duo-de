@@ -1,0 +1,33 @@
+From abbdeb107c693284bdd41389648aa19870888676 Mon Sep 17 00:00:00 2001
+From: Yanqiang Fan <yanqiang.fan@mediatek.com>
+Date: Tue, 22 Oct 2024 15:06:22 +0800
+Subject: [PATCH 126/436] codec2: Fix VideoEncoderRoiTest cts failure
+
+Corrected the assignment of rect to ensure proper region of interest
+configuration, preventing invalid rects and fixing the test failure.
+
+Test:run cts --abi arm64-v8a -m CtsVideoCodecTestCases -t android.videocodec.ctsVideoEncoderRoiTest --log-level-display INFO
+
+Bug: 374920078
+
+Change-Id: Ia0ab535c2671ce0f85688ec028c53dfd5d922cad
+---
+ media/codec2/sfplugin/CCodecConfig.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/media/codec2/sfplugin/CCodecConfig.cpp b/media/codec2/sfplugin/CCodecConfig.cpp
+index a943626423..897a696f7f 100644
+--- a/media/codec2/sfplugin/CCodecConfig.cpp
++++ b/media/codec2/sfplugin/CCodecConfig.cpp
+@@ -1907,7 +1907,7 @@ ReflectedParamUpdater::Dict CCodecConfig::getReflectedFormat(
+                         bottom = c2_min(bottom, height);
+                         if (right > left && bottom > top) {
+                             C2Rect rect(right - left, bottom - top);
+-                            rect.at(left, top);
++                            rect = rect.at(left, top);
+                             c2QpOffsetRects.push_back(C2QpOffsetRectStruct(rect, offset));
+                         } else {
+                             ALOGE("Rects configuration %s is not valid.", box);
+-- 
+2.43.0
+

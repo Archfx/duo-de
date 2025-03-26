@@ -1,0 +1,43 @@
+From 99c85e8a50f51af7d97b01c5266e26ad63858b6a Mon Sep 17 00:00:00 2001
+From: Jean-Michel Trivi <jmtrivi@google.com>
+Date: Thu, 5 Dec 2024 14:46:21 -0800
+Subject: [PATCH 412/436] Spatializer load doesn't fail for spatialized masks
+
+Do not report an error is the spatializer effect doesn't
+support SPATIALIZER_PARAM_SUPPORTED_CHANNEL_MASKS or
+reports an empty list as not all implementations may
+have been updated to support it.
+
+Bug: 377582613
+Flag: android.media.audio.spatializer_capabilities
+Test: adb shell dumpsys audio | grep "Spatial audio" -A 7
+(cherry picked from https://googleplex-android-review.googlesource.com/q/commit:5c862f3a9a9b37ce0ee7199d32278030ef901641)
+Merged-In: I8c955496f75d167b46e812b79a0d970f8ed27581
+Change-Id: I8c955496f75d167b46e812b79a0d970f8ed27581
+---
+ services/audiopolicy/service/Spatializer.cpp | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/services/audiopolicy/service/Spatializer.cpp b/services/audiopolicy/service/Spatializer.cpp
+index d177b92af0..e469b2c5a9 100644
+--- a/services/audiopolicy/service/Spatializer.cpp
++++ b/services/audiopolicy/service/Spatializer.cpp
+@@ -418,11 +418,13 @@ status_t Spatializer::loadEngineConfiguration(sp<EffectHalInterface> effect) {
+                                    &spatializedChannelMasks);
+     if (status != NO_ERROR) {
+         ALOGW("%s: cannot get SPATIALIZER_PARAM_SPATIALIZED_CHANNEL_MASKS", __func__);
+-        return status;
++        // do not return an error yet as spatializer implementations may not have been
++        // updated yet to support this parameter
+     }
+     if (spatializedChannelMasks.empty()) {
+         ALOGW("%s: SPATIALIZER_PARAM_SPATIALIZED_CHANNEL_MASKS reports empty", __func__);
+-        return BAD_VALUE;
++        // do not return an error yet as spatializer implementations may not have been
++        // updated yet to support this parameter
+     }
+     for (const audio_channel_mask_t spatializedMask : spatializedChannelMasks) {
+         // spatialized masks must be contained in the supported input masks
+-- 
+2.43.0
+

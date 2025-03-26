@@ -1,0 +1,28 @@
+From 726f6c14b22ec0645abe148a10f88d647eb87f7f Mon Sep 17 00:00:00 2001
+From: Sneha Patil <sneha.patil@ittiam.com>
+Date: Tue, 22 Oct 2024 13:33:08 +0000
+Subject: [PATCH 128/436] DynamicsProcessing: Reset mEngineInited to false
+ after processing
+
+Bug: 305866207
+Test: atest VtsHalDynamicsProcessingTargetTest
+Change-Id: I2fd49da535228cd4f32cbd8a22fd7c2f6ccd025a
+---
+ media/libeffects/dynamicsproc/aidl/DynamicsProcessingContext.cpp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/media/libeffects/dynamicsproc/aidl/DynamicsProcessingContext.cpp b/media/libeffects/dynamicsproc/aidl/DynamicsProcessingContext.cpp
+index fd4e615411..dd14ac2b07 100644
+--- a/media/libeffects/dynamicsproc/aidl/DynamicsProcessingContext.cpp
++++ b/media/libeffects/dynamicsproc/aidl/DynamicsProcessingContext.cpp
+@@ -52,6 +52,7 @@ RetCode DynamicsProcessingContext::reset() {
+     if (mDpFreq != nullptr) {
+         mDpFreq->reset();
+     }
++    mEngineInited = false;
+     return RetCode::SUCCESS;
+ }
+ 
+-- 
+2.43.0
+

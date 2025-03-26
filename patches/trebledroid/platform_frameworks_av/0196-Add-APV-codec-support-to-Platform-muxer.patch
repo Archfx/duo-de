@@ -1,0 +1,135 @@
+From 8aff9d0b9205441015d4365f06b43237dc308907 Mon Sep 17 00:00:00 2001
+From: Sham Rathod <shamrathod@google.com>
+Date: Tue, 22 Oct 2024 07:15:36 +0000
+Subject: [PATCH 196/436] Add APV codec support to Platform muxer
+
+Bug: 370061501
+Test: atest CtsMediaMuxerTest
+Change-Id: I18c98ffa1993ad8eb8843d6146ff8984c3c9eafb
+---
+ media/libstagefright/MPEG4Writer.cpp          | 26 ++++++++++++++++++-
+ .../include/media/stagefright/MetaDataBase.h  |  1 +
+ 2 files changed, 26 insertions(+), 1 deletion(-)
+
+diff --git a/media/libstagefright/MPEG4Writer.cpp b/media/libstagefright/MPEG4Writer.cpp
+index 3aa0107d55..cb3c185d47 100644
+--- a/media/libstagefright/MPEG4Writer.cpp
++++ b/media/libstagefright/MPEG4Writer.cpp
+@@ -54,6 +54,7 @@
+ #include "include/HevcUtils.h"
+ 
+ #include <com_android_media_editing_flags.h>
++namespace editing_flags = com::android::media::editing::flags;
+ 
+ #ifndef __predict_false
+ #define __predict_false(exp) __builtin_expect((exp) != 0, 0)
+@@ -160,6 +161,7 @@ public:
+     bool isAvc() const { return mIsAvc; }
+     bool isHevc() const { return mIsHevc; }
+     bool isAv1() const { return mIsAv1; }
++    bool isApv() const { return mIsApv; }
+     bool isHeic() const { return mIsHeic; }
+     bool isAvif() const { return mIsAvif; }
+     bool isHeif() const { return mIsHeif; }
+@@ -328,6 +330,7 @@ private:
+     bool mIsAvc;
+     bool mIsHevc;
+     bool mIsAv1;
++    bool mIsApv;
+     bool mIsDovi;
+     bool mIsAudio;
+     bool mIsVideo;
+@@ -479,6 +482,7 @@ private:
+     void writeAvccBox();
+     void writeHvccBox();
+     void writeAv1cBox();
++    void writeApvcBox();
+     void writeDoviConfigBox();
+     void writeUrlBox();
+     void writeDrefBox();
+@@ -680,6 +684,9 @@ const char *MPEG4Writer::Track::getFourCCForMime(const char *mime) {
+             return "hvc1";
+         } else if (!strcasecmp(MEDIA_MIMETYPE_VIDEO_AV1, mime)) {
+             return "av01";
++        } else if (editing_flags::muxer_mp4_enable_apv() &&
++                   !strcasecmp(MEDIA_MIMETYPE_VIDEO_APV, mime)) {
++            return "apv1";
+         }
+     } else if (!strncasecmp(mime, "application/", 12)) {
+         return "mett";
+@@ -2266,6 +2273,7 @@ MPEG4Writer::Track::Track(
+     mIsAvc = !strcasecmp(mime, MEDIA_MIMETYPE_VIDEO_AVC);
+     mIsHevc = !strcasecmp(mime, MEDIA_MIMETYPE_VIDEO_HEVC);
+     mIsAv1 = !strcasecmp(mime, MEDIA_MIMETYPE_VIDEO_AV1);
++    mIsApv = editing_flags::muxer_mp4_enable_apv() && !strcasecmp(mime, MEDIA_MIMETYPE_VIDEO_APV);
+     mIsDovi = !strcasecmp(mime, MEDIA_MIMETYPE_VIDEO_DOLBY_VISION);
+     mIsAudio = !strncasecmp(mime, "audio/", 6);
+     mIsVideo = !strncasecmp(mime, "video/", 6);
+@@ -2708,6 +2716,9 @@ void MPEG4Writer::Track::getCodecSpecificDataFromInputFormatIfPossible() {
+     } else if (!strcasecmp(mime, MEDIA_MIMETYPE_VIDEO_AV1) ||
+                !strcasecmp(mime, MEDIA_MIMETYPE_IMAGE_AVIF)) {
+         mMeta->findData(kKeyAV1C, &type, &data, &size);
++    } else if (editing_flags::muxer_mp4_enable_apv() &&
++               !strcasecmp(mime, MEDIA_MIMETYPE_VIDEO_APV)) {
++        mMeta->findData(kKeyAPVC, &type, &data, &size);
+     } else if (!strcasecmp(mime, MEDIA_MIMETYPE_VIDEO_DOLBY_VISION)) {
+         getDolbyVisionProfile();
+         if (!mMeta->findData(kKeyAVCC, &type, &data, &size) &&
+@@ -3609,7 +3620,7 @@ status_t MPEG4Writer::Track::threadEntry() {
+                             (const uint8_t *)buffer->data()
+                                 + buffer->range_offset(),
+                             buffer->range_length());
+-                } else if (mIsMPEG4 || mIsAv1) {
++                } else if (mIsMPEG4 || mIsAv1 || mIsApv) {
+                     err = copyCodecSpecificData((const uint8_t *)buffer->data() + buffer->range_offset(),
+                             buffer->range_length());
+                 }
+@@ -4338,6 +4349,7 @@ status_t MPEG4Writer::Track::checkCodecSpecificData() const {
+         !strcasecmp(MEDIA_MIMETYPE_VIDEO_AVC, mime) ||
+         !strcasecmp(MEDIA_MIMETYPE_VIDEO_HEVC, mime) ||
+         !strcasecmp(MEDIA_MIMETYPE_VIDEO_AV1, mime) ||
++        (editing_flags::muxer_mp4_enable_apv() && !strcasecmp(MEDIA_MIMETYPE_VIDEO_APV, mime)) ||
+         !strcasecmp(MEDIA_MIMETYPE_VIDEO_DOLBY_VISION, mime) ||
+         !strcasecmp(MEDIA_MIMETYPE_IMAGE_ANDROID_HEIC, mime) ||
+         !strcasecmp(MEDIA_MIMETYPE_IMAGE_AVIF, mime)) {
+@@ -4512,6 +4524,9 @@ void MPEG4Writer::Track::writeVideoFourCCBox() {
+         writeHvccBox();
+     } else if (!strcasecmp(MEDIA_MIMETYPE_VIDEO_AV1, mime)) {
+         writeAv1cBox();
++    } else if (editing_flags::muxer_mp4_enable_apv() &&
++               !strcasecmp(MEDIA_MIMETYPE_VIDEO_APV, mime)) {
++        writeApvcBox();
+     } else if (!strcasecmp(MEDIA_MIMETYPE_VIDEO_DOLBY_VISION, mime)) {
+         if (mDoviProfile <= DolbyVisionProfileDvheSt) {
+             writeHvccBox();
+@@ -5103,6 +5118,15 @@ void MPEG4Writer::Track::writeAv1cBox() {
+     mOwner->endBox();  // av1C
+ }
+ 
++void MPEG4Writer::Track::writeApvcBox() {
++    CHECK(mCodecSpecificData);
++    CHECK_GE(mCodecSpecificDataSize, 4u);
++
++    mOwner->beginBox("apvC");
++    mOwner->write(mCodecSpecificData, mCodecSpecificDataSize);
++    mOwner->endBox();  // apvC
++}
++
+ void MPEG4Writer::Track::writeDoviConfigBox() {
+     CHECK_NE(mDoviProfile, 0u);
+ 
+diff --git a/media/libstagefright/include/media/stagefright/MetaDataBase.h b/media/libstagefright/include/media/stagefright/MetaDataBase.h
+index a7d2eb9335..9dce55bf65 100644
+--- a/media/libstagefright/include/media/stagefright/MetaDataBase.h
++++ b/media/libstagefright/include/media/stagefright/MetaDataBase.h
+@@ -63,6 +63,7 @@ enum {
+     kKeyDVVC              = 'dvvc',  // raw data
+     kKeyDVWC              = 'dvwc',  // raw data
+     kKeyAV1C              = 'av1c',  // raw data
++    kKeyAPVC              = 'apvc',  // raw data
+     kKeyThumbnailHVCC     = 'thvc',  // raw data
+     kKeyThumbnailAV1C     = 'tav1',  // raw data
+     kKeyD263              = 'd263',  // raw data
+-- 
+2.43.0
+

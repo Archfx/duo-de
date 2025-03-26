@@ -1,0 +1,626 @@
+From 7fed726f2d8569173da9f39a1302ef0d23fa9bd7 Mon Sep 17 00:00:00 2001
+From: Sungtak Lee <taklee@google.com>
+Date: Tue, 1 Oct 2024 04:02:03 +0000
+Subject: [PATCH 094/436] C2HIDL: handle unregistered death notification
+
+HIDL HAL unregister death notification permaturely certain cases.
+Handle cleaning up even though death notification is not received.
+
+Bug: 309898317
+Test: build
+Flag: EXEMPT bugfix
+
+Change-Id: I36e1b19fc7d716e007d3f4418536bfcb0c98837a
+---
+ .../codec2/common/BqPoolInvalidateHelper.h    |  50 +++++++
+ media/codec2/hal/hidl/1.0/utils/Component.cpp |  48 ++++++-
+ media/codec2/hal/hidl/1.1/utils/Component.cpp |  48 ++++++-
+ media/codec2/hal/hidl/1.2/utils/Component.cpp |  48 ++++++-
+ media/codec2/vndk/Android.bp                  |   3 +-
+ .../codec2/vndk/include/C2BqPoolInvalidator.h | 105 ++++++++++++++
+ .../vndk/platform/C2BqPoolInvalidator.cpp     | 130 ++++++++++++++++++
+ 7 files changed, 410 insertions(+), 22 deletions(-)
+ create mode 100644 media/codec2/hal/common/include/codec2/common/BqPoolInvalidateHelper.h
+ create mode 100644 media/codec2/vndk/include/C2BqPoolInvalidator.h
+ create mode 100644 media/codec2/vndk/platform/C2BqPoolInvalidator.cpp
+
+diff --git a/media/codec2/hal/common/include/codec2/common/BqPoolInvalidateHelper.h b/media/codec2/hal/common/include/codec2/common/BqPoolInvalidateHelper.h
+new file mode 100644
+index 0000000000..859f703986
+--- /dev/null
++++ b/media/codec2/hal/common/include/codec2/common/BqPoolInvalidateHelper.h
+@@ -0,0 +1,50 @@
++/*
++ * Copyright 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#pragma once
++
++#include <C2BqBufferPriv.h>
++#include <C2PlatformSupport.h>
++
++namespace android {
++
++// filter fn from component's blockpool container to bqpool conatainer
++static inline bool BqPoolFilterFn(
++        std::pair<const uint64_t, std::shared_ptr<C2BlockPool>> pool) {
++    return (pool.second->getAllocatorId() == C2PlatformAllocatorStore::BUFFERQUEUE);
++}
++
++// convert fn from component's blockpool container to bqpool container
++static inline std::shared_ptr<C2BufferQueueBlockPool> BqPoolConvertFn(
++        std::pair<const uint64_t, std::shared_ptr<C2BlockPool>> pool) {
++    return std::static_pointer_cast<C2BufferQueueBlockPool>(pool.second);
++}
++
++// This is similar to std::transform excpet there is \pred functor parameter.
++// The elements with \pred function value \true only will be transformed and
++// added to the dest container. (For portability std::ranges are not used.)
++template <class InputIt, class OutputIt, class Pred, class Fct>
++void transform_if(InputIt first, InputIt last, OutputIt dest, Pred pred, Fct transform)
++{
++   while (first != last) {
++      if (pred(*first)) {
++         *dest++ = transform(*first);
++      }
++      ++first;
++   }
++}
++
++}  // namespace android
+diff --git a/media/codec2/hal/hidl/1.0/utils/Component.cpp b/media/codec2/hal/hidl/1.0/utils/Component.cpp
+index 62f0e25eb4..162a80e2f4 100644
+--- a/media/codec2/hal/hidl/1.0/utils/Component.cpp
++++ b/media/codec2/hal/hidl/1.0/utils/Component.cpp
+@@ -18,6 +18,7 @@
+ #define LOG_TAG "Codec2-Component"
+ #include <android-base/logging.h>
+ 
++#include <codec2/common/BqPoolInvalidateHelper.h>
+ #include <codec2/hidl/1.0/Component.h>
+ #include <codec2/hidl/1.0/ComponentStore.h>
+ #include <codec2/hidl/1.0/InputBufferManager.h>
+@@ -30,6 +31,7 @@
+ #include <utils/Timers.h>
+ 
+ #include <C2BqBufferPriv.h>
++#include <C2BqPoolInvalidator.h>
+ #include <C2Debug.h>
+ #include <C2PlatformSupport.h>
+ 
+@@ -270,16 +272,17 @@ c2_status_t Component::status() const {
+ }
+ 
+ void Component::onDeathReceived() {
++    std::list<std::shared_ptr<C2BufferQueueBlockPool>> bqPools;
+     {
+         std::lock_guard<std::mutex> lock(mBlockPoolsMutex);
+         mClientDied = true;
+-        for (auto it = mBlockPools.begin(); it != mBlockPools.end(); ++it) {
+-            if (it->second->getAllocatorId() == C2PlatformAllocatorStore::BUFFERQUEUE) {
+-                std::shared_ptr<C2BufferQueueBlockPool> bqPool =
+-                        std::static_pointer_cast<C2BufferQueueBlockPool>(it->second);
+-                bqPool->invalidate();
+-            }
+-        }
++        transform_if(mBlockPools.begin(), mBlockPools.end(), std::back_inserter(bqPools),
++                BqPoolFilterFn, BqPoolConvertFn);
++    }
++    if (!bqPools.empty()) {
++        std::shared_ptr<C2BqPoolInvalidateItem> bqInvalidateItem =
++                std::make_shared<C2BqPoolInvalidateItem>(std::move(bqPools));
++        bqInvalidateItem->invalidate();
+     }
+     release();
+ }
+@@ -549,7 +552,26 @@ Return<Status> Component::reset() {
+ }
+ 
+ Return<Status> Component::release() {
++    std::list<std::shared_ptr<C2BufferQueueBlockPool>> bqPools;
++    {
++        std::lock_guard<std::mutex> lock(mBlockPoolsMutex);
++        if (!mClientDied) {
++            transform_if(mBlockPools.begin(), mBlockPools.end(), std::back_inserter(bqPools),
++                     BqPoolFilterFn, BqPoolConvertFn);
++        }
++    }
++    std::shared_ptr<C2BqPoolInvalidateItem> bqInvalidateItem;
++    if (!bqPools.empty()) {
++        // handling rare cases of process death just after release() called.
++        bqInvalidateItem = std::make_shared<C2BqPoolInvalidateItem>(std::move(bqPools));
++        C2BqPoolInvalidator::getInstance().queue(bqInvalidateItem);
++    }
+     Status status = static_cast<Status>(mComponent->release());
++    if (bqInvalidateItem) {
++        // If release is not blocked,
++        // skip invalidation and finish ASAP.
++        bqInvalidateItem->skip();
++    }
+     {
+         std::lock_guard<std::mutex> lock(mBlockPoolsMutex);
+         mBlockPools.clear();
+@@ -637,6 +659,18 @@ void Component::initListener(const sp<Component>& self) {
+ }
+ 
+ Component::~Component() {
++    std::list<std::shared_ptr<C2BufferQueueBlockPool>> bqPools;
++    {
++        std::lock_guard<std::mutex> lock(mBlockPoolsMutex);
++        transform_if(mBlockPools.begin(), mBlockPools.end(), std::back_inserter(bqPools),
++                     BqPoolFilterFn, BqPoolConvertFn);
++    }
++    if (!bqPools.empty()) {
++        LOG(ERROR) << "blockpools are not cleared yet at dtor";
++        std::shared_ptr<C2BqPoolInvalidateItem> bqInvalidateItem =
++                std::make_shared<C2BqPoolInvalidateItem>(std::move(bqPools));
++        C2BqPoolInvalidator::getInstance().queue(bqInvalidateItem);
++    }
+     InputBufferManager::unregisterFrameData(mListener);
+     mStore->reportComponentDeath(this);
+ }
+diff --git a/media/codec2/hal/hidl/1.1/utils/Component.cpp b/media/codec2/hal/hidl/1.1/utils/Component.cpp
+index 7f2c4dd383..1c2a49a33e 100644
+--- a/media/codec2/hal/hidl/1.1/utils/Component.cpp
++++ b/media/codec2/hal/hidl/1.1/utils/Component.cpp
+@@ -18,6 +18,7 @@
+ #define LOG_TAG "Codec2-Component@1.1"
+ #include <android-base/logging.h>
+ 
++#include <codec2/common/BqPoolInvalidateHelper.h>
+ #include <codec2/hidl/1.1/Component.h>
+ #include <codec2/hidl/1.1/ComponentStore.h>
+ #include <codec2/hidl/1.1/InputBufferManager.h>
+@@ -32,6 +33,7 @@
+ #include <codec2/common/MultiAccessUnitHelper.h>
+ 
+ #include <C2BqBufferPriv.h>
++#include <C2BqPoolInvalidator.h>
+ #include <C2Debug.h>
+ #include <C2PlatformSupport.h>
+ 
+@@ -274,16 +276,17 @@ c2_status_t Component::status() const {
+ }
+ 
+ void Component::onDeathReceived() {
++    std::list<std::shared_ptr<C2BufferQueueBlockPool>> bqPools;
+     {
+         std::lock_guard<std::mutex> lock(mBlockPoolsMutex);
+         mClientDied = true;
+-        for (auto it = mBlockPools.begin(); it != mBlockPools.end(); ++it) {
+-            if (it->second->getAllocatorId() == C2PlatformAllocatorStore::BUFFERQUEUE) {
+-                std::shared_ptr<C2BufferQueueBlockPool> bqPool =
+-                        std::static_pointer_cast<C2BufferQueueBlockPool>(it->second);
+-                bqPool->invalidate();
+-            }
+-        }
++        transform_if(mBlockPools.begin(), mBlockPools.end(), std::back_inserter(bqPools),
++                BqPoolFilterFn, BqPoolConvertFn);
++    }
++    if (!bqPools.empty()) {
++        std::shared_ptr<C2BqPoolInvalidateItem> bqInvalidateItem =
++                std::make_shared<C2BqPoolInvalidateItem>(std::move(bqPools));
++        bqInvalidateItem->invalidate();
+     }
+     release();
+ }
+@@ -555,7 +558,26 @@ Return<Status> Component::reset() {
+ }
+ 
+ Return<Status> Component::release() {
++    std::list<std::shared_ptr<C2BufferQueueBlockPool>> bqPools;
++    {
++        std::lock_guard<std::mutex> lock(mBlockPoolsMutex);
++        if (!mClientDied) {
++            transform_if(mBlockPools.begin(), mBlockPools.end(), std::back_inserter(bqPools),
++                    BqPoolFilterFn, BqPoolConvertFn);
++        }
++    }
++    std::shared_ptr<C2BqPoolInvalidateItem> bqInvalidateItem;
++    if (!bqPools.empty()) {
++        // handling rare cases of process death just after release() called.
++        bqInvalidateItem = std::make_shared<C2BqPoolInvalidateItem>(std::move(bqPools));
++        C2BqPoolInvalidator::getInstance().queue(bqInvalidateItem);
++    }
+     Status status = static_cast<Status>(mComponent->release());
++    if (bqInvalidateItem) {
++        // If release is not blocked,
++        // skip invalidation and finish ASAP.
++        bqInvalidateItem->skip();
++    }
+     {
+         std::lock_guard<std::mutex> lock(mBlockPoolsMutex);
+         mBlockPools.clear();
+@@ -649,6 +671,18 @@ void Component::initListener(const sp<Component>& self) {
+ }
+ 
+ Component::~Component() {
++    std::list<std::shared_ptr<C2BufferQueueBlockPool>> bqPools;
++    {
++        std::lock_guard<std::mutex> lock(mBlockPoolsMutex);
++        transform_if(mBlockPools.begin(), mBlockPools.end(), std::back_inserter(bqPools),
++                BqPoolFilterFn, BqPoolConvertFn);
++    }
++    if (!bqPools.empty()) {
++        LOG(ERROR) << "blockpools are not cleared yet at dtor";
++        std::shared_ptr<C2BqPoolInvalidateItem> bqInvalidateItem =
++                std::make_shared<C2BqPoolInvalidateItem>(std::move(bqPools));
++        C2BqPoolInvalidator::getInstance().queue(bqInvalidateItem);
++    }
+     InputBufferManager::unregisterFrameData(mListener);
+     mStore->reportComponentDeath(this);
+ }
+diff --git a/media/codec2/hal/hidl/1.2/utils/Component.cpp b/media/codec2/hal/hidl/1.2/utils/Component.cpp
+index 7b0aa9bfbc..a15febed85 100644
+--- a/media/codec2/hal/hidl/1.2/utils/Component.cpp
++++ b/media/codec2/hal/hidl/1.2/utils/Component.cpp
+@@ -18,6 +18,7 @@
+ #define LOG_TAG "Codec2-Component@1.2"
+ #include <android-base/logging.h>
+ 
++#include <codec2/common/BqPoolInvalidateHelper.h>
+ #include <codec2/hidl/1.2/Component.h>
+ #include <codec2/hidl/1.2/ComponentStore.h>
+ #include <codec2/hidl/1.2/InputBufferManager.h>
+@@ -30,6 +31,7 @@
+ #include <utils/Timers.h>
+ 
+ #include <C2BqBufferPriv.h>
++#include <C2BqPoolInvalidator.h>
+ #include <C2Debug.h>
+ #include <C2PlatformSupport.h>
+ 
+@@ -272,16 +274,17 @@ c2_status_t Component::status() const {
+ }
+ 
+ void Component::onDeathReceived() {
++    std::list<std::shared_ptr<C2BufferQueueBlockPool>> bqPools;
+     {
+         std::lock_guard<std::mutex> lock(mBlockPoolsMutex);
+         mClientDied = true;
+-        for (auto it = mBlockPools.begin(); it != mBlockPools.end(); ++it) {
+-            if (it->second->getAllocatorId() == C2PlatformAllocatorStore::BUFFERQUEUE) {
+-                std::shared_ptr<C2BufferQueueBlockPool> bqPool =
+-                        std::static_pointer_cast<C2BufferQueueBlockPool>(it->second);
+-                bqPool->invalidate();
+-            }
+-        }
++        transform_if(mBlockPools.begin(), mBlockPools.end(), std::back_inserter(bqPools),
++                BqPoolFilterFn, BqPoolConvertFn);
++    }
++    if (!bqPools.empty()) {
++        std::shared_ptr<C2BqPoolInvalidateItem> bqInvalidateItem =
++                std::make_shared<C2BqPoolInvalidateItem>(std::move(bqPools));
++        bqInvalidateItem->invalidate();
+     }
+     release();
+ }
+@@ -551,7 +554,26 @@ Return<Status> Component::reset() {
+ }
+ 
+ Return<Status> Component::release() {
++    std::list<std::shared_ptr<C2BufferQueueBlockPool>> bqPools;
++    {
++        std::lock_guard<std::mutex> lock(mBlockPoolsMutex);
++        if (!mClientDied) {
++            transform_if(mBlockPools.begin(), mBlockPools.end(), std::back_inserter(bqPools),
++                    BqPoolFilterFn, BqPoolConvertFn);
++        }
++    }
++    std::shared_ptr<C2BqPoolInvalidateItem> bqInvalidateItem;
++    if (!bqPools.empty()) {
++        // handling rare cases of process death just after release() called.
++        bqInvalidateItem = std::make_shared<C2BqPoolInvalidateItem>(std::move(bqPools));
++        C2BqPoolInvalidator::getInstance().queue(bqInvalidateItem);
++    }
+     Status status = static_cast<Status>(mComponent->release());
++    if (bqInvalidateItem) {
++        // If release is not blocked,
++        // skip invalidation and finish ASAP.
++        bqInvalidateItem->skip();
++    }
+     {
+         std::lock_guard<std::mutex> lock(mBlockPoolsMutex);
+         mBlockPools.clear();
+@@ -676,6 +698,18 @@ void Component::initListener(const sp<Component>& self) {
+ }
+ 
+ Component::~Component() {
++    std::list<std::shared_ptr<C2BufferQueueBlockPool>> bqPools;
++    {
++        std::lock_guard<std::mutex> lock(mBlockPoolsMutex);
++        transform_if(mBlockPools.begin(), mBlockPools.end(), std::back_inserter(bqPools),
++                BqPoolFilterFn, BqPoolConvertFn);
++    }
++    if (!bqPools.empty()) {
++        LOG(ERROR) << "blockpools are not cleared yet at dtor";
++        std::shared_ptr<C2BqPoolInvalidateItem> bqInvalidateItem =
++                std::make_shared<C2BqPoolInvalidateItem>(std::move(bqPools));
++        C2BqPoolInvalidator::getInstance().queue(bqInvalidateItem);
++    }
+     InputBufferManager::unregisterFrameData(mListener);
+     mStore->reportComponentDeath(this);
+ }
+diff --git a/media/codec2/vndk/Android.bp b/media/codec2/vndk/Android.bp
+index dc06ee6400..9d1cbffc58 100644
+--- a/media/codec2/vndk/Android.bp
++++ b/media/codec2/vndk/Android.bp
+@@ -53,7 +53,7 @@ cc_library {
+     ],
+ 
+     defaults: [
+-	"aconfig_lib_cc_static_link.defaults",
++        "aconfig_lib_cc_static_link.defaults",
+         "libcodec2_hal_selection",
+     ],
+ 
+@@ -68,6 +68,7 @@ cc_library {
+         "C2PlatformStorePluginLoader.cpp",
+         "C2Store.cpp",
+         "platform/C2BqBuffer.cpp",
++        "platform/C2BqPoolInvalidator.cpp",
+         "platform/C2SurfaceSyncObj.cpp",
+         "platform/C2IgbaBuffer.cpp",
+         "types.cpp",
+diff --git a/media/codec2/vndk/include/C2BqPoolInvalidator.h b/media/codec2/vndk/include/C2BqPoolInvalidator.h
+new file mode 100644
+index 0000000000..612d023752
+--- /dev/null
++++ b/media/codec2/vndk/include/C2BqPoolInvalidator.h
+@@ -0,0 +1,105 @@
++/*
++ * Copyright (C) 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#pragma once
++
++#include <android-base/no_destructor.h>
++#include <media/stagefright/foundation/ABase.h>
++
++#include <condition_variable>
++#include <deque>
++#include <list>
++#include <memory>
++#include <thread>
++
++class C2BufferQueueBlockPool;
++
++namespace android {
++
++/**
++ * Container class in order to invalidate C2BufferQueueBlockPool(s) and their resources
++ * when the client process is dead abruptly.
++ */
++class C2BqPoolInvalidateItem {
++public:
++
++    /**
++     * invalidate contained C2BufferQueueBlockPool(s) and their resources
++     */
++    void invalidate();
++
++    /**
++     * skip invalidate(), if it is scheduled and not yet invalidated.
++     */
++    void skip();
++
++    /**
++     * returns whether invalidate() is reuqired or not.
++     */
++    bool needsInvalidate();
++
++    C2BqPoolInvalidateItem(std::list<std::shared_ptr<C2BufferQueueBlockPool>> &&pools);
++
++    ~C2BqPoolInvalidateItem() = default;
++private:
++
++    std::list<std::shared_ptr<C2BufferQueueBlockPool>>  mPools;
++    bool mNeedsInvalidate;
++    std::mutex mLock;
++
++    DISALLOW_EVIL_CONSTRUCTORS(C2BqPoolInvalidateItem);
++};
++
++/**
++ * Asynchronous C2BufferQueueBlockPool invalidator.
++ *
++ * this has C2BqPoolInvalidateItem inside. and call invalidate() from a separate
++ * thread asynchronously.
++ */
++class C2BqPoolInvalidator {
++public:
++    /**
++     * This gets the singleton instance of the class.
++     */
++    static C2BqPoolInvalidator &getInstance();
++
++    /**
++     * queue invalidation items. the item will be invalidated after certain
++     * amount of delay from a separate thread.
++     */
++    void queue(std::shared_ptr<C2BqPoolInvalidateItem> &item);
++
++    ~C2BqPoolInvalidator();
++private:
++
++    C2BqPoolInvalidator();
++
++    void run();
++
++    std::thread mThread;
++    bool mDone;
++
++    std::mutex mMutex;
++    std::condition_variable mCv;
++
++    std::deque<std::pair<int64_t, std::shared_ptr<C2BqPoolInvalidateItem>>> mItems;
++
++    friend class ::android::base::NoDestructor<C2BqPoolInvalidator>;
++
++    DISALLOW_EVIL_CONSTRUCTORS(C2BqPoolInvalidator);
++};
++
++}  // namespace android
+diff --git a/media/codec2/vndk/platform/C2BqPoolInvalidator.cpp b/media/codec2/vndk/platform/C2BqPoolInvalidator.cpp
+new file mode 100644
+index 0000000000..2666cd3675
+--- /dev/null
++++ b/media/codec2/vndk/platform/C2BqPoolInvalidator.cpp
+@@ -0,0 +1,130 @@
++/*
++ * Copyright (C) 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++//#define LOG_NDEBUG 0
++#define LOG_TAG "C2BqPoolInvalidator"
++#include <utils/Log.h>
++#include <utils/SystemClock.h>
++
++#include <C2BqBufferPriv.h>
++#include <C2BqPoolInvalidator.h>
++
++namespace android {
++
++namespace {
++    static constexpr int64_t kBqPoolInvalidateDelayMs = 1000;
++} // anonymous namespace
++
++C2BqPoolInvalidateItem::C2BqPoolInvalidateItem(
++        std::list<std::shared_ptr<C2BufferQueueBlockPool>> &&pools) : mPools(std::move(pools)) {
++    if (!mPools.empty()) {
++        mNeedsInvalidate = true;
++    } else {
++        mNeedsInvalidate = false;
++    }
++}
++
++void C2BqPoolInvalidateItem::invalidate() {
++    std::list<std::shared_ptr<C2BufferQueueBlockPool>> pools;
++    {
++        std::unique_lock<std::mutex> l(mLock);
++        if (!mNeedsInvalidate) {
++            return;
++        }
++        pools = std::move(mPools);
++        mNeedsInvalidate = false;
++    }
++    for(auto it = pools.begin(); it != pools.end(); ++it) {
++        (*it)->invalidate();
++    }
++}
++
++void C2BqPoolInvalidateItem::skip() {
++    std::unique_lock<std::mutex> l(mLock);
++    mNeedsInvalidate = false;
++    mPools.clear();
++}
++
++bool C2BqPoolInvalidateItem::needsInvalidate() {
++    std::unique_lock<std::mutex> l(mLock);
++    return mNeedsInvalidate;
++}
++
++C2BqPoolInvalidator &C2BqPoolInvalidator::getInstance() {
++    static android::base::NoDestructor<C2BqPoolInvalidator> sInvalidator;
++    return *sInvalidator;
++}
++
++C2BqPoolInvalidator::C2BqPoolInvalidator() : mDone(false) {
++    mThread = std::thread(&C2BqPoolInvalidator::run, this);
++}
++
++C2BqPoolInvalidator::~C2BqPoolInvalidator() {
++    {
++        std::unique_lock<std::mutex> l(mMutex);
++        mDone = true;
++        mCv.notify_one();
++    }
++    if (mThread.joinable()) {
++        mThread.join();
++    }
++}
++
++void C2BqPoolInvalidator::queue(std::shared_ptr<C2BqPoolInvalidateItem> &item) {
++    std::unique_lock<std::mutex> l(mMutex);
++    std::pair<int64_t, std::shared_ptr<C2BqPoolInvalidateItem>> p =
++            std::make_pair(::android::elapsedRealtime() + kBqPoolInvalidateDelayMs, item);
++    mItems.push_back(p);
++    mCv.notify_one();
++}
++
++void C2BqPoolInvalidator::run() {
++    while(true) {
++        int64_t nowMs = ::android::elapsedRealtime();
++        std::unique_lock<std::mutex> l(mMutex);
++        if (mDone) {
++            break;
++        }
++        std::list<std::shared_ptr<C2BqPoolInvalidateItem>> items;
++        while (!mItems.empty()) {
++            if (mItems.front().first <= nowMs) {
++                items.push_back(mItems.front().second);
++                mItems.pop_front();
++            } else {
++                break;
++            }
++        }
++        if (items.empty()) {
++            if (mItems.empty()) {
++                mCv.wait(l);
++            } else {
++                int64_t nextMs = mItems.front().first;
++                if (nextMs > nowMs) {
++                    mCv.wait_for(l, std::chrono::milliseconds(nextMs - nowMs));
++                }
++            }
++        } else {
++            l.unlock();
++            int invalidated = 0;
++            for (auto it = items.begin(); it != items.end(); ++it, ++invalidated) {
++                (*it)->invalidate();
++            }
++            ALOGD("invalidated %d bqpool items", invalidated);
++        }
++    }
++}
++
++} // android
+-- 
+2.43.0
+

@@ -1,0 +1,109 @@
+From c4a2fe51c00207785cf4d9a61023480f4e573e80 Mon Sep 17 00:00:00 2001
+From: Vadim Caen <caen@google.com>
+Date: Thu, 24 Oct 2024 14:14:42 +0200
+Subject: [PATCH 147/436] Skip permission check for test camera
+
+Now that we dropped CREATE_VIRTUAL_DEVICE permission from shell, CTS
+test cannot create a test camera. Let's skip the permission check when
+registering a test camera.
+
+Flag: EXEMPT Bug fix
+Bug: 372971702
+Test: CtsVirtualDevicesCameraCtsTestCases
+Change-Id: Iefd4ff48d95772733b81f4dca416434e8d9b8599
+---
+ .../camera/virtualcamera/VirtualCameraService.cc | 16 +++++++++++-----
+ .../camera/virtualcamera/VirtualCameraService.h  |  9 +++++++++
+ .../camera/virtualcamera/util/Permissions.cc     | 12 +++++++++---
+ 3 files changed, 29 insertions(+), 8 deletions(-)
+
+diff --git a/services/camera/virtualcamera/VirtualCameraService.cc b/services/camera/virtualcamera/VirtualCameraService.cc
+index 7466089e89..de09a628b7 100644
+--- a/services/camera/virtualcamera/VirtualCameraService.cc
++++ b/services/camera/virtualcamera/VirtualCameraService.cc
+@@ -240,11 +240,16 @@ ndk::ScopedAStatus VirtualCameraService::registerCamera(
+     const VirtualCameraConfiguration& configuration,
+     const std::string& cameraId, const int32_t deviceId, bool* _aidl_return) {
+   if (!mPermissionProxy.checkCallingPermission(kCreateVirtualDevicePermission)) {
+-    ALOGE("%s: caller (pid %d, uid %d) doesn't hold %s permission", __func__,
+-          getpid(), getuid(), kCreateVirtualDevicePermission);
+     return ndk::ScopedAStatus::fromExceptionCode(EX_SECURITY);
+   }
++  return registerCameraNoCheck(token, configuration, cameraId, deviceId,
++                               _aidl_return);
++}
+ 
++ndk::ScopedAStatus VirtualCameraService::registerCameraNoCheck(
++    const ::ndk::SpAIBinder& token,
++    const VirtualCameraConfiguration& configuration,
++    const std::string& cameraId, const int32_t deviceId, bool* _aidl_return) {
+   if (_aidl_return == nullptr) {
+     return ndk::ScopedAStatus::fromServiceSpecificError(
+         Status::EX_ILLEGAL_ARGUMENT);
+@@ -481,9 +486,10 @@ binder_status_t VirtualCameraService::enableTestCameraCmd(
+   configuration.virtualCameraCallback =
+       ndk::SharedRefBase::make<VirtualCameraTestInstance>(
+           inputFps.value_or(kTestCameraDefaultInputFps));
+-  registerCamera(mTestCameraToken, configuration,
+-                 cameraId.value_or(std::to_string(sNextIdNumericalPortion++)),
+-                 kDefaultDeviceId, &ret);
++  registerCameraNoCheck(
++      mTestCameraToken, configuration,
++      cameraId.value_or(std::to_string(sNextIdNumericalPortion++)),
++      kDefaultDeviceId, &ret);
+   if (ret) {
+     dprintf(out, "Successfully registered test camera %s\n",
+             getCamera(mTestCameraToken)->getCameraName().c_str());
+diff --git a/services/camera/virtualcamera/VirtualCameraService.h b/services/camera/virtualcamera/VirtualCameraService.h
+index 4ef01c7bf4..3be5c3e896 100644
+--- a/services/camera/virtualcamera/VirtualCameraService.h
++++ b/services/camera/virtualcamera/VirtualCameraService.h
+@@ -87,6 +87,15 @@ class VirtualCameraService
+   // Disable and destroy test camera instance if there's one.
+   void disableTestCameraCmd(int out);
+ 
++  // Register camera corresponding to the binder token without checking for
++  // caller permission.
++  ndk::ScopedAStatus registerCameraNoCheck(
++      const ::ndk::SpAIBinder& token,
++      const ::aidl::android::companion::virtualcamera::VirtualCameraConfiguration&
++          configuration,
++      const std::string& cameraId, int32_t deviceId, bool* _aidl_return)
++      EXCLUDES(mLock);
++
+   std::shared_ptr<VirtualCameraProvider> mVirtualCameraProvider;
+   bool mVerifyEglExtensions = true;
+   const PermissionsProxy& mPermissionProxy;
+diff --git a/services/camera/virtualcamera/util/Permissions.cc b/services/camera/virtualcamera/util/Permissions.cc
+index 634bca3c60..1c1db32f02 100644
+--- a/services/camera/virtualcamera/util/Permissions.cc
++++ b/services/camera/virtualcamera/util/Permissions.cc
+@@ -20,7 +20,7 @@
+ #include "Permissions.h"
+ 
+ #include "binder/PermissionCache.h"
+-#include "log/log.h"
++#include "log/log_main.h"
+ 
+ namespace android {
+ namespace companion {
+@@ -39,8 +39,14 @@ bool PermissionsProxyImpl::checkCallingPermission(
+   const bool hasPermission = PermissionCache::checkCallingPermission(
+       String16(permission.c_str()), &pid, &uid);
+ 
+-  ALOGV("%s: Checking %s permission for pid %d uid %d: %s", __func__,
+-        permission.c_str(), pid, uid, hasPermission ? "granted" : "denied");
++  if (hasPermission) {
++    ALOGV("%s: Checking %s permission for pid %d uid %d: granted", __func__,
++          permission.c_str(), pid, uid);
++  } else {
++    ALOGW("%s: Checking %s permission for pid %d uid %d: denied", __func__,
++          permission.c_str(), pid, uid);
++  }
++
+   return hasPermission;
+ }
+ }  // namespace
+-- 
+2.43.0
+

@@ -1,0 +1,42 @@
+From 5b882d9e98798978726eed8c73751f9c5ec2eb26 Mon Sep 17 00:00:00 2001
+From: Atneya Nair <atneya@google.com>
+Date: Thu, 12 Dec 2024 09:58:42 -0800
+Subject: [PATCH 411/436] Un-require RECORD_OP for VOICE_DOWNLINK
+
+Flag: EXEMPT bugfix
+Bug: 383173148
+Test: compiles
+(cherry picked from https://googleplex-android-review.googlesource.com/q/commit:747554dc6b8f05dcda56e5bb9811ea7e957e524a)
+Merged-In: Idd4389e7e79ee819c29ec2676d2e22d5a4b12249
+Change-Id: Idd4389e7e79ee819c29ec2676d2e22d5a4b12249
+---
+ media/utils/ServiceUtilities.cpp | 6 ++----
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/media/utils/ServiceUtilities.cpp b/media/utils/ServiceUtilities.cpp
+index ce8e00e945..7fd5be5d36 100644
+--- a/media/utils/ServiceUtilities.cpp
++++ b/media/utils/ServiceUtilities.cpp
+@@ -80,9 +80,7 @@ static String16 resolveCallingPackage(PermissionController& permissionController
+ }
+ 
+ // NOTE/TODO(b/379754682):
+-// AUDIO_SOURCE_VOICE_DOWNLINK and AUDIO_SOURCE_VOICE_CALL are handled specially:
+-// DOWNLINK is an output source, but we still require RecordOp in addition to
+-// OP_RECORD_INCOMING_PHONE_AUDIO
++// AUDIO_SOURCE_VOICE_CALL is handled specially:
+ // CALL includes both uplink and downlink, but we attribute RECORD_OP (only), since
+ // there is not support for noting multiple ops.
+ int32_t getOpForSource(audio_source_t source) {
+@@ -110,7 +108,7 @@ bool isRecordOpRequired(audio_source_t source) {
+     case AUDIO_SOURCE_FM_TUNER:
+     case AUDIO_SOURCE_ECHO_REFERENCE: // fallthrough
+     case AUDIO_SOURCE_REMOTE_SUBMIX:
+-    // case AUDIO_SOURCE_VOICE_DOWNLINK:
++    case AUDIO_SOURCE_VOICE_DOWNLINK:
+         return false;
+     default:
+       return true;
+-- 
+2.43.0
+

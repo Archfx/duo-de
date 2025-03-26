@@ -1,0 +1,203 @@
+From d27bbb9cc8a663fd9d2f68780a35845d4eb8d47e Mon Sep 17 00:00:00 2001
+From: Dean Wheatley <dwhea@dolby.com>
+Date: Fri, 19 Jan 2024 15:54:35 +1100
+Subject: [PATCH 046/436] Return HAL config in datapath for
+ SwAudioOutputDescriptor
+
+* AudioFlinger needs to return the HAL config opened by Spdif wrappers
+  so that AudioPolicyManager can patch with valid port configs.
+* AudioPolicyManager openDirectOutput must allow for mismatch of config
+  between client request and APM output descriptor config because
+  AudioFlinger may format convert using Spdif wrapper.
+* When finding or creating a mix port config in Hal2AidlWrapper, we
+  need to allow for a client request with DIRECT or IEC958_NONAUDIO
+  to match an output without these flags for remote submix, as the
+  remote submix HAL may not support those flags and they are not
+  necessary for correct remote submix operation.
+* Do not use device port config to open stream as fall back for lack
+  of profile for opening non-PCM mix port config for remote submix,
+  because the remote submix HAL does not support non PCM.
+
+Bug: 311830316
+Test: atest android.media.audio.cts.LoopbackPassthroughTest
+      atest audiorouting_tests
+      atest VirtualAudioTest
+      (allowing for re-running of flaky tests)
+      pass on remote submix AIDL and HIDL HALs.
+Change-Id: I216e5bde0db240c2119f63d896f5eecc01b3bd93
+---
+ media/libaudiohal/impl/Hal2AidlMapper.cpp     | 48 ++++++++++++++++---
+ .../audioflinger/datapath/AudioHwDevice.cpp   | 12 +++++
+ .../audioflinger/datapath/SpdifStreamIn.cpp   |  5 ++
+ .../audioflinger/datapath/SpdifStreamOut.cpp  |  5 ++
+ .../managerdefault/AudioPolicyManager.cpp     | 13 +++--
+ 5 files changed, 73 insertions(+), 10 deletions(-)
+
+diff --git a/media/libaudiohal/impl/Hal2AidlMapper.cpp b/media/libaudiohal/impl/Hal2AidlMapper.cpp
+index f352849492..0cdf0f2c7f 100644
+--- a/media/libaudiohal/impl/Hal2AidlMapper.cpp
++++ b/media/libaudiohal/impl/Hal2AidlMapper.cpp
+@@ -368,16 +368,21 @@ status_t Hal2AidlMapper::findOrCreateMixPortConfig(
+         const AudioConfig& config, const std::optional<AudioIoFlags>& flags, int32_t ioHandle,
+         AudioSource source, const std::set<int32_t>& destinationPortIds,
+         AudioPortConfig* portConfig, bool* created) {
+-    // These flags get removed one by one in this order when retrying port finding.
+-    static const std::vector<AudioInputFlags> kOptionalInputFlags{
+-        AudioInputFlags::FAST, AudioInputFlags::RAW, AudioInputFlags::VOIP_TX };
+     if (auto portConfigIt = findPortConfig(config, flags, ioHandle);
+             portConfigIt == mPortConfigs.end() && flags.has_value()) {
+-        auto optionalInputFlagsIt = kOptionalInputFlags.begin();
++        // These input flags get removed one by one in this order when retrying port finding.
++        std::vector<AudioInputFlags> optionalInputFlags {
++            AudioInputFlags::FAST, AudioInputFlags::RAW, AudioInputFlags::VOIP_TX };
++        // For remote submix input, retry with direct input flag removed as the remote submix
++        // input is not expected to manipulate the contents of the audio stream.
++        if (mRemoteSubmixIn.has_value()) {
++            optionalInputFlags.push_back(AudioInputFlags::DIRECT);
++        }
++        auto optionalInputFlagsIt = optionalInputFlags.begin();
+         AudioIoFlags matchFlags = flags.value();
+         auto portsIt = findPort(config, matchFlags, destinationPortIds);
+         while (portsIt == mPorts.end() && matchFlags.getTag() == AudioIoFlags::Tag::input
+-                && optionalInputFlagsIt != kOptionalInputFlags.end()) {
++                && optionalInputFlagsIt != optionalInputFlags.end()) {
+             if (!isBitPositionFlagSet(
+                             matchFlags.get<AudioIoFlags::Tag::input>(), *optionalInputFlagsIt)) {
+                 ++optionalInputFlagsIt;
+@@ -392,6 +397,36 @@ status_t Hal2AidlMapper::findOrCreateMixPortConfig(
+                         config.toString().c_str(), flags.value().toString().c_str(),
+                         matchFlags.toString().c_str());
+         }
++        // These output flags get removed one by one in this order when retrying port finding.
++        std::vector<AudioOutputFlags> optionalOutputFlags { };
++        // For remote submix output, retry with these output flags removed one by one:
++        // 1. DIRECT: remote submix outputs are expected not to manipulate the contents of the
++        //            audio stream.
++        // 2. IEC958_NONAUDIO: remote submix outputs are not connected to ALSA and do not require
++        //                     non audio signalling.
++        if (mRemoteSubmixOut.has_value()) {
++            optionalOutputFlags.push_back(AudioOutputFlags::DIRECT);
++            optionalOutputFlags.push_back(AudioOutputFlags::IEC958_NONAUDIO);
++        }
++        auto optionalOutputFlagsIt = optionalOutputFlags.begin();
++        matchFlags = flags.value();
++        while (portsIt == mPorts.end() && matchFlags.getTag() == AudioIoFlags::Tag::output
++                && optionalOutputFlagsIt != optionalOutputFlags.end()) {
++            if (!isBitPositionFlagSet(
++                            matchFlags.get<AudioIoFlags::Tag::output>(),*optionalOutputFlagsIt)) {
++                ++optionalOutputFlagsIt;
++                continue;
++            }
++            matchFlags.set<AudioIoFlags::Tag::output>(matchFlags.get<AudioIoFlags::Tag::output>() &
++                    ~makeBitPositionFlagMask(*optionalOutputFlagsIt++));
++            portsIt = findPort(config, matchFlags, destinationPortIds);
++            AUGMENT_LOG(I,
++                        "mix port for config %s, flags %s was not found"
++                        "retried with flags %s",
++                        config.toString().c_str(), flags.value().toString().c_str(),
++                        matchFlags.toString().c_str());
++        }
++
+         if (portsIt == mPorts.end()) {
+             AUGMENT_LOG(E, "mix port for config %s, flags %s is not found",
+                         config.toString().c_str(), matchFlags.toString().c_str());
+@@ -792,7 +827,8 @@ status_t Hal2AidlMapper::prepareToOpenStream(
+     status_t status = prepareToOpenStreamHelper(ioHandle, devicePortConfig.portId,
+             devicePortConfig.id, flags, source, initialConfig, cleanups, config,
+             mixPortConfig, patch);
+-    if (status != OK) {
++    if (status != OK && !(mRemoteSubmixOut.has_value() &&
++                initialConfig.base.format.type != AudioFormatType::PCM)) {
+         // If using the client-provided config did not work out for establishing a mix port config
+         // or patching, try with the device port config. Note that in general device port config and
+         // mix port config are not required to be the same, however they must match if the HAL
+diff --git a/services/audioflinger/datapath/AudioHwDevice.cpp b/services/audioflinger/datapath/AudioHwDevice.cpp
+index 002aa699bb..c2e538cba0 100644
+--- a/services/audioflinger/datapath/AudioHwDevice.cpp
++++ b/services/audioflinger/datapath/AudioHwDevice.cpp
+@@ -81,6 +81,12 @@ status_t AudioHwDevice::openOutputStream(
+                         status);
+                     delete outputStream;
+                     outputStream = nullptr;
++                } else {
++                    // on success, we need to assign the actual HAL stream config so that clients
++                    // know and can later patch correctly.
++                    config->format = originalConfig.format;
++                    config->channel_mask = originalConfig.channel_mask;
++                    config->sample_rate = originalConfig.sample_rate;
+                 }
+             } else {
+                 ALOGE("ERROR - openOutputStream(), SPDIFEncoder does not support format 0x%08x",
+@@ -154,6 +160,12 @@ status_t AudioHwDevice::openInputStream(
+                         status);
+                     delete inputStream;
+                     inputStream = nullptr;
++                } else {
++                    // on success, we need to assign the actual HAL stream config so that clients
++                    // know and can later patch correctly.
++                    config->format = originalConfig.format;
++                    config->channel_mask = originalConfig.channel_mask;
++                    config->sample_rate = originalConfig.sample_rate;
+                 }
+             } else {
+                 ALOGE("ERROR - openInputStream(), SPDIFDecoder does not support format 0x%08x",
+diff --git a/services/audioflinger/datapath/SpdifStreamIn.cpp b/services/audioflinger/datapath/SpdifStreamIn.cpp
+index 98ce712edd..0090bc5331 100644
+--- a/services/audioflinger/datapath/SpdifStreamIn.cpp
++++ b/services/audioflinger/datapath/SpdifStreamIn.cpp
+@@ -81,6 +81,11 @@ status_t SpdifStreamIn::open(
+             outputDevice,
+             outputDeviceAddress);
+ 
++    // reset config back to whatever is returned by HAL
++    config->sample_rate = customConfig.sample_rate;
++    config->format = customConfig.format;
++    config->channel_mask = customConfig.channel_mask;
++
+     ALOGI("SpdifStreamIn::open() status = %d", status);
+ 
+ #ifdef TEE_SINK
+diff --git a/services/audioflinger/datapath/SpdifStreamOut.cpp b/services/audioflinger/datapath/SpdifStreamOut.cpp
+index 52d66a150f..a565955a79 100644
+--- a/services/audioflinger/datapath/SpdifStreamOut.cpp
++++ b/services/audioflinger/datapath/SpdifStreamOut.cpp
+@@ -81,6 +81,11 @@ status_t SpdifStreamOut::open(
+             address,
+             sourceMetadata);
+ 
++    // reset config back to whatever is returned by HAL
++    config->sample_rate = customConfig.sample_rate;
++    config->format = customConfig.format;
++    config->channel_mask = customConfig.channel_mask;
++
+     ALOGI("SpdifStreamOut::open() status = %d", status);
+ 
+ #ifdef TEE_SINK
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index 8c9b17b0fa..b9c193ff6c 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -1613,11 +1613,16 @@ status_t AudioPolicyManager::openDirectOutput(audio_stream_type_t stream,
+             outputDesc->open(config, nullptr /* mixerConfig */, devices, stream, &flags, output,
+                              attributes);
+ 
+-    // only accept an output with the requested parameters
++    // only accept an output with the requested parameters, unless the format can be IEC61937
++    // encapsulated and opened by AudioFlinger as wrapped IEC61937.
++    const bool ignoreRequestedParametersCheck = audio_is_iec61937_compatible(config->format)
++            && (flags & AUDIO_OUTPUT_FLAG_IEC958_NONAUDIO)
++            && audio_has_proportional_frames(outputDesc->getFormat());
+     if (status != NO_ERROR ||
+-        (config->sample_rate != 0 && config->sample_rate != outputDesc->getSamplingRate()) ||
+-        (config->format != AUDIO_FORMAT_DEFAULT && config->format != outputDesc->getFormat()) ||
+-        (config->channel_mask != 0 && config->channel_mask != outputDesc->getChannelMask())) {
++        (!ignoreRequestedParametersCheck &&
++        ((config->sample_rate != 0 && config->sample_rate != outputDesc->getSamplingRate()) ||
++         (config->format != AUDIO_FORMAT_DEFAULT && config->format != outputDesc->getFormat()) ||
++         (config->channel_mask != 0 && config->channel_mask != outputDesc->getChannelMask())))) {
+         ALOGV("%s failed opening direct output: output %d sample rate %d %d,"
+                 "format %d %d, channel mask %04x %04x", __func__, *output, config->sample_rate,
+                 outputDesc->getSamplingRate(), config->format, outputDesc->getFormat(),
+-- 
+2.43.0
+

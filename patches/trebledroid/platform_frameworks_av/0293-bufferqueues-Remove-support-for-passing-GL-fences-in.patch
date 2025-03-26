@@ -1,0 +1,122 @@
+From c3849ec24389a50da75c4ec3463ff76e1a258754 Mon Sep 17 00:00:00 2001
+From: Jim Shargo <jshargo@google.com>
+Date: Fri, 15 Nov 2024 01:07:36 +0000
+Subject: [PATCH 293/436] bufferqueues: Remove support for passing GL fences
+ into BQs
+
+These are going away since they're prone to cause deadlocks,
+overcomplicate the API, and have been superceded by normal fd-based
+fences (that can be derived from GL fences on most platforms).
+
+Bug: 339705065
+Flag: EXEMPT refactor
+Test: old tests
+
+Change-Id: I212f20ae77ddba234d888d1837c9e4935ccffa2f
+---
+ media/codec2/tests/aidl/GraphicsTracker_test.cpp            | 6 ++----
+ media/libstagefright/FrameCaptureLayer.cpp                  | 3 +--
+ media/libstagefright/MediaCodec.cpp                         | 3 +--
+ media/libstagefright/MediaSync.cpp                          | 3 +--
+ .../device3/deprecated/DeprecatedCamera3StreamSplitter.cpp  | 3 +--
+ services/camera/libcameraservice/gui/RingBufferConsumer.cpp | 4 +---
+ 6 files changed, 7 insertions(+), 15 deletions(-)
+
+diff --git a/media/codec2/tests/aidl/GraphicsTracker_test.cpp b/media/codec2/tests/aidl/GraphicsTracker_test.cpp
+index 9008086edb..da79277eee 100644
+--- a/media/codec2/tests/aidl/GraphicsTracker_test.cpp
++++ b/media/codec2/tests/aidl/GraphicsTracker_test.cpp
+@@ -92,8 +92,7 @@ struct TestConsumerListener : public android::BnConsumerListener {
+         sp<IGraphicBufferConsumer> consumer = mConsumer.promote();
+         if (consumer != nullptr && consumer->acquireBuffer(&buffer, 0) == android::NO_ERROR) {
+             ::usleep(kRenderDelayUs);
+-            consumer->releaseBuffer(buffer.mSlot, buffer.mFrameNumber,
+-                                    EGL_NO_DISPLAY, EGL_NO_SYNC_KHR, buffer.mFence);
++            consumer->releaseBuffer(buffer.mSlot, buffer.mFrameNumber, buffer.mFence);
+         }
+     }
+     void onBuffersReleased() override {}
+@@ -438,8 +437,7 @@ TEST_F(GraphicsTrackerTest, DropAndReleaseTest) {
+     // Consume one buffer and release
+     BufferItem item;
+     ASSERT_EQ(OK, mConsumer->acquireBuffer(&item, 0));
+-    ASSERT_EQ(OK, mConsumer->releaseBuffer(item.mSlot, item.mFrameNumber,
+-            EGL_NO_DISPLAY, EGL_NO_SYNC_KHR, item.mFence));
++    ASSERT_EQ(OK, mConsumer->releaseBuffer(item.mSlot, item.mFrameNumber, item.mFence));
+     // Nothing to consume
+     ASSERT_NE(OK, mConsumer->acquireBuffer(&item, 0));
+ 
+diff --git a/media/libstagefright/FrameCaptureLayer.cpp b/media/libstagefright/FrameCaptureLayer.cpp
+index 4e71943cfb..53e4d7d2af 100644
+--- a/media/libstagefright/FrameCaptureLayer.cpp
++++ b/media/libstagefright/FrameCaptureLayer.cpp
+@@ -242,8 +242,7 @@ status_t FrameCaptureLayer::releaseBuffer(const BufferItem &bi) {
+     ALOGV("releaseBuffer");
+     Mutex::Autolock _lock(mLock);
+ 
+-    return mConsumer->releaseBuffer(bi.mSlot, bi.mFrameNumber,
+-            EGL_NO_DISPLAY, EGL_NO_SYNC_KHR, bi.mFence);
++    return mConsumer->releaseBuffer(bi.mSlot, bi.mFrameNumber, bi.mFence);
+ }
+ 
+ }  // namespace android
+diff --git a/media/libstagefright/MediaCodec.cpp b/media/libstagefright/MediaCodec.cpp
+index efbd6828da..eb7edafd40 100644
+--- a/media/libstagefright/MediaCodec.cpp
++++ b/media/libstagefright/MediaCodec.cpp
+@@ -755,8 +755,7 @@ public:
+                 // consume buffer
+                 sp<IGraphicBufferConsumer> consumer = mConsumer.promote();
+                 if (consumer != nullptr && consumer->acquireBuffer(&buffer, 0) == NO_ERROR) {
+-                    consumer->releaseBuffer(buffer.mSlot, buffer.mFrameNumber,
+-                                            EGL_NO_DISPLAY, EGL_NO_SYNC_KHR, buffer.mFence);
++                    consumer->releaseBuffer(buffer.mSlot, buffer.mFrameNumber, buffer.mFence);
+                 }
+             }
+ 
+diff --git a/media/libstagefright/MediaSync.cpp b/media/libstagefright/MediaSync.cpp
+index a3f55da711..b6400403c8 100644
+--- a/media/libstagefright/MediaSync.cpp
++++ b/media/libstagefright/MediaSync.cpp
+@@ -752,8 +752,7 @@ void MediaSync::returnBufferToInput_l(
+     status_t status = mInput->attachBuffer(&consumerSlot, oldBuffer);
+     ALOGE_IF(status != NO_ERROR, "attaching buffer to input failed (%d)", status);
+     if (status == NO_ERROR) {
+-        status = mInput->releaseBuffer(consumerSlot, 0 /* frameNumber */,
+-                EGL_NO_DISPLAY, EGL_NO_SYNC_KHR, fence);
++        status = mInput->releaseBuffer(consumerSlot, 0 /* frameNumber */, fence);
+         ALOGE_IF(status != NO_ERROR, "releasing buffer to input failed (%d)", status);
+     }
+ 
+diff --git a/services/camera/libcameraservice/device3/deprecated/DeprecatedCamera3StreamSplitter.cpp b/services/camera/libcameraservice/device3/deprecated/DeprecatedCamera3StreamSplitter.cpp
+index 00bbde3fda..41be9a4122 100644
+--- a/services/camera/libcameraservice/device3/deprecated/DeprecatedCamera3StreamSplitter.cpp
++++ b/services/camera/libcameraservice/device3/deprecated/DeprecatedCamera3StreamSplitter.cpp
+@@ -635,8 +635,7 @@ void DeprecatedCamera3StreamSplitter::decrementBufRefCountLocked(uint64_t id, si
+         if (detach) {
+             res = consumer->detachBuffer(consumerSlot);
+         } else {
+-            res = consumer->releaseBuffer(consumerSlot, frameNumber, EGL_NO_DISPLAY,
+-                                          EGL_NO_SYNC_KHR, tracker_ptr->getMergedFence());
++            res = consumer->releaseBuffer(consumerSlot, frameNumber, tracker_ptr->getMergedFence());
+         }
+     } else {
+         SP_LOGE("%s: consumer has become null!", __FUNCTION__);
+diff --git a/services/camera/libcameraservice/gui/RingBufferConsumer.cpp b/services/camera/libcameraservice/gui/RingBufferConsumer.cpp
+index c968e44879..ec8da1a7e8 100644
+--- a/services/camera/libcameraservice/gui/RingBufferConsumer.cpp
++++ b/services/camera/libcameraservice/gui/RingBufferConsumer.cpp
+@@ -248,9 +248,7 @@ status_t RingBufferConsumer::releaseOldestBufferLocked(size_t* pinnedFrames) {
+ 
+         // item.mGraphicBuffer was populated with the proper graphic-buffer
+         // at acquire even if it was previously acquired
+-        err = releaseBufferLocked(item.mSlot, item.mGraphicBuffer,
+-                                  EGL_NO_DISPLAY,
+-                                  EGL_NO_SYNC_KHR);
++        err = releaseBufferLocked(item.mSlot, item.mGraphicBuffer);
+         if (err != OK) {
+             BI_LOGE("Failed to release buffer: %s (%d)",
+                     strerror(-err), err);
+-- 
+2.43.0
+

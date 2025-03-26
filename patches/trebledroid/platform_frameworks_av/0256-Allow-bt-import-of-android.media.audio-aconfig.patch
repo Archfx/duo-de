@@ -1,0 +1,55 @@
+From f6e23aa28f1a421b5aaab4b7ec03f6149959d5eb Mon Sep 17 00:00:00 2001
+From: Vlad Popa <pvlad@google.com>
+Date: Mon, 11 Nov 2024 14:46:55 -0800
+Subject: [PATCH 256/436] Allow bt import of android.media.audio-aconfig
+
+Test: make
+Bug: 376931112
+Flag: android.media.audio.deprecate_stream_bt_sco
+Merged-In: Ic584854e2876c316afe6802034014bd7a02e5d54
+Change-Id: Ic584854e2876c316afe6802034014bd7a02e5d54
+---
+ media/audio/aconfig/Android.bp | 20 +++++++++++++++++++-
+ 1 file changed, 19 insertions(+), 1 deletion(-)
+
+diff --git a/media/audio/aconfig/Android.bp b/media/audio/aconfig/Android.bp
+index a5aeff268b..5f4a6a1780 100644
+--- a/media/audio/aconfig/Android.bp
++++ b/media/audio/aconfig/Android.bp
+@@ -116,7 +116,11 @@ aconfig_declarations {
+     package: "android.media.audio",
+     container: "system",
+     srcs: ["audio_framework.aconfig"],
+-    visibility: ["//frameworks/base/api"],
++    visibility: [
++        "//frameworks/base/api",
++        "//frameworks/base/core/res",
++    ],
++    exportable: true,
+ }
+ 
+ aconfig_declarations {
+@@ -148,6 +152,20 @@ java_aconfig_library {
+     defaults: ["framework-minus-apex-aconfig-java-defaults"],
+ }
+ 
++java_aconfig_library {
++    name: "android.media.audio-aconfig-exported-java",
++    aconfig_declarations: "android.media.audio-aconfig",
++    defaults: ["framework-minus-apex-aconfig-java-defaults"],
++    min_sdk_version: "Tiramisu",
++    mode: "exported",
++    apex_available: [
++        "com.android.btservices",
++    ],
++    visibility: [
++        "//packages/modules/Bluetooth:__subpackages__",
++    ],
++}
++
+ java_aconfig_library {
+     name: "android.media.audiopolicy-aconfig-java",
+     aconfig_declarations: "android.media.audiopolicy-aconfig",
+-- 
+2.43.0
+

@@ -1,0 +1,69 @@
+From f6a71618a7e2c3997567ba24daaf35174379fd61 Mon Sep 17 00:00:00 2001
+From: Abdelrahman Daim <adaim@meta.com>
+Date: Thu, 21 Nov 2024 08:57:37 -0800
+Subject: [PATCH 402/436] Update mStandby flag in RecordThread
+
+Summary: RecordThread is using mStandby flag to indicate if it's in the standby mode, and sets it to true when there are no active (not silenced) and not paused streams.
+Additionally, setting the FastCapture thread to COLD_IDLE state which pauses any processing there.
+
+At some point in time, a track may be unmuted and becomes active again, which changes the state of FastTrack thread to READ_WRITE (active).
+
+Unfortunately, the mStandby flag is not modified accordingly. Currently it's only set to false when new track is starting (different path, than silenced one). This causes RecordThread to end up in situations like one captured below:
+
+```
+Input thread 0x795cdc6b00, name AudioIn_B6, tid 29295, type 3 (RECORD):
+  I/O handle: 182
+  Standby: yes
+  Sample rate: 48000 Hz
+  HAL frame count: 144
+  HAL format: 0x1 (AUDIO_FORMAT_PCM_16_BIT)
+  HAL buffer size: 288 bytes
+...
+  AudioStreamIn: 0x795cca2600 flags 0x1 (AUDIO_INPUT_FLAG_FAST)
+  Frames read: 8823951
+  Fast capture thread: yes
+  Fast track available: yes
+  FastCapture command=READ_WRITE readSequence=124589 framesRead=8970336
+              readErrors=0 sampleRate=48000 frameCount=144
+              measuredWarmup=107 ms, warmupCycles=3 period=3.00 ms
+  1 Tracks of which 1 are active
+    Active     Id Client Session Port Id  S  Flags   Format Chn mask
+    F  yes    131  29016     705     120  A  0x000 00000001 00000010
+...
+```
+
+Where Standby: yes and FastCapture command=READ_WRITE. This situation
+may cause crashes, as RecordThread may modify/remove clients without
+notifying the FastCapture thread, because it thinks it's in standby mode and is not
+running.
+
+
+Test: Successful Build on master branch
+Test: atest CtsMediaAudioTestCases
+
+
+Bug: 382396707
+Change-Id: I2414f8e26a61a232d3f07d9eea8c22b4931aa55b
+Signed-off-by: Abdelrahman Daim <adaim@meta.com>
+---
+ services/audioflinger/Threads.cpp | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/services/audioflinger/Threads.cpp b/services/audioflinger/Threads.cpp
+index b7c0bb3811..58a1acb736 100644
+--- a/services/audioflinger/Threads.cpp
++++ b/services/audioflinger/Threads.cpp
+@@ -8473,6 +8473,10 @@ reacquire_wakelock:
+ 
+             timestampCorrectionEnabled = isTimestampCorrectionEnabled_l();
+             lockEffectChains_l(effectChains);
++            // We're exiting locked scope with non empty activeTracks, make sure
++            // that we're not in standby mode which we could have entered if some
++            // tracks were muted/unmuted.
++            mStandby = false;
+         }
+ 
+         // thread mutex is now unlocked, mActiveTracks unknown, activeTracks.size() > 0
+-- 
+2.43.0
+

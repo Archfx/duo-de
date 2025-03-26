@@ -1,0 +1,38 @@
+From 0fc3d44f3299ffb9317142272982f21ed879407a Mon Sep 17 00:00:00 2001
+From: Jaideep Sharma <quic_jaidshar@quicinc.com>
+Date: Tue, 5 Nov 2024 15:50:21 +0530
+Subject: [PATCH 219/436] libaudiohal: Fix Standby sequence
+
+If stream is in DRAINING state and standby is received then it is paused first. However, as DRAINING is a transient state for which HAL will be moved to IDLE on next cycle/trasient timeout. So, even after pause, stream can stay in IDLE state.
+
+Allow reply.state to in IDLE after pause command (which is possible if original HAL state is DRAINING) so later flush,
+standby sequence can be executed as part of intended fallthrough.
+
+Bug: 377443079
+
+Test: Oboe Tester -> open ->start -> stop, check logs for standby
+Test: run cts-dev -m CtsNativeMediaAAudioTestCases
+
+Change-Id: I882fd90c3bc49bfc40fecec169406b8ef88ecf2d
+---
+ media/libaudiohal/impl/StreamHalAidl.cpp | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/media/libaudiohal/impl/StreamHalAidl.cpp b/media/libaudiohal/impl/StreamHalAidl.cpp
+index 0d65f8cde5..e138ceaa02 100644
+--- a/media/libaudiohal/impl/StreamHalAidl.cpp
++++ b/media/libaudiohal/impl/StreamHalAidl.cpp
+@@ -232,7 +232,9 @@ status_t StreamHalAidl::standby() {
+             RETURN_STATUS_IF_ERROR(pause(&reply));
+             if (reply.state != StreamDescriptor::State::PAUSED &&
+                     reply.state != StreamDescriptor::State::DRAIN_PAUSED &&
+-                    reply.state != StreamDescriptor::State::TRANSFER_PAUSED) {
++                    reply.state != StreamDescriptor::State::TRANSFER_PAUSED &&
++                    (state != StreamDescriptor::State::DRAINING ||
++                        reply.state != StreamDescriptor::State::IDLE)) {
+                 AUGMENT_LOG(E, "unexpected stream state: %s (expected PAUSED)",
+                             toString(reply.state).c_str());
+                 return INVALID_OPERATION;
+-- 
+2.43.0
+

@@ -1,0 +1,160 @@
+From e20145d3a87d9063f9ef732b22ba6e54d3e659df Mon Sep 17 00:00:00 2001
+From: Andy Hung <hunga@google.com>
+Date: Mon, 25 Nov 2024 16:22:37 -0800
+Subject: [PATCH 409/436] AudioSystem: onServiceDied check service match
+
+It is conceivable though unlikely that the onServiceDied notification
+may match a previous server death if the service restarts quickly.
+Warn when unusual situations occur.
+
+Flag: EXEMPT bugfix
+Test: for run in {1..100}; do (sleep 8; echo $run; adb shell pkill audioserver); done
+Test: atest CtsMediaAudioTestCases
+Bug: 379427790
+Change-Id: Ic86a4ce45c46162f47b4cf846a37fc281ad3b01b
+---
+ media/libaudioclient/AudioSystem.cpp          | 63 ++++++++++++++-----
+ .../include/media/IAudioFlinger.h             |  4 ++
+ 2 files changed, 53 insertions(+), 14 deletions(-)
+
+diff --git a/media/libaudioclient/AudioSystem.cpp b/media/libaudioclient/AudioSystem.cpp
+index 8094d07078..c675c343c9 100644
+--- a/media/libaudioclient/AudioSystem.cpp
++++ b/media/libaudioclient/AudioSystem.cpp
+@@ -146,10 +146,19 @@ public:
+         onNewServiceWithAdapter(createServiceAdapter(afs));
+     }
+ 
+-    static void onServiceDied(const sp<media::IAudioFlingerService>&) {
+-        ALOGW("%s: %s service died", __func__, getServiceName());
++    static void onServiceDied(const sp<media::IAudioFlingerService>& service) {
++        ALOGW("%s: %s service died %p", __func__, getServiceName(), service.get());
+         {
+             std::lock_guard l(mMutex);
++            if (!mValid) {
++                ALOGW("%s: %s service already invalidated, ignoring", __func__, getServiceName());
++                return;
++            }
++            if (!mService || mService->getDelegate() != service) {
++                ALOGW("%s: %s unmatched service death pointers, ignoring",
++                        __func__, getServiceName());
++                return;
++            }
+             mValid = false;
+             if (mClient) {
+                 mClient->clearIoCache();
+@@ -219,12 +228,18 @@ public:
+     static status_t setLocalService(const sp<IAudioFlinger>& af) {
+         mediautils::skipService<media::IAudioFlingerService>();
+         sp<IAudioFlinger> old;
+-        {
+-            std::lock_guard l(mMutex);
+-            old = mService;
+-            mService = af;
++
++        audio_utils::unique_lock ul(mMutex);
++        old = mService;
++        if (old) {
++            ul.unlock();
++            onServiceDied(old->getDelegate());
++            ul.lock();
++            ALOGW_IF(old != mService,
++                    "%s: service changed during callback, continuing.", __func__);
+         }
+-        if (old) onServiceDied({});
++        mService = af;
++        ul.unlock();
+         if (af) onNewServiceWithAdapter(af);
+         return OK;
+     }
+@@ -255,6 +270,8 @@ private:
+         bool reportNoError = false;
+         {
+             std::lock_guard l(mMutex);
++            ALOGW_IF(mValid, "%s: %s service already valid, continuing with initialization",
++                    __func__, getServiceName());
+             if (mClient == nullptr) {
+                 mClient = sp<AudioSystem::AudioFlingerClient>::make();
+             } else {
+@@ -985,6 +1002,8 @@ public:
+         sp<AudioSystem::AudioPolicyServiceClient> client;
+         {
+             std::lock_guard l(mMutex);
++            ALOGW_IF(mValid, "%s: %s service already valid, continuing with initialization",
++                    __func__, getServiceName());
+             if (mClient == nullptr) {
+                 mClient = sp<AudioSystem::AudioPolicyServiceClient>::make();
+             }
+@@ -1000,11 +1019,20 @@ public:
+         IPCThreadState::self()->restoreCallingIdentity(token);
+     }
+ 
+-    static void onServiceDied(const sp<IAudioPolicyService>&) {
+-        ALOGW("%s: %s service died", __func__, getServiceName());
++    static void onServiceDied(const sp<IAudioPolicyService>& service) {
++        ALOGW("%s: %s service died %p", __func__, getServiceName(), service.get());
+         sp<AudioSystem::AudioPolicyServiceClient> client;
+         {
+             std::lock_guard l(mMutex);
++            if (!mValid) {
++                ALOGW("%s: %s service already invalidated, ignoring", __func__, getServiceName());
++                return;
++            }
++            if (mService != service) {
++                ALOGW("%s: %s unmatched service death pointers, ignoring",
++                        __func__, getServiceName());
++                return;
++            }
+             mValid = false;
+             client = mClient;
+         }
+@@ -1069,12 +1097,19 @@ public:
+     static status_t setLocalService(const sp<IAudioPolicyService>& aps) {
+         mediautils::skipService<IAudioPolicyService>();
+         sp<IAudioPolicyService> old;
+-        {
+-            std::lock_guard l(mMutex);
+-            old = mService;
+-            mService = aps;
++        audio_utils::unique_lock ul(mMutex);
++        old = mService;
++        if (old) {
++            ul.unlock();
++            onServiceDied(old);
++            ul.lock();
++            if (mService != old) {
++                ALOGD("%s: service changed during callback, ignoring.", __func__);
++                return OK;
++            }
+         }
+-        if (old) onServiceDied(old);
++        mService = aps;
++        ul.unlock();
+         if (aps) onNewService(aps);
+         return OK;
+     }
+diff --git a/media/libaudioclient/include/media/IAudioFlinger.h b/media/libaudioclient/include/media/IAudioFlinger.h
+index 8292eef6e0..6b501a7c05 100644
+--- a/media/libaudioclient/include/media/IAudioFlinger.h
++++ b/media/libaudioclient/include/media/IAudioFlinger.h
+@@ -181,6 +181,8 @@ public:
+         fromAidl(const media::CreateRecordResponse& aidl);
+     };
+ 
++    virtual sp<media::IAudioFlingerService> getDelegate() const { return {}; }
++
+     /* create an audio track and registers it with AudioFlinger.
+      * The audioTrack field will be null if the track cannot be created and the status will reflect
+      * failure.
+@@ -414,6 +416,8 @@ class AudioFlingerClientAdapter : public IAudioFlinger {
+ public:
+     explicit AudioFlingerClientAdapter(const sp<media::IAudioFlingerService> delegate);
+ 
++    sp<media::IAudioFlingerService> getDelegate() const final { return mDelegate; }
++
+     status_t createTrack(const media::CreateTrackRequest& input,
+                          media::CreateTrackResponse& output) override;
+     status_t createRecord(const media::CreateRecordRequest& input,
+-- 
+2.43.0
+

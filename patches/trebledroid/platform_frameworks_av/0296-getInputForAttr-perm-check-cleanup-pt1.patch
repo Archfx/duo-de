@@ -1,0 +1,552 @@
+From 89ff04369808e6ae8c3a87b15aa35e1461410154 Mon Sep 17 00:00:00 2001
+From: Atneya Nair <atneya@google.com>
+Date: Tue, 19 Nov 2024 12:47:28 -0800
+Subject: [PATCH 296/436] getInputForAttr perm check cleanup pt1
+
+Pull permission checking logic out of main function.
+
+No behavior changes for now.
+
+Test: Compiles
+Bug: 374870131
+Bug: 343523722
+Flag: EXEMPT mechanical refactoring
+Change-Id: I3a3dc2b876612f63757570fd6fe9b2f9d5437fa9
+---
+ media/libaudioclient/AudioSystem.cpp          |  11 +-
+ media/utils/ServiceUtilities.cpp              |  10 +
+ .../service/AudioPolicyInterfaceImpl.cpp      | 330 ++++++++++--------
+ .../audiopolicy/service/AudioPolicyService.h  |   8 +
+ .../audiopolicy/service/AudioRecordClient.h   |   6 +-
+ 5 files changed, 213 insertions(+), 152 deletions(-)
+
+diff --git a/media/libaudioclient/AudioSystem.cpp b/media/libaudioclient/AudioSystem.cpp
+index b8dadb4786..cfa3011ea8 100644
+--- a/media/libaudioclient/AudioSystem.cpp
++++ b/media/libaudioclient/AudioSystem.cpp
+@@ -1379,13 +1379,14 @@ status_t AudioSystem::getInputForAttr(const audio_attributes_t* attr,
+ 
+     media::GetInputForAttrResponse response;
+ 
+-    status_t status = statusTFromBinderStatus(
+-            aps->getInputForAttr(attrAidl, inputAidl, riidAidl, sessionAidl, attributionSource,
+-                configAidl, flagsAidl, selectedDeviceIdAidl, &response));
+-    if (status != NO_ERROR) {
++    const Status res = aps->getInputForAttr(attrAidl, inputAidl, riidAidl, sessionAidl,
++                                            attributionSource, configAidl, flagsAidl,
++                                            selectedDeviceIdAidl, &response);
++    if (!res.isOk()) {
++        ALOGE("getInputForAttr error: %s", res.toString8().c_str());
+         *config = VALUE_OR_RETURN_STATUS(
+                 aidl2legacy_AudioConfigBase_audio_config_base_t(response.config, true /*isInput*/));
+-        return status;
++        return statusTFromBinderStatus(res);
+     }
+ 
+     *input = VALUE_OR_RETURN_STATUS(aidl2legacy_int32_t_audio_io_handle_t(response.input));
+diff --git a/media/utils/ServiceUtilities.cpp b/media/utils/ServiceUtilities.cpp
+index ee0f2bc11a..39a172f732 100644
+--- a/media/utils/ServiceUtilities.cpp
++++ b/media/utils/ServiceUtilities.cpp
+@@ -77,15 +77,24 @@ static String16 resolveCallingPackage(PermissionController& permissionController
+     return packages[0];
+ }
+ 
++// NOTE/TODO(b/379754682):
++// AUDIO_SOURCE_VOICE_DOWNLINK and AUDIO_SOURCE_VOICE_CALL are handled specially:
++// DOWNLINK is an output source, but we still require RecordOp in addition to
++// OP_RECORD_INCOMING_PHONE_AUDIO
++// CALL includes both uplink and downlink, but we attribute RECORD_OP (only), since
++// there is not support for noting multiple ops.
+ int32_t getOpForSource(audio_source_t source) {
+   switch (source) {
++    // BEGIN output sources
+     case AUDIO_SOURCE_FM_TUNER:
+         return AppOpsManager::OP_NONE;
+     case AUDIO_SOURCE_ECHO_REFERENCE: // fallthrough
+     case AUDIO_SOURCE_REMOTE_SUBMIX:
++        // TODO -- valid in all cases?
+       return AppOpsManager::OP_RECORD_AUDIO_OUTPUT;
+     case AUDIO_SOURCE_VOICE_DOWNLINK:
+       return AppOpsManager::OP_RECORD_INCOMING_PHONE_AUDIO;
++    // END output sources
+     case AUDIO_SOURCE_HOTWORD:
+       return AppOpsManager::OP_RECORD_AUDIO_HOTWORD;
+     case AUDIO_SOURCE_DEFAULT:
+@@ -99,6 +108,7 @@ bool isRecordOpRequired(audio_source_t source) {
+     case AUDIO_SOURCE_FM_TUNER:
+     case AUDIO_SOURCE_ECHO_REFERENCE: // fallthrough
+     case AUDIO_SOURCE_REMOTE_SUBMIX:
++    // case AUDIO_SOURCE_VOICE_DOWNLINK:
+         return false;
+     default:
+       return true;
+diff --git a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+index df7077c6f5..20bc78861b 100644
+--- a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
++++ b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+@@ -24,6 +24,7 @@
+ #include <android/content/AttributionSourceState.h>
+ #include <android_media_audiopolicy.h>
+ #include <android_media_audio.h>
++#include <binder/Enums.h>
+ #include <com_android_media_audio.h>
+ #include <cutils/properties.h>
+ #include <error/expected_utils.h>
+@@ -51,6 +52,8 @@
+ #define CHECK_PERM(expr1, expr2) \
+     VALUE_OR_RETURN_STATUS(getPermissionProvider().checkPermission((expr1), (expr2)))
+ 
++#define PROPAGATE_FALSEY(val) do { if (!val.has_value() || !val.value()) return val; } while (0)
++
+ #define MAX_ITEMS_PER_LIST 1024
+ 
+ namespace android {
+@@ -60,6 +63,7 @@ using aidl_utils::binderStatusFromStatusT;
+ using android::media::audio::concurrent_audio_record_bypass_permission;
+ using com::android::media::audio::audioserver_permissions;
+ using com::android::media::permission::NativePermissionController;
++using com::android::media::permission::PermissionEnum;
+ using com::android::media::permission::PermissionEnum::ACCESS_ULTRASOUND;
+ using com::android::media::permission::PermissionEnum::CALL_AUDIO_INTERCEPTION;
+ using com::android::media::permission::PermissionEnum::CAPTURE_AUDIO_HOTWORD;
+@@ -661,6 +665,146 @@ void AudioPolicyService::doReleaseOutput(audio_port_handle_t portId)
+     mAudioPolicyManager->releaseOutput(portId);
+ }
+ 
++// These are sources for which CAPTURE_AUDIO_OUTPUT granted access
++// for legacy reasons, before more specific permissions were deployed.
++// TODO: remove this access
++static bool isLegacyOutputSource(AudioSource source) {
++    switch (source) {
++        case AudioSource::VOICE_CALL:
++        case AudioSource::VOICE_DOWNLINK:
++        case AudioSource::VOICE_UPLINK:
++        case AudioSource::FM_TUNER:
++            return true;
++        default:
++            return false;
++    }
++}
++
++error::BinderResult<bool> AudioPolicyService::evaluatePermsForSource(
++        const AttributionSourceState& attrSource, AudioSource source, bool isHotword) {
++    error::BinderResult<bool> permRes = true;
++    const auto check_perm = [&](PermissionEnum perm, uid_t uid) {
++        return getPermissionProvider().checkPermission(perm, uid);
++    };
++    switch (source) {
++        case AudioSource::VOICE_UPLINK:
++        case AudioSource::VOICE_DOWNLINK:
++        case AudioSource::VOICE_CALL:
++            permRes = audioserver_permissions()
++                              ? check_perm(CALL_AUDIO_INTERCEPTION, attrSource.uid)
++                              : callAudioInterceptionAllowed(attrSource);
++            break;
++        case AudioSource::ECHO_REFERENCE:
++            permRes = audioserver_permissions() ? check_perm(CAPTURE_AUDIO_OUTPUT, attrSource.uid)
++                                                : captureAudioOutputAllowed(attrSource);
++            break;
++        case AudioSource::FM_TUNER:
++            permRes = audioserver_permissions()
++                              ? check_perm(CAPTURE_TUNER_AUDIO_INPUT, attrSource.uid)
++                              : captureTunerAudioInputAllowed(attrSource);
++            break;
++        case AudioSource::HOTWORD:
++            permRes = audioserver_permissions() ? check_perm(CAPTURE_AUDIO_HOTWORD, attrSource.uid)
++                                                : captureHotwordAllowed(attrSource);
++            break;
++        case AudioSource::ULTRASOUND:
++            permRes = audioserver_permissions() ? check_perm(ACCESS_ULTRASOUND, attrSource.uid)
++                                                : accessUltrasoundAllowed(attrSource);
++            break;
++        case AudioSource::SYS_RESERVED_INVALID:
++        case AudioSource::DEFAULT:
++        case AudioSource::MIC:
++        case AudioSource::CAMCORDER:
++        case AudioSource::VOICE_RECOGNITION:
++        case AudioSource::VOICE_COMMUNICATION:
++        case AudioSource::UNPROCESSED:
++        case AudioSource::VOICE_PERFORMANCE:
++            // No additional check intended
++        case AudioSource::REMOTE_SUBMIX:
++            // special-case checked based on device (evaluatePermsForDevice)
++            break;
++    }
++
++    bool isAllowed = VALUE_OR_RETURN(permRes);
++
++    if (!isAllowed) {
++        if (isLegacyOutputSource(source)) {
++            permRes = audioserver_permissions() ? check_perm(CAPTURE_AUDIO_OUTPUT, attrSource.uid)
++                                                : captureAudioOutputAllowed(attrSource);
++            PROPAGATE_FALSEY(permRes);
++        } else {
++            return false;
++        }
++    }
++
++    if (isHotword) {
++        permRes = audioserver_permissions() ? check_perm(CAPTURE_AUDIO_HOTWORD, attrSource.uid)
++                                            : captureHotwordAllowed(attrSource);
++        PROPAGATE_FALSEY(permRes);
++    }
++
++    // All sources which aren't output capture require RECORD as well,
++    // as well as vdi policy mix
++    const auto legacySource = aidl2legacy_AudioSource_audio_source_t(source).value();
++    if (isRecordOpRequired(legacySource)) {
++        permRes = audioserver_permissions() ? check_perm(RECORD_AUDIO, attrSource.uid)
++                                            : recordingAllowed(attrSource, legacySource);
++        PROPAGATE_FALSEY(permRes);
++    }
++    return true;
++}
++
++error::BinderResult<bool> AudioPolicyService::evaluatePermsForDevice(
++        const AttributionSourceState& attrSource, AudioSource source,
++        AudioPolicyInterface::input_type_t inputType, uint32_t vdi, bool isCallRedir) {
++    // enforce permission (if any) required for each type of input
++    error::BinderResult<bool> permRes = true;
++    const auto check_perm = [&](PermissionEnum perm, uid_t uid) {
++        return getPermissionProvider().checkPermission(perm, uid);
++    };
++    bool isAllowedDueToCallPerm = false;
++    if (isCallRedir) {
++        const auto checkCall = audioserver_permissions()
++                                       ? check_perm(CALL_AUDIO_INTERCEPTION, attrSource.uid)
++                                       : callAudioInterceptionAllowed(attrSource);
++        isAllowedDueToCallPerm = VALUE_OR_RETURN(checkCall);
++    }
++    switch (inputType) {
++        case AudioPolicyInterface::API_INPUT_MIX_PUBLIC_CAPTURE_PLAYBACK:
++            // this use case has been validated in audio service with a MediaProjection token,
++            // and doesn't rely on regular permissions
++        case AudioPolicyInterface::API_INPUT_LEGACY:
++            break;
++        case AudioPolicyInterface::API_INPUT_TELEPHONY_RX:
++            if (isAllowedDueToCallPerm) break;
++            // FIXME: use the same permission as for remote submix for now.
++            FALLTHROUGH_INTENDED;
++        case AudioPolicyInterface::API_INPUT_MIX_CAPTURE:
++            permRes = audioserver_permissions() ? check_perm(CAPTURE_AUDIO_OUTPUT, attrSource.uid)
++                                                : captureAudioOutputAllowed(attrSource);
++            break;
++        case AudioPolicyInterface::API_INPUT_MIX_EXT_POLICY_REROUTE: {
++            // TODO intended?
++            if (isAllowedDueToCallPerm) break;
++            permRes = audioserver_permissions() ? check_perm(MODIFY_AUDIO_ROUTING, attrSource.uid)
++                                                : modifyAudioRoutingAllowed(attrSource);
++            break;
++        }
++        case AudioPolicyInterface::API_INPUT_INVALID:
++        default:
++            LOG_ALWAYS_FATAL("%s encountered an invalid input type %d", __func__, (int)inputType);
++    }
++
++    PROPAGATE_FALSEY(permRes);
++
++    if (audiopolicy_flags::record_audio_device_aware_permission()) {
++        // enforce device-aware RECORD_AUDIO permission
++        const auto legacySource = aidl2legacy_AudioSource_audio_source_t(source).value();
++        return vdi == kDefaultVirtualDeviceId || recordingAllowed(attrSource, vdi, legacySource);
++    }
++    return true;
++}
++
+ Status AudioPolicyService::getInputForAttr(const media::audio::common::AudioAttributes& attrAidl,
+                                            int32_t inputAidl,
+                                            int32_t riidAidl,
+@@ -670,6 +814,7 @@ Status AudioPolicyService::getInputForAttr(const media::audio::common::AudioAttr
+                                            int32_t flagsAidl,
+                                            int32_t selectedDeviceIdAidl,
+                                            media::GetInputForAttrResponse* _aidl_return) {
++    auto inputSource = attrAidl.source;
+     audio_attributes_t attr = VALUE_OR_RETURN_BINDER_STATUS(
+             aidl2legacy_AudioAttributes_audio_attributes_t(attrAidl));
+     audio_io_handle_t input = VALUE_OR_RETURN_BINDER_STATUS(
+@@ -694,49 +839,24 @@ Status AudioPolicyService::getInputForAttr(const media::audio::common::AudioAttr
+     RETURN_IF_BINDER_ERROR(
+             binderStatusFromStatusT(AudioValidator::validateAudioAttributes(attr, "68953950")));
+ 
+-    audio_source_t inputSource = attr.source;
+-    if (inputSource == AUDIO_SOURCE_DEFAULT) {
+-        inputSource = AUDIO_SOURCE_MIC;
+-    }
+-
+-    // already checked by client, but double-check in case the client wrapper is bypassed
+-    if ((inputSource < AUDIO_SOURCE_DEFAULT)
+-            || (inputSource >= AUDIO_SOURCE_CNT
+-                && inputSource != AUDIO_SOURCE_HOTWORD
+-                && inputSource != AUDIO_SOURCE_FM_TUNER
+-                && inputSource != AUDIO_SOURCE_ECHO_REFERENCE
+-                && inputSource != AUDIO_SOURCE_ULTRASOUND)) {
++    if (inputSource == AudioSource::SYS_RESERVED_INVALID ||
++            std::find(enum_range<AudioSource>().begin(), enum_range<AudioSource>().end(),
++                inputSource) == enum_range<AudioSource>().end()) {
+         return binderStatusFromStatusT(BAD_VALUE);
+     }
+ 
+-    RETURN_IF_BINDER_ERROR(validateUsage(attr, attributionSource));
++    if (inputSource == AudioSource::DEFAULT) {
++        inputSource = AudioSource::MIC;
++    }
+ 
+-    uint32_t virtualDeviceId = kDefaultVirtualDeviceId;
++    const bool isHotword = (flags & (AUDIO_INPUT_FLAG_HW_HOTWORD | AUDIO_INPUT_FLAG_HOTWORD_TAP |
++                        AUDIO_INPUT_FLAG_HW_LOOKBACK)) != 0;
+ 
+-    // check calling permissions.
+-    // Capturing from the following sources does not require permission RECORD_AUDIO
+-    // as the captured audio does not come from a microphone:
+-    // - FM_TUNER source is controlled by captureTunerAudioInputAllowed() or
+-    // captureAudioOutputAllowed() (deprecated).
+-    // - REMOTE_SUBMIX source is controlled by captureAudioOutputAllowed() if the input
+-    // type is API_INPUT_MIX_EXT_POLICY_REROUTE and by AudioService if a media projection
+-    // is used and input type is API_INPUT_MIX_PUBLIC_CAPTURE_PLAYBACK
+-    // - ECHO_REFERENCE source is controlled by captureAudioOutputAllowed()
+-    const auto isRecordingAllowed = audioserver_permissions() ?
+-            CHECK_PERM(RECORD_AUDIO, attributionSource.uid) :
+-            recordingAllowed(attributionSource, inputSource);
+-    if (!(isRecordingAllowed
+-            || inputSource == AUDIO_SOURCE_FM_TUNER
+-            || inputSource == AUDIO_SOURCE_REMOTE_SUBMIX
+-            || inputSource == AUDIO_SOURCE_ECHO_REFERENCE)) {
+-        ALOGE("%s permission denied: recording not allowed for %s",
+-                __func__, attributionSource.toString().c_str());
+-        return binderStatusFromStatusT(PERMISSION_DENIED);
+-    }
++    const bool isCallRedir = (attr.flags & AUDIO_FLAG_CALL_REDIRECTION) != 0;
+ 
+-    bool canCaptureOutput = audioserver_permissions() ?
+-                        CHECK_PERM(CAPTURE_AUDIO_OUTPUT, attributionSource.uid)
+-                        : captureAudioOutputAllowed(attributionSource);
++    const bool canCaptureOutput = audioserver_permissions()
++                                ? CHECK_PERM(CAPTURE_AUDIO_OUTPUT, attributionSource.uid)
++                                : captureAudioOutputAllowed(attributionSource);
+ 
+     //TODO(b/374751406): remove forcing canBypassConcurrentPolicy to canCaptureOutput
+     // once all system apps using CAPTURE_AUDIO_OUTPUT to capture during calls
+@@ -748,53 +868,20 @@ Status AudioPolicyService::getInputForAttr(const media::audio::common::AudioAttr
+                                        attributionSource.uid)
+                             : bypassConcurrentPolicyAllowed(attributionSource);
+     }
+-    bool canInterceptCallAudio = audioserver_permissions() ?
+-                        CHECK_PERM(CALL_AUDIO_INTERCEPTION, attributionSource.uid)
+-                        : callAudioInterceptionAllowed(attributionSource);
+-    bool isCallAudioSource = inputSource == AUDIO_SOURCE_VOICE_UPLINK
+-             || inputSource == AUDIO_SOURCE_VOICE_DOWNLINK
+-             || inputSource == AUDIO_SOURCE_VOICE_CALL;
+-
+-    if (isCallAudioSource && !canInterceptCallAudio && !canCaptureOutput) {
+-        return binderStatusFromStatusT(PERMISSION_DENIED);
+-    }
+-    if (inputSource == AUDIO_SOURCE_ECHO_REFERENCE
+-            && !canCaptureOutput) {
+-        return binderStatusFromStatusT(PERMISSION_DENIED);
+-    }
+-    if (inputSource == AUDIO_SOURCE_FM_TUNER
+-        && !canCaptureOutput
+-        && !(audioserver_permissions() ?
+-                        CHECK_PERM(CAPTURE_TUNER_AUDIO_INPUT, attributionSource.uid)
+-            : captureTunerAudioInputAllowed(attributionSource))) {
+-        return binderStatusFromStatusT(PERMISSION_DENIED);
+-    }
+ 
+-    bool canCaptureHotword = audioserver_permissions() ?
+-                        CHECK_PERM(CAPTURE_AUDIO_HOTWORD, attributionSource.uid)
+-                        : captureHotwordAllowed(attributionSource);
+-    if ((inputSource == AUDIO_SOURCE_HOTWORD) && !canCaptureHotword) {
+-        return binderStatusFromStatusT(PERMISSION_DENIED);
+-    }
++    const bool hasPerm = VALUE_OR_RETURN_STATUS(evaluatePermsForSource(
++                attributionSource,
++                inputSource,
++                isHotword));
+ 
+-    if (((flags & (AUDIO_INPUT_FLAG_HW_HOTWORD |
+-                        AUDIO_INPUT_FLAG_HOTWORD_TAP |
+-                        AUDIO_INPUT_FLAG_HW_LOOKBACK)) != 0)
+-            && !canCaptureHotword) {
+-        ALOGE("%s: permission denied: hotword mode not allowed"
+-              " for uid %d pid %d", __func__, attributionSource.uid, attributionSource.pid);
+-        return binderStatusFromStatusT(PERMISSION_DENIED);
++    if (!hasPerm) {
++        return Status::fromExceptionCode(
++                EX_SECURITY, String8::format("%s: %s missing perms for source %s", __func__,
++                                             attributionSource.toString().c_str(),
++                                             toString(inputSource).c_str()));
+     }
+ 
+-    if (attr.source == AUDIO_SOURCE_ULTRASOUND) {
+-        if (!(audioserver_permissions() ?
+-                CHECK_PERM(ACCESS_ULTRASOUND, attributionSource.uid)
+-                : accessUltrasoundAllowed(attributionSource))) {
+-            ALOGE("%s: permission denied: ultrasound not allowed for uid %d pid %d",
+-                    __func__, attributionSource.uid, attributionSource.pid);
+-            return binderStatusFromStatusT(PERMISSION_DENIED);
+-        }
+-    }
++    uint32_t virtualDeviceId = kDefaultVirtualDeviceId;
+ 
+     sp<AudioPolicyEffects>audioPolicyEffects;
+     {
+@@ -815,72 +902,29 @@ Status AudioPolicyService::getInputForAttr(const media::audio::common::AudioAttr
+         audioPolicyEffects = mAudioPolicyEffects;
+ 
+         if (status == NO_ERROR) {
+-            // enforce permission (if any) required for each type of input
+-            switch (inputType) {
+-            case AudioPolicyInterface::API_INPUT_MIX_PUBLIC_CAPTURE_PLAYBACK:
+-                // this use case has been validated in audio service with a MediaProjection token,
+-                // and doesn't rely on regular permissions
+-            case AudioPolicyInterface::API_INPUT_LEGACY:
+-                break;
+-            case AudioPolicyInterface::API_INPUT_TELEPHONY_RX:
+-                if ((attr.flags & AUDIO_FLAG_CALL_REDIRECTION) != 0
+-                        && canInterceptCallAudio) {
+-                    break;
+-                }
+-                // FIXME: use the same permission as for remote submix for now.
+-                FALLTHROUGH_INTENDED;
+-            case AudioPolicyInterface::API_INPUT_MIX_CAPTURE:
+-                if (!canCaptureOutput) {
+-                    ALOGE("%s permission denied: capture not allowed", __func__);
+-                    status = PERMISSION_DENIED;
+-                }
+-                break;
+-            case AudioPolicyInterface::API_INPUT_MIX_EXT_POLICY_REROUTE: {
+-                bool modAudioRoutingAllowed;
+-                if (audioserver_permissions()) {
+-                        auto result = getPermissionProvider().checkPermission(
+-                                MODIFY_AUDIO_ROUTING, attributionSource.uid);
+-                        if (!result.ok()) {
+-                            ALOGE("%s permission provider error: %s", __func__,
+-                                    result.error().toString8().c_str());
+-                            status = aidl_utils::statusTFromBinderStatus(result.error());
+-                            break;
+-                        }
+-                        modAudioRoutingAllowed = result.value();
+-                } else {
+-                    modAudioRoutingAllowed = modifyAudioRoutingAllowed(attributionSource);
+-                }
+-                if (!(modAudioRoutingAllowed
+-                        || ((attr.flags & AUDIO_FLAG_CALL_REDIRECTION) != 0
+-                            && canInterceptCallAudio))) {
+-                    ALOGE("%s permission denied for remote submix capture", __func__);
+-                    status = PERMISSION_DENIED;
+-                }
+-                break;
+-            }
+-            case AudioPolicyInterface::API_INPUT_INVALID:
+-            default:
+-                LOG_ALWAYS_FATAL("%s encountered an invalid input type %d",
+-                        __func__, (int)inputType);
+-            }
++            const auto permResult = evaluatePermsForDevice(attributionSource,
++                    inputSource, inputType, virtualDeviceId,
++                    isCallRedir);
+ 
+-            if (audiopolicy_flags::record_audio_device_aware_permission()) {
+-                // enforce device-aware RECORD_AUDIO permission
+-                if (virtualDeviceId != kDefaultVirtualDeviceId &&
+-                    !recordingAllowed(attributionSource, virtualDeviceId, inputSource)) {
+-                    status = PERMISSION_DENIED;
+-                }
++            if (!permResult.has_value()) {
++                AutoCallerClear acc;
++                mAudioPolicyManager->releaseInput(portId);
++                return permResult.error();
++            } else if (!permResult.value()) {
++                AutoCallerClear acc;
++                mAudioPolicyManager->releaseInput(portId);
++                return Status::fromExceptionCode(
++                        EX_SECURITY,
++                        String8::format(
++                                "%s: %s missing perms for input type %d, inputSource %d, vdi %d",
++                                __func__, attributionSource.toString().c_str(), inputType,
++                                inputSource, virtualDeviceId));
+             }
+         }
+ 
+         if (status != NO_ERROR) {
+-            if (status == PERMISSION_DENIED) {
+-                AutoCallerClear acc;
+-                mAudioPolicyManager->releaseInput(portId);
+-            } else {
+-                _aidl_return->config = VALUE_OR_RETURN_BINDER_STATUS(
+-                        legacy2aidl_audio_config_base_t_AudioConfigBase(config, true /*isInput*/));
+-            }
++            _aidl_return->config = VALUE_OR_RETURN_BINDER_STATUS(
++                    legacy2aidl_audio_config_base_t_AudioConfigBase(config, true /*isInput*/));
+             return binderStatusFromStatusT(status);
+         }
+ 
+@@ -889,14 +933,14 @@ Status AudioPolicyService::getInputForAttr(const media::audio::common::AudioAttr
+                                                              selectedDeviceIds, attributionSource,
+                                                              virtualDeviceId,
+                                                              canBypassConcurrentPolicy,
+-                                                             canCaptureHotword,
+                                                              mOutputCommandThread);
+         mAudioRecordClients.add(portId, client);
+     }
+ 
+     if (audioPolicyEffects != 0) {
+         // create audio pre processors according to input source
+-        status_t status = audioPolicyEffects->addInputEffects(input, inputSource, session);
++        status_t status = audioPolicyEffects->addInputEffects(input,
++                aidl2legacy_AudioSource_audio_source_t(inputSource).value(), session);
+         if (status != NO_ERROR && status != ALREADY_EXISTS) {
+             ALOGW("Failed to add effects on input %d", input);
+         }
+diff --git a/services/audiopolicy/service/AudioPolicyService.h b/services/audiopolicy/service/AudioPolicyService.h
+index eeac9a6ea2..5fe200c597 100644
+--- a/services/audiopolicy/service/AudioPolicyService.h
++++ b/services/audiopolicy/service/AudioPolicyService.h
+@@ -504,6 +504,14 @@ private:
+                             const audio_output_flags_t flags);
+     status_t unregisterOutput(audio_io_handle_t output);
+ 
++    error::BinderResult<bool> evaluatePermsForSource(const AttributionSourceState& attrSource,
++                                                     AudioSource source, bool isHotword);
++
++    error::BinderResult<bool> evaluatePermsForDevice(const AttributionSourceState& attrSource,
++                                                     AudioSource source,
++                                                     AudioPolicyInterface::input_type_t inputType,
++                                                     uint32_t vdi, bool isCallRedir);
++
+     // If recording we need to make sure the UID is allowed to do that. If the UID is idle
+     // then it cannot record and gets buffers with zeros - silence. As soon as the UID
+     // transitions to an active state we will start reporting buffers with data. This approach
+diff --git a/services/audiopolicy/service/AudioRecordClient.h b/services/audiopolicy/service/AudioRecordClient.h
+index 213557553c..f45b4de157 100644
+--- a/services/audiopolicy/service/AudioRecordClient.h
++++ b/services/audiopolicy/service/AudioRecordClient.h
+@@ -90,14 +90,13 @@ public:
+                       const DeviceIdVector deviceIds,
+                       const AttributionSourceState& attributionSource,
+                       const uint32_t virtualDeviceId,
+-                      bool canBypassConcurrentPolicy, bool canCaptureHotword,
++                      bool canBypassConcurrentPolicy,
+                       wp<AudioPolicyService::AudioCommandThread> commandThread) :
+                 AudioClient(attributes, io, attributionSource,
+                     session, portId, deviceIds), attributionSource(attributionSource),
+                     virtualDeviceId(virtualDeviceId),
+                     startTimeNs(0), canBypassConcurrentPolicy(canBypassConcurrentPolicy),
+-                    canCaptureHotword(canCaptureHotword), silenced(false),
+-                    mOpRecordAudioMonitor(
++                    silenced(false), mOpRecordAudioMonitor(
+                             OpRecordAudioMonitor::createIfNeeded(attributionSource,
+                                                                  virtualDeviceId,
+                                                                  attributes, commandThread)) {
+@@ -113,7 +112,6 @@ public:
+     const uint32_t virtualDeviceId; // id of the virtual device associated with the audio device
+     nsecs_t startTimeNs;
+     const bool canBypassConcurrentPolicy;
+-    const bool canCaptureHotword;
+     bool silenced;
+ 
+ private:
+-- 
+2.43.0
+

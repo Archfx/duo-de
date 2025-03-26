@@ -1,0 +1,35 @@
+From 32777e49303c339bf7f6018145f51d6e55d9dd96 Mon Sep 17 00:00:00 2001
+From: Andy Hung <hunga@google.com>
+Date: Tue, 10 Dec 2024 15:14:56 -0800
+Subject: [PATCH 410/436] MMapTrack: Fix nullptr crash when ATRACE audio is
+ enabled
+
+MMapTrack and PatchTracks may have null clients.
+
+Flag: EXEMPT bugfix
+Test: Perfetto with Oboetester
+Bug: 383354934
+(cherry picked from https://googleplex-android-review.googlesource.com/q/commit:a6a2410be108d99db3875a3f9cedf60481772487)
+Merged-In: Ia66329d60293f538aed4fa480f97d88404204d2b
+Change-Id: Ia66329d60293f538aed4fa480f97d88404204d2b
+---
+ services/audioflinger/Tracks.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/services/audioflinger/Tracks.cpp b/services/audioflinger/Tracks.cpp
+index 78ba24d1b0..c9b578ff39 100644
+--- a/services/audioflinger/Tracks.cpp
++++ b/services/audioflinger/Tracks.cpp
+@@ -367,7 +367,8 @@ audio_utils::trace::Object TrackBase::createDeviceIntervalTrace(const std::strin
+             .set(AUDIO_TRACE_OBJECT_KEY_FLAGS, trackFlagsAsString())
+             .set(AUDIO_TRACE_OBJECT_KEY_FORMAT, IAfThreadBase::formatToString(mFormat))
+             .set(AUDIO_TRACE_OBJECT_KEY_FRAMECOUNT, static_cast<int64_t>(mFrameCount))
+-            .set(AUDIO_TRACE_OBJECT_KEY_PID, static_cast<int32_t>(mClient->pid()))
++            .set(AUDIO_TRACE_OBJECT_KEY_PID, static_cast<int32_t>(
++                    mClient ? mClient->pid() : getpid()))
+             .set(AUDIO_TRACE_OBJECT_KEY_SAMPLE_RATE, static_cast<int32_t>(sampleRate()));
+     if (const auto thread = mThread.promote()) {
+         trace // continue in alphabetical order
+-- 
+2.43.0
+

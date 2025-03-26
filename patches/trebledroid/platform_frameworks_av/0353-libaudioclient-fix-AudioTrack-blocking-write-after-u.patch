@@ -1,0 +1,44 @@
+From 5a36f93bb75f5aaf6bfbd54b14c4ed9becb0dfb5 Mon Sep 17 00:00:00 2001
+From: "youfa.song" <vsyfar@gmail.com>
+Date: Wed, 20 Nov 2024 14:41:20 +0800
+Subject: [PATCH 353/436] libaudioclient: fix AudioTrack blocking write after
+ underrun
+
+After checking that the ring buffer is full and before waiting for more buffer space,
+there's a window where AudioFlinger may disable the track due to an underrun.
+If this occurs, the client track will never wake up because it awaits buffer space
+that will never become available.
+This commit addresses the issue by ensuring the client track handles this scenario properly,
+preventing a potential hang.
+
+Change-Id: I4b9575c7a70ef7d5ad2158c9e27cd9259ab7cfe6
+Signed-off-by: youfa.song <vsyfar@gmail.com>
+---
+ media/libaudioclient/AudioTrackShared.cpp | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/media/libaudioclient/AudioTrackShared.cpp b/media/libaudioclient/AudioTrackShared.cpp
+index e3b79b2ece..359f3c1ff2 100644
+--- a/media/libaudioclient/AudioTrackShared.cpp
++++ b/media/libaudioclient/AudioTrackShared.cpp
+@@ -310,8 +310,16 @@ status_t ClientProxy::obtainBuffer(Buffer* buffer, const struct timespec *reques
+             ts = NULL;
+             break;
+         }
++
+         int32_t old = android_atomic_and(~CBLK_FUTEX_WAKE, &cblk->mFutex);
+-        if (!(old & CBLK_FUTEX_WAKE)) {
++
++        // Check inactive to prevent waiting if the track has been disabled due to underrun
++        // (or invalidated).  The subsequent call to obtainBufer will return NOT_ENOUGH_DATA
++        // (or DEAD_OBJECT) and restart (or restore) the track.
++        const int32_t current_flags = android_atomic_acquire_load(&cblk->mFlags);
++        const bool inactive = current_flags & (CBLK_INVALID | CBLK_DISABLED);
++
++        if (!(old & CBLK_FUTEX_WAKE) && !inactive) {
+             if (measure && !beforeIsValid) {
+                 clock_gettime(CLOCK_MONOTONIC, &before);
+                 beforeIsValid = true;
+-- 
+2.43.0
+

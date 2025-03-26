@@ -1,0 +1,104 @@
+From d55d2d1fd7671e6376b1d16328e0791c56fd3e81 Mon Sep 17 00:00:00 2001
+From: "T.J. Mercier" <tjmercier@google.com>
+Date: Fri, 1 Nov 2024 19:48:13 +0000
+Subject: [PATCH 193/436] frameworks/av: Update libprocessgroup dependencies
+
+Bug: 349105928
+Change-Id: I61b09b47e0dbbeeccdd90567518a60888b4e76f7
+---
+ apex/ld.config.txt                          | 4 ++--
+ media/libaaudio/fuzzer/Android.bp           | 2 --
+ media/libaudioclient/aidl/fuzzer/Android.bp | 2 --
+ media/libaudioclient/fuzzer/Android.bp      | 2 --
+ media/libaudioclient/tests/Android.bp       | 1 -
+ media/module/extractors/mpeg2/Android.bp    | 1 -
+ 6 files changed, 2 insertions(+), 10 deletions(-)
+
+diff --git a/apex/ld.config.txt b/apex/ld.config.txt
+index 4dc5fb12ee..c24d51f252 100644
+--- a/apex/ld.config.txt
++++ b/apex/ld.config.txt
+@@ -33,7 +33,7 @@ namespace.default.links = platform
+ # TODO: replace the following when apex has a way to auto-generate this list
+ # namespace.default.link.platform.shared_libs  = %LLNDK_LIBRARIES%
+ # namespace.default.link.platform.shared_libs += %SANITIZER_RUNTIME_LIBRARIES%
+-namespace.default.link.platform.shared_libs = libEGL.so:libGLESv1_CM.so:libGLESv2.so:libGLESv3.so:libandroid_net.so:libc.so:libcgrouprc.so:libclang_rt.asan-aarch64-android.so:libclang_rt.asan-arm-android.so:libclang_rt.hwasan-aarch64-android.so:libclang_rt.asan-i686-android.so:libclang_rt.asan-x86_64-android.so:libdl.so:libft2.so:liblog.so:libm.so:libmediandk.so:libnativewindow.so:libneuralnetworks.so:libsync.so:libvndksupport.so:libdl_android.so:libvulkan.so:libbinder_ndk.so
++namespace.default.link.platform.shared_libs = libEGL.so:libGLESv1_CM.so:libGLESv2.so:libGLESv3.so:libandroid_net.so:libc.so:libclang_rt.asan-aarch64-android.so:libclang_rt.asan-arm-android.so:libclang_rt.hwasan-aarch64-android.so:libclang_rt.asan-i686-android.so:libclang_rt.asan-x86_64-android.so:libdl.so:libft2.so:liblog.so:libm.so:libmediandk.so:libnativewindow.so:libneuralnetworks.so:libsync.so:libvndksupport.so:libdl_android.so:libvulkan.so:libbinder_ndk.so
+ 
+ ###############################################################################
+ # "platform" namespace
+@@ -138,7 +138,7 @@ namespace.sphal.links = platform
+ # TODO: replace the following when apex has a way to auto-generate this list
+ # namespace.sphal.link.platform.shared_libs  = %LLNDK_LIBRARIES%
+ # namespace.sphal.link.platform.shared_libs += %SANITIZER_RUNTIME_LIBRARIES%
+-namespace.sphal.link.platform.shared_libs = libEGL.so:libGLESv1_CM.so:libGLESv2.so:libGLESv3.so:libandroid_net.so:libc.so:libcgrouprc.so:libclang_rt.asan-aarch64-android.so:libclang_rt.asan-arm-android.so:libclang_rt.hwasan-aarch64-android.so:libclang_rt.asan-i686-android.so:libclang_rt.asan-x86_64-android.so:libdl.so:libft2.so:liblog.so:libm.so:libmediandk.so:libnativewindow.so:libneuralnetworks.so:libsync.so:libvndksupport.so:libvulkan.so:libbinder_ndk.so
++namespace.sphal.link.platform.shared_libs = libEGL.so:libGLESv1_CM.so:libGLESv2.so:libGLESv3.so:libandroid_net.so:libc.so:libclang_rt.asan-aarch64-android.so:libclang_rt.asan-arm-android.so:libclang_rt.hwasan-aarch64-android.so:libclang_rt.asan-i686-android.so:libclang_rt.asan-x86_64-android.so:libdl.so:libft2.so:liblog.so:libm.so:libmediandk.so:libnativewindow.so:libneuralnetworks.so:libsync.so:libvndksupport.so:libvulkan.so:libbinder_ndk.so
+ 
+ # Add a link for libz.so which is llndk on devices where VNDK is not enforced.
+ namespace.sphal.link.platform.shared_libs += libz.so
+diff --git a/media/libaaudio/fuzzer/Android.bp b/media/libaaudio/fuzzer/Android.bp
+index b369a6252f..67c6715c32 100644
+--- a/media/libaaudio/fuzzer/Android.bp
++++ b/media/libaaudio/fuzzer/Android.bp
+@@ -58,8 +58,6 @@ cc_fuzz {
+         "libaudioclient",
+         "libaudioutils",
+         "libbase_ndk",
+-        "libcgrouprc",
+-        "libcgrouprc_format",
+         "libcutils",
+         "libjsoncpp",
+         "liblog",
+diff --git a/media/libaudioclient/aidl/fuzzer/Android.bp b/media/libaudioclient/aidl/fuzzer/Android.bp
+index a215c0b11c..14e528fad1 100644
+--- a/media/libaudioclient/aidl/fuzzer/Android.bp
++++ b/media/libaudioclient/aidl/fuzzer/Android.bp
+@@ -24,8 +24,6 @@ cc_defaults {
+         "android.hardware.audio.common@7.0-enums",
+         "audiopermissioncontroller",
+         "libaudiomockhal",
+-        "libcgrouprc",
+-        "libcgrouprc_format",
+         "libfakeservicemanager",
+         "libjsoncpp",
+         "libmediametricsservice",
+diff --git a/media/libaudioclient/fuzzer/Android.bp b/media/libaudioclient/fuzzer/Android.bp
+index 8bca8dfebf..65ada70186 100644
+--- a/media/libaudioclient/fuzzer/Android.bp
++++ b/media/libaudioclient/fuzzer/Android.bp
+@@ -37,8 +37,6 @@ cc_fuzz {
+         "effect-aidl-cpp",
+         "libaudioclient",
+         "libbase",
+-        "libcgrouprc",
+-        "libcgrouprc_format",
+         "libcutils",
+         "libjsoncpp",
+         "liblog",
+diff --git a/media/libaudioclient/tests/Android.bp b/media/libaudioclient/tests/Android.bp
+index ddf14a3498..3941280a37 100644
+--- a/media/libaudioclient/tests/Android.bp
++++ b/media/libaudioclient/tests/Android.bp
+@@ -107,7 +107,6 @@ cc_defaults {
+         "framework-permission-aidl-cpp",
+         "libaudioutils",
+         "libbase",
+-        "libcgrouprc",
+         "libdl",
+         "libmedia",
+         "libmedia_helper",
+diff --git a/media/module/extractors/mpeg2/Android.bp b/media/module/extractors/mpeg2/Android.bp
+index aa59a0ce87..63dbcda947 100644
+--- a/media/module/extractors/mpeg2/Android.bp
++++ b/media/module/extractors/mpeg2/Android.bp
+@@ -44,7 +44,6 @@ cc_library {
+ 
+     shared_libs: [
+         "libbase",
+-        "libcgrouprc#29",
+     ],
+ 
+     header_libs: [
+-- 
+2.43.0
+

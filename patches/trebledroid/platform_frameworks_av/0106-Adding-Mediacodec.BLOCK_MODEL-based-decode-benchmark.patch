@@ -1,0 +1,615 @@
+From b1f5a7f1b3ee94caf2f57561a4ae817bed9424e2 Mon Sep 17 00:00:00 2001
+From: Arun Johnson <arunjohnson@google.com>
+Date: Mon, 14 Oct 2024 23:37:53 +0000
+Subject: [PATCH 106/436] Adding Mediacodec.BLOCK_MODEL based decode benchmarks
+
+benchmarks for all decode use cases using BLOCK_MODEL
+
+Bug: 361349204
+Flag: EXEMPT does not affect framework behaviour
+
+Change-Id: I8e5367f4224def2eb1e3db2c0d83a244bc841e01
+---
+ .../benchmark/library/BlockModelDecoder.java  | 241 ++++++++++++++++
+ .../media/benchmark/library/CodecUtils.java   |  17 ++
+ .../media/benchmark/library/Decoder.java      |  12 +-
+ .../MultiAccessUnitBlockModelDecoder.java     | 264 ++++++++++++++++++
+ 4 files changed, 531 insertions(+), 3 deletions(-)
+ create mode 100644 media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/BlockModelDecoder.java
+ create mode 100644 media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/MultiAccessUnitBlockModelDecoder.java
+
+diff --git a/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/BlockModelDecoder.java b/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/BlockModelDecoder.java
+new file mode 100644
+index 0000000000..3b3640edf3
+--- /dev/null
++++ b/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/BlockModelDecoder.java
+@@ -0,0 +1,241 @@
++/*
++ * Copyright (C) 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package com.android.media.benchmark.library;
++
++import android.media.MediaCodec;
++import android.media.MediaExtractor;
++import android.media.MediaFormat;
++import android.os.Build;
++import android.util.Log;
++
++import androidx.annotation.NonNull;
++
++import java.io.FileOutputStream;
++import java.io.IOException;
++import java.nio.ByteBuffer;
++import java.util.List;
++
++import com.android.media.benchmark.library.Decoder;
++
++public class BlockModelDecoder extends Decoder {
++    private static final String TAG = BlockModelDecoder.class.getSimpleName();
++    private final boolean DEBUG = false;
++    protected final LinearBlockWrapper mLinearInputBlock = new LinearBlockWrapper();
++
++    /**
++     * Wrapper class for {@link MediaCodec.LinearBlock}
++     */
++    public static class LinearBlockWrapper {
++        private MediaCodec.LinearBlock mBlock;
++        private ByteBuffer mBuffer;
++        private int mOffset;
++
++        public MediaCodec.LinearBlock getBlock() {
++            return mBlock;
++        }
++
++        public ByteBuffer getBuffer() {
++            return mBuffer;
++        }
++
++        public int getBufferCapacity() {
++            return mBuffer == null ? 0 : mBuffer.capacity();
++        }
++
++        public int getOffset() {
++            return mOffset;
++        }
++
++        public void setOffset(int size) {
++            mOffset = size;
++        }
++
++        public boolean allocateBlock(String codec, int size) throws RuntimeException{
++            recycle();
++            mBlock = MediaCodec.LinearBlock.obtain(size, new String[]{codec});
++            if (mBlock == null || !mBlock.isMappable()) {
++                throw new RuntimeException("Linear Block not allocated/mapped");
++            }
++            mBuffer = mBlock.map();
++            mOffset = 0;
++            return true;
++        }
++
++        public void recycle() {
++            if (mBlock != null) {
++                mBlock.recycle();
++                mBlock = null;
++            }
++            mBuffer = null;
++            mOffset = 0;
++        }
++    }
++
++    public BlockModelDecoder() {
++        // empty
++    }
++
++    public void tearDown() {
++        mLinearInputBlock.recycle();
++
++    }
++
++    /**
++     * Decodes the given input buffer,
++     * provided valid list of buffer info and format are passed as inputs.
++     *
++     * @param inputBuffer     Decode the provided list of ByteBuffers
++     * @param inputBufferInfo List of buffer info corresponding to provided input buffers
++     * @param asyncMode       Will run on async implementation if true
++     * @param format          For creating the decoder if codec name is empty and configuring it
++     * @param codecName       Will create the decoder with codecName
++     * @return DECODE_SUCCESS if decode was successful, DECODE_DECODER_ERROR for fail,
++     *         DECODE_CREATE_ERROR for decoder not created
++     * @throws IOException if the codec cannot be created.
++     */
++    @Override
++    public int decode(@NonNull List<ByteBuffer> inputBuffer,
++        @NonNull List<MediaCodec.BufferInfo> inputBufferInfo, final boolean asyncMode,
++        @NonNull MediaFormat format, String codecName)
++        throws IOException, InterruptedException {
++        setExtraConfigureFlags(MediaCodec.CONFIGURE_FLAG_USE_BLOCK_MODEL);
++        return super.decode(inputBuffer, inputBufferInfo, asyncMode, format, codecName);
++    }
++
++    @Override
++    protected void onInputAvailable(int inputBufferId, MediaCodec mediaCodec) {
++        if (mNumInFramesProvided >= mNumInFramesRequired) {
++            mIndex = mInputBufferInfo.size() - 1;
++        }
++        MediaCodec.BufferInfo bufInfo = mInputBufferInfo.get(mIndex);
++        mSawInputEOS = (bufInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0;
++        if (mLinearInputBlock.getOffset() + bufInfo.size > mLinearInputBlock.getBufferCapacity()) {
++            int requestSize = 8192;
++            requestSize = Math.max(bufInfo.size, requestSize);
++            mLinearInputBlock.allocateBlock(mediaCodec.getCanonicalName(), requestSize);
++        }
++        int codecFlags = 0;
++        if ((bufInfo.flags & MediaExtractor.SAMPLE_FLAG_SYNC) != 0) {
++            codecFlags |= MediaCodec.BUFFER_FLAG_KEY_FRAME;
++        }
++        if ((bufInfo.flags & MediaExtractor.SAMPLE_FLAG_PARTIAL_FRAME) != 0) {
++            codecFlags |= MediaCodec.BUFFER_FLAG_PARTIAL_FRAME;
++        }
++        codecFlags |= mSawInputEOS ? MediaCodec.BUFFER_FLAG_END_OF_STREAM : 0;
++        if (DEBUG) {
++            Log.v(TAG, "input: id: " + inputBufferId
++                    + " size: " + bufInfo.size
++                    + " pts: " + bufInfo.presentationTimeUs
++                    + " flags: " + codecFlags);
++        }
++        mLinearInputBlock.getBuffer().put(mInputBuffer.get(mIndex).array());
++        mNumInFramesProvided++;
++        mIndex = mNumInFramesProvided % (mInputBufferInfo.size() - 1);
++        if (mSawInputEOS) {
++            Log.i(TAG, "Saw Input EOS");
++        }
++        mStats.addFrameSize(bufInfo.size);
++        MediaCodec.QueueRequest request = mCodec.getQueueRequest(inputBufferId);
++        request.setLinearBlock(mLinearInputBlock.getBlock(), mLinearInputBlock.getOffset(),
++                bufInfo.size);
++        request.setPresentationTimeUs(bufInfo.presentationTimeUs);
++        request.setFlags(codecFlags);
++        request.queue();
++        if (bufInfo.size > 0 && (codecFlags & (MediaCodec.BUFFER_FLAG_CODEC_CONFIG
++                | MediaCodec.BUFFER_FLAG_PARTIAL_FRAME)) == 0) {
++            mLinearInputBlock.setOffset(mLinearInputBlock.getOffset() + bufInfo.size);
++        }
++    }
++
++    @Override
++    protected void onOutputAvailable(
++            MediaCodec mediaCodec, int outputBufferId, MediaCodec.BufferInfo outputBufferInfo) {
++        if (mSawOutputEOS || outputBufferId < 0) {
++            return;
++        }
++        mNumOutputFrame++;
++        if (DEBUG) {
++            Log.d(TAG,
++                    "In OutputBufferAvailable ,"
++                            + " output frame number = " + mNumOutputFrame
++                            + " timestamp = " + outputBufferInfo.presentationTimeUs
++                            + " size = " + outputBufferInfo.size);
++        }
++        MediaCodec.OutputFrame outFrame = mediaCodec.getOutputFrame(outputBufferId);
++        ByteBuffer outputBuffer = null;
++        try {
++            if (outFrame.getLinearBlock() != null) {
++                outputBuffer = outFrame.getLinearBlock().map();
++            }
++        } catch(IllegalStateException e) {
++            // buffer may not be linear, this is ok
++            // as we are handling non-linear buffers below.
++        }
++        if (mOutputStream != null) {
++            try {
++                if (outputBuffer != null) {
++                    byte[] bytesOutput = new byte[outputBuffer.remaining()];
++                    outputBuffer.get(bytesOutput);
++                    mOutputStream.write(bytesOutput);
++                }
++            } catch (IOException e) {
++                e.printStackTrace();
++                Log.d(TAG, "Error Dumping File: Exception " + e.toString());
++            }
++        }
++        ByteBuffer copiedBuffer = null;
++        int bytesRemaining = 0;
++        if (outputBuffer != null) {
++            bytesRemaining = outputBuffer.remaining();
++            if (mIBufferSend != null) {
++                copiedBuffer = ByteBuffer.allocate(outputBuffer.remaining());
++                copiedBuffer.put(outputBuffer);
++            }
++            outFrame.getLinearBlock().recycle();
++            outputBuffer = null;
++        }
++        if (mFrameReleaseQueue != null) {
++            if (mMime.startsWith("audio/")) {
++                try {
++                    mFrameReleaseQueue.pushFrame(outputBufferId, bytesRemaining);
++                } catch (Exception e) {
++                    Log.d(TAG, "Error in getting MediaCodec buffer" + e.toString());
++                }
++            } else {
++                mFrameReleaseQueue.pushFrame(mNumOutputFrame, outputBufferId,
++                                                outputBufferInfo.presentationTimeUs);
++            }
++
++        } else if (mIBufferSend != null) {
++            IBufferXfer.BufferXferInfo info = new IBufferXfer.BufferXferInfo();
++            // TODO: may be inefficient;
++            info.buf = copiedBuffer;
++            info.idx = outputBufferId;
++            info.obj = mediaCodec;
++            info.bytesRead = outputBufferInfo.size;
++            info.presentationTimeUs = outputBufferInfo.presentationTimeUs;
++            info.flag = outputBufferInfo.flags;
++            mIBufferSend.sendBuffer(this, info);
++        } else {
++            mediaCodec.releaseOutputBuffer(outputBufferId, mRender);
++        }
++        mSawOutputEOS = (outputBufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0;
++        if (DEBUG && mSawOutputEOS) {
++            Log.i(TAG, "Saw output EOS");
++        }
++    }
++
++}
+\ No newline at end of file
+diff --git a/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/CodecUtils.java b/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/CodecUtils.java
+index f2232420e3..031817b8b5 100644
+--- a/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/CodecUtils.java
++++ b/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/CodecUtils.java
+@@ -78,4 +78,21 @@ public class CodecUtils {
+         }
+         return null;
+     }
++    /**
++     * Returns compression ratio for a given mediaType.
++     * @param mediaType mime type for which compression ratio is to be returned.
++     */
++    public static float getCompressionRatio(String mediaType) {
++        switch (mediaType) {
++            case MediaFormat.MIMETYPE_AUDIO_FLAC:
++                return 0.7f;
++            case MediaFormat.MIMETYPE_AUDIO_G711_MLAW:
++            case MediaFormat.MIMETYPE_AUDIO_G711_ALAW:
++            case MediaFormat.MIMETYPE_AUDIO_MSGSM:
++                return 0.5f;
++            case MediaFormat.MIMETYPE_AUDIO_RAW:
++                return 1.0f;
++        }
++        return 0.1f;
++    }
+ }
+diff --git a/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/Decoder.java b/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/Decoder.java
+index e2d23e22de..2ea0ed254c 100644
+--- a/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/Decoder.java
++++ b/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/Decoder.java
+@@ -43,6 +43,7 @@ public class Decoder implements IBufferXfer.IReceiveBuffer {
+ 
+     protected final Object mLock = new Object();
+     protected MediaCodec mCodec;
++    protected int mExtraFlags = 0;
+     protected Surface mSurface = null;
+     protected boolean mRender = false;
+     protected ArrayList<BufferInfo> mInputBufferInfo;
+@@ -88,6 +89,11 @@ public class Decoder implements IBufferXfer.IReceiveBuffer {
+         mIBufferSend = receiver;
+         return true;
+     }
++
++    public void setExtraConfigureFlags(int flags) {
++        this.mExtraFlags = flags;
++    }
++
+     /**
+      * Setup of decoder
+      *
+@@ -121,7 +127,8 @@ public class Decoder implements IBufferXfer.IReceiveBuffer {
+         mOutputStream = null;
+         mSurface = surface;
+         mRender = render;
+-        if (useFrameReleaseQueue) {
++        mUseFrameReleaseQueue = useFrameReleaseQueue;
++        if (mUseFrameReleaseQueue) {
+             Log.i(TAG, "Using FrameReleaseQueue with frameRate " + frameRate);
+             mFrameReleaseQueue = new FrameReleaseQueue(mRender, frameRate);
+         }
+@@ -252,11 +259,10 @@ public class Decoder implements IBufferXfer.IReceiveBuffer {
+         if (asyncMode) {
+             setCallback(mCodec);
+         }
+-        int isEncoder = 0;
+         if (DEBUG) {
+             Log.d(TAG, "Media Format : " + format.toString());
+         }
+-        mCodec.configure(format, mSurface, null, isEncoder);
++        mCodec.configure(format, mSurface, null, mExtraFlags);
+ 
+         mCodec.start();
+         Log.i(TAG, "Codec started async mode ?  " + asyncMode);
+diff --git a/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/MultiAccessUnitBlockModelDecoder.java b/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/MultiAccessUnitBlockModelDecoder.java
+new file mode 100644
+index 0000000000..ed2defe1e6
+--- /dev/null
++++ b/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/MultiAccessUnitBlockModelDecoder.java
+@@ -0,0 +1,264 @@
++/*
++ * Copyright (C) 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package com.android.media.benchmark.library;
++
++import android.media.AudioFormat;
++import android.media.MediaCodec;
++import android.media.MediaExtractor;
++import android.media.MediaFormat;
++import android.os.Build;
++import android.util.Log;
++
++import androidx.annotation.NonNull;
++
++import java.io.FileOutputStream;
++import java.io.IOException;
++import java.nio.ByteBuffer;
++
++import java.util.ArrayDeque;
++import java.util.Iterator;
++import java.util.List;
++
++import com.android.media.benchmark.library.CodecUtils;
++import com.android.media.benchmark.library.BlockModelDecoder;
++
++public class MultiAccessUnitBlockModelDecoder extends BlockModelDecoder {
++	private static final String TAG = MultiAccessUnitBlockModelDecoder.class.getSimpleName();
++    private final ArrayDeque<MediaCodec.BufferInfo> mInputInfos = new ArrayDeque<>();
++    private final boolean DEBUG = false;
++    protected int mMaxInputSize = 0;
++
++    public MultiAccessUnitBlockModelDecoder() {
++    	// empty
++    }
++
++    /**
++     * Decodes the given input buffer,
++     * provided valid list of buffer info and format are passed as inputs.
++     *
++     * @param inputBuffer     Decode the provided list of ByteBuffers
++     * @param inputBufferInfo List of buffer info corresponding to provided input buffers
++     * @param asyncMode       Will run on async implementation if true
++     * @param format          For creating the decoder if codec name is empty and configuring it
++     * @param codecName       Will create the decoder with codecName
++     * @return DECODE_SUCCESS if decode was successful, DECODE_DECODER_ERROR for fail,
++     *         DECODE_CREATE_ERROR for decoder not created
++     * @throws IOException if the codec cannot be created.
++     */
++    @Override
++    public int decode(@NonNull List<ByteBuffer> inputBuffer,
++        @NonNull List<MediaCodec.BufferInfo> inputBufferInfo, final boolean asyncMode,
++        @NonNull MediaFormat format, String codecName)
++        throws IOException, InterruptedException {
++        setExtraConfigureFlags(MediaCodec.CONFIGURE_FLAG_USE_BLOCK_MODEL);
++        configureMaxInputSize(format);
++        return super.decode(inputBuffer, inputBufferInfo, asyncMode, format, codecName);
++    }
++
++    protected void configureMaxInputSize(MediaFormat format) {
++        final String mime = format.getString(MediaFormat.KEY_MIME);
++        final int maxOutputSize = format.getNumber(
++            MediaFormat.KEY_BUFFER_BATCH_MAX_OUTPUT_SIZE, 0).intValue();
++        final int maxInputSizeInBytes = format.getInteger(
++                MediaFormat.KEY_MAX_INPUT_SIZE);
++        mMaxInputSize = Math.max(maxInputSizeInBytes,
++                (int) (maxOutputSize * CodecUtils.getCompressionRatio(mime)));
++    }
++
++    @Override
++    public void setCallback(MediaCodec codec) {
++        mCodec.setCallback(new MediaCodec.Callback() {
++            boolean isUsingLargeFrameMode = false;
++
++            @Override
++            public void onInputBufferAvailable(
++                    @NonNull MediaCodec mediaCodec, int inputBufferId) {
++                try {
++                    mStats.addInputTime();
++                    if (isUsingLargeFrameMode) {
++                        onInputsAvailable(inputBufferId, mediaCodec);
++                    } else {
++                        onInputAvailable(inputBufferId, mediaCodec);
++                    }
++                } catch (Exception e) {
++                    e.printStackTrace();
++                    Log.e(TAG, e.toString());
++                }
++            }
++
++            @Override
++            public void onOutputBufferAvailable(@NonNull MediaCodec mediaCodec,
++                    int outputBufferId, @NonNull MediaCodec.BufferInfo bufferInfo) {
++                mStats.addOutputTime();
++                onOutputAvailable(mediaCodec, outputBufferId, bufferInfo);
++                if (mSawOutputEOS) {
++                    synchronized (mLock) { mLock.notify(); }
++                }
++            }
++
++            @Override
++            public void onOutputBuffersAvailable(
++                    @NonNull MediaCodec mediaCodec,
++                            int outputBufferId, @NonNull ArrayDeque<MediaCodec.BufferInfo> infos) {
++                int i = 0;
++                while(i++ < infos.size()) {
++                    mStats.addOutputTime();
++                }
++                onOutputsAvailable(mediaCodec, outputBufferId, infos);
++                if (mSawOutputEOS) {
++                    synchronized (mLock) { mLock.notify(); }
++                }
++            }
++
++            @Override
++            public void onOutputFormatChanged(
++                    @NonNull MediaCodec mediaCodec, @NonNull MediaFormat format) {
++                Log.i(TAG, "Output format changed. Format: " + format.toString());
++                final int maxOutputSize = format.getNumber(
++                            MediaFormat.KEY_BUFFER_BATCH_MAX_OUTPUT_SIZE, 0).intValue();
++                isUsingLargeFrameMode = (maxOutputSize > 0);
++                configureMaxInputSize(format);
++                if (mUseFrameReleaseQueue && mFrameReleaseQueue == null) {
++                    int bytesPerSample = AudioFormat.getBytesPerSample(
++                            format.getInteger(MediaFormat.KEY_PCM_ENCODING,
++                                    AudioFormat.ENCODING_PCM_16BIT));
++                    int sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE);
++                    int channelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
++                    mFrameReleaseQueue = new FrameReleaseQueue(
++                            mRender, sampleRate, channelCount, bytesPerSample);
++                    mFrameReleaseQueue.setMediaCodec(mCodec);
++                }
++            }
++
++            @Override
++            public void onError(
++                    @NonNull MediaCodec mediaCodec, @NonNull MediaCodec.CodecException e) {
++                mSignalledError = true;
++                Log.e(TAG, "Codec Error: " + e.toString());
++                e.printStackTrace();
++                synchronized (mLock) { mLock.notify(); }
++            }
++        });
++
++    }
++
++    protected void onInputsAvailable(int inputBufferId, MediaCodec mediaCodec) {
++        if (inputBufferId >= 0) {
++            mLinearInputBlock.allocateBlock(mediaCodec.getCanonicalName(), mMaxInputSize);
++            MediaCodec.BufferInfo bufInfo;
++            mInputInfos.clear();
++            int offset = 0;
++            while (mNumInFramesProvided < mNumInFramesRequired) {
++                bufInfo = mInputBufferInfo.get(mIndex);
++                mSawInputEOS = (bufInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0;
++                int bufferSizeNeeded = mLinearInputBlock.getOffset() + bufInfo.size;
++                if (bufferSizeNeeded > mLinearInputBlock.getBufferCapacity()) {
++                    break;
++                }
++                mLinearInputBlock.getBuffer().put(mInputBuffer.get(mIndex).array());
++                mLinearInputBlock.setOffset(mLinearInputBlock.getOffset() + bufInfo.size);
++                bufInfo.offset = offset; offset += bufInfo.size;
++                mInputInfos.add(bufInfo);
++                mNumInFramesProvided++;
++                mIndex = mNumInFramesProvided % (mInputBufferInfo.size() - 1);
++
++            }
++            if (DEBUG) {
++                Log.d(TAG, "inputsAvailable ID : " + inputBufferId
++                        + " queued info size: " + mInputInfos.size()
++                        + " Total queued size: " + offset);
++            }
++            if (mNumInFramesProvided >= mNumInFramesRequired) {
++                mIndex = mInputBufferInfo.size() - 1;
++                bufInfo = mInputBufferInfo.get(mIndex);
++                int bufferSizeNeeded = mLinearInputBlock.getOffset() + bufInfo.size;
++                if (bufferSizeNeeded <= mLinearInputBlock.getBufferCapacity()) {
++                    if ((bufInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) == 0) {
++                        Log.e(TAG, "Error in EOS flag for Decoder");
++                    }
++                    mSawInputEOS = (bufInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0;
++                    mLinearInputBlock.getBuffer().put(mInputBuffer.get(mIndex).array());
++                    mLinearInputBlock.setOffset(mLinearInputBlock.getOffset() + bufInfo.size);
++                    bufInfo.offset = offset; offset += bufInfo.size;
++                    //bufInfo.flags = codecFlags;
++                    mInputInfos.add(bufInfo);
++                    mNumInFramesProvided++;
++                }
++            }
++            if (mInputInfos.size() == 0) {
++                Log.d(TAG, " No inputs to queue");
++            } else {
++                mStats.addFrameSize(offset);
++                MediaCodec.QueueRequest request = mediaCodec.getQueueRequest(inputBufferId);
++                request.setMultiFrameLinearBlock(mLinearInputBlock.getBlock(), mInputInfos);
++                request.queue();
++            }
++        }
++    }
++
++    protected void onOutputsAvailable(MediaCodec mediaCodec, int outputBufferId,
++            ArrayDeque<MediaCodec.BufferInfo> infos) {
++        if (mSawOutputEOS || outputBufferId < 0) {
++            return;
++        }
++        MediaCodec.OutputFrame outFrame = mediaCodec.getOutputFrame(outputBufferId);
++        ByteBuffer outputBuffer = null;
++        try {
++            if (outFrame.getLinearBlock() != null) {
++                outputBuffer = outFrame.getLinearBlock().map();
++            }
++        } catch(IllegalStateException e) {
++            // buffer may not be linear, this is ok
++            // as we are handling non-linear buffers below.
++        }
++        if (mOutputStream != null) {
++            try {
++                if (outputBuffer != null) {
++                    byte[] bytesOutput = new byte[outputBuffer.remaining()];
++                    outputBuffer.get(bytesOutput);
++                    mOutputStream.write(bytesOutput);
++                    if (DEBUG) {
++                        Log.d(TAG, "Received outputs buffer size : " + outputBuffer.remaining()
++                                + " infos size " + infos.size());
++                    }
++                }
++            } catch (IOException e) {
++                e.printStackTrace();
++                Log.d(TAG, "Error Dumping File: Exception " + e.toString());
++            }
++        }
++        mNumOutputFrame += infos.size();
++        MediaCodec.BufferInfo last = infos.peekLast();
++        if (last != null) {
++            mSawOutputEOS |= ((last.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0);
++        }
++        int bytesRemaining = 0;
++        if (outputBuffer != null) {
++            bytesRemaining = outputBuffer.remaining();
++            outFrame.getLinearBlock().recycle();
++            outputBuffer = null;
++        }
++        if (mFrameReleaseQueue != null) {
++            mFrameReleaseQueue.pushFrame(outputBufferId, bytesRemaining);
++        } else if (mIBufferSend == null) {
++            mediaCodec.releaseOutputBuffer(outputBufferId, mRender);
++        }
++        if (mSawOutputEOS) {
++            Log.i(TAG, "Large frame - saw output EOS");
++        }
++    }
++
++}
+\ No newline at end of file
+-- 
+2.43.0
+

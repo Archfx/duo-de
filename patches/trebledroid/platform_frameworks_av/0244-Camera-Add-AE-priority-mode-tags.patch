@@ -1,0 +1,357 @@
+From f8c010585878edf1e7fb8ee6c2f0e078b763b4b0 Mon Sep 17 00:00:00 2001
+From: Ravneet Dhanjal <rdhanjal@google.com>
+Date: Tue, 5 Nov 2024 23:48:37 +0000
+Subject: [PATCH 244/436] Camera: Add AE priority mode tags
+
+- Add AE priority mode tags
+- Populate CONTROL_AE_AVAILABLE_PRIORITY_MODES with at
+least OFF mode
+
+Test: Camera CTS with and without flag
+Bug: 359944765
+Flag: com.android.internal.camera.flags.ae_priority
+
+Change-Id: I1aec82f212915d6ddbd0e6f55b015a0d840b2585
+---
+ camera/camera_platform.aconfig                |   9 ++
+ camera/ndk/impl/ACameraMetadata.cpp           |   1 +
+ .../include/camera/NdkCameraMetadataTags.h    | 106 +++++++++++++++++-
+ .../aidl/VndkVersionMetadataTags.h            |   2 +
+ .../common/CameraProviderManager.cpp          |  30 +++++
+ .../common/CameraProviderManager.h            |   1 +
+ .../common/aidl/AidlProviderInfo.cpp          |   8 ++
+ .../common/hidl/HidlProviderInfo.cpp          |   8 ++
+ .../utils/SessionConfigurationUtils.cpp       |   9 ++
+ 9 files changed, 171 insertions(+), 3 deletions(-)
+
+diff --git a/camera/camera_platform.aconfig b/camera/camera_platform.aconfig
+index 774d21c814..55e5fc8f84 100644
+--- a/camera/camera_platform.aconfig
++++ b/camera/camera_platform.aconfig
+@@ -226,3 +226,12 @@ flag {
+     description: "Gives apps explicit control on reflects zoom via ZOOM_RATIO capture result"
+     bug: "298899993"
+ }
++
++flag {
++    namespace: "camera_platform"
++    is_exported: true
++    name: "ae_priority"
++    description: "Add AE priority modes"
++    bug: "359944765"
++}
++
+diff --git a/camera/ndk/impl/ACameraMetadata.cpp b/camera/ndk/impl/ACameraMetadata.cpp
+index b701c6e96d..32e2f3dc9c 100644
+--- a/camera/ndk/impl/ACameraMetadata.cpp
++++ b/camera/ndk/impl/ACameraMetadata.cpp
+@@ -563,6 +563,7 @@ ACameraMetadata::isCaptureRequestTag(const uint32_t tag) {
+         case ACAMERA_CONTROL_SETTINGS_OVERRIDE:
+         case ACAMERA_CONTROL_AUTOFRAMING:
+         case ACAMERA_CONTROL_ZOOM_METHOD:
++        case ACAMERA_CONTROL_AE_PRIORITY_MODE:
+         case ACAMERA_EDGE_MODE:
+         case ACAMERA_FLASH_MODE:
+         case ACAMERA_FLASH_STRENGTH_LEVEL:
+diff --git a/camera/ndk/include/camera/NdkCameraMetadataTags.h b/camera/ndk/include/camera/NdkCameraMetadataTags.h
+index ece37a744f..b792de08ab 100644
+--- a/camera/ndk/include/camera/NdkCameraMetadataTags.h
++++ b/camera/ndk/include/camera/NdkCameraMetadataTags.h
+@@ -563,7 +563,9 @@ typedef enum acamera_metadata_tag {
+      * application's selected exposure time, sensor sensitivity,
+      * and frame duration (ACAMERA_SENSOR_EXPOSURE_TIME,
+      * ACAMERA_SENSOR_SENSITIVITY, and
+-     * ACAMERA_SENSOR_FRAME_DURATION). If one of the FLASH modes
++     * ACAMERA_SENSOR_FRAME_DURATION). If ACAMERA_CONTROL_AE_PRIORITY_MODE is
++     * enabled, the relevant priority CaptureRequest settings will not be overridden.
++     * See ACAMERA_CONTROL_AE_PRIORITY_MODE for more details. If one of the FLASH modes
+      * is selected, the camera device's flash unit controls are
+      * also overridden.</p>
+      * <p>The FLASH modes are only available if the camera device
+@@ -583,6 +585,7 @@ typedef enum acamera_metadata_tag {
+      * different ACAMERA_FLASH_STRENGTH_LEVEL.</p>
+      *
+      * @see ACAMERA_CONTROL_AE_MODE
++     * @see ACAMERA_CONTROL_AE_PRIORITY_MODE
+      * @see ACAMERA_CONTROL_MODE
+      * @see ACAMERA_FLASH_INFO_AVAILABLE
+      * @see ACAMERA_FLASH_MODE
+@@ -2435,6 +2438,61 @@ typedef enum acamera_metadata_tag {
+      */
+     ACAMERA_CONTROL_ZOOM_METHOD =                               // byte (acamera_metadata_enum_android_control_zoom_method_t)
+             ACAMERA_CONTROL_START + 60,
++    /**
++     * <p>Turn on AE priority mode.</p>
++     *
++     * <p>Type: byte (acamera_metadata_enum_android_control_ae_priority_mode_t)</p>
++     *
++     * <p>This tag may appear in:
++     * <ul>
++     *   <li>ACameraMetadata from ACameraCaptureSession_captureCallback_result callbacks</li>
++     *   <li>ACaptureRequest</li>
++     * </ul></p>
++     *
++     * <p>This control is only effective if ACAMERA_CONTROL_MODE is
++     * AUTO and ACAMERA_CONTROL_AE_MODE is set to one of its
++     * ON modes, with the exception of ON_LOW_LIGHT_BOOST_BRIGHTNESS_PRIORITY.</p>
++     * <p>When a priority mode is enabled, the camera device's
++     * auto-exposure routine will maintain the application's
++     * selected parameters relevant to the priority mode while overriding
++     * the remaining exposure parameters
++     * (ACAMERA_SENSOR_EXPOSURE_TIME, ACAMERA_SENSOR_SENSITIVITY, and
++     * ACAMERA_SENSOR_FRAME_DURATION). For example, if
++     * SENSOR_SENSITIVITY_PRIORITY mode is enabled, the camera device will
++     * maintain the application-selected ACAMERA_SENSOR_SENSITIVITY
++     * while adjusting ACAMERA_SENSOR_EXPOSURE_TIME
++     * and ACAMERA_SENSOR_FRAME_DURATION. The overridden fields for a
++     * given capture will be available in its CaptureResult.</p>
++     *
++     * @see ACAMERA_CONTROL_AE_MODE
++     * @see ACAMERA_CONTROL_MODE
++     * @see ACAMERA_SENSOR_EXPOSURE_TIME
++     * @see ACAMERA_SENSOR_FRAME_DURATION
++     * @see ACAMERA_SENSOR_SENSITIVITY
++     */
++    ACAMERA_CONTROL_AE_PRIORITY_MODE =                          // byte (acamera_metadata_enum_android_control_ae_priority_mode_t)
++            ACAMERA_CONTROL_START + 61,
++    /**
++     * <p>List of auto-exposure priority modes for ACAMERA_CONTROL_AE_PRIORITY_MODE
++     * that are supported by this camera device.</p>
++     *
++     * @see ACAMERA_CONTROL_AE_PRIORITY_MODE
++     *
++     * <p>Type: byte[n]</p>
++     *
++     * <p>This tag may appear in:
++     * <ul>
++     *   <li>ACameraMetadata from ACameraManager_getCameraCharacteristics</li>
++     * </ul></p>
++     *
++     * <p>This entry lists the valid modes for
++     * ACAMERA_CONTROL_AE_PRIORITY_MODE for this camera device.
++     * If no AE priority modes are available for a device, this will only list OFF.</p>
++     *
++     * @see ACAMERA_CONTROL_AE_PRIORITY_MODE
++     */
++    ACAMERA_CONTROL_AE_AVAILABLE_PRIORITY_MODES =               // byte[n]
++            ACAMERA_CONTROL_START + 62,
+     ACAMERA_CONTROL_END,
+ 
+     /**
+@@ -4921,9 +4979,12 @@ typedef enum acamera_metadata_tag {
+      * duration exposed to the nearest possible value (rather than expose longer).
+      * The final exposure time used will be available in the output capture result.</p>
+      * <p>This control is only effective if ACAMERA_CONTROL_AE_MODE or ACAMERA_CONTROL_MODE is set to
+-     * OFF; otherwise the auto-exposure algorithm will override this value.</p>
++     * OFF; otherwise the auto-exposure algorithm will override this value. However, in the
++     * case that ACAMERA_CONTROL_AE_PRIORITY_MODE is set to SENSOR_EXPOSURE_TIME_PRIORITY, this
++     * control will be effective and not controlled by the auto-exposure algorithm.</p>
+      *
+      * @see ACAMERA_CONTROL_AE_MODE
++     * @see ACAMERA_CONTROL_AE_PRIORITY_MODE
+      * @see ACAMERA_CONTROL_MODE
+      */
+     ACAMERA_SENSOR_EXPOSURE_TIME =                              // int64
+@@ -5032,7 +5093,9 @@ typedef enum acamera_metadata_tag {
+      * value. The final sensitivity used will be available in the
+      * output capture result.</p>
+      * <p>This control is only effective if ACAMERA_CONTROL_AE_MODE or ACAMERA_CONTROL_MODE is set to
+-     * OFF; otherwise the auto-exposure algorithm will override this value.</p>
++     * OFF; otherwise the auto-exposure algorithm will override this value. However, in the
++     * case that ACAMERA_CONTROL_AE_PRIORITY_MODE is set to SENSOR_SENSITIVITY_PRIORITY, this
++     * control will be effective and not controlled by the auto-exposure algorithm.</p>
+      * <p>Note that for devices supporting postRawSensitivityBoost, the total sensitivity applied
+      * to the final processed image is the combination of ACAMERA_SENSOR_SENSITIVITY and
+      * ACAMERA_CONTROL_POST_RAW_SENSITIVITY_BOOST. In case the application uses the sensor
+@@ -5041,6 +5104,7 @@ typedef enum acamera_metadata_tag {
+      * set postRawSensitivityBoost.</p>
+      *
+      * @see ACAMERA_CONTROL_AE_MODE
++     * @see ACAMERA_CONTROL_AE_PRIORITY_MODE
+      * @see ACAMERA_CONTROL_MODE
+      * @see ACAMERA_CONTROL_POST_RAW_SENSITIVITY_BOOST
+      * @see ACAMERA_SENSOR_INFO_SENSITIVITY_RANGE
+@@ -9686,6 +9750,42 @@ typedef enum acamera_metadata_enum_acamera_control_low_light_boost_state {
+ 
+ } acamera_metadata_enum_android_control_low_light_boost_state_t;
+ 
++// ACAMERA_CONTROL_AE_PRIORITY_MODE
++typedef enum acamera_metadata_enum_acamera_control_ae_priority_mode {
++    /**
++     * <p>Disable AE priority mode. This is the default value.</p>
++     */
++    ACAMERA_CONTROL_AE_PRIORITY_MODE_OFF                             = 0,
++
++    /**
++     * <p>The camera device's auto-exposure routine is active and
++     * prioritizes the application-selected ISO (ACAMERA_SENSOR_SENSITIVITY).</p>
++     * <p>The application has control over ACAMERA_SENSOR_SENSITIVITY while
++     * the application's values for ACAMERA_SENSOR_EXPOSURE_TIME and
++     * ACAMERA_SENSOR_FRAME_DURATION are ignored.</p>
++     *
++     * @see ACAMERA_SENSOR_EXPOSURE_TIME
++     * @see ACAMERA_SENSOR_FRAME_DURATION
++     * @see ACAMERA_SENSOR_SENSITIVITY
++     */
++    ACAMERA_CONTROL_AE_PRIORITY_MODE_SENSOR_SENSITIVITY_PRIORITY     = 1,
++
++    /**
++     * <p>The camera device's auto-exposure routine is active and
++     * prioritizes the application-selected exposure time
++     * (ACAMERA_SENSOR_EXPOSURE_TIME).</p>
++     * <p>The application has control over ACAMERA_SENSOR_EXPOSURE_TIME while
++     * the application's values for ACAMERA_SENSOR_SENSITIVITY and
++     * ACAMERA_SENSOR_FRAME_DURATION are ignored.</p>
++     *
++     * @see ACAMERA_SENSOR_EXPOSURE_TIME
++     * @see ACAMERA_SENSOR_FRAME_DURATION
++     * @see ACAMERA_SENSOR_SENSITIVITY
++     */
++    ACAMERA_CONTROL_AE_PRIORITY_MODE_SENSOR_EXPOSURE_TIME_PRIORITY   = 2,
++
++} acamera_metadata_enum_android_control_ae_priority_mode_t;
++
+ 
+ 
+ // ACAMERA_EDGE_MODE
+diff --git a/services/camera/libcameraservice/aidl/VndkVersionMetadataTags.h b/services/camera/libcameraservice/aidl/VndkVersionMetadataTags.h
+index 05d1c9e5a2..1835f2f389 100644
+--- a/services/camera/libcameraservice/aidl/VndkVersionMetadataTags.h
++++ b/services/camera/libcameraservice/aidl/VndkVersionMetadataTags.h
+@@ -96,6 +96,7 @@ std::map<int, std::vector<camera_metadata_tag>> static_api_level_to_keys{
+       {36, {
+           ANDROID_COLOR_CORRECTION_AVAILABLE_MODES,
+           ANDROID_COLOR_CORRECTION_COLOR_TEMPERATURE_RANGE,
++          ANDROID_CONTROL_AE_AVAILABLE_PRIORITY_MODES,
+           ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_MIN_FRAME_DURATIONS,
+           ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_MIN_FRAME_DURATIONS_MAXIMUM_RESOLUTION,
+           ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STALL_DURATIONS,
+@@ -138,6 +139,7 @@ std::map<int, std::vector<camera_metadata_tag>> dynamic_api_level_to_keys{
+       {36, {
+           ANDROID_COLOR_CORRECTION_COLOR_TEMPERATURE,
+           ANDROID_COLOR_CORRECTION_COLOR_TINT,
++          ANDROID_CONTROL_AE_PRIORITY_MODE,
+           ANDROID_CONTROL_ZOOM_METHOD,
+           ANDROID_EXTENSION_NIGHT_MODE_INDICATOR,
+         }  },
+diff --git a/services/camera/libcameraservice/common/CameraProviderManager.cpp b/services/camera/libcameraservice/common/CameraProviderManager.cpp
+index d02fa756d6..c1f9204025 100644
+--- a/services/camera/libcameraservice/common/CameraProviderManager.cpp
++++ b/services/camera/libcameraservice/common/CameraProviderManager.cpp
+@@ -1898,6 +1898,36 @@ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addAutoframingTags()
+     return res;
+ }
+ 
++status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addAePriorityModeTags() {
++    status_t res = OK;
++    auto& c = mCameraCharacteristics;
++
++    auto entry = c.find(ANDROID_CONTROL_AE_AVAILABLE_PRIORITY_MODES);
++    if (entry.count != 0) {
++        return res;
++    }
++
++    std::vector<int32_t> supportedChTags;
++    auto chTags = c.find(ANDROID_REQUEST_AVAILABLE_CHARACTERISTICS_KEYS);
++    if (chTags.count == 0) {
++        ALOGE("%s: No supported camera characteristics keys!", __FUNCTION__);
++        return BAD_VALUE;
++    }
++
++    std::vector<uint8_t> aePriorityAvailableModes = {
++            ANDROID_CONTROL_AE_PRIORITY_MODE_OFF };
++    supportedChTags.reserve(chTags.count + 1);
++    supportedChTags.insert(supportedChTags.end(), chTags.data.i32,
++            chTags.data.i32 + chTags.count);
++    supportedChTags.push_back(ANDROID_CONTROL_AE_AVAILABLE_PRIORITY_MODES);
++    c.update(ANDROID_CONTROL_AE_AVAILABLE_PRIORITY_MODES,
++            aePriorityAvailableModes.data(), aePriorityAvailableModes.size());
++    c.update(ANDROID_REQUEST_AVAILABLE_CHARACTERISTICS_KEYS, supportedChTags.data(),
++             supportedChTags.size());
++
++    return res;
++}
++
+ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addPreCorrectionActiveArraySize() {
+     status_t res = OK;
+     auto& c = mCameraCharacteristics;
+diff --git a/services/camera/libcameraservice/common/CameraProviderManager.h b/services/camera/libcameraservice/common/CameraProviderManager.h
+index e629218b16..3bad975f57 100644
+--- a/services/camera/libcameraservice/common/CameraProviderManager.h
++++ b/services/camera/libcameraservice/common/CameraProviderManager.h
+@@ -779,6 +779,7 @@ private:
+             status_t addPreCorrectionActiveArraySize();
+             status_t addReadoutTimestampTag(bool readoutTimestampSupported = true);
+             status_t addColorCorrectionAvailableModesTag(CameraMetadata& ch);
++            status_t addAePriorityModeTags();
+             status_t addSessionConfigQueryVersionTag();
+ 
+             static void getSupportedSizes(const CameraMetadata& ch, uint32_t tag,
+diff --git a/services/camera/libcameraservice/common/aidl/AidlProviderInfo.cpp b/services/camera/libcameraservice/common/aidl/AidlProviderInfo.cpp
+index 3d6a23f93d..3a0cfa1f70 100644
+--- a/services/camera/libcameraservice/common/aidl/AidlProviderInfo.cpp
++++ b/services/camera/libcameraservice/common/aidl/AidlProviderInfo.cpp
+@@ -618,6 +618,14 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
+         }
+     }
+ 
++    if (flags::ae_priority()) {
++        res = addAePriorityModeTags();
++        if (OK != res) {
++            ALOGE("%s: Unable to add CONTROL_AE_AVAILABLE_PRIORITY_MODES tag: %s (%d)",
++                    __FUNCTION__, strerror(-res), res);
++        }
++    }
++
+     camera_metadata_entry flashAvailable =
+             mCameraCharacteristics.find(ANDROID_FLASH_INFO_AVAILABLE);
+     if (flashAvailable.count == 1 &&
+diff --git a/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp b/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp
+index edaee6ea26..756c255596 100644
+--- a/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp
++++ b/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp
+@@ -683,6 +683,14 @@ HidlProviderInfo::HidlDeviceInfo3::HidlDeviceInfo3(
+         }
+     }
+ 
++    if (flags::ae_priority()) {
++        res = addAePriorityModeTags();
++        if (OK != res) {
++            ALOGE("%s: Unable to add CONTROL_AE_AVAILABLE_PRIORITY_MODES tag: %s (%d)",
++                    __FUNCTION__, strerror(-res), res);
++        }
++    }
++
+     camera_metadata_entry flashAvailable =
+             mCameraCharacteristics.find(ANDROID_FLASH_INFO_AVAILABLE);
+     if (flashAvailable.count == 1 &&
+diff --git a/services/camera/libcameraservice/utils/SessionConfigurationUtils.cpp b/services/camera/libcameraservice/utils/SessionConfigurationUtils.cpp
+index 08f6314c63..ee4df4e11c 100644
+--- a/services/camera/libcameraservice/utils/SessionConfigurationUtils.cpp
++++ b/services/camera/libcameraservice/utils/SessionConfigurationUtils.cpp
+@@ -41,6 +41,7 @@ using aidl::android::hardware::camera::device::RequestTemplate;
+ 
+ namespace android {
+ namespace camera3 {
++namespace flags = com::android::internal::camera::flags;
+ 
+ void StreamConfiguration::getStreamConfigurations(
+         const CameraMetadata &staticInfo, int configuration,
+@@ -1252,6 +1253,14 @@ status_t overrideDefaultRequestKeys(CameraMetadata *request) {
+         request->update(ANDROID_CONTROL_AUTOFRAMING, &kDefaultAutoframingMode, 1);
+     }
+ 
++    if (flags::ae_priority()) {
++        // Fill in CONTROL_AE_PRIORITY_MODE if not available
++        if (!request->exists(ANDROID_CONTROL_AE_PRIORITY_MODE)) {
++            static const uint8_t kDefaultAePriorityMode = ANDROID_CONTROL_AE_PRIORITY_MODE_OFF;
++            request->update(ANDROID_CONTROL_AE_PRIORITY_MODE, &kDefaultAePriorityMode, 1);
++        }
++    }
++
+     return OK;
+ }
+ 
+-- 
+2.43.0
+

@@ -1,0 +1,93 @@
+From eb961c729b8188b2ca0938a6b6c36efcfc61bcc8 Mon Sep 17 00:00:00 2001
+From: Avichal Rakesh <arakesh@google.com>
+Date: Wed, 25 Sep 2024 17:26:26 -0700
+Subject: [PATCH 035/436] Camera: remove flag
+ check_session_support_before_session_char
+
+Bug: 365555385
+Test: Builds successfully.
+Flag: EXEMPT flag removal
+Change-Id: I8ae2f93d8eed882eefa90be261ead402f38a74a3
+---
+ camera/camera_platform.aconfig                | 10 ------
+ .../camera/libcameraservice/CameraService.cpp | 36 +++++++++----------
+ 2 files changed, 18 insertions(+), 28 deletions(-)
+
+diff --git a/camera/camera_platform.aconfig b/camera/camera_platform.aconfig
+index d28b67db60..e7defa59f5 100644
+--- a/camera/camera_platform.aconfig
++++ b/camera/camera_platform.aconfig
+@@ -111,16 +111,6 @@ flag {
+     }
+ }
+ 
+-flag {
+-    namespace: "camera_platform"
+-    name: "check_session_support_before_session_char"
+-    description: "Validate that a SessionConfiguration is supported before fetching SessionCharacteristics."
+-    bug: "327008530"
+-    metadata {
+-        purpose: PURPOSE_BUGFIX
+-    }
+-}
+-
+ flag {
+     namespace: "camera_platform"
+     name: "analytics_24q3"
+diff --git a/services/camera/libcameraservice/CameraService.cpp b/services/camera/libcameraservice/CameraService.cpp
+index 86e9a6f509..6a5d5e08d6 100644
+--- a/services/camera/libcameraservice/CameraService.cpp
++++ b/services/camera/libcameraservice/CameraService.cpp
+@@ -1011,23 +1011,23 @@ Status CameraService::getSessionCharacteristics(const std::string& unresolvedCam
+ 
+     bool overrideForPerfClass = SessionConfigurationUtils::targetPerfClassPrimaryCamera(
+             mPerfClassPrimaryCameraIds, cameraId, targetSdkVersion);
+-    if (flags::check_session_support_before_session_char()) {
+-        bool sessionConfigSupported;
+-        Status res = isSessionConfigurationWithParametersSupportedUnsafe(
+-                cameraId, sessionConfiguration, overrideForPerfClass, &sessionConfigSupported);
+-        if (!res.isOk()) {
+-            // isSessionConfigurationWithParametersSupportedUnsafe should log what went wrong and
+-            // report the correct Status to send to the client. Simply forward the error to
+-            // the client.
+-            outMetadata->clear();
+-            return res;
+-        }
+-        if (!sessionConfigSupported) {
+-            std::string msg = fmt::sprintf(
+-                    "Session configuration not supported for camera device %s.", cameraId.c_str());
+-            outMetadata->clear();
+-            return STATUS_ERROR(CameraService::ERROR_ILLEGAL_ARGUMENT, msg.c_str());
+-        }
++
++    bool sessionConfigSupported;
++    Status res = isSessionConfigurationWithParametersSupportedUnsafe(
++            cameraId, sessionConfiguration, overrideForPerfClass, &sessionConfigSupported);
++    if (!res.isOk()) {
++        // isSessionConfigurationWithParametersSupportedUnsafe should log what went wrong and
++        // report the correct Status to send to the client. Simply forward the error to
++        // the client.
++        outMetadata->clear();
++        return res;
++    }
++
++    if (!sessionConfigSupported) {
++        std::string msg = fmt::sprintf("Session configuration not supported for camera device %s.",
++                                       cameraId.c_str());
++        outMetadata->clear();
++        return STATUS_ERROR(CameraService::ERROR_ILLEGAL_ARGUMENT, msg.c_str());
+     }
+ 
+     status_t ret = mCameraProviderManager->getSessionCharacteristics(
+@@ -1069,7 +1069,7 @@ Status CameraService::getSessionCharacteristics(const std::string& unresolvedCam
+             }
+     }
+ 
+-    Status res = filterSensitiveMetadataIfNeeded(cameraId, outMetadata);
++    res = filterSensitiveMetadataIfNeeded(cameraId, outMetadata);
+     if (flags::analytics_24q3()) {
+         mCameraServiceProxyWrapper->logSessionCharacteristicsQuery(cameraId,
+                 getCallingUid(), sessionConfiguration, res);
+-- 
+2.43.0
+

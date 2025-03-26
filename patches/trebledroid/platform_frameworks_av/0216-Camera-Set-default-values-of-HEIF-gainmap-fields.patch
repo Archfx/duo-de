@@ -1,0 +1,121 @@
+From 7a29908507662a7605b4eb6303eb52f9f6ad16bb Mon Sep 17 00:00:00 2001
+From: Emilian Peev <epeev@google.com>
+Date: Wed, 6 Nov 2024 23:01:51 +0000
+Subject: [PATCH 216/436] Camera: Set default values of HEIF gainmap fields
+
+Some of the newly introduced HEIC composite stream fields
+related to HEIF gainmap support were not given initial
+default values.
+
+Flag: com.android.internal.camera.flags.camera_heif_gainmap
+Bug: 362608343
+Test: Successful build
+Change-Id: I60bd1a03f9e40ab75d215e68a54a2608df414186
+---
+ .../api2/HeicCompositeStream.cpp              | 56 +++++++++++--------
+ .../api2/HeicCompositeStream.h                | 22 ++++++--
+ 2 files changed, 49 insertions(+), 29 deletions(-)
+
+diff --git a/services/camera/libcameraservice/api2/HeicCompositeStream.cpp b/services/camera/libcameraservice/api2/HeicCompositeStream.cpp
+index 20e6205a4e..768eaf8379 100644
+--- a/services/camera/libcameraservice/api2/HeicCompositeStream.cpp
++++ b/services/camera/libcameraservice/api2/HeicCompositeStream.cpp
+@@ -60,30 +60,38 @@ namespace android {
+ namespace camera3 {
+ 
+ HeicCompositeStream::HeicCompositeStream(sp<CameraDeviceBase> device,
+-        wp<hardware::camera2::ICameraDeviceCallbacks> cb) :
+-        CompositeStream(device, cb),
+-        mUseHeic(false),
+-        mNumOutputTiles(1),
+-        mOutputWidth(0),
+-        mOutputHeight(0),
+-        mMaxHeicBufferSize(0),
+-        mGridWidth(HeicEncoderInfoManager::kGridWidth),
+-        mGridHeight(HeicEncoderInfoManager::kGridHeight),
+-        mGridRows(1),
+-        mGridCols(1),
+-        mUseGrid(false),
+-        mAppSegmentStreamId(-1),
+-        mAppSegmentSurfaceId(-1),
+-        mMainImageStreamId(-1),
+-        mMainImageSurfaceId(-1),
+-        mYuvBufferAcquired(false),
+-        mStreamSurfaceListener(new StreamSurfaceListener()),
+-        mDequeuedOutputBufferCnt(0),
+-        mCodecOutputCounter(0),
+-        mCodecGainmapOutputCounter(0),
+-        mQuality(-1),
+-        mGridTimestampUs(0),
+-        mStatusId(StatusTracker::NO_STATUS_ID) {
++                                         wp<hardware::camera2::ICameraDeviceCallbacks> cb)
++    : CompositeStream(device, cb),
++      mUseHeic(false),
++      mNumOutputTiles(1),
++      mNumGainmapOutputTiles(1),
++      mOutputWidth(0),
++      mOutputHeight(0),
++      mGainmapOutputWidth(0),
++      mGainmapOutputHeight(0),
++      mMaxHeicBufferSize(0),
++      mGridWidth(HeicEncoderInfoManager::kGridWidth),
++      mGridHeight(HeicEncoderInfoManager::kGridHeight),
++      mGainmapGridWidth(HeicEncoderInfoManager::kGridWidth),
++      mGainmapGridHeight(HeicEncoderInfoManager::kGridHeight),
++      mGridRows(1),
++      mGridCols(1),
++      mGainmapGridRows(1),
++      mGainmapGridCols(1),
++      mUseGrid(false),
++      mGainmapUseGrid(false),
++      mAppSegmentStreamId(-1),
++      mAppSegmentSurfaceId(-1),
++      mMainImageStreamId(-1),
++      mMainImageSurfaceId(-1),
++      mYuvBufferAcquired(false),
++      mStreamSurfaceListener(new StreamSurfaceListener()),
++      mDequeuedOutputBufferCnt(0),
++      mCodecOutputCounter(0),
++      mCodecGainmapOutputCounter(0),
++      mQuality(-1),
++      mGridTimestampUs(0),
++      mStatusId(StatusTracker::NO_STATUS_ID) {
+     mStaticInfo = device->info();
+     camera_metadata_entry halHeicSupport = mStaticInfo.find(ANDROID_HEIC_INFO_SUPPORTED);
+     if (halHeicSupport.count == 1 &&
+diff --git a/services/camera/libcameraservice/api2/HeicCompositeStream.h b/services/camera/libcameraservice/api2/HeicCompositeStream.h
+index bfcd668181..beb08b0759 100644
+--- a/services/camera/libcameraservice/api2/HeicCompositeStream.h
++++ b/services/camera/libcameraservice/api2/HeicCompositeStream.h
+@@ -197,11 +197,23 @@ private:
+         std::unique_ptr<uint8_t[]> gainmapChroma;
+         std::vector<uint8_t> isoGainmapMetadata;
+ 
+-        InputFrame() : orientation(0), quality(kDefaultJpegQuality), error(false),
+-                       exifError(false), timestamp(-1), requestId(-1), fenceFd(-1),
+-                       fileFd(-1), trackIndex(-1), anb(nullptr), appSegmentWritten(false),
+-                       pendingOutputTiles(0), gainmapPendingOutputTiles(0),
+-                       codecInputCounter(0), gainmapCodecInputCounter(0) { }
++        InputFrame()
++            : orientation(0),
++              quality(kDefaultJpegQuality),
++              error(false),
++              exifError(false),
++              timestamp(-1),
++              requestId(-1),
++              fenceFd(-1),
++              fileFd(-1),
++              trackIndex(-1),
++              gainmapTrackIndex(-1),
++              anb(nullptr),
++              appSegmentWritten(false),
++              pendingOutputTiles(0),
++              gainmapPendingOutputTiles(0),
++              codecInputCounter(0),
++              gainmapCodecInputCounter(0) {}
+     };
+ 
+     void compilePendingInputLocked();
+-- 
+2.43.0
+

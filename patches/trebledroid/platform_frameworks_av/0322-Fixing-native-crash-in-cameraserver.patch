@@ -1,0 +1,87 @@
+From 1a586fdbd8a76ae70388b501a0ec9a11ea1cb580 Mon Sep 17 00:00:00 2001
+From: Jyoti Bhayana <jbhayana@google.com>
+Date: Wed, 20 Nov 2024 19:54:35 -0800
+Subject: [PATCH 322/436] Fixing native crash in cameraserver
+
+Flag: com.android.internal.camera.flags.camera_multi_client
+Bug: 379183541
+Test: Verify reported crash does not occur.
+Change-Id: I04842279bb2172122dde9a59b4fd793d8c5a6c6a
+---
+ .../camera/libcameraservice/CameraService.cpp | 25 ++++++++++++++++---
+ .../camera/libcameraservice/CameraService.h   |  3 +++
+ .../libcameraservice/utils/ClientManager.h    |  2 +-
+ 3 files changed, 25 insertions(+), 5 deletions(-)
+
+diff --git a/services/camera/libcameraservice/CameraService.cpp b/services/camera/libcameraservice/CameraService.cpp
+index df944781f4..31a45c381b 100644
+--- a/services/camera/libcameraservice/CameraService.cpp
++++ b/services/camera/libcameraservice/CameraService.cpp
+@@ -3811,14 +3811,31 @@ std::vector<sp<CameraService::BasicClient>> CameraService::removeClientsLocked(
+         const std::string& cameraId) {
+     // Remove from active clients list
+     std::vector<sp<CameraService::BasicClient>> clients;
+-    std::vector<CameraService::DescriptorPtr> clientDescriptors;
+-    clientDescriptors =  mActiveClientManager.removeAll(cameraId);
+-    for (const auto& clientDescriptorPtr : clientDescriptors) {
++    if (flags::camera_multi_client()) {
++        std::vector<CameraService::DescriptorPtr> clientDescriptors;
++        clientDescriptors =  mActiveClientManager.removeAll(cameraId);
++        for (const auto& clientDescriptorPtr : clientDescriptors) {
++            if (clientDescriptorPtr != nullptr) {
++                sp<BasicClient> client = clientDescriptorPtr->getValue();
++                if (client.get() != nullptr) {
++                    cacheClientTagDumpIfNeeded(clientDescriptorPtr->getKey(), client.get());
++                    clients.push_back(client);
++                }
++            }
++        }
++    } else {
++        auto clientDescriptorPtr = mActiveClientManager.remove(cameraId);
++        if (clientDescriptorPtr == nullptr) {
++            ALOGW("%s: Could not evict client, no client for camera ID %s", __FUNCTION__,
++                    cameraId.c_str());
++            return clients;
++        }
++
+         sp<BasicClient> client = clientDescriptorPtr->getValue();
+         if (client.get() != nullptr) {
+             cacheClientTagDumpIfNeeded(clientDescriptorPtr->getKey(), client.get());
++            clients.push_back(client);
+         }
+-        clients.push_back(client);
+     }
+     return clients;
+ }
+diff --git a/services/camera/libcameraservice/CameraService.h b/services/camera/libcameraservice/CameraService.h
+index 9c75edeaf7..6f29ff4cbb 100644
+--- a/services/camera/libcameraservice/CameraService.h
++++ b/services/camera/libcameraservice/CameraService.h
+@@ -631,6 +631,9 @@ public:
+         CameraClientManager();
+         virtual ~CameraClientManager();
+ 
++        // Bring all remove() functions into scope
++        using ClientManager::remove;
++
+         virtual void remove(const DescriptorPtr& value) override;
+ 
+         /**
+diff --git a/services/camera/libcameraservice/utils/ClientManager.h b/services/camera/libcameraservice/utils/ClientManager.h
+index b2b8685b00..0f0dc4c342 100644
+--- a/services/camera/libcameraservice/utils/ClientManager.h
++++ b/services/camera/libcameraservice/utils/ClientManager.h
+@@ -746,9 +746,9 @@ std::vector<std::shared_ptr<ClientDescriptor<KEY, VALUE>>>
+         for (auto it = mClients.begin(); it != mClients.end();)
+         {
+             if ((*it)->getKey() == key) {
+-                it = mClients.erase(it);
+                 if (mListener != nullptr) mListener->onClientRemoved(**it);
+                 clients.push_back(*it);
++                it = mClients.erase(it);
+             } else {
+                 ++it;
+             }
+-- 
+2.43.0
+

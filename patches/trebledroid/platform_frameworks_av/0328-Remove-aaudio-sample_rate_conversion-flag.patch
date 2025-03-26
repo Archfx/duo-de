@@ -1,0 +1,70 @@
+From b91f7d2d318cf4c7a143452a4406a314762d046a Mon Sep 17 00:00:00 2001
+From: Robert Wu <robertwu@google.com>
+Date: Wed, 20 Nov 2024 19:56:16 +0000
+Subject: [PATCH 328/436] Remove aaudio sample_rate_conversion flag
+
+This flag was added in Android V and we can remove it now.
+
+Bug: 378766408
+Test: presubmit
+Flag: EXEMPT bugfix
+Change-Id: Ib07574aa2cde7b6d5079c13b500470e8e78c757f
+---
+ media/libaaudio/src/client/AudioStreamInternal.cpp | 10 ----------
+ services/oboeservice/AAudioServiceEndpointMMAP.cpp | 12 +++---------
+ 2 files changed, 3 insertions(+), 19 deletions(-)
+
+diff --git a/media/libaaudio/src/client/AudioStreamInternal.cpp b/media/libaaudio/src/client/AudioStreamInternal.cpp
+index 6bc7dc2018..33f152c6e3 100644
+--- a/media/libaaudio/src/client/AudioStreamInternal.cpp
++++ b/media/libaaudio/src/client/AudioStreamInternal.cpp
+@@ -42,7 +42,6 @@
+ #include "fifo/FifoBuffer.h"
+ #include "utility/AudioClock.h"
+ #include <media/AidlConversion.h>
+-#include <com_android_media_aaudio.h>
+ 
+ #include "AudioStreamInternal.h"
+ 
+@@ -197,15 +196,6 @@ aaudio_result_t AudioStreamInternal::open(const AudioStreamBuilder &builder) {
+         setSampleRate(configurationOutput.getSampleRate());
+     }
+ 
+-    if (!com::android::media::aaudio::sample_rate_conversion()) {
+-        if (getSampleRate() != getDeviceSampleRate()) {
+-            ALOGD("%s - skipping sample rate converter. SR = %d, Device SR = %d", __func__,
+-                    getSampleRate(), getDeviceSampleRate());
+-            result = AAUDIO_ERROR_INVALID_RATE;
+-            goto error;
+-        }
+-    }
+-
+     // Save device format so we can do format conversion and volume scaling together.
+     setDeviceFormat(configurationOutput.getFormat());
+     setDeviceSamplesPerFrame(configurationOutput.getSamplesPerFrame());
+diff --git a/services/oboeservice/AAudioServiceEndpointMMAP.cpp b/services/oboeservice/AAudioServiceEndpointMMAP.cpp
+index 66918c185b..6c31d2c70f 100644
+--- a/services/oboeservice/AAudioServiceEndpointMMAP.cpp
++++ b/services/oboeservice/AAudioServiceEndpointMMAP.cpp
+@@ -150,15 +150,9 @@ aaudio_result_t AAudioServiceEndpointMMAP::open(const aaudio::AAudioStreamReques
+ 
+         // Try other formats if the config from APM is the same as our current config.
+         // Some HALs may report its format support incorrectly.
+-        if (previousConfig.format == config.format) {
+-            if (previousConfig.sample_rate == config.sample_rate) {
+-                config.format = getNextFormatToTry(config.format);
+-            } else if (!com::android::media::aaudio::sample_rate_conversion()) {
+-                ALOGI("%s() - AAudio SRC feature not enabled, different rates! %d != %d",
+-                      __func__, previousConfig.sample_rate, config.sample_rate);
+-                result = AAUDIO_ERROR_INVALID_RATE;
+-                break;
+-            }
++        if ((previousConfig.format == config.format) &&
++                (previousConfig.sample_rate == config.sample_rate)) {
++            config.format = getNextFormatToTry(config.format);
+         }
+ 
+         ALOGD("%s() %#x %d failed, perhaps due to format or sample rate. Try again with %#x %d",
+-- 
+2.43.0
+

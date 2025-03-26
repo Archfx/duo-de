@@ -1,0 +1,1153 @@
+From ca0ff1706faf5e4bfa40c3a7fc333ed68220d570 Mon Sep 17 00:00:00 2001
+From: Carlos Martinez Romero <carlosmr@google.com>
+Date: Thu, 12 Sep 2024 08:45:52 -0700
+Subject: [PATCH 138/436] Remove some usage of IGBPs in the ICamera.
+
+This change removes the usage of IGBPs in ICamera and the surrounding
+code where reasonable. This is part of a refactor outline at go/warren-buffers.
+
+BYPASS_IGBP_IGBC_API_REASON: this CL is part of the migration.
+Bug: 342197849
+Test: atest android.hardware.cts.CameraTest
+Flag: com.android.graphics.libgui.flags.wb_libcameraservice
+
+Change-Id: I06fbf42e6a249f3b30266ac5b3dad0bdbc4f585a
+---
+ camera/Camera.cpp                             |  32 +++--
+ camera/ICamera.cpp                            | 105 +++++++++++++---
+ camera/include/camera/Camera.h                |  22 ++--
+ .../include/camera/android/hardware/ICamera.h |  12 +-
+ camera/tests/CameraZSLTests.cpp               |  22 ++--
+ camera/tests/fuzzer/camera_fuzzer.cpp         |  19 ++-
+ .../StagefrightRecorder.cpp                   |  17 +++
+ .../fuzzer/mediarecorder_fuzzer.cpp           |  14 +--
+ media/libstagefright/CameraSource.cpp         |  17 ++-
+ .../libstagefright/CameraSourceTimeLapse.cpp  |   9 ++
+ .../include/media/stagefright/CameraSource.h  |  11 +-
+ .../media/stagefright/CameraSourceTimeLapse.h |   5 +-
+ .../camera/libcameraservice/CameraService.h   |  16 +--
+ .../libcameraservice/api1/Camera2Client.cpp   | 116 +++++++++++++-----
+ .../libcameraservice/api1/Camera2Client.h     |  27 ++--
+ .../camera_service_fuzzer.cpp                 |  13 +-
+ 16 files changed, 327 insertions(+), 130 deletions(-)
+
+diff --git a/camera/Camera.cpp b/camera/Camera.cpp
+index d90f7c9331..0bc735fcca 100644
+--- a/camera/Camera.cpp
++++ b/camera/Camera.cpp
+@@ -99,23 +99,21 @@ status_t Camera::unlock()
+     return c->unlock();
+ }
+ 
+-// pass the buffered IGraphicBufferProducer to the camera service
+-status_t Camera::setPreviewTarget(const sp<IGraphicBufferProducer>& bufferProducer)
+-{
+-    ALOGV("setPreviewTarget(%p)", bufferProducer.get());
+-    sp <::android::hardware::ICamera> c = mCamera;
++// pass the Surface to the camera service
++status_t Camera::setPreviewTarget(const sp<SurfaceType>& target) {
++    ALOGV("setPreviewTarget(%p)", target.get());
++    sp<::android::hardware::ICamera> c = mCamera;
+     if (c == 0) return NO_INIT;
+-    ALOGD_IF(bufferProducer == 0, "app passed NULL surface");
+-    return c->setPreviewTarget(bufferProducer);
++    ALOGD_IF(target == 0, "app passed NULL surface");
++    return c->setPreviewTarget(target);
+ }
+ 
+-status_t Camera::setVideoTarget(const sp<IGraphicBufferProducer>& bufferProducer)
+-{
+-    ALOGV("setVideoTarget(%p)", bufferProducer.get());
+-    sp <::android::hardware::ICamera> c = mCamera;
++status_t Camera::setVideoTarget(const sp<SurfaceType>& target) {
++    ALOGV("setVideoTarget(%p)", target.get());
++    sp<::android::hardware::ICamera> c = mCamera;
+     if (c == 0) return NO_INIT;
+-    ALOGD_IF(bufferProducer == 0, "app passed NULL video surface");
+-    return c->setVideoTarget(bufferProducer);
++    ALOGD_IF(target == 0, "app passed NULL video surface");
++    return c->setVideoTarget(target);
+ }
+ 
+ // start preview mode
+@@ -272,12 +270,10 @@ void Camera::setPreviewCallbackFlags(int flag)
+     c->setPreviewCallbackFlag(flag);
+ }
+ 
+-status_t Camera::setPreviewCallbackTarget(
+-        const sp<IGraphicBufferProducer>& callbackProducer)
+-{
+-    sp <::android::hardware::ICamera> c = mCamera;
++status_t Camera::setPreviewCallbackTarget(const sp<SurfaceType>& target) {
++    sp<::android::hardware::ICamera> c = mCamera;
+     if (c == 0) return NO_INIT;
+-    return c->setPreviewCallbackTarget(callbackProducer);
++    return c->setPreviewCallbackTarget(target);
+ }
+ 
+ status_t Camera::setAudioRestriction(int32_t mode)
+diff --git a/camera/ICamera.cpp b/camera/ICamera.cpp
+index b83edf7060..0b811d23d4 100644
+--- a/camera/ICamera.cpp
++++ b/camera/ICamera.cpp
+@@ -17,16 +17,16 @@
+ 
+ //#define LOG_NDEBUG 0
+ #define LOG_TAG "ICamera"
+-#include <utils/Log.h>
+-#include <stdint.h>
+-#include <sys/types.h>
+-#include <binder/Parcel.h>
+-#include <camera/CameraUtils.h>
+ #include <android/hardware/ICamera.h>
+ #include <android/hardware/ICameraClient.h>
+-#include <gui/IGraphicBufferProducer.h>
++#include <binder/Parcel.h>
++#include <camera/CameraUtils.h>
+ #include <gui/Surface.h>
++#include <gui/view/Surface.h>
+ #include <media/hardware/HardwareAPI.h>
++#include <stdint.h>
++#include <sys/types.h>
++#include <utils/Log.h>
+ 
+ namespace android {
+ namespace hardware {
+@@ -34,8 +34,14 @@ namespace hardware {
+ enum {
+     DISCONNECT = IBinder::FIRST_CALL_TRANSACTION,
+     SET_PREVIEW_TARGET,
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++    SET_PREVIEW_TARGET_SURFACE,
++#endif
+     SET_PREVIEW_CALLBACK_FLAG,
+     SET_PREVIEW_CALLBACK_TARGET,
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++    SET_PREVIEW_CALLBACK_TARGET_SURFACE,
++#endif
+     START_PREVIEW,
+     STOP_PREVIEW,
+     AUTO_FOCUS,
+@@ -54,6 +60,9 @@ enum {
+     RELEASE_RECORDING_FRAME,
+     SET_VIDEO_BUFFER_MODE,
+     SET_VIDEO_BUFFER_TARGET,
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++    SET_VIDEO_BUFFER_TARGET_SURFACE,
++#endif
+     RELEASE_RECORDING_FRAME_HANDLE,
+     RELEASE_RECORDING_FRAME_HANDLE_BATCH,
+     SET_AUDIO_RESTRICTION,
+@@ -79,15 +88,20 @@ public:
+         return binder::Status::ok();
+     }
+ 
+-    // pass the buffered IGraphicBufferProducer to the camera service
+-    status_t setPreviewTarget(const sp<IGraphicBufferProducer>& bufferProducer)
+-    {
++    // pass the Surface to the camera service
++    status_t setPreviewTarget(const sp<SurfaceType>& target) {
+         ALOGV("setPreviewTarget");
+         Parcel data, reply;
+         data.writeInterfaceToken(ICamera::getInterfaceDescriptor());
+-        sp<IBinder> b(IInterface::asBinder(bufferProducer));
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++        view::Surface viewSurfaceProducer = view::Surface::fromSurface(target);
++        data.writeParcelable(viewSurfaceProducer);
++        remote()->transact(SET_PREVIEW_TARGET_SURFACE, data, &reply);
++#else
++        sp<IBinder> b(IInterface::asBinder(target));
+         data.writeStrongBinder(b);
+         remote()->transact(SET_PREVIEW_TARGET, data, &reply);
++#endif
+         return reply.readInt32();
+     }
+ 
+@@ -102,15 +116,19 @@ public:
+         remote()->transact(SET_PREVIEW_CALLBACK_FLAG, data, &reply);
+     }
+ 
+-    status_t setPreviewCallbackTarget(
+-            const sp<IGraphicBufferProducer>& callbackProducer)
+-    {
++    status_t setPreviewCallbackTarget(const sp<SurfaceType>& target) {
+         ALOGV("setPreviewCallbackTarget");
+         Parcel data, reply;
+         data.writeInterfaceToken(ICamera::getInterfaceDescriptor());
+-        sp<IBinder> b(IInterface::asBinder(callbackProducer));
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++        view::Surface viewCallbackProducer = view::Surface::fromSurface(target);
++        data.writeParcelable(viewCallbackProducer);
++        remote()->transact(SET_PREVIEW_CALLBACK_TARGET_SURFACE, data, &reply);
++#else
++        sp<IBinder> b(IInterface::asBinder(target));
+         data.writeStrongBinder(b);
+         remote()->transact(SET_PREVIEW_CALLBACK_TARGET, data, &reply);
++#endif
+         return reply.readInt32();
+     }
+ 
+@@ -326,14 +344,19 @@ public:
+         return reply.readInt32();
+     }
+ 
+-    status_t setVideoTarget(const sp<IGraphicBufferProducer>& bufferProducer)
+-    {
++    status_t setVideoTarget(const sp<SurfaceType>& target) {
+         ALOGV("setVideoTarget");
+         Parcel data, reply;
+         data.writeInterfaceToken(ICamera::getInterfaceDescriptor());
+-        sp<IBinder> b(IInterface::asBinder(bufferProducer));
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++        view::Surface viewSurfaceProducer = view::Surface::fromSurface(target);
++        data.writeParcelable(viewSurfaceProducer);
++        remote()->transact(SET_VIDEO_BUFFER_TARGET_SURFACE, data, &reply);
++#else
++        sp<IBinder> b(IInterface::asBinder(target));
+         data.writeStrongBinder(b);
+         remote()->transact(SET_VIDEO_BUFFER_TARGET, data, &reply);
++#endif
+         return reply.readInt32();
+     }
+ };
+@@ -358,9 +381,25 @@ status_t BnCamera::onTransact(
+             CHECK_INTERFACE(ICamera, data, reply);
+             sp<IGraphicBufferProducer> st =
+                 interface_cast<IGraphicBufferProducer>(data.readStrongBinder());
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++            sp<Surface> sp = new Surface(st);
++            reply->writeInt32(setPreviewTarget(sp));
++#else
++            reply->writeInt32(setPreviewTarget(st));
++#endif
++            return NO_ERROR;
++        } break;
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++        case SET_PREVIEW_TARGET_SURFACE: {
++            ALOGV("SET_PREVIEW_TARGET_SURFACE");
++            CHECK_INTERFACE(ICamera, data, reply);
++            view::Surface viewSurface;
++            data.readParcelable(&viewSurface);
++            sp<Surface> st = viewSurface.toSurface();
+             reply->writeInt32(setPreviewTarget(st));
+             return NO_ERROR;
+         } break;
++#endif
+         case SET_PREVIEW_CALLBACK_FLAG: {
+             ALOGV("SET_PREVIEW_CALLBACK_TYPE");
+             CHECK_INTERFACE(ICamera, data, reply);
+@@ -373,9 +412,25 @@ status_t BnCamera::onTransact(
+             CHECK_INTERFACE(ICamera, data, reply);
+             sp<IGraphicBufferProducer> cp =
+                 interface_cast<IGraphicBufferProducer>(data.readStrongBinder());
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++            sp<Surface> sp = new Surface(cp);
++            reply->writeInt32(setPreviewCallbackTarget(sp));
++#else
++            reply->writeInt32(setPreviewCallbackTarget(cp));
++#endif
++            return NO_ERROR;
++        }
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++        case SET_PREVIEW_CALLBACK_TARGET_SURFACE: {
++            ALOGV("SET_PREVIEW_CALLBACK_TARGET_SURFACE");
++            CHECK_INTERFACE(ICamera, data, reply);
++            view::Surface viewSurface;
++            data.readParcelable(&viewSurface);
++            sp<Surface> cp = viewSurface.toSurface();
+             reply->writeInt32(setPreviewCallbackTarget(cp));
+             return NO_ERROR;
+         }
++#endif
+         case START_PREVIEW: {
+             ALOGV("START_PREVIEW");
+             CHECK_INTERFACE(ICamera, data, reply);
+@@ -508,9 +563,25 @@ status_t BnCamera::onTransact(
+             CHECK_INTERFACE(ICamera, data, reply);
+             sp<IGraphicBufferProducer> st =
+                 interface_cast<IGraphicBufferProducer>(data.readStrongBinder());
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++            sp<Surface> sp = new Surface(st);
++            reply->writeInt32(setVideoTarget(sp));
++#else
+             reply->writeInt32(setVideoTarget(st));
++#endif
++            return NO_ERROR;
++        } break;
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++        case SET_VIDEO_BUFFER_TARGET_SURFACE: {
++            ALOGV("SET_VIDEO_BUFFER_TARGET_SURFACE");
++            CHECK_INTERFACE(ICamera, data, reply);
++            view::Surface viewSurface;
++            data.readParcelable(&viewSurface);
++            sp<Surface> cp = viewSurface.toSurface();
++            reply->writeInt32(setVideoTarget(cp));
+             return NO_ERROR;
+         } break;
++#endif
+         case SET_AUDIO_RESTRICTION: {
+             CHECK_INTERFACE(ICamera, data, reply);
+             int32_t mode = data.readInt32();
+diff --git a/camera/include/camera/Camera.h b/camera/include/camera/Camera.h
+index 646b139742..fa84b4e782 100644
+--- a/camera/include/camera/Camera.h
++++ b/camera/include/camera/Camera.h
+@@ -21,13 +21,18 @@
+ 
+ #include <android/hardware/ICameraService.h>
+ 
+-#include <gui/IGraphicBufferProducer.h>
+-#include <system/camera.h>
++#include <camera/CameraBase.h>
++#include <camera/CameraUtils.h>
+ #include <camera/ICameraRecordingProxy.h>
+ #include <camera/android/hardware/ICamera.h>
+ #include <camera/android/hardware/ICameraClient.h>
+-#include <camera/CameraBase.h>
+-#include <camera/CameraUtils.h>
++#include <gui/Flags.h>
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++#include <gui/Surface.h>
++#else
++#include <gui/IGraphicBufferProducer.h>
++#endif
++#include <system/camera.h>
+ 
+ namespace android {
+ 
+@@ -91,8 +96,8 @@ public:
+             status_t    lock();
+             status_t    unlock();
+ 
+-            // pass the buffered IGraphicBufferProducer to the camera service
+-            status_t    setPreviewTarget(const sp<IGraphicBufferProducer>& bufferProducer);
++            // pass the SurfaceType to the camera service
++            status_t    setPreviewTarget(const sp<SurfaceType>& target);
+ 
+             // start preview mode, must call setPreviewTarget first
+             status_t    startPreview();
+@@ -148,7 +153,7 @@ public:
+ 
+             // Set the video buffer producer for camera to use in VIDEO_BUFFER_MODE_BUFFER_QUEUE
+             // mode.
+-            status_t    setVideoTarget(const sp<IGraphicBufferProducer>& bufferProducer);
++            status_t    setVideoTarget(const sp<SurfaceType>& target);
+ 
+             void        setListener(const sp<CameraListener>& listener);
+ 
+@@ -158,8 +163,7 @@ public:
+             // disabled by calling it with CAMERA_FRAME_CALLBACK_FLAG_NOOP, and
+             // Target by calling it with a NULL interface.
+             void        setPreviewCallbackFlags(int preview_callback_flag);
+-            status_t    setPreviewCallbackTarget(
+-                    const sp<IGraphicBufferProducer>& callbackProducer);
++            status_t    setPreviewCallbackTarget(const sp<SurfaceType>& target);
+ 
+             sp<ICameraRecordingProxy> getRecordingProxy();
+ 
+diff --git a/camera/include/camera/android/hardware/ICamera.h b/camera/include/camera/android/hardware/ICamera.h
+index ec19e5d631..eb887fbd51 100644
+--- a/camera/include/camera/android/hardware/ICamera.h
++++ b/camera/include/camera/android/hardware/ICamera.h
+@@ -22,6 +22,7 @@
+ #include <binder/Parcel.h>
+ #include <binder/IMemory.h>
+ #include <binder/Status.h>
++#include <gui/Flags.h>
+ #include <utils/String8.h>
+ 
+ namespace android {
+@@ -61,9 +62,8 @@ public:
+     // allow other processes to use this ICamera interface
+     virtual status_t        unlock() = 0;
+ 
+-    // pass the buffered IGraphicBufferProducer to the camera service
+-    virtual status_t        setPreviewTarget(
+-            const sp<IGraphicBufferProducer>& bufferProducer) = 0;
++    // pass the SurfaceType to the camera service
++    virtual status_t        setPreviewTarget(const sp<SurfaceType>& bufferProducer) = 0;
+ 
+     // set the preview callback flag to affect how the received frames from
+     // preview are handled. Enabling preview callback flags disables any active
+@@ -73,8 +73,7 @@ public:
+     // of preview callback buffers. Passing a valid interface here disables any
+     // active preview callbacks set by setPreviewCallbackFlag(). Passing NULL
+     // disables the use of the callback target.
+-    virtual status_t        setPreviewCallbackTarget(
+-            const sp<IGraphicBufferProducer>& callbackProducer) = 0;
++    virtual status_t        setPreviewCallbackTarget(const sp<SurfaceType>& callbackProducer) = 0;
+ 
+     // start preview mode, must call setPreviewTarget first
+     virtual status_t        startPreview() = 0;
+@@ -138,8 +137,7 @@ public:
+     virtual status_t        setVideoBufferMode(int32_t videoBufferMode) = 0;
+ 
+     // Set the video buffer producer for camera to use in VIDEO_BUFFER_MODE_BUFFER_QUEUE mode.
+-    virtual status_t        setVideoTarget(
+-            const sp<IGraphicBufferProducer>& bufferProducer) = 0;
++    virtual status_t        setVideoTarget(const sp<SurfaceType>& bufferProducer) = 0;
+ 
+     // Set the audio restriction mode
+     virtual status_t        setAudioRestriction(int32_t mode) = 0;
+diff --git a/camera/tests/CameraZSLTests.cpp b/camera/tests/CameraZSLTests.cpp
+index 2740d09fb8..b06f9b4111 100644
+--- a/camera/tests/CameraZSLTests.cpp
++++ b/camera/tests/CameraZSLTests.cpp
+@@ -20,17 +20,18 @@
+ #include <gtest/gtest.h>
+ 
+ #include <android/content/AttributionSourceState.h>
++#include <android/hardware/ICameraService.h>
+ #include <binder/ProcessState.h>
+-#include <utils/Errors.h>
+-#include <utils/Log.h>
+-#include <gui/Surface.h>
+-#include <gui/SurfaceComposerClient.h>
+-#include <camera/CameraParameters.h>
+-#include <camera/CameraMetadata.h>
+ #include <camera/Camera.h>
++#include <camera/CameraMetadata.h>
++#include <camera/CameraParameters.h>
+ #include <camera/CameraUtils.h>
+ #include <camera/StringUtils.h>
+-#include <android/hardware/ICameraService.h>
++#include <gui/Flags.h>
++#include <gui/Surface.h>
++#include <gui/SurfaceComposerClient.h>
++#include <utils/Errors.h>
++#include <utils/Log.h>
+ 
+ using namespace android;
+ using namespace android::hardware;
+@@ -276,8 +277,11 @@ TEST_F(CameraZSLTests, TestAllPictureSizes) {
+ 
+         previewSurface = surfaceControl->getSurface();
+         ASSERT_TRUE(previewSurface != NULL);
+-        ASSERT_EQ(NO_ERROR, cameraDevice->setPreviewTarget(
+-                previewSurface->getIGraphicBufferProducer()));
++        ASSERT_EQ(NO_ERROR, cameraDevice->setPreviewTarget(previewSurface
++#if !WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++                                                                   ->getIGraphicBufferProducer()
++#endif
++                                                                   ));
+ 
+         cameraDevice->setPreviewCallbackFlag(
+                 CAMERA_FRAME_CALLBACK_FLAG_CAMCORDER);
+diff --git a/camera/tests/fuzzer/camera_fuzzer.cpp b/camera/tests/fuzzer/camera_fuzzer.cpp
+index f46d24657a..f976fe1d7a 100644
+--- a/camera/tests/fuzzer/camera_fuzzer.cpp
++++ b/camera/tests/fuzzer/camera_fuzzer.cpp
+@@ -20,6 +20,7 @@
+ #include <android/content/AttributionSourceState.h>
+ #include <binder/MemoryDealer.h>
+ #include <fuzzer/FuzzedDataProvider.h>
++#include <gui/Flags.h>
+ #include <gui/Surface.h>
+ #include <gui/SurfaceComposerClient.h>
+ #include "camera2common.h"
+@@ -210,7 +211,11 @@ void CameraFuzzer::invokeCamera() {
+         auto callCameraAPIs = mFDP->PickValueInArray<const std::function<void()>>({
+                 [&]() {
+                     if (surfaceControl) {
+-                        mCamera->setPreviewTarget(surface->getIGraphicBufferProducer());
++                        mCamera->setPreviewTarget(surface
++#if !WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++                                                          ->getIGraphicBufferProducer()
++#endif
++                        );
+                     }
+                 },
+                 [&]() {
+@@ -267,7 +272,11 @@ void CameraFuzzer::invokeCamera() {
+                 },
+                 [&]() {
+                     if (surfaceControl) {
+-                        mCamera->setVideoTarget(surface->getIGraphicBufferProducer());
++                        mCamera->setVideoTarget(surface
++#if !WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++                                                        ->getIGraphicBufferProducer()
++#endif
++                        );
+                     }
+                 },
+                 [&]() {
+@@ -283,7 +292,11 @@ void CameraFuzzer::invokeCamera() {
+                 },
+                 [&]() {
+                     if (surfaceControl) {
+-                        mCamera->setPreviewCallbackTarget(surface->getIGraphicBufferProducer());
++                        mCamera->setPreviewCallbackTarget(surface
++#if !WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++                                                                  ->getIGraphicBufferProducer()
++#endif
++                        );
+                     }
+                 },
+                 [&]() { mCamera->getRecordingProxy(); },
+diff --git a/media/libmediaplayerservice/StagefrightRecorder.cpp b/media/libmediaplayerservice/StagefrightRecorder.cpp
+index 086baa390f..23e7a479bb 100644
+--- a/media/libmediaplayerservice/StagefrightRecorder.cpp
++++ b/media/libmediaplayerservice/StagefrightRecorder.cpp
+@@ -59,6 +59,7 @@
+ #include <media/stagefright/PersistentSurface.h>
+ #include <media/MediaProfiles.h>
+ #include <camera/CameraParameters.h>
++#include <gui/Flags.h>
+ 
+ #include <utils/Errors.h>
+ #include <sys/types.h>
+@@ -1932,16 +1933,32 @@ status_t StagefrightRecorder::setupCameraSource(
+             return BAD_VALUE;
+         }
+ 
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++        sp<Surface> surface = new Surface(mPreviewSurface);
++        mCameraSourceTimeLapse = CameraSourceTimeLapse::CreateFromCamera(
++                mCamera, mCameraProxy, mCameraId, clientName, uid, pid,
++                videoSize, mFrameRate, surface,
++                std::llround(1e6 / mCaptureFps));
++#else
+         mCameraSourceTimeLapse = CameraSourceTimeLapse::CreateFromCamera(
+                 mCamera, mCameraProxy, mCameraId, clientName, uid, pid,
+                 videoSize, mFrameRate, mPreviewSurface,
+                 std::llround(1e6 / mCaptureFps));
++#endif
+         *cameraSource = mCameraSourceTimeLapse;
+     } else {
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++        sp<Surface> surface = new Surface(mPreviewSurface);
++        *cameraSource = CameraSource::CreateFromCamera(
++                mCamera, mCameraProxy, mCameraId, clientName, uid, pid,
++                videoSize, mFrameRate,
++                surface);
++#else
+         *cameraSource = CameraSource::CreateFromCamera(
+                 mCamera, mCameraProxy, mCameraId, clientName, uid, pid,
+                 videoSize, mFrameRate,
+                 mPreviewSurface);
++#endif
+     }
+     mCamera.clear();
+     mCameraProxy.clear();
+diff --git a/media/libmediaplayerservice/fuzzer/mediarecorder_fuzzer.cpp b/media/libmediaplayerservice/fuzzer/mediarecorder_fuzzer.cpp
+index 2518c21879..3339ae8e69 100644
+--- a/media/libmediaplayerservice/fuzzer/mediarecorder_fuzzer.cpp
++++ b/media/libmediaplayerservice/fuzzer/mediarecorder_fuzzer.cpp
+@@ -24,6 +24,7 @@
+ #include <fakeservicemanager/FakeServiceManager.h>
+ #include <gui/IGraphicBufferProducer.h>
+ #include <gui/Surface.h>
++#include <gui/Flags.h>
+ #include <gui/SurfaceComposerClient.h>
+ #include <media/stagefright/PersistentSurface.h>
+ #include <media/stagefright/foundation/AString.h>
+@@ -126,14 +127,9 @@ class TestCamera : public ICamera {
+     status_t connect(const sp<ICameraClient> & /*client*/) override { return 0; };
+     status_t lock() override { return 0; };
+     status_t unlock() override { return 0; };
+-    status_t setPreviewTarget(const sp<IGraphicBufferProducer> & /*bufferProducer*/) override {
+-        return 0;
+-    };
++    status_t setPreviewTarget(const sp<SurfaceType> & /*target*/) override { return 0; };
++    status_t setPreviewCallbackTarget(const sp<SurfaceType> & /*target*/) override { return 0; };
+     void setPreviewCallbackFlag(int /*flag*/) override{};
+-    status_t setPreviewCallbackTarget(
+-        const sp<IGraphicBufferProducer> & /*callbackProducer*/) override {
+-        return 0;
+-    };
+     status_t startPreview() override { return 0; };
+     void stopPreview() override{};
+     bool previewEnabled() override { return true; };
+@@ -152,9 +148,7 @@ class TestCamera : public ICamera {
+         return 0;
+     };
+     status_t setVideoBufferMode(int32_t /*videoBufferMode*/) override { return 0; };
+-    status_t setVideoTarget(const sp<IGraphicBufferProducer> & /*bufferProducer*/) override {
+-        return 0;
+-    };
++    status_t setVideoTarget(const sp<SurfaceType> & /*target*/) override { return 0; };
+     status_t setAudioRestriction(int32_t /*mode*/) override { return 0; };
+     int32_t getGlobalAudioRestriction() override { return 0; };
+     IBinder *onAsBinder() override { return reinterpret_cast<IBinder *>(this); };
+diff --git a/media/libstagefright/CameraSource.cpp b/media/libstagefright/CameraSource.cpp
+index e26f18989c..81a5508ff7 100644
+--- a/media/libstagefright/CameraSource.cpp
++++ b/media/libstagefright/CameraSource.cpp
+@@ -35,6 +35,7 @@
+ #include <camera/StringUtils.h>
+ #include <com_android_graphics_libgui_flags.h>
+ #include <gui/Surface.h>
++#include <gui/Flags.h>
+ #include <utils/String8.h>
+ #include <cutils/properties.h>
+ 
+@@ -99,7 +100,7 @@ CameraSource *CameraSource::CreateFromCamera(
+     pid_t clientPid,
+     Size videoSize,
+     int32_t frameRate,
+-    const sp<IGraphicBufferProducer>& surface) {
++    const sp<SurfaceType>& surface) {
+ 
+     CameraSource *source = new CameraSource(camera, proxy, cameraId,
+             clientName, clientUid, clientPid, videoSize, frameRate, surface);
+@@ -115,7 +116,7 @@ CameraSource::CameraSource(
+     pid_t clientPid,
+     Size videoSize,
+     int32_t frameRate,
+-    const sp<IGraphicBufferProducer>& surface)
++    const sp<SurfaceType>& surface)
+     : mCameraFlags(0),
+       mNumInputBuffers(0),
+       mVideoFrameRate(-1),
+@@ -490,11 +491,23 @@ status_t CameraSource::initBufferQueue(uint32_t width, uint32_t height,
+ #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+     mVideoBufferConsumer = new BufferItemConsumer(usage, bufferCount);
+     mVideoBufferConsumer->setName(String8::format("StageFright-CameraSource"));
++
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++    mVideoBufferProducer = mVideoBufferConsumer->getSurface();
++#else
+     mVideoBufferProducer = mVideoBufferConsumer->getSurface()->getIGraphicBufferProducer();
++#endif  // WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++
+ #else
+     mVideoBufferConsumer = new BufferItemConsumer(consumer, usage, bufferCount);
+     mVideoBufferConsumer->setName(String8::format("StageFright-CameraSource"));
++
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++    mVideoBufferProducer = new Surface(producer);
++#else
+     mVideoBufferProducer = producer;
++#endif  // WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++
+ #endif  // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+ 
+     status_t res = mVideoBufferConsumer->setDefaultBufferSize(width, height);
+diff --git a/media/libstagefright/CameraSourceTimeLapse.cpp b/media/libstagefright/CameraSourceTimeLapse.cpp
+index 50a512f726..b1a005b59d 100644
+--- a/media/libstagefright/CameraSourceTimeLapse.cpp
++++ b/media/libstagefright/CameraSourceTimeLapse.cpp
+@@ -29,6 +29,7 @@
+ #include <media/stagefright/MetaData.h>
+ #include <camera/Camera.h>
+ #include <camera/CameraParameters.h>
++#include <gui/Flags.h>
+ #include <utils/String8.h>
+ #include <utils/Vector.h>
+ 
+@@ -44,7 +45,11 @@ CameraSourceTimeLapse *CameraSourceTimeLapse::CreateFromCamera(
+         pid_t clientPid,
+         Size videoSize,
+         int32_t videoFrameRate,
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++        const sp<Surface>& surface,
++#else
+         const sp<IGraphicBufferProducer>& surface,
++#endif
+         int64_t timeBetweenFrameCaptureUs) {
+ 
+     CameraSourceTimeLapse *source = new
+@@ -71,7 +76,11 @@ CameraSourceTimeLapse::CameraSourceTimeLapse(
+         pid_t clientPid,
+         Size videoSize,
+         int32_t videoFrameRate,
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++        const sp<Surface>& surface,
++#else
+         const sp<IGraphicBufferProducer>& surface,
++#endif
+         int64_t timeBetweenFrameCaptureUs)
+       : CameraSource(camera, proxy, cameraId, clientName, clientUid, clientPid,
+                 videoSize, videoFrameRate, surface),
+diff --git a/media/libstagefright/include/media/stagefright/CameraSource.h b/media/libstagefright/include/media/stagefright/CameraSource.h
+index f42e31570e..54e4f18999 100644
+--- a/media/libstagefright/include/media/stagefright/CameraSource.h
++++ b/media/libstagefright/include/media/stagefright/CameraSource.h
+@@ -25,6 +25,8 @@
+ #include <camera/ICameraRecordingProxy.h>
+ #include <camera/CameraParameters.h>
+ #include <gui/BufferItemConsumer.h>
++#include <gui/Surface.h>
++#include <gui/Flags.h>
+ #include <utils/List.h>
+ #include <utils/RefBase.h>
+ #include <utils/String16.h>
+@@ -77,7 +79,7 @@ public:
+                                           pid_t clientPid,
+                                           Size videoSize,
+                                           int32_t frameRate,
+-                                          const sp<IGraphicBufferProducer>& surface);
++                                          const sp<SurfaceType>& surface);
+ 
+     virtual ~CameraSource();
+ 
+@@ -165,7 +167,7 @@ protected:
+     sp<Camera>   mCamera;
+     sp<ICameraRecordingProxy>   mCameraRecordingProxy;
+     sp<DeathNotifier> mDeathNotifier;
+-    sp<IGraphicBufferProducer>  mSurface;
++    sp<SurfaceType>  mSurface;
+     sp<MetaData> mMeta;
+ 
+     int64_t mStartTimeUs;
+@@ -180,8 +182,7 @@ protected:
+ 
+     CameraSource(const sp<hardware::ICamera>& camera, const sp<ICameraRecordingProxy>& proxy,
+                  int32_t cameraId, const String16& clientName, uid_t clientUid, pid_t clientPid,
+-                 Size videoSize, int32_t frameRate,
+-                 const sp<IGraphicBufferProducer>& surface);
++                 Size videoSize, int32_t frameRate, const sp<SurfaceType> & surface);
+ 
+     virtual status_t startCameraRecording();
+     virtual void releaseRecordingFrame(const sp<IMemory>& frame);
+@@ -221,7 +222,7 @@ private:
+     static const nsecs_t kMemoryBaseAvailableTimeoutNs = 200000000; // 200ms
+     // Consumer and producer of the buffer queue between this class and camera.
+     sp<BufferItemConsumer> mVideoBufferConsumer;
+-    sp<IGraphicBufferProducer> mVideoBufferProducer;
++    sp<SurfaceType> mVideoBufferProducer;
+     // Memory used to send the buffers to encoder, where sp<IMemory> stores VideoNativeMetadata.
+     sp<IMemoryHeap> mMemoryHeapBase;
+     List<sp<IMemory>> mMemoryBases;
+diff --git a/media/libstagefright/include/media/stagefright/CameraSourceTimeLapse.h b/media/libstagefright/include/media/stagefright/CameraSourceTimeLapse.h
+index 3c311cff00..a789b12848 100644
+--- a/media/libstagefright/include/media/stagefright/CameraSourceTimeLapse.h
++++ b/media/libstagefright/include/media/stagefright/CameraSourceTimeLapse.h
+@@ -23,6 +23,7 @@
+ #include <utils/RefBase.h>
+ #include <utils/threads.h>
+ #include <utils/String16.h>
++#include <gui/Flags.h>
+ 
+ namespace android {
+ 
+@@ -44,7 +45,7 @@ public:
+         pid_t clientPid,
+         Size videoSize,
+         int32_t videoFrameRate,
+-        const sp<IGraphicBufferProducer>& surface,
++        const sp<SurfaceType>& surface,
+         int64_t timeBetweenTimeLapseFrameCaptureUs);
+ 
+     virtual ~CameraSourceTimeLapse();
+@@ -120,7 +121,7 @@ private:
+         pid_t clientPid,
+         Size videoSize,
+         int32_t videoFrameRate,
+-        const sp<IGraphicBufferProducer>& surface,
++        const sp<SurfaceType>& surface,
+         int64_t timeBetweenTimeLapseFrameCaptureUs);
+ 
+     // Wrapper over CameraSource::signalBufferReturned() to implement quick stop.
+diff --git a/services/camera/libcameraservice/CameraService.h b/services/camera/libcameraservice/CameraService.h
+index 5eb2536682..d0c3361b76 100644
+--- a/services/camera/libcameraservice/CameraService.h
++++ b/services/camera/libcameraservice/CameraService.h
+@@ -24,18 +24,19 @@
+ #include <android/hardware/camera2/BnCameraInjectionSession.h>
+ #include <android/hardware/camera2/ICameraInjectionCallback.h>
+ 
+-#include <cutils/multiuser.h>
+-#include <utils/Vector.h>
+-#include <utils/KeyedVector.h>
+ #include <binder/ActivityManager.h>
+ #include <binder/AppOpsManager.h>
+ #include <binder/BinderService.h>
+-#include <binder/IServiceManager.h>
+ #include <binder/IActivityManager.h>
+ #include <binder/IAppOpsCallback.h>
++#include <binder/IServiceManager.h>
+ #include <binder/IUidObserver.h>
++#include <cutils/multiuser.h>
++#include <gui/Flags.h>
+ #include <hardware/camera.h>
+ #include <sensorprivacy/SensorPrivacyManager.h>
++#include <utils/KeyedVector.h>
++#include <utils/Vector.h>
+ 
+ #include <android/hardware/camera/common/1.0/types.h>
+ 
+@@ -543,10 +544,9 @@ public:
+         virtual status_t      connect(const sp<hardware::ICameraClient>& client) = 0;
+         virtual status_t      lock() = 0;
+         virtual status_t      unlock() = 0;
+-        virtual status_t      setPreviewTarget(const sp<IGraphicBufferProducer>& bufferProducer)=0;
++        virtual status_t      setPreviewTarget(const sp<SurfaceType>& target) = 0;
+         virtual void          setPreviewCallbackFlag(int flag) = 0;
+-        virtual status_t      setPreviewCallbackTarget(
+-                const sp<IGraphicBufferProducer>& callbackProducer) = 0;
++        virtual status_t      setPreviewCallbackTarget(const sp<SurfaceType>& target) = 0;
+         virtual status_t      startPreview() = 0;
+         virtual void          stopPreview() = 0;
+         virtual bool          previewEnabled() = 0;
+@@ -561,7 +561,7 @@ public:
+         virtual status_t      setParameters(const String8& params) = 0;
+         virtual String8       getParameters() const = 0;
+         virtual status_t      sendCommand(int32_t cmd, int32_t arg1, int32_t arg2) = 0;
+-        virtual status_t      setVideoTarget(const sp<IGraphicBufferProducer>& bufferProducer) = 0;
++        virtual status_t      setVideoTarget(const sp<SurfaceType>& target) = 0;
+ 
+         // Interface used by CameraService
+         Client(const sp<CameraService>& cameraService,
+diff --git a/services/camera/libcameraservice/api1/Camera2Client.cpp b/services/camera/libcameraservice/api1/Camera2Client.cpp
+index 861414f307..af422a7f45 100644
+--- a/services/camera/libcameraservice/api1/Camera2Client.cpp
++++ b/services/camera/libcameraservice/api1/Camera2Client.cpp
+@@ -30,6 +30,7 @@
+ #include <com_android_internal_camera_flags.h>
+ #include <cutils/properties.h>
+ #include <gui/Surface.h>
++#include <gui/view/Surface.h>
+ 
+ #include "api1/Camera2Client.h"
+ 
+@@ -587,26 +588,56 @@ status_t Camera2Client::unlock() {
+     return EBUSY;
+ }
+ 
+-status_t Camera2Client::setPreviewTarget(
+-        const sp<IGraphicBufferProducer>& bufferProducer) {
++status_t Camera2Client::setPreviewTarget(const sp<SurfaceType>& target) {
+     ATRACE_CALL();
+     ALOGV("%s: E", __FUNCTION__);
+     Mutex::Autolock icl(mBinderSerializationLock);
+     status_t res;
+-    if ( (res = checkPid(__FUNCTION__) ) != OK) return res;
++    if ((res = checkPid(__FUNCTION__)) != OK) return res;
+ 
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++    sp<Surface> surface;
++    view::Surface viewSurface;
++    if (target != nullptr) {
++        // Using controlledByApp flag to ensure that the buffer queue remains in
++        // async mode for the old camera API, where many applications depend
++        // on that behavior.
++        surface = new Surface(target->getIGraphicBufferProducer(), true);
++        viewSurface = view::Surface::fromSurface(surface);
++    }
++    return setPreviewWindowL(viewSurface, surface);
++#else
+     sp<IBinder> binder;
+     sp<Surface> window;
+-    if (bufferProducer != 0) {
+-        binder = IInterface::asBinder(bufferProducer);
++    if (target != 0) {
++        binder = IInterface::asBinder(target);
+         // Using controlledByApp flag to ensure that the buffer queue remains in
+         // async mode for the old camera API, where many applications depend
+         // on that behavior.
+-        window = new Surface(bufferProducer, /*controlledByApp*/ true);
++        window = new Surface(target, /*controlledByApp*/ true);
+     }
+     return setPreviewWindowL(binder, window);
++#endif
+ }
+ 
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++status_t Camera2Client::setPreviewWindowL(const view::Surface& viewSurface,
++                                          const sp<Surface>& window) {
++    ATRACE_CALL();
++    status_t res;
++
++    uint64_t viewSurfaceID;
++    res = viewSurface.getUniqueId(&viewSurfaceID);
++    if (res != OK) {
++        ALOGE("%s: Camera %d: Could not getUniqueId.", __FUNCTION__, mCameraId);
++        return res;
++    }
++
++    if (viewSurfaceID == mPreviewViewSurfaceID) {
++        ALOGV("%s: Camera %d: New window is same as old window", __FUNCTION__, mCameraId);
++        return NO_ERROR;
++    }
++#else
+ status_t Camera2Client::setPreviewWindowL(const sp<IBinder>& binder,
+         const sp<Surface>& window) {
+     ATRACE_CALL();
+@@ -617,6 +648,7 @@ status_t Camera2Client::setPreviewWindowL(const sp<IBinder>& binder,
+                 __FUNCTION__, mCameraId);
+         return NO_ERROR;
+     }
++#endif
+ 
+     Parameters::State state;
+     {
+@@ -628,9 +660,8 @@ status_t Camera2Client::setPreviewWindowL(const sp<IBinder>& binder,
+         case Parameters::RECORD:
+         case Parameters::STILL_CAPTURE:
+         case Parameters::VIDEO_SNAPSHOT:
+-            ALOGE("%s: Camera %d: Cannot set preview display while in state %s",
+-                    __FUNCTION__, mCameraId,
+-                    Parameters::getStateName(state));
++            ALOGE("%s: Camera %d: Cannot set preview display while in state %s", __FUNCTION__,
++                  mCameraId, Parameters::getStateName(state));
+             return INVALID_OPERATION;
+         case Parameters::STOPPED:
+         case Parameters::WAITING_FOR_PREVIEW_WINDOW:
+@@ -640,19 +671,23 @@ status_t Camera2Client::setPreviewWindowL(const sp<IBinder>& binder,
+             // Already running preview - need to stop and create a new stream
+             res = stopStream();
+             if (res != OK) {
+-                ALOGE("%s: Unable to stop preview to swap windows: %s (%d)",
+-                        __FUNCTION__, strerror(-res), res);
++                ALOGE("%s: Unable to stop preview to swap windows: %s (%d)", __FUNCTION__,
++                      strerror(-res), res);
+                 return res;
+             }
+             state = Parameters::WAITING_FOR_PREVIEW_WINDOW;
+             break;
+     }
+ 
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++    mPreviewViewSurfaceID = viewSurfaceID;
++#else
+     mPreviewSurface = binder;
++#endif
++
+     res = mStreamingProcessor->setPreviewWindow(window);
+     if (res != OK) {
+-        ALOGE("%s: Unable to set new preview window: %s (%d)",
+-                __FUNCTION__, strerror(-res), res);
++        ALOGE("%s: Unable to set new preview window: %s (%d)", __FUNCTION__, strerror(-res), res);
+         return res;
+     }
+ 
+@@ -725,23 +760,26 @@ void Camera2Client::setPreviewCallbackFlagL(Parameters &params, int flag) {
+     }
+ }
+ 
+-status_t Camera2Client::setPreviewCallbackTarget(
+-        const sp<IGraphicBufferProducer>& callbackProducer) {
++status_t Camera2Client::setPreviewCallbackTarget(const sp<SurfaceType>& target) {
+     ATRACE_CALL();
+     ALOGV("%s: E", __FUNCTION__);
+     Mutex::Autolock icl(mBinderSerializationLock);
+     status_t res;
+-    if ( (res = checkPid(__FUNCTION__) ) != OK) return res;
++    if ((res = checkPid(__FUNCTION__)) != OK) return res;
+ 
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++    sp<Surface> window = target;
++#else
+     sp<Surface> window;
+-    if (callbackProducer != 0) {
+-        window = new Surface(callbackProducer);
++    if (target != 0) {
++        window = new Surface(target);
+     }
++#endif
+ 
+     res = mCallbackProcessor->setCallbackWindow(window);
+     if (res != OK) {
+-        ALOGE("%s: Camera %d: Unable to set preview callback surface: %s (%d)",
+-                __FUNCTION__, mCameraId, strerror(-res), res);
++        ALOGE("%s: Camera %d: Unable to set preview callback surface: %s (%d)", __FUNCTION__,
++              mCameraId, strerror(-res), res);
+         return res;
+     }
+ 
+@@ -757,7 +795,7 @@ status_t Camera2Client::setPreviewCallbackTarget(
+         l.mParameters.previewCallbackSurface = false;
+     }
+ 
+-    switch(l.mParameters.state) {
++    switch (l.mParameters.state) {
+         case Parameters::PREVIEW:
+             res = startPreviewL(l.mParameters, true);
+             break;
+@@ -769,15 +807,13 @@ status_t Camera2Client::setPreviewCallbackTarget(
+             break;
+     }
+     if (res != OK) {
+-        ALOGE("%s: Camera %d: Unable to refresh request in state %s",
+-                __FUNCTION__, mCameraId,
+-                Parameters::getStateName(l.mParameters.state));
++        ALOGE("%s: Camera %d: Unable to refresh request in state %s", __FUNCTION__, mCameraId,
++              Parameters::getStateName(l.mParameters.state));
+     }
+ 
+     return OK;
+ }
+ 
+-
+ status_t Camera2Client::startPreview() {
+     ATRACE_CALL();
+     ALOGV("%s: E", __FUNCTION__);
+@@ -2266,29 +2302,47 @@ status_t Camera2Client::overrideVideoSnapshotSize(Parameters &params) {
+     return res;
+ }
+ 
+-status_t Camera2Client::setVideoTarget(const sp<IGraphicBufferProducer>& bufferProducer) {
++status_t Camera2Client::setVideoTarget(const sp<SurfaceType>& target) {
+     ATRACE_CALL();
+     ALOGV("%s: E", __FUNCTION__);
+     Mutex::Autolock icl(mBinderSerializationLock);
+     status_t res;
+     if ( (res = checkPid(__FUNCTION__) ) != OK) return res;
+ 
+-    sp<IBinder> binder = IInterface::asBinder(bufferProducer);
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++    uint64_t videoSurfaceID;
++    res = target->getUniqueId(&videoSurfaceID);
++    if (res != OK) {
++        ALOGE("%s: Camera %d: Could not getUniqueId in setVideoTarget.", __FUNCTION__, mCameraId);
++        return res;
++    }
++    if (videoSurfaceID == mVideoSurfaceID) {
++        ALOGE("%s: Camera %d: New video window is same as old video window", __FUNCTION__,
++              mCameraId);
++        return NO_ERROR;
++    }
++#else
++    sp<IBinder> binder = IInterface::asBinder(target);
+     if (binder == mVideoSurface) {
+         ALOGV("%s: Camera %d: New video window is same as old video window",
+                 __FUNCTION__, mCameraId);
+         return NO_ERROR;
+     }
++#endif
+ 
+     sp<Surface> window;
+     int format;
+     android_dataspace dataSpace;
+ 
+-    if (bufferProducer != nullptr) {
++    if (target != nullptr) {
+         // Using controlledByApp flag to ensure that the buffer queue remains in
+         // async mode for the old camera API, where many applications depend
+         // on that behavior.
+-        window = new Surface(bufferProducer, /*controlledByApp*/ true);
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++        window = new Surface(target->getIGraphicBufferProducer(), /*controlledByApp*/ true);
++#else
++        window = new Surface(target, /*controlledByApp*/ true);
++#endif
+ 
+         ANativeWindow *anw = window.get();
+ 
+@@ -2327,7 +2381,11 @@ status_t Camera2Client::setVideoTarget(const sp<IGraphicBufferProducer>& bufferP
+             return INVALID_OPERATION;
+     }
+ 
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++    mVideoSurfaceID = videoSurfaceID;
++#else
+     mVideoSurface = binder;
++#endif
+     res = mStreamingProcessor->setRecordingWindow(window);
+     if (res != OK) {
+         ALOGE("%s: Unable to set new recording window: %s (%d)",
+diff --git a/services/camera/libcameraservice/api1/Camera2Client.h b/services/camera/libcameraservice/api1/Camera2Client.h
+index a0c9f2d8b1..ce668dde1e 100644
+--- a/services/camera/libcameraservice/api1/Camera2Client.h
++++ b/services/camera/libcameraservice/api1/Camera2Client.h
+@@ -17,12 +17,14 @@
+ #ifndef ANDROID_SERVERS_CAMERA_CAMERA2CLIENT_H
+ #define ANDROID_SERVERS_CAMERA_CAMERA2CLIENT_H
+ 
++#include <gui/Flags.h>
++#include <gui/view/Surface.h>
++#include <media/RingBuffer.h>
+ #include "CameraService.h"
+-#include "common/CameraDeviceBase.h"
+-#include "common/Camera2ClientBase.h"
+-#include "api1/client2/Parameters.h"
+ #include "api1/client2/FrameProcessor.h"
+-#include <media/RingBuffer.h>
++#include "api1/client2/Parameters.h"
++#include "common/Camera2ClientBase.h"
++#include "common/CameraDeviceBase.h"
+ 
+ namespace android {
+ 
+@@ -53,11 +55,9 @@ public:
+     virtual status_t        connect(const sp<hardware::ICameraClient>& client);
+     virtual status_t        lock();
+     virtual status_t        unlock();
+-    virtual status_t        setPreviewTarget(
+-        const sp<IGraphicBufferProducer>& bufferProducer);
++    virtual status_t        setPreviewTarget(const sp<SurfaceType>& target);
+     virtual void            setPreviewCallbackFlag(int flag);
+-    virtual status_t        setPreviewCallbackTarget(
+-        const sp<IGraphicBufferProducer>& callbackProducer);
++    virtual status_t        setPreviewCallbackTarget(const sp<SurfaceType>& target);
+ 
+     virtual status_t        startPreview();
+     virtual void            stopPreview();
+@@ -78,7 +78,7 @@ public:
+     virtual status_t        sendCommand(int32_t cmd, int32_t arg1, int32_t arg2);
+     virtual void            notifyError(int32_t errorCode,
+                                         const CaptureResultExtras& resultExtras);
+-    virtual status_t        setVideoTarget(const sp<IGraphicBufferProducer>& bufferProducer);
++    virtual status_t        setVideoTarget(const sp<SurfaceType>& target);
+     virtual status_t        setAudioRestriction(int mode);
+     virtual int32_t         getGlobalAudioRestriction();
+     virtual status_t        setRotateAndCropOverride(uint8_t rotateAndCrop, bool fromHal = false);
+@@ -183,8 +183,12 @@ private:
+     /** ICamera interface-related private members */
+     typedef camera2::Parameters Parameters;
+ 
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++    status_t setPreviewWindowL(const view::Surface& viewSurface, const sp<Surface>& window);
++#else
+     status_t setPreviewWindowL(const sp<IBinder>& binder,
+             const sp<Surface>& window);
++#endif
+     status_t startPreviewL(Parameters &params, bool restart);
+     void     stopPreviewL();
+     status_t startRecordingL(Parameters &params, bool restart);
+@@ -221,8 +225,13 @@ private:
+ 
+     /* Preview/Recording related members */
+ 
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++    uint64_t mPreviewViewSurfaceID;
++    uint64_t mVideoSurfaceID;
++#else
+     sp<IBinder> mPreviewSurface;
+     sp<IBinder> mVideoSurface;
++#endif
+     sp<camera2::StreamingProcessor> mStreamingProcessor;
+ 
+     /** Preview callback related members */
+diff --git a/services/camera/libcameraservice/libcameraservice_fuzzer/camera_service_fuzzer.cpp b/services/camera/libcameraservice/libcameraservice_fuzzer/camera_service_fuzzer.cpp
+index 12ac33f95a..86e2c70651 100644
+--- a/services/camera/libcameraservice/libcameraservice_fuzzer/camera_service_fuzzer.cpp
++++ b/services/camera/libcameraservice/libcameraservice_fuzzer/camera_service_fuzzer.cpp
+@@ -40,6 +40,7 @@
+ #include <fakeservicemanager/FakeServiceManager.h>
+ #include <fuzzbinder/random_binder.h>
+ #include <gui/BufferItemConsumer.h>
++#include <gui/Flags.h>
+ #include <gui/IGraphicBufferProducer.h>
+ #include <gui/Surface.h>
+ #include <gui/SurfaceComposerClient.h>
+@@ -620,7 +621,11 @@ void CameraFuzzer::invokeCameraAPIs() {
+ 
+             previewSurface = surfaceControl->getSurface();
+             if (previewSurface.get()) {
+-                cameraDevice->setPreviewTarget(previewSurface->getIGraphicBufferProducer());
++                cameraDevice->setPreviewTarget(previewSurface
++#if !WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++                                                       ->getIGraphicBufferProducer()
++#endif
++                );
+             }
+         }
+         cameraDevice->setPreviewCallbackFlag(CAMERA_FRAME_CALLBACK_FLAG_CAMCORDER);
+@@ -675,7 +680,11 @@ void CameraFuzzer::invokeCameraAPIs() {
+                         .apply();
+                 sp<Surface> previewSurfaceVideo = surfaceControlVideo->getSurface();
+                 if (previewSurfaceVideo.get()) {
+-                    cameraDevice->setVideoTarget(previewSurfaceVideo->getIGraphicBufferProducer());
++                    cameraDevice->setVideoTarget(previewSurfaceVideo
++#if !WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++                                                         ->getIGraphicBufferProducer()
++#endif
++                    );
+                 }
+             }
+             cameraDevice->stopPreview();
+-- 
+2.43.0
+

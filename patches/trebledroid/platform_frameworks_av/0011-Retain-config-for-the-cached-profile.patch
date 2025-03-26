@@ -1,0 +1,130 @@
+From 5e02d2b1bb5ed91d68a7a6d80be2f1ef118d10d6 Mon Sep 17 00:00:00 2001
+From: jiabin <jiabin@google.com>
+Date: Mon, 23 Sep 2024 19:26:19 +0000
+Subject: [PATCH 011/436] Retain config for the cached profile.
+
+Bug: 366668769
+Bug: 283825771
+Test: atest audiopolicy_tests
+Flag: EXEMPT bugfix
+Change-Id: Ifb146dd4162dbb1b72468b3f4905036f7427c727
+---
+ .../managerdefault/AudioPolicyManager.cpp     | 12 ++++++---
+ .../tests/AudioPolicyTestManager.h            |  1 +
+ .../tests/audiopolicymanager_tests.cpp        | 27 +++++++++++++++++++
+ .../test_audio_policy_configuration.xml       |  7 +++++
+ 4 files changed, 44 insertions(+), 3 deletions(-)
+
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index 574307a7e0..514808e1c4 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -8156,6 +8156,9 @@ sp<IOProfile> AudioPolicyManager::getInputProfile(const sp<DeviceDescriptor> &de
+ 
+     for (;;) {
+         sp<IOProfile> firstInexact = nullptr;
++        uint32_t inexactSamplingRate = 0;
++        audio_format_t inexactFormat = AUDIO_FORMAT_INVALID;
++        audio_channel_mask_t inexactChannelMask = AUDIO_CHANNEL_INVALID;
+         uint32_t updatedSamplingRate = 0;
+         audio_format_t updatedFormat = AUDIO_FORMAT_INVALID;
+         audio_channel_mask_t updatedChannelMask = AUDIO_CHANNEL_INVALID;
+@@ -8193,14 +8196,17 @@ sp<IOProfile> AudioPolicyManager::getInputProfile(const sp<DeviceDescriptor> &de
+                                 false /*exactMatchRequiredForInputFlags*/)
+                                 != IOProfile::NO_MATCH) {
+                     firstInexact = profile;
++                    inexactSamplingRate = updatedSamplingRate;
++                    inexactFormat = updatedFormat;
++                    inexactChannelMask = updatedChannelMask;
+                 }
+             }
+         }
+ 
+         if (firstInexact != nullptr) {
+-            samplingRate = updatedSamplingRate;
+-            format = updatedFormat;
+-            channelMask = updatedChannelMask;
++            samplingRate = inexactSamplingRate;
++            format = inexactFormat;
++            channelMask = inexactChannelMask;
+             return firstInexact;
+         } else if (flags & AUDIO_INPUT_FLAG_RAW) {
+             flags = (audio_input_flags_t) (flags & ~AUDIO_INPUT_FLAG_RAW); // retry
+diff --git a/services/audiopolicy/tests/AudioPolicyTestManager.h b/services/audiopolicy/tests/AudioPolicyTestManager.h
+index bf45bb2838..e30882c3fe 100644
+--- a/services/audiopolicy/tests/AudioPolicyTestManager.h
++++ b/services/audiopolicy/tests/AudioPolicyTestManager.h
+@@ -46,6 +46,7 @@ class AudioPolicyTestManager : public AudioPolicyManager {
+     using AudioPolicyManager::setDeviceConnectionState;
+     using AudioPolicyManager::deviceToAudioPort;
+     using AudioPolicyManager::handleDeviceConfigChange;
++    using AudioPolicyManager::getInputProfile;
+     uint32_t getAudioPortGeneration() const { return mAudioPortGeneration; }
+     HwModuleCollection getHwModules() const { return mHwModules; }
+ };
+diff --git a/services/audiopolicy/tests/audiopolicymanager_tests.cpp b/services/audiopolicy/tests/audiopolicymanager_tests.cpp
+index ad8657c4c2..1c5c50a6f4 100644
+--- a/services/audiopolicy/tests/audiopolicymanager_tests.cpp
++++ b/services/audiopolicy/tests/audiopolicymanager_tests.cpp
+@@ -1244,6 +1244,33 @@ TEST_F(AudioPolicyManagerTestWithConfigurationFile, SetDeviceConnectionStateClos
+     EXPECT_EQ(streamCountBefore, mClient->getOpenedInputsCount());
+ }
+ 
++TEST_F(AudioPolicyManagerTestWithConfigurationFile, UpdateConfigFromInexactProfile) {
++    const audio_format_t expectedFormat = AUDIO_FORMAT_PCM_16_BIT;
++    const uint32_t expectedSampleRate = 48000;
++    const audio_channel_mask_t expectedChannelMask = AUDIO_CHANNEL_IN_STEREO;
++    const std::string expectedIOProfile = "primary input";
++
++    auto devices = mManager->getAvailableInputDevices();
++    sp<DeviceDescriptor> mic = nullptr;
++    for (auto device : devices) {
++        if (device->type() == AUDIO_DEVICE_IN_BUILTIN_MIC) {
++            mic = device;
++            break;
++        }
++    }
++    EXPECT_NE(nullptr, mic);
++
++    audio_format_t requestedFormat = AUDIO_FORMAT_PCM_16_BIT;
++    uint32_t requestedSampleRate = 44100;
++    audio_channel_mask_t requestedChannelMask = AUDIO_CHANNEL_IN_STEREO;
++    auto profile = mManager->getInputProfile(
++            mic, requestedSampleRate, requestedFormat, requestedChannelMask, AUDIO_INPUT_FLAG_NONE);
++    EXPECT_EQ(expectedIOProfile, profile->getName());
++    EXPECT_EQ(expectedFormat, requestedFormat);
++    EXPECT_EQ(expectedSampleRate, requestedSampleRate);
++    EXPECT_EQ(expectedChannelMask, requestedChannelMask);
++}
++
+ class AudioPolicyManagerTestDynamicPolicy : public AudioPolicyManagerTestWithConfigurationFile {
+ protected:
+     void TearDown() override;
+diff --git a/services/audiopolicy/tests/resources/test_audio_policy_configuration.xml b/services/audiopolicy/tests/resources/test_audio_policy_configuration.xml
+index 67e99f2b9d..3c64898da6 100644
+--- a/services/audiopolicy/tests/resources/test_audio_policy_configuration.xml
++++ b/services/audiopolicy/tests/resources/test_audio_policy_configuration.xml
+@@ -66,6 +66,11 @@
+                         channelMasks="AUDIO_CHANNEL_IN_STEREO"/>
+                 </mixPort>
+                 <mixPort name="hifi_input" role="sink" />
++                <mixPort name="multiple_channels_input" role="sink">
++                    <profile name="" format="AUDIO_FORMAT_PCM_16_BIT"
++                             samplingRates="48000"
++                             channelMasks="AUDIO_CHANNEL_IN_5POINT1"/>
++                </mixPort>
+             </mixPorts>
+             <devicePorts>
+                 <devicePort tagName="Speaker" type="AUDIO_DEVICE_OUT_SPEAKER" role="sink">
+@@ -114,6 +119,8 @@
+                     sources="BUS Device In"/>
+                 <route type="mix" sink="hifi_input"
+                         sources="USB Device In" />
++                <route type="mix" sink="multiple_channels_input"
++                       sources="Built-In Mic" />
+             </routes>
+         </module>
+ 
+-- 
+2.43.0
+

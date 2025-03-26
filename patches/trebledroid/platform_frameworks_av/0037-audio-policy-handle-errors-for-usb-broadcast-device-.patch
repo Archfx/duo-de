@@ -1,0 +1,199 @@
+From 2a5a524a90bd113d6960495170b7cdeb5861853f Mon Sep 17 00:00:00 2001
+From: Ping Tsai <Yung-ping.Tsai@mediatek.com>
+Date: Fri, 16 Aug 2024 13:39:10 +0800
+Subject: [PATCH 037/436] audio policy: handle errors for usb broadcast device
+ connection
+
+When the USB is quickly connected and then disconnected, the
+broadcast device may not have enough time to read the USB info,
+preventing the dynamic profile from being created and causing
+routing errors. Therefore, when the usb broadcast device
+connection fails, setDeviceConnectionState will be interrupted.
+
+To avoid failures on devices running HIDL and having HAL modules
+that do not implement 'IDevice.setConnectedState', do not
+consider 'Result::NOT_SUPPORTED' as an error.
+
+Bug: 360284877
+Test: atest audiopolicy_tests
+Change-Id: I0b414cb0222fafb6b55f77be238b88fe960eb52e
+---
+ media/libaudiohal/impl/DeviceHalHidl.cpp      |  9 +++-
+ .../managerdefault/AudioPolicyManager.cpp     | 31 ++++++++----
+ .../managerdefault/AudioPolicyManager.h       |  4 +-
+ .../tests/audiopolicymanager_tests.cpp        | 48 +++++++++++++++++++
+ 4 files changed, 80 insertions(+), 12 deletions(-)
+
+diff --git a/media/libaudiohal/impl/DeviceHalHidl.cpp b/media/libaudiohal/impl/DeviceHalHidl.cpp
+index 0a262e45e9..263ef968ba 100644
+--- a/media/libaudiohal/impl/DeviceHalHidl.cpp
++++ b/media/libaudiohal/impl/DeviceHalHidl.cpp
+@@ -619,7 +619,14 @@ status_t DeviceHalHidl::setConnectedState(const struct audio_port_v7 *port, bool
+             result != NO_ERROR) {
+         return result;
+     }
+-    return processReturn("setConnectedState", mDevice->setConnectedState(hidlAddress, connected));
++    Return<Result> ret = mDevice->setConnectedState(hidlAddress, connected);
++    if (ret.isOk() || ret == Result::NOT_SUPPORTED) {
++        // The framework is only interested in errors occurring due to connection state handling,
++        // so it can decide whether retrying is needed. If the HAL does not support this operation,
++        // it's not an error.
++        return NO_ERROR;
++    }
++    return processReturn("setConnectedState", ret);
+ }
+ 
+ error::Result<audio_hw_sync_t> DeviceHalHidl::getHwAvSync() {
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index 2ff2907d9d..c290acddb0 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -122,17 +122,16 @@ status_t AudioPolicyManager::setDeviceConnectionState(audio_devices_t device,
+     }
+ }
+ 
+-void AudioPolicyManager::broadcastDeviceConnectionState(const sp<DeviceDescriptor> &device,
++status_t AudioPolicyManager::broadcastDeviceConnectionState(const sp<DeviceDescriptor> &device,
+                                                         media::DeviceConnectedState state)
+ {
+     audio_port_v7 devicePort;
+     device->toAudioPort(&devicePort);
+-    if (status_t status = mpClientInterface->setDeviceConnectedState(&devicePort, state);
+-            status != OK) {
+-        ALOGE("Error %d while setting connected state %d for device %s",
+-                status, static_cast<int>(state),
+-                device->getDeviceTypeAddr().toString(false).c_str());
+-    }
++    status_t status = mpClientInterface->setDeviceConnectedState(&devicePort, state);
++    ALOGE_IF(status != OK, "Error %d while setting connected state %d for device %s", status,
++             static_cast<int>(state), device->getDeviceTypeAddr().toString(false).c_str());
++
++    return status;
+ }
+ 
+ status_t AudioPolicyManager::setDeviceConnectionStateInt(
+@@ -213,7 +212,14 @@ status_t AudioPolicyManager::setDeviceConnectionStateInt(const sp<DeviceDescript
+ 
+             // Before checking outputs, broadcast connect event to allow HAL to retrieve dynamic
+             // parameters on newly connected devices (instead of opening the outputs...)
+-            broadcastDeviceConnectionState(device, media::DeviceConnectedState::CONNECTED);
++            if (broadcastDeviceConnectionState(
++                        device, media::DeviceConnectedState::CONNECTED) != NO_ERROR) {
++                mAvailableOutputDevices.remove(device);
++                mHwModules.cleanUpForDevice(device);
++                ALOGE("%s() device %s format %x connection failed", __func__,
++                      device->toString().c_str(), device->getEncodedFormat());
++                return INVALID_OPERATION;
++            }
+ 
+             if (checkOutputsForDevice(device, state, outputs) != NO_ERROR) {
+                 mAvailableOutputDevices.remove(device);
+@@ -398,7 +404,14 @@ status_t AudioPolicyManager::setDeviceConnectionStateInt(const sp<DeviceDescript
+ 
+             // Before checking intputs, broadcast connect event to allow HAL to retrieve dynamic
+             // parameters on newly connected devices (instead of opening the inputs...)
+-            broadcastDeviceConnectionState(device, media::DeviceConnectedState::CONNECTED);
++            if (broadcastDeviceConnectionState(
++                        device, media::DeviceConnectedState::CONNECTED) != NO_ERROR) {
++                mAvailableInputDevices.remove(device);
++                mHwModules.cleanUpForDevice(device);
++                ALOGE("%s() device %s format %x connection failed", __func__,
++                      device->toString().c_str(), device->getEncodedFormat());
++                return INVALID_OPERATION;
++            }
+             // Propagate device availability to Engine
+             setEngineDeviceConnectionState(device, state);
+ 
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.h b/services/audiopolicy/managerdefault/AudioPolicyManager.h
+index 953fd2aac3..9d2166a27e 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.h
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.h
+@@ -1105,8 +1105,8 @@ private:
+         // It can give a chance to HAL implementer to retrieve dynamic capabilities associated
+         // to this device for example.
+         // TODO avoid opening stream to retrieve capabilities of a profile.
+-        void broadcastDeviceConnectionState(const sp<DeviceDescriptor> &device,
+-                                            media::DeviceConnectedState state);
++        status_t broadcastDeviceConnectionState(const sp<DeviceDescriptor> &device,
++                                                media::DeviceConnectedState state);
+ 
+         // updates device caching and output for streams that can influence the
+         //    routing of notifications
+diff --git a/services/audiopolicy/tests/audiopolicymanager_tests.cpp b/services/audiopolicy/tests/audiopolicymanager_tests.cpp
+index 08855c95a1..75aee32a24 100644
+--- a/services/audiopolicy/tests/audiopolicymanager_tests.cpp
++++ b/services/audiopolicy/tests/audiopolicymanager_tests.cpp
+@@ -2539,8 +2539,29 @@ class AudioPolicyManagerTestClientOpenFails : public AudioPolicyManagerTestClien
+ 
+     void setSimulateFailure(bool simulateFailure) { mSimulateFailure = simulateFailure; }
+ 
++    void setSimulateBroadcastDeviceStatus(audio_devices_t device, status_t status) {
++        if (status != NO_ERROR) {
++            // simulate device connect status
++            mSimulateBroadcastDeviceStatus[device] = status;
++        } else {
++            // remove device connection fixed status
++            mSimulateBroadcastDeviceStatus.erase(device);
++        }
++    }
++
++    status_t setDeviceConnectedState(const struct audio_port_v7* port,
++                                     media::DeviceConnectedState state) override {
++        if (mSimulateBroadcastDeviceStatus.find(port->ext.device.type) !=
++            mSimulateBroadcastDeviceStatus.end()) {
++            // If a simulated status exists, return a status value
++            return mSimulateBroadcastDeviceStatus[port->ext.device.type];
++        }
++        return AudioPolicyManagerTestClient::setDeviceConnectedState(port, state);
++    }
++
+   private:
+     bool mSimulateFailure = false;
++    std::map<audio_devices_t, status_t> mSimulateBroadcastDeviceStatus;
+ };
+ 
+ }  // namespace
+@@ -2561,6 +2582,9 @@ class AudioPolicyManagerTestDeviceConnectionFailed :
+     void setSimulateOpenFailure(bool simulateFailure) {
+         mFullClient->setSimulateFailure(simulateFailure); }
+ 
++    void setSimulateBroadcastDeviceStatus(audio_devices_t device, status_t status) {
++        mFullClient->setSimulateBroadcastDeviceStatus(device, status); }
++
+     static const std::string sBluetoothConfig;
+ 
+   private:
+@@ -2604,6 +2628,30 @@ TEST_P(AudioPolicyManagerTestDeviceConnectionFailed, SetDeviceConnectedStateHasA
+     }
+ }
+ 
++TEST_P(AudioPolicyManagerTestDeviceConnectionFailed, BroadcastDeviceFailure) {
++    const audio_devices_t type = std::get<0>(GetParam());
++    const std::string name = std::get<1>(GetParam());
++    const std::string address = std::get<2>(GetParam());
++    const audio_format_t format = std::get<3>(GetParam());
++
++    // simulate broadcastDeviceConnectionState return failure
++    setSimulateBroadcastDeviceStatus(type, INVALID_OPERATION);
++    ASSERT_EQ(INVALID_OPERATION, mManager->setDeviceConnectionState(
++            type, AUDIO_POLICY_DEVICE_STATE_AVAILABLE,
++            address.c_str(), name.c_str(), format));
++
++    // if broadcast is fail, device should not be added to available devices list
++    if (audio_is_output_device(type)) {
++        auto availableDevices = mManager->getAvailableOutputDevices();
++        EXPECT_FALSE(availableDevices.containsDeviceWithType(type));
++    } else if (audio_is_input_device(type)) {
++        auto availableDevices = mManager->getAvailableInputDevices();
++        EXPECT_FALSE(availableDevices.containsDeviceWithType(type));
++    }
++
++    setSimulateBroadcastDeviceStatus(type, NO_ERROR);
++}
++
+ INSTANTIATE_TEST_CASE_P(
+         DeviceConnectionFailure,
+         AudioPolicyManagerTestDeviceConnectionFailed,
+-- 
+2.43.0
+

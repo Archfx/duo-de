@@ -1,0 +1,34 @@
+From 7f1823bda8d5d43fe57cdf8ee4ff72fc003d6719 Mon Sep 17 00:00:00 2001
+From: Vlad Popa <pvlad@google.com>
+Date: Tue, 5 Nov 2024 15:37:52 -0800
+Subject: [PATCH 206/436] Remove SCO flag from valid attributes check
+
+Test: manual
+Bug: 376756660
+Flag: EXEMPT bugfix
+Change-Id: I6c7240c1eb550248061a16ea4a66772f5e10c661
+---
+ services/audiopolicy/managerdefault/AudioPolicyManager.cpp | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index 000b5717e8..522451fada 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -8723,8 +8723,12 @@ void AudioPolicyManager::setVolumeSourceMutedInternally(VolumeSource volumeSourc
+ 
+ bool AudioPolicyManager::isValidAttributes(const audio_attributes_t *paa)
+ {
++    if ((paa->flags & AUDIO_FLAG_SCO) != 0) {
++        ALOGW("%s: deprecated use of AUDIO_FLAG_SCO in attributes flags %d", __func__, paa->flags);
++    }
++
+     // has flags that map to a stream type?
+-    if ((paa->flags & (AUDIO_FLAG_AUDIBILITY_ENFORCED | AUDIO_FLAG_SCO | AUDIO_FLAG_BEACON)) != 0) {
++    if ((paa->flags & (AUDIO_FLAG_AUDIBILITY_ENFORCED | AUDIO_FLAG_BEACON)) != 0) {
+         return true;
+     }
+ 
+-- 
+2.43.0
+

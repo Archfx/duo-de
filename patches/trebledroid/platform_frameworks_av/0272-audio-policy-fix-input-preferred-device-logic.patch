@@ -1,0 +1,62 @@
+From d8add2beef9484eb324b893ba452d7f35108785f Mon Sep 17 00:00:00 2001
+From: Eric Laurent <elaurent@google.com>
+Date: Fri, 15 Nov 2024 16:05:32 +0000
+Subject: [PATCH 272/436] audio policy: fix input preferred device logic
+
+In AudioPolicyManager::getNewInputDevice(), the intention is to allow
+and app to specify a preferred device only if no other app is capturing.
+The implemented rule was actually preventing an app from specifying a
+preferred device if that same app was also capturing.
+
+Bug: 379233370
+Test: repro steps in bug
+Flag: EXEMPT bug fix.
+Change-Id: I6d4b8a461e49088fa2bfb1ec25af8c96caa5d979
+---
+ .../include/AudioIODescriptorInterface.h          | 15 +++++++++++++++
+ .../managerdefault/AudioPolicyManager.cpp         |  3 ++-
+ 2 files changed, 17 insertions(+), 1 deletion(-)
+
+diff --git a/services/audiopolicy/common/managerdefinitions/include/AudioIODescriptorInterface.h b/services/audiopolicy/common/managerdefinitions/include/AudioIODescriptorInterface.h
+index e5197665e9..918e2474fb 100644
+--- a/services/audiopolicy/common/managerdefinitions/include/AudioIODescriptorInterface.h
++++ b/services/audiopolicy/common/managerdefinitions/include/AudioIODescriptorInterface.h
+@@ -64,6 +64,21 @@ sp<DeviceDescriptor> findPreferredDevice(
+             if (activeClients.size() == activeClientsWithRoute.size()) {
+                 return devices.getDeviceFromId(activeClientsWithRoute[0]->preferredDeviceId());
+             }
++            if (activeClientsWithRoute.size() == 0) {
++                return nullptr;
++            }
++            uid_t uniqueUid = activeClients[0]->uid();
++            for (const auto &client : activeClients) {
++                if (uniqueUid != client->uid()) {
++                   return nullptr;
++                }
++            }
++            for (const auto &client : activeClientsWithRoute) {
++                if (uniqueUid != client->uid()) {
++                   return nullptr;
++                }
++            }
++            return devices.getDeviceFromId(activeClientsWithRoute[0]->preferredDeviceId());
+         }
+     }
+     return nullptr;
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index 04ebb57f84..0231d451cd 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -7829,7 +7829,8 @@ sp<DeviceDescriptor> AudioPolicyManager::getNewInputDevice(
+     }
+ 
+     // Honor explicit routing requests only if no client using default routing is active on this
+-    // input: a specific app can not force routing for other apps by setting a preferred device.
++    // input or if all active clients are from the same app: a specific app can not force routing
++    // for other apps by setting a preferred device.
+     bool active;
+     device = findPreferredDevice(inputDesc, AUDIO_SOURCE_DEFAULT, active, mAvailableInputDevices);
+     if (device != nullptr) {
+-- 
+2.43.0
+

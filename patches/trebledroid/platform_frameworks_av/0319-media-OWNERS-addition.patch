@@ -1,0 +1,30 @@
+From e3a51a3e2589ce40874ca7f72465a284499b4d7c Mon Sep 17 00:00:00 2001
+From: Atneya Nair <atneya@google.com>
+Date: Wed, 20 Nov 2024 15:41:45 -0800
+Subject: [PATCH 319/436] media OWNERS addition
+
+Add myself to OWNERS, to also get OWNERS in cts.
+
+Test: none
+Bug: none
+Flag: EXEMPT docs_only
+Change-Id: I68974bf0def5bff63a60c34bb2f01bd4b2d17da0
+---
+ media/OWNERS | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/media/OWNERS b/media/OWNERS
+index b926075855..5e3204790f 100644
+--- a/media/OWNERS
++++ b/media/OWNERS
+@@ -1,6 +1,7 @@
+ # Bug component: 1344
+ elaurent@google.com
+ essick@google.com
++atneya@google.com
+ hunga@google.com
+ jiabin@google.com
+ jmtrivi@google.com
+-- 
+2.43.0
+

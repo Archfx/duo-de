@@ -1,0 +1,59 @@
+From 5d837eacdb9ba734d676a76b6ea73c4d596690fd Mon Sep 17 00:00:00 2001
+From: Eric Laurent <elaurent@google.com>
+Date: Fri, 15 Nov 2024 18:56:01 +0000
+Subject: [PATCH 277/436] AudioTrack: fix race condition between start and
+ restore
+
+There is a small window in AudioTrack::start where it is possible that
+a concurrent track invalidation yields to rejecting the start request and leave
+the track paused when later restored.
+To avoid this race, return DEAD_OBJECT from AudioPolicyManager::startOutput()
+if the output is already closed.
+
+This aligns the behavior with startInput().
+
+Also apply the same behavior to stopOutput() and stopInput() for consistency.
+Apply the same fix to AudioRecord.
+
+Bug: 367917846
+Test: make
+Flag: EXEMPT bug fix
+Change-Id: I1c2051a2d7e58042cde5166914c68a081cd4bb49
+---
+ services/audiopolicy/managerdefault/AudioPolicyManager.cpp | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index 04ebb57f84..ef5f7a96a5 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -2350,7 +2350,7 @@ status_t AudioPolicyManager::startOutput(audio_port_handle_t portId)
+     sp<SwAudioOutputDescriptor> outputDesc = mOutputs.getOutputForClient(portId);
+     if (outputDesc == 0) {
+         ALOGW("startOutput() no output for client %d", portId);
+-        return BAD_VALUE;
++        return DEAD_OBJECT;
+     }
+     sp<TrackClientDescriptor> client = outputDesc->getClient(portId);
+ 
+@@ -2727,7 +2727,7 @@ status_t AudioPolicyManager::stopOutput(audio_port_handle_t portId)
+     sp<SwAudioOutputDescriptor> outputDesc = mOutputs.getOutputForClient(portId);
+     if (outputDesc == 0) {
+         ALOGW("stopOutput() no output for client %d", portId);
+-        return BAD_VALUE;
++        return DEAD_OBJECT;
+     }
+     sp<TrackClientDescriptor> client = outputDesc->getClient(portId);
+ 
+@@ -3430,7 +3430,7 @@ status_t AudioPolicyManager::stopInput(audio_port_handle_t portId)
+     sp<AudioInputDescriptor> inputDesc = mInputs.getInputForClient(portId);
+     if (inputDesc == 0) {
+         ALOGW("%s no input for client %d", __FUNCTION__, portId);
+-        return BAD_VALUE;
++        return DEAD_OBJECT;
+     }
+     audio_io_handle_t input = inputDesc->mIoHandle;
+     sp<RecordClientDescriptor> client = inputDesc->getClient(portId);
+-- 
+2.43.0
+

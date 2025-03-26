@@ -1,0 +1,109 @@
+From 74568a7fae2d783b98c80c776f117b58bf0c6a13 Mon Sep 17 00:00:00 2001
+From: Aiguo <aiguo.feng@amlogic.corp-partner.google.com>
+Date: Wed, 6 Nov 2024 18:42:29 +0800
+Subject: [PATCH 235/436] nuplayer: fix audioFormat error in offload mode
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+For audio with PCM_FLOAT and audio/raw，
+Nuplayer uses incorrect audio format to determine if offload is supported.
+
+bug:377433161
+
+Change-Id: I6966a49706365076bcbe78876ecd07743d97298a
+Signed-off-by: Aiguo <aiguo.feng@amlogic.corp-partner.google.com>
+---
+ .../nuplayer/NuPlayerRenderer.cpp             | 18 --------------
+ media/libstagefright/Utils.cpp                | 24 +++++++++++++++++++
+ .../include/media/stagefright/Utils.h         |  3 +++
+ 3 files changed, 27 insertions(+), 18 deletions(-)
+
+diff --git a/media/libmediaplayerservice/nuplayer/NuPlayerRenderer.cpp b/media/libmediaplayerservice/nuplayer/NuPlayerRenderer.cpp
+index e434a3ddb3..225cfdd627 100644
+--- a/media/libmediaplayerservice/nuplayer/NuPlayerRenderer.cpp
++++ b/media/libmediaplayerservice/nuplayer/NuPlayerRenderer.cpp
+@@ -98,24 +98,6 @@ const NuPlayer::Renderer::PcmInfo NuPlayer::Renderer::AUDIO_PCMINFO_INITIALIZER
+ // static
+ const int64_t NuPlayer::Renderer::kMinPositionUpdateDelayUs = 100000ll;
+ 
+-static audio_format_t constexpr audioFormatFromEncoding(int32_t pcmEncoding) {
+-    switch (pcmEncoding) {
+-    case kAudioEncodingPcmFloat:
+-        return AUDIO_FORMAT_PCM_FLOAT;
+-    case kAudioEncodingPcm32bit:
+-        return AUDIO_FORMAT_PCM_32_BIT;
+-    case kAudioEncodingPcm24bitPacked:
+-        return AUDIO_FORMAT_PCM_24_BIT_PACKED;
+-    case kAudioEncodingPcm16bit:
+-        return AUDIO_FORMAT_PCM_16_BIT;
+-    case kAudioEncodingPcm8bit:
+-        return AUDIO_FORMAT_PCM_8_BIT; // TODO: do we want to support this?
+-    default:
+-        ALOGE("%s: Invalid encoding: %d", __func__, pcmEncoding);
+-        return AUDIO_FORMAT_INVALID;
+-    }
+-}
+-
+ NuPlayer::Renderer::Renderer(
+         const sp<MediaPlayerBase::AudioSink> &sink,
+         const sp<MediaClock> &mediaClock,
+diff --git a/media/libstagefright/Utils.cpp b/media/libstagefright/Utils.cpp
+index 86741a616d..e59cac78ad 100644
+--- a/media/libstagefright/Utils.cpp
++++ b/media/libstagefright/Utils.cpp
+@@ -2406,6 +2406,24 @@ void mapAACProfileToAudioFormat( audio_format_t& format, uint64_t eAacProfile)
+     return;
+ }
+ 
++audio_format_t audioFormatFromEncoding(int32_t pcmEncoding) {
++    switch (pcmEncoding) {
++    case kAudioEncodingPcmFloat:
++        return AUDIO_FORMAT_PCM_FLOAT;
++    case kAudioEncodingPcm32bit:
++        return AUDIO_FORMAT_PCM_32_BIT;
++    case kAudioEncodingPcm24bitPacked:
++        return AUDIO_FORMAT_PCM_24_BIT_PACKED;
++    case kAudioEncodingPcm16bit:
++        return AUDIO_FORMAT_PCM_16_BIT;
++    case kAudioEncodingPcm8bit:
++        return AUDIO_FORMAT_PCM_8_BIT; // TODO: do we want to support this?
++    default:
++        ALOGE("%s: Invalid encoding: %d", __func__, pcmEncoding);
++        return AUDIO_FORMAT_INVALID;
++    }
++}
++
+ status_t getAudioOffloadInfo(const sp<MetaData>& meta, bool hasVideo,
+         bool isStreaming, audio_stream_type_t streamType, audio_offload_info_t *info)
+ {
+@@ -2425,6 +2443,12 @@ status_t getAudioOffloadInfo(const sp<MetaData>& meta, bool hasVideo,
+         ALOGV("Mime type \"%s\" mapped to audio_format %d", mime, info->format);
+     }
+ 
++    int32_t pcmEncoding;
++    if (meta->findInt32(kKeyPcmEncoding, &pcmEncoding)) {
++        info->format = audioFormatFromEncoding(pcmEncoding);
++        ALOGV("audio_format use kKeyPcmEncoding value %d first", info->format);
++    }
++
+     if (AUDIO_FORMAT_INVALID == info->format) {
+         // can't offload if we don't know what the source format is
+         ALOGE("mime type \"%s\" not a known audio format", mime);
+diff --git a/media/libstagefright/include/media/stagefright/Utils.h b/media/libstagefright/include/media/stagefright/Utils.h
+index 1673120721..e19037477e 100644
+--- a/media/libstagefright/include/media/stagefright/Utils.h
++++ b/media/libstagefright/include/media/stagefright/Utils.h
+@@ -44,6 +44,9 @@ const uint8_t *findNextNalStartCode(const uint8_t *data, size_t length);
+ // Convert a MIME type to a AudioSystem::audio_format
+ status_t mapMimeToAudioFormat(audio_format_t& format, const char* mime);
+ 
++// Convert a pcm-encoding to a AudioSystem::audio_format
++audio_format_t audioFormatFromEncoding(int32_t pcmEncoding);
++
+ // Convert a aac profile to a AudioSystem::audio_format
+ void mapAACProfileToAudioFormat(audio_format_t& format, uint64_t eAacProfile);
+ 
+-- 
+2.43.0
+

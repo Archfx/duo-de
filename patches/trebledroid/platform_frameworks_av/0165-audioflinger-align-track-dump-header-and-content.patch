@@ -1,0 +1,43 @@
+From cfef2714b3f15147b4433b923d5e2fc62e394ef8 Mon Sep 17 00:00:00 2001
+From: jiabin <jiabin@google.com>
+Date: Tue, 29 Oct 2024 20:52:28 +0000
+Subject: [PATCH 165/436] audioflinger: align track dump header and content.
+
+Bug: 376301650
+Test: dumpsys audioflinger
+Flag: EXEMPT log only update
+Change-Id: I63bcfe8a55aeff5ef2559b69a5908a253f936c86
+---
+ services/audioflinger/IAfTrack.h | 2 +-
+ services/audioflinger/Tracks.cpp | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/services/audioflinger/IAfTrack.h b/services/audioflinger/IAfTrack.h
+index 1b10f81739..d27d52a2e9 100644
+--- a/services/audioflinger/IAfTrack.h
++++ b/services/audioflinger/IAfTrack.h
+@@ -299,7 +299,7 @@ public:
+         return "Type     Id Active Client(pid/uid) Session Port Id S  Flags "
+                         "  Format Chn mask  SRate "
+                         "ST Usg CT "
+-                        " G db  L dB  R dB  VS dB  PortVol dB  PortMuted"
++                        " G db  L dB  R dB  VS dB  PortVol dB  PortMuted "
+                         "  Server FrmCnt  FrmRdy F Underruns  Flushed BitPerfect InternalMute"
+                         "   Latency\n"sv;
+     }
+diff --git a/services/audioflinger/Tracks.cpp b/services/audioflinger/Tracks.cpp
+index 14cfb40ccc..33dab4313b 100644
+--- a/services/audioflinger/Tracks.cpp
++++ b/services/audioflinger/Tracks.cpp
+@@ -1090,7 +1090,7 @@ void Track::appendDump(String8& result, bool active) const
+     result.appendFormat("%7s %7u/%7u %7u %7u %2s 0x%03X "
+                         "%08X %08X %6u "
+                         "%2u %3x %2x "
+-                        "%5.2g %5.2g %5.2g %5.2g%c %11.2g %12s"
++                        "%5.2g %5.2g %5.2g %5.2g%c %11.2g %10s "
+                         "%08X %6zu%c %6zu %c %9u%c %7u %10s %12s",
+             active ? "yes" : "no",
+             mClient ? mClient->pid() : getpid() ,
+-- 
+2.43.0
+

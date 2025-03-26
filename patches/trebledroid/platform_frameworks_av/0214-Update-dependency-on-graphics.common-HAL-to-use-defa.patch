@@ -1,0 +1,44 @@
+From 1a478c790f4e2ba2185cb3349241d8b978afd3d0 Mon Sep 17 00:00:00 2001
+From: Eino-Ville Talvala <etalvala@google.com>
+Date: Wed, 6 Nov 2024 22:36:35 +0000
+Subject: [PATCH 214/436] Update dependency on graphics.common HAL to use
+ defaults
+
+In preparation of migrating to graphics.common HAL v6.
+
+Bug: 368395888
+Flag: EXEMPT build file changes only
+Test: Builds
+(cherry picked from https://googleplex-android-review.googlesource.com/q/commit:93e388163eb1e7607b42c5ca884927d47c2e058e)
+Merged-In: Ic2c0970673e9d93282271e09f4e7342961eb75ab
+Change-Id: Ic2c0970673e9d93282271e09f4e7342961eb75ab
+---
+ media/codec2/sfplugin/Android.bp | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/media/codec2/sfplugin/Android.bp b/media/codec2/sfplugin/Android.bp
+index 4f6fe51654..cc5d10c835 100644
+--- a/media/codec2/sfplugin/Android.bp
++++ b/media/codec2/sfplugin/Android.bp
+@@ -16,6 +16,10 @@ cc_library_headers {
+ cc_library_shared {
+     name: "libsfplugin_ccodec",
+ 
++    defaults: [
++        "android.hardware.graphics.common-ndk_shared",
++    ],
++
+     export_include_dirs: ["include"],
+ 
+     srcs: [
+@@ -57,7 +61,6 @@ cc_library_shared {
+         "android.hardware.drm@1.0",
+         "android.hardware.media.c2@1.0",
+         "android.hardware.media.omx@1.0",
+-        "android.hardware.graphics.common-V5-ndk",
+         "graphicbuffersource-aidl-ndk",
+         "libbase",
+         "libbinder",
+-- 
+2.43.0
+

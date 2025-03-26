@@ -1,0 +1,32 @@
+From 2f67f41deb3067471836dd7d3e1e9281d4ecd59b Mon Sep 17 00:00:00 2001
+From: "Harish Mahendrakar (xWF)" <hmahendrakar@google.com>
+Date: Tue, 1 Oct 2024 16:24:38 +0000
+Subject: [PATCH 048/436] C2SoftMp3Dec: Fix potential null reference in
+ onStop()
+
+Bug: 364989775
+Test: Treehugger
+
+Change-Id: Id3e611817c2308ea7afb1fa9a1a35532220b52db
+---
+ media/codec2/components/mp3/C2SoftMp3Dec.cpp | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/media/codec2/components/mp3/C2SoftMp3Dec.cpp b/media/codec2/components/mp3/C2SoftMp3Dec.cpp
+index 149c6ee034..aed5e6845d 100644
+--- a/media/codec2/components/mp3/C2SoftMp3Dec.cpp
++++ b/media/codec2/components/mp3/C2SoftMp3Dec.cpp
+@@ -114,7 +114,9 @@ c2_status_t C2SoftMP3::onInit() {
+ c2_status_t C2SoftMP3::onStop() {
+     // Make sure that the next buffer output does not still
+     // depend on fragments from the last one decoded.
+-    pvmp3_InitDecoder(mConfig, mDecoderBuf);
++    if (mDecoderBuf) {
++        pvmp3_InitDecoder(mConfig, mDecoderBuf);
++    }
+     mSignalledError = false;
+     mIsFirst = true;
+     mSignalledOutputEos = false;
+-- 
+2.43.0
+

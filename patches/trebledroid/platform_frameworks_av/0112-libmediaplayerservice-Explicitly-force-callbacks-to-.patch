@@ -1,0 +1,43 @@
+From 511599f564ef63ebdfd451dd68cb4dae490a1a94 Mon Sep 17 00:00:00 2001
+From: Jaideep Sharma <quic_jaidshar@quicinc.com>
+Date: Thu, 6 Jan 2022 13:38:57 +0530
+Subject: [PATCH 112/436] libmediaplayerservice: Explicitly force callbacks to
+ stop running
+
+This is needed to prevent a race condition with
+the callbacks running after a close. MediaPlayerService instance
+can go out of scope and callbacks from AudioTrack can lead to crash
+in MediaPlayerService or NuPlayer.
+
+Flag: EXEMPT bugfix
+Bug: 183765091
+Bug: 351695164
+Test: see bug for validation
+Change-Id: I48ebb5643b65eec8751c7bd345bc1266c4a98659
+---
+ media/libmediaplayerservice/MediaPlayerService.cpp | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/media/libmediaplayerservice/MediaPlayerService.cpp b/media/libmediaplayerservice/MediaPlayerService.cpp
+index 10a1da7ce6..761137e240 100644
+--- a/media/libmediaplayerservice/MediaPlayerService.cpp
++++ b/media/libmediaplayerservice/MediaPlayerService.cpp
+@@ -2514,6 +2514,15 @@ void MediaPlayerService::AudioOutput::close()
+     {
+         Mutex::Autolock lock(mLock);
+         track = mTrack;
++    }
++
++    // do not hold lock while joining.
++    if (track) {
++        track->stopAndJoinCallbacks();
++    }
++
++    {
++        Mutex::Autolock lock(mLock);
+         close_l(); // clears mTrack
+     }
+     // destruction of the track occurs outside of mutex.
+-- 
+2.43.0
+

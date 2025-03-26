@@ -1,0 +1,3028 @@
+From 0a2f93386647aa9e4f749be0e9d049068c8674e4 Mon Sep 17 00:00:00 2001
+From: Emilian Peev <epeev@google.com>
+Date: Fri, 20 Sep 2024 22:13:54 +0000
+Subject: [PATCH 187/436] Camera: Extend HEIC output support
+
+- Enable HEIC composite streams on devices with SW
+  HEVC codecs and no dedicated HEIC stream combination
+  support.
+- Switch the default HEVC YUV420_888 input format to P010.
+- Tonemap the P010 camera output to an SDR base image.
+- Generate an HDR gainmap.
+- Write the the HDR gainmap metadata in the final HEIF
+  container.
+- Add a separate gainmap HEVC encoding pipeline
+- Stitch final HEIC including the gainmap and metadata
+  according to ISO/IEC 23008-12:2024
+- Introduce public APIs
+- Wire up public APIs with the Heic composite functionality
+
+TODO:
+- Enable support for native/Hal HEIF UltraHDR
+- Code cleanup and polish
+
+Flag: com.android.internal.camera.flags.camera_heif_gainmap
+Bug: 362608343
+Test: test -c -d cts/tests/camera/src/android/hardware/camera2/cts/ImageReaderTest.java#testHeicUltraHdr
+
+Change-Id: I09f0d55a5a11699871801583be0bce5c36cacc7a
+---
+ camera/camera_platform.aconfig                |   8 +
+ .../include/camera/NdkCameraMetadataTags.h    | 159 ++++
+ media/libstagefright/Android.bp               |   1 +
+ media/libstagefright/MPEG4Writer.cpp          | 365 +++++++-
+ media/libstagefright/MediaMuxer.cpp           |  23 +
+ .../include/media/stagefright/MPEG4Writer.h   |   9 +
+ .../libstagefright/writer_fuzzers/Android.bp  |   1 +
+ .../aidl/VndkVersionMetadataTags.h            |   6 +
+ .../api2/HeicCompositeStream.cpp              | 779 +++++++++++++++---
+ .../api2/HeicCompositeStream.h                | 122 ++-
+ .../api2/HeicEncoderInfoManager.cpp           |  32 +-
+ .../api2/HeicEncoderInfoManager.h             |  11 +-
+ .../common/CameraDeviceBase.h                 |   4 +
+ .../common/CameraProviderManager.cpp          | 224 +++--
+ .../common/CameraProviderManager.h            |  21 +-
+ .../common/aidl/AidlProviderInfo.cpp          |  14 +
+ .../device3/Camera3Device.cpp                 |   3 +
+ .../device3/Camera3OutputStream.cpp           |   3 +
+ .../utils/SessionConfigurationUtils.cpp       |  11 +
+ .../utils/SessionConfigurationUtilsHost.cpp   |   6 +
+ 20 files changed, 1567 insertions(+), 235 deletions(-)
+
+diff --git a/camera/camera_platform.aconfig b/camera/camera_platform.aconfig
+index 323b23a1cc..b0512ff6ef 100644
+--- a/camera/camera_platform.aconfig
++++ b/camera/camera_platform.aconfig
+@@ -1,6 +1,14 @@
+ package: "com.android.internal.camera.flags"
+ container: "system"
+ 
++flag {
++    namespace: "camera_platform"
++    name: "camera_heif_gainmap"
++    is_exported: true
++    description: "Extend HEIC/HEIF still capture with HDR gainmap"
++    bug: "362608343"
++}
++
+ flag {
+     namespace: "camera_platform"
+     name: "camera_hsum_permission"
+diff --git a/camera/ndk/include/camera/NdkCameraMetadataTags.h b/camera/ndk/include/camera/NdkCameraMetadataTags.h
+index 44aac2907d..15b165fdf9 100644
+--- a/camera/ndk/include/camera/NdkCameraMetadataTags.h
++++ b/camera/ndk/include/camera/NdkCameraMetadataTags.h
+@@ -7959,6 +7959,145 @@ typedef enum acamera_metadata_tag {
+     ACAMERA_HEIC_AVAILABLE_HEIC_STALL_DURATIONS_MAXIMUM_RESOLUTION = 
+                                                                 // int64[4*n]
+             ACAMERA_HEIC_START + 5,
++    /**
++     * <p>The available HEIC (ISO/IEC 23008-12/24) UltraHDR stream
++     * configurations that this camera device supports
++     * (i.e. format, width, height, output/input stream).</p>
++     *
++     * <p>Type: int32[n*4] (acamera_metadata_enum_android_heic_available_heic_ultra_hdr_stream_configurations_t)</p>
++     *
++     * <p>This tag may appear in:
++     * <ul>
++     *   <li>ACameraMetadata from ACameraManager_getCameraCharacteristics</li>
++     * </ul></p>
++     *
++     * <p>The configurations are listed as <code>(format, width, height, input?)</code> tuples.</p>
++     * <p>All the static, control, and dynamic metadata tags related to JPEG apply to HEIC formats.
++     * Configuring JPEG and HEIC streams at the same time is not supported.</p>
++     * <p>All the configuration tuples <code>(format, width, height, input?)</code> will contain
++     * AIMAGE_FORMAT_HEIC format as OUTPUT only.</p>
++     */
++    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS = 
++                                                                // int32[n*4] (acamera_metadata_enum_android_heic_available_heic_ultra_hdr_stream_configurations_t)
++            ACAMERA_HEIC_START + 6,
++    /**
++     * <p>This lists the minimum frame duration for each
++     * format/size combination for HEIC UltraHDR output formats.</p>
++     *
++     * <p>Type: int64[4*n]</p>
++     *
++     * <p>This tag may appear in:
++     * <ul>
++     *   <li>ACameraMetadata from ACameraManager_getCameraCharacteristics</li>
++     * </ul></p>
++     *
++     * <p>This should correspond to the frame duration when only that
++     * stream is active, with all processing (typically in android.*.mode)
++     * set to either OFF or FAST.</p>
++     * <p>When multiple streams are used in a request, the minimum frame
++     * duration will be max(individual stream min durations).</p>
++     * <p>See ACAMERA_SENSOR_FRAME_DURATION and
++     * ACAMERA_SCALER_AVAILABLE_STALL_DURATIONS for more details about
++     * calculating the max frame rate.</p>
++     *
++     * @see ACAMERA_SCALER_AVAILABLE_STALL_DURATIONS
++     * @see ACAMERA_SENSOR_FRAME_DURATION
++     */
++    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_MIN_FRAME_DURATIONS = // int64[4*n]
++            ACAMERA_HEIC_START + 7,
++    /**
++     * <p>This lists the maximum stall duration for each
++     * output format/size combination for HEIC UltraHDR streams.</p>
++     *
++     * <p>Type: int64[4*n]</p>
++     *
++     * <p>This tag may appear in:
++     * <ul>
++     *   <li>ACameraMetadata from ACameraManager_getCameraCharacteristics</li>
++     * </ul></p>
++     *
++     * <p>A stall duration is how much extra time would get added
++     * to the normal minimum frame duration for a repeating request
++     * that has streams with non-zero stall.</p>
++     * <p>This functions similarly to
++     * ACAMERA_SCALER_AVAILABLE_STALL_DURATIONS for HEIC UltraHDR
++     * streams.</p>
++     * <p>All HEIC output stream formats may have a nonzero stall
++     * duration.</p>
++     *
++     * @see ACAMERA_SCALER_AVAILABLE_STALL_DURATIONS
++     */
++    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STALL_DURATIONS =     // int64[4*n]
++            ACAMERA_HEIC_START + 8,
++    /**
++     * <p>The available HEIC (ISO/IEC 23008-12/24) UltraHDR stream
++     * configurations that this camera device supports
++     * (i.e. format, width, height, output/input stream) for CaptureRequests where
++     * ACAMERA_SENSOR_PIXEL_MODE is set to
++     * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraMetadata.html#SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION">CameraMetadata#SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION</a>.</p>
++     *
++     * @see ACAMERA_SENSOR_PIXEL_MODE
++     *
++     * <p>Type: int32[n*4] (acamera_metadata_enum_android_heic_available_heic_ultra_hdr_stream_configurations_maximum_resolution_t)</p>
++     *
++     * <p>This tag may appear in:
++     * <ul>
++     *   <li>ACameraMetadata from ACameraManager_getCameraCharacteristics</li>
++     * </ul></p>
++     *
++     * <p>Refer to ACAMERA_HEIC_AVAILABLE_HEIC_STREAM_CONFIGURATIONS for details.</p>
++     * <p>All the configuration tuples <code>(format, width, height, input?)</code> will contain
++     * AIMAGE_FORMAT_HEIC format as OUTPUT only.</p>
++     *
++     * @see ACAMERA_HEIC_AVAILABLE_HEIC_STREAM_CONFIGURATIONS
++     */
++    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS_MAXIMUM_RESOLUTION = 
++                                                                // int32[n*4] (acamera_metadata_enum_android_heic_available_heic_ultra_hdr_stream_configurations_maximum_resolution_t)
++            ACAMERA_HEIC_START + 9,
++    /**
++     * <p>This lists the minimum frame duration for each
++     * format/size combination for HEIC UltraHDR output formats for CaptureRequests where
++     * ACAMERA_SENSOR_PIXEL_MODE is set to
++     * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraMetadata.html#SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION">CameraMetadata#SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION</a>.</p>
++     *
++     * @see ACAMERA_SENSOR_PIXEL_MODE
++     *
++     * <p>Type: int64[4*n]</p>
++     *
++     * <p>This tag may appear in:
++     * <ul>
++     *   <li>ACameraMetadata from ACameraManager_getCameraCharacteristics</li>
++     * </ul></p>
++     *
++     * <p>Refer to ACAMERA_HEIC_AVAILABLE_HEIC_MIN_FRAME_DURATIONS for details.</p>
++     *
++     * @see ACAMERA_HEIC_AVAILABLE_HEIC_MIN_FRAME_DURATIONS
++     */
++    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_MIN_FRAME_DURATIONS_MAXIMUM_RESOLUTION = 
++                                                                // int64[4*n]
++            ACAMERA_HEIC_START + 10,
++    /**
++     * <p>This lists the maximum stall duration for each
++     * output format/size combination for HEIC UltraHDR streams for CaptureRequests where
++     * ACAMERA_SENSOR_PIXEL_MODE is set to
++     * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraMetadata.html#SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION">CameraMetadata#SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION</a>.</p>
++     *
++     * @see ACAMERA_SENSOR_PIXEL_MODE
++     *
++     * <p>Type: int64[4*n]</p>
++     *
++     * <p>This tag may appear in:
++     * <ul>
++     *   <li>ACameraMetadata from ACameraManager_getCameraCharacteristics</li>
++     * </ul></p>
++     *
++     * <p>Refer to ACAMERA_HEIC_AVAILABLE_HEIC_STALL_DURATIONS for details.</p>
++     *
++     * @see ACAMERA_HEIC_AVAILABLE_HEIC_STALL_DURATIONS
++     */
++    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STALL_DURATIONS_MAXIMUM_RESOLUTION = 
++                                                                // int64[4*n]
++            ACAMERA_HEIC_START + 11,
+     ACAMERA_HEIC_END,
+ 
+     /**
+@@ -11526,6 +11665,26 @@ typedef enum acamera_metadata_enum_acamera_heic_available_heic_stream_configurat
+ 
+ } acamera_metadata_enum_android_heic_available_heic_stream_configurations_maximum_resolution_t;
+ 
++// ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS
++typedef enum acamera_metadata_enum_acamera_heic_available_heic_ultra_hdr_stream_configurations {
++    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS_OUTPUT
++                                                                      = 0,
++
++    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS_INPUT
++                                                                      = 1,
++
++} acamera_metadata_enum_android_heic_available_heic_ultra_hdr_stream_configurations_t;
++
++// ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS_MAXIMUM_RESOLUTION
++typedef enum acamera_metadata_enum_acamera_heic_available_heic_ultra_hdr_stream_configurations_maximum_resolution {
++    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS_MAXIMUM_RESOLUTION_OUTPUT
++                                                                      = 0,
++
++    ACAMERA_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS_MAXIMUM_RESOLUTION_INPUT
++                                                                      = 1,
++
++} acamera_metadata_enum_android_heic_available_heic_ultra_hdr_stream_configurations_maximum_resolution_t;
++
+ 
+ 
+ // ACAMERA_AUTOMOTIVE_LOCATION
+diff --git a/media/libstagefright/Android.bp b/media/libstagefright/Android.bp
+index d084f10590..92bf35df32 100644
+--- a/media/libstagefright/Android.bp
++++ b/media/libstagefright/Android.bp
+@@ -317,6 +317,7 @@ cc_library {
+         "server_configurable_flags",
+         "libaconfig_storage_read_api_cc",
+         "aconfig_mediacodec_flags_c_lib",
++        "camera_platform_flags_c_lib",
+     ],
+ 
+     static_libs: [
+diff --git a/media/libstagefright/MPEG4Writer.cpp b/media/libstagefright/MPEG4Writer.cpp
+index 3aa0107d55..b3d9c5f5c3 100644
+--- a/media/libstagefright/MPEG4Writer.cpp
++++ b/media/libstagefright/MPEG4Writer.cpp
+@@ -53,6 +53,7 @@
+ #include <media/esds/ESDS.h>
+ #include "include/HevcUtils.h"
+ 
++#include <com_android_internal_camera_flags.h>
+ #include <com_android_media_editing_flags.h>
+ 
+ #ifndef __predict_false
+@@ -65,6 +66,8 @@
+     true; \
+ }))
+ 
++namespace flags_camera = com::android::internal::camera::flags;
++
+ namespace android {
+ 
+ static const int64_t kMinStreamableFileSizeInBytes = 5 * 1024 * 1024;
+@@ -91,6 +94,8 @@ static const char kMetaKey_TemporalLayerCount[] = "com.android.video.temporal_la
+ static const int kTimestampDebugCount = 10;
+ static const int kItemIdBase = 10000;
+ static const char kExifHeader[] = {'E', 'x', 'i', 'f', '\0', '\0'};
++static const char kGainmapMetaHeader[] = {'t', 'm', 'a', 'p', '\0', '\0'};
++static const char kGainmapHeader[] = {'g', 'm', 'a', 'p', '\0', '\0'};
+ static const uint8_t kExifApp1Marker[] = {'E', 'x', 'i', 'f', 0xff, 0xe1};
+ 
+ static const uint8_t kMandatoryHevcNalUnitTypes[3] = {
+@@ -167,8 +172,11 @@ public:
+     bool isMPEG4() const { return mIsMPEG4; }
+     bool usePrefix() const { return mIsAvc || mIsHevc || mIsHeic || mIsDovi; }
+     bool isExifData(MediaBufferBase *buffer, uint32_t *tiffHdrOffset) const;
++    bool isGainmapMetaData(MediaBufferBase* buffer, uint32_t* offset) const;
++    bool isGainmapData(MediaBufferBase* buffer, uint32_t* offset) const;
+     void addChunkOffset(off64_t offset);
+-    void addItemOffsetAndSize(off64_t offset, size_t size, bool isExif);
++    void addItemOffsetAndSize(off64_t offset, size_t size, bool isExif,
++            bool isGainmapMeta = false, bool isGainmap = false);
+     void flushItemRefs();
+     TrackId& getTrackId() { return mTrackId; }
+     status_t dump(int fd, const Vector<String16>& args) const;
+@@ -178,8 +186,11 @@ public:
+     void resetInternal();
+     int64_t trackMetaDataSize();
+     bool isTimestampValid(int64_t timeUs);
++    uint16_t getImageItemId() { return mImageItemId; };
++    uint16_t getGainmapItemId() { return mGainmapItemId; };
++    uint16_t getGainmapMetaItemId() { return mGainmapMetadataItemId; };
+ 
+-private:
++  private:
+     // A helper class to handle faster write box with table entries
+     template<class TYPE, unsigned ENTRY_SIZE>
+     // ENTRY_SIZE: # of values in each entry
+@@ -405,6 +416,7 @@ private:
+ 
+     Vector<uint16_t> mProperties;
+     ItemRefs mDimgRefs;
++    ItemRefs mGainmapDimgRefs;
+     Vector<uint16_t> mExifList;
+     uint16_t mImageItemId;
+     uint16_t mItemIdBase;
+@@ -413,6 +425,10 @@ private:
+     int32_t mTileWidth, mTileHeight;
+     int32_t mGridRows, mGridCols;
+     size_t mNumTiles, mTileIndex;
++    uint16_t mGainmapItemId, mGainmapMetadataItemId;
++    ColorAspects mColorAspects;
++    bool mColorAspectsValid;
++    Vector<uint8_t> mBitsPerChannel;
+ 
+     // Update the audio track's drift information.
+     void updateDriftTime(const sp<MetaData>& meta);
+@@ -814,6 +830,10 @@ int64_t MPEG4Writer::estimateFileLevelMetaSize(MetaData *params) {
+                          + 12  // iref box (when empty)
+                          ;
+ 
++    if (flags_camera::camera_heif_gainmap()) {
++        metaSize +=  36;  // grpl box (when empty)
++    }
++
+     for (List<Track *>::iterator it = mTracks.begin();
+          it != mTracks.end(); ++it) {
+         if ((*it)->isHeif()) {
+@@ -2213,8 +2233,7 @@ size_t MPEG4Writer::numTracks() {
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+ 
+-MPEG4Writer::Track::Track(
+-        MPEG4Writer *owner, const sp<MediaSource> &source, uint32_t aTrackId)
++MPEG4Writer::Track::Track(MPEG4Writer* owner, const sp<MediaSource>& source, uint32_t aTrackId)
+     : mOwner(owner),
+       mMeta(source->getFormat()),
+       mSource(source),
+@@ -2234,7 +2253,7 @@ MPEG4Writer::Track::Track(
+       mStssTableEntries(new ListTableEntries<uint32_t, 1>(1000)),
+       mSttsTableEntries(new ListTableEntries<uint32_t, 2>(1000)),
+       mCttsTableEntries(new ListTableEntries<uint32_t, 2>(1000)),
+-      mElstTableEntries(new ListTableEntries<uint32_t, 3>(3)), // Reserve 3 rows, a row has 3 items
++      mElstTableEntries(new ListTableEntries<uint32_t, 3>(3)),  // Reserve 3 rows, a row has 3 items
+       mMinCttsOffsetTimeUs(0),
+       mMinCttsOffsetTicks(0),
+       mMaxCttsOffsetTicks(0),
+@@ -2248,6 +2267,7 @@ MPEG4Writer::Track::Track(
+       mFirstSampleStartOffsetUs(0),
+       mRotation(0),
+       mDimgRefs("dimg"),
++      mGainmapDimgRefs("dimg"),
+       mImageItemId(0),
+       mItemIdBase(0),
+       mIsPrimary(0),
+@@ -2258,7 +2278,10 @@ MPEG4Writer::Track::Track(
+       mGridRows(0),
+       mGridCols(0),
+       mNumTiles(1),
+-      mTileIndex(0) {
++      mTileIndex(0),
++      mGainmapItemId(0),
++      mGainmapMetadataItemId(0),
++      mColorAspectsValid(false) {
+     getCodecSpecificDataFromInputFormatIfPossible();
+ 
+     const char *mime;
+@@ -2446,25 +2469,57 @@ status_t MPEG4Writer::setNextFd(int fd) {
+     return OK;
+ }
+ 
+-bool MPEG4Writer::Track::isExifData(
+-        MediaBufferBase *buffer, uint32_t *tiffHdrOffset) const {
++bool MPEG4Writer::Track::isGainmapMetaData(MediaBufferBase* buffer, uint32_t* offset) const {
+     if (!mIsHeif) {
+         return false;
+     }
+ 
+-    // Exif block starting with 'Exif\0\0'
++    // Gainmap metadata block starting with 'tmap\0\0'
+     size_t length = buffer->range_length();
+     uint8_t *data = (uint8_t *)buffer->data() + buffer->range_offset();
+-    if ((length > sizeof(kExifHeader))
+-        && !memcmp(data, kExifHeader, sizeof(kExifHeader))) {
++    if ((length > sizeof(kGainmapMetaHeader)) &&
++        !memcmp(data, kGainmapMetaHeader, sizeof(kGainmapMetaHeader))) {
++        *offset = sizeof(kGainmapMetaHeader);
++        return true;
++    }
++
++    return false;
++}
++
++bool MPEG4Writer::Track::isGainmapData(MediaBufferBase* buffer, uint32_t* offset) const {
++    if (!mIsHeif) {
++        return false;
++    }
++
++    // Gainmap block starting with 'gmap\0\0'
++    size_t length = buffer->range_length();
++    uint8_t* data = (uint8_t*)buffer->data() + buffer->range_offset();
++    if ((length > sizeof(kGainmapHeader)) &&
++        !memcmp(data, kGainmapHeader, sizeof(kGainmapHeader))) {
++        *offset = sizeof(kGainmapHeader);
++        return true;
++    }
++
++    return false;
++}
++
++bool MPEG4Writer::Track::isExifData(MediaBufferBase* buffer, uint32_t* tiffHdrOffset) const {
++    if (!mIsHeif) {
++        return false;
++    }
++
++    // Exif block starting with 'Exif\0\0'
++    size_t length = buffer->range_length();
++    uint8_t* data = (uint8_t*)buffer->data() + buffer->range_offset();
++    if ((length > sizeof(kExifHeader)) && !memcmp(data, kExifHeader, sizeof(kExifHeader))) {
+         *tiffHdrOffset = sizeof(kExifHeader);
+         return true;
+     }
+ 
+     // Exif block starting with fourcc 'Exif' followed by APP1 marker
+-    if ((length > sizeof(kExifApp1Marker) + 2 + sizeof(kExifHeader))
+-            && !memcmp(data, kExifApp1Marker, sizeof(kExifApp1Marker))
+-            && !memcmp(data + sizeof(kExifApp1Marker) + 2, kExifHeader, sizeof(kExifHeader))) {
++    if ((length > sizeof(kExifApp1Marker) + 2 + sizeof(kExifHeader)) &&
++        !memcmp(data, kExifApp1Marker, sizeof(kExifApp1Marker)) &&
++        !memcmp(data + sizeof(kExifApp1Marker) + 2, kExifHeader, sizeof(kExifHeader))) {
+         // skip 'Exif' fourcc
+         buffer->set_range(4, buffer->range_length() - 4);
+ 
+@@ -2481,7 +2536,8 @@ void MPEG4Writer::Track::addChunkOffset(off64_t offset) {
+     mCo64TableEntries->add(hton64(offset));
+ }
+ 
+-void MPEG4Writer::Track::addItemOffsetAndSize(off64_t offset, size_t size, bool isExif) {
++void MPEG4Writer::Track::addItemOffsetAndSize(off64_t offset, size_t size, bool isExif,
++        bool isGainmapMeta, bool isGainmap) {
+     CHECK(mIsHeif);
+ 
+     if (offset > UINT32_MAX || size > UINT32_MAX) {
+@@ -2510,6 +2566,46 @@ void MPEG4Writer::Track::addItemOffsetAndSize(off64_t offset, size_t size, bool
+         return;
+     }
+ 
++    bool hasGrid = (mTileWidth > 0);
++
++    if (isGainmapMeta && flags_camera::camera_heif_gainmap()) {
++        uint16_t metaItemId;
++        if (mOwner->reserveItemId_l(1, &metaItemId) != OK) {
++            return;
++        }
++
++        Vector<uint16_t> props;
++        if (mColorAspectsValid) {
++            ItemProperty property;
++            property.type = FOURCC('c', 'o', 'l', 'r');
++            ColorUtils::convertCodecColorAspectsToIsoAspects(
++                    mColorAspects, &property.colorPrimaries, &property.colorTransfer,
++                    &property.colorMatrix, &property.colorRange);
++            props.push_back(mOwner->addProperty_l(property));
++        }
++        if (!mBitsPerChannel.empty()) {
++            ItemProperty property;
++            property.type = FOURCC('p', 'i', 'x', 'i');
++            property.bitsPerChannel.appendVector(mBitsPerChannel);
++            props.push_back(mOwner->addProperty_l(property));
++        }
++        props.push_back(mOwner->addProperty_l({
++            .type = FOURCC('i', 's', 'p', 'e'),
++            .width = hasGrid ? mTileWidth : mWidth,
++            .height = hasGrid ? mTileHeight : mHeight,
++        }));
++        mGainmapMetadataItemId = mOwner->addItem_l({
++                .itemType = "tmap",
++                .itemId = metaItemId,
++                .isPrimary = false,
++                .isHidden = false,
++                .offset = (uint32_t)offset,
++                .size = (uint32_t)size,
++                .properties = props,
++        });
++        return;
++    }
++
+     if (mTileIndex >= mNumTiles) {
+         ALOGW("Ignoring excess tiles!");
+         return;
+@@ -2524,8 +2620,6 @@ void MPEG4Writer::Track::addItemOffsetAndSize(off64_t offset, size_t size, bool
+         default: break; // don't set if invalid
+     }
+ 
+-    bool hasGrid = (mTileWidth > 0);
+-
+     if (mProperties.empty()) {
+         mProperties.push_back(mOwner->addProperty_l({
+             .type = static_cast<uint32_t>(mIsAvif ?
+@@ -2550,7 +2644,7 @@ void MPEG4Writer::Track::addItemOffsetAndSize(off64_t offset, size_t size, bool
+ 
+     mTileIndex++;
+     if (hasGrid) {
+-        mDimgRefs.value.push_back(mOwner->addItem_l({
++        uint16_t id = mOwner->addItem_l({
+             .itemType = mIsAvif ? "av01" : "hvc1",
+             .itemId = mItemIdBase++,
+             .isPrimary = false,
+@@ -2558,7 +2652,12 @@ void MPEG4Writer::Track::addItemOffsetAndSize(off64_t offset, size_t size, bool
+             .offset = (uint32_t)offset,
+             .size = (uint32_t)size,
+             .properties = mProperties,
+-        }));
++        });
++        if (isGainmap && flags_camera::camera_heif_gainmap()) {
++            mGainmapDimgRefs.value.push_back(id);
++        } else {
++            mDimgRefs.value.push_back(id);
++        }
+ 
+         if (mTileIndex == mNumTiles) {
+             mProperties.clear();
+@@ -2573,28 +2672,71 @@ void MPEG4Writer::Track::addItemOffsetAndSize(off64_t offset, size_t size, bool
+                     .rotation = heifRotation,
+                 }));
+             }
+-            mImageItemId = mOwner->addItem_l({
+-                .itemType = "grid",
+-                .itemId = mItemIdBase++,
+-                .isPrimary = (mIsPrimary != 0),
+-                .isHidden = false,
+-                .rows = (uint32_t)mGridRows,
+-                .cols = (uint32_t)mGridCols,
+-                .width = (uint32_t)mWidth,
+-                .height = (uint32_t)mHeight,
+-                .properties = mProperties,
++            if (mColorAspectsValid && flags_camera::camera_heif_gainmap()) {
++                ItemProperty property;
++                property.type = FOURCC('c', 'o', 'l', 'r');
++                ColorUtils::convertCodecColorAspectsToIsoAspects(
++                        mColorAspects, &property.colorPrimaries, &property.colorTransfer,
++                        &property.colorMatrix, &property.colorRange);
++                mProperties.push_back(mOwner->addProperty_l(property));
++            }
++            if (!mBitsPerChannel.empty() && flags_camera::camera_heif_gainmap()) {
++                ItemProperty property;
++                property.type = FOURCC('p', 'i', 'x', 'i');
++                property.bitsPerChannel.appendVector(mBitsPerChannel);
++                mProperties.push_back(mOwner->addProperty_l(property));
++            }
++            uint16_t itemId = mOwner->addItem_l({
++                    .itemType = "grid",
++                    .itemId = mItemIdBase++,
++                    .isPrimary = isGainmap && flags_camera::camera_heif_gainmap()
++                                         ? false
++                                         : (mIsPrimary != 0),
++                    .isHidden = false,
++                    .rows = (uint32_t)mGridRows,
++                    .cols = (uint32_t)mGridCols,
++                    .width = (uint32_t)mWidth,
++                    .height = (uint32_t)mHeight,
++                    .properties = mProperties,
+             });
++
++            if (isGainmap && flags_camera::camera_heif_gainmap()) {
++                mGainmapItemId = itemId;
++            } else {
++                mImageItemId = itemId;
++            }
+         }
+     } else {
+-        mImageItemId = mOwner->addItem_l({
+-            .itemType = mIsAvif ? "av01" : "hvc1",
+-            .itemId = mItemIdBase++,
+-            .isPrimary = (mIsPrimary != 0),
+-            .isHidden = false,
+-            .offset = (uint32_t)offset,
+-            .size = (uint32_t)size,
+-            .properties = mProperties,
++        if (mColorAspectsValid && flags_camera::camera_heif_gainmap()) {
++            ItemProperty property;
++            property.type = FOURCC('c', 'o', 'l', 'r');
++            ColorUtils::convertCodecColorAspectsToIsoAspects(
++                    mColorAspects, &property.colorPrimaries, &property.colorTransfer,
++                    &property.colorMatrix, &property.colorRange);
++            mProperties.push_back(mOwner->addProperty_l(property));
++        }
++        if (!mBitsPerChannel.empty() && flags_camera::camera_heif_gainmap()) {
++            ItemProperty property;
++            property.type = FOURCC('p', 'i', 'x', 'i');
++            property.bitsPerChannel.appendVector(mBitsPerChannel);
++            mProperties.push_back(mOwner->addProperty_l(property));
++        }
++        uint16_t itemId = mOwner->addItem_l({
++                .itemType = mIsAvif ? "av01" : "hvc1",
++                .itemId = mItemIdBase++,
++                .isPrimary = (isGainmap && flags_camera::camera_heif_gainmap()) ? false
++                                                                                : (mIsPrimary != 0),
++                .isHidden = false,
++                .offset = (uint32_t)offset,
++                .size = (uint32_t)size,
++                .properties = mProperties,
+         });
++
++        if (isGainmap && flags_camera::camera_heif_gainmap()) {
++            mGainmapItemId = itemId;
++        } else {
++            mImageItemId = itemId;
++        }
+     }
+ }
+ 
+@@ -2619,6 +2761,10 @@ void MPEG4Writer::Track::flushItemRefs() {
+             }
+         }
+     }
++
++    if ((mGainmapItemId > 0) && flags_camera::camera_heif_gainmap()) {
++        mOwner->addRefs_l(mGainmapItemId, mGainmapDimgRefs);
++    }
+ }
+ 
+ void MPEG4Writer::Track::setTimeScale() {
+@@ -3660,19 +3806,68 @@ status_t MPEG4Writer::Track::threadEntry() {
+             break;
+         }
+ 
++        bool isGainmapMeta = false;
++        bool isGainmap = false;
+         bool isExif = false;
+         uint32_t tiffHdrOffset = 0;
++        uint32_t gainmapOffset = 0;
+         int32_t isMuxerData;
+         if (buffer->meta_data().findInt32(kKeyIsMuxerData, &isMuxerData) && isMuxerData) {
+-            // We only support one type of muxer data, which is Exif data block.
++            if (flags_camera::camera_heif_gainmap()) {
++                isGainmapMeta = isGainmapMetaData(buffer, &gainmapOffset);
++                isGainmap = isGainmapData(buffer, &gainmapOffset);
++                if ((isGainmap || isGainmapMeta) && (gainmapOffset > 0) &&
++                    (gainmapOffset < buffer->range_length())) {
++                    // Don't include the tmap/gmap header
++                    buffer->set_range(gainmapOffset, buffer->range_length() - gainmapOffset);
++                }
++            }
+             isExif = isExifData(buffer, &tiffHdrOffset);
+-            if (!isExif) {
+-                ALOGW("Ignoring bad Exif data block");
++            if (!isExif && !isGainmap && !isGainmapMeta) {
++                ALOGW("Ignoring bad muxer data block");
+                 buffer->release();
+                 buffer = NULL;
+                 continue;
+             }
+         }
++        if (flags_camera::camera_heif_gainmap()) {
++            int32_t val32;
++            if (buffer->meta_data().findInt32(kKeyColorPrimaries, &val32)) {
++                mColorAspects.mPrimaries = static_cast<ColorAspects::Primaries>(val32);
++                mColorAspectsValid = true;
++            } else {
++                mColorAspectsValid = false;
++            }
++            if (buffer->meta_data().findInt32(kKeyTransferFunction, &val32)) {
++                mColorAspects.mTransfer = static_cast<ColorAspects::Transfer>(val32);
++            } else {
++                mColorAspectsValid = false;
++            }
++            if (buffer->meta_data().findInt32(kKeyColorMatrix, &val32)) {
++                mColorAspects.mMatrixCoeffs = static_cast<ColorAspects::MatrixCoeffs>(val32);
++            } else {
++                mColorAspectsValid = false;
++            }
++            if (buffer->meta_data().findInt32(kKeyColorRange, &val32)) {
++                mColorAspects.mRange = static_cast<ColorAspects::Range>(val32);
++            } else {
++                mColorAspectsValid = false;
++            }
++            if (mBitsPerChannel.empty() && buffer->meta_data().findInt32(kKeyColorFormat, &val32)) {
++                switch (val32) {
++                    case COLOR_FormatYUV420Flexible:
++                    case COLOR_FormatYUV420Planar:
++                    case COLOR_FormatYUV420SemiPlanar: {
++                            uint8_t bitsPerChannel[] = {8, 8, 8};
++                            mBitsPerChannel.appendArray(bitsPerChannel, sizeof(bitsPerChannel));
++                        }
++                        break;
++                    default:
++                        break;
++                }
++            }
++        }
++
+         if (!buffer->meta_data().findInt64(kKeySampleFileOffset, &sampleFileOffset)) {
+             sampleFileOffset = -1;
+         }
+@@ -3698,7 +3893,7 @@ status_t MPEG4Writer::Track::threadEntry() {
+ 
+         // Make a deep copy of the MediaBuffer and Metadata and release
+         // the original as soon as we can
+-        MediaBuffer *copy = new MediaBuffer(buffer->range_length());
++        MediaBuffer* copy = new MediaBuffer(buffer->range_length());
+         if (sampleFileOffset != -1) {
+             copy->meta_data().setInt64(kKeySampleFileOffset, sampleFileOffset);
+         } else {
+@@ -3995,13 +4190,13 @@ status_t MPEG4Writer::Track::threadEntry() {
+                 trackProgressStatus(timestampUs);
+             }
+         }
+-        if (!hasMultipleTracks) {
++        if (!hasMultipleTracks || isGainmapMeta || isGainmap) {
+             size_t bytesWritten;
+             off64_t offset = mOwner->addSample_l(
+                     copy, usePrefix, tiffHdrOffset, &bytesWritten);
+ 
+             if (mIsHeif) {
+-                addItemOffsetAndSize(offset, bytesWritten, isExif);
++                addItemOffsetAndSize(offset, bytesWritten, isExif, isGainmapMeta, isGainmap);
+             } else {
+                 if (mCo64TableEntries->count() == 0) {
+                     addChunkOffset(offset);
+@@ -4304,6 +4499,15 @@ int32_t MPEG4Writer::Track::getMetaSizeIncrease(
+         increase += 9;                              // 'irot' property (worst case)
+     }
+ 
++    if (flags_camera::camera_heif_gainmap()) {
++        // assume we have HDR gainmap and associated metadata
++        increase += (8 + mCodecSpecificDataSize)  // 'hvcC' property (HDR gainmap)
++                    + (2 * 20)                    // 'ispe' property
++                    + (2 * 16)                    // 'pixi' property
++                    + (2 * 19)                    // 'colr' property
++                ;
++    }
++
+     // increase to iref and idat
+     if (grid) {
+         increase += (12 + mNumTiles * 2)            // 'dimg' in iref
+@@ -4317,6 +4521,12 @@ int32_t MPEG4Writer::Track::getMetaSizeIncrease(
+               + 21)                                 // increase to 'iinf'
+               * (mNumTiles + grid + 1);             // "+1" is for 'Exif'
+ 
++    if (flags_camera::camera_heif_gainmap()) {
++        increase += (16                                 // increase to 'iloc'
++                  + 21)                                 // increase to 'iinf'
++                  * 2;                                  // "2" is for 'tmap', 'gmap'
++    }
++
+     // When total # of properties is > 127, the properties id becomes 2-byte.
+     // We write 4 properties at most for each image (2x'ispe', 1x'hvcC', 1x'irot').
+     // Set the threshold to be 30.
+@@ -5475,6 +5685,21 @@ void MPEG4Writer::writePitmBox() {
+     endBox();
+ }
+ 
++void MPEG4Writer::writeGrplBox(const Vector<uint16_t> &items) {
++    if (flags_camera::camera_heif_gainmap()) {
++        beginBox("grpl");
++        beginBox("altr");
++        writeInt32(0);           // Version = 0, Flags = 0
++        writeInt32(1);           // Group Id
++        writeInt32(items.size());// Number of entities
++        for (size_t i = 0; i < items.size(); i++) {
++            writeInt32(items[i]);// Item Id
++        }
++        endBox();
++        endBox();
++    }
++}
++
+ void MPEG4Writer::writeIpcoBox() {
+     beginBox("ipco");
+     size_t numProperties = mProperties.size();
+@@ -5520,6 +5745,32 @@ void MPEG4Writer::writeIpcoBox() {
+                 endBox();
+                 break;
+             }
++            case FOURCC('c', 'o', 'l', 'r'):
++            {
++                if (flags_camera::camera_heif_gainmap()) {
++                    beginBox("colr");
++                    writeFourcc("nclx");
++                    writeInt16(mProperties[propIndex].colorPrimaries);
++                    writeInt16(mProperties[propIndex].colorTransfer);
++                    writeInt16(mProperties[propIndex].colorMatrix);
++                    writeInt8(int8_t(mProperties[propIndex].colorRange ? 0x80 : 0x0));
++                    endBox();
++                }
++                break;
++            }
++            case FOURCC('p', 'i', 'x', 'i'):
++            {
++                if (flags_camera::camera_heif_gainmap()) {
++                    beginBox("pixi");
++                    writeInt32(0); // Version = 0, Flags = 0
++                    writeInt8(mProperties[propIndex].bitsPerChannel.size()); // Number of channels
++                    for (size_t i = 0; i < mProperties[propIndex].bitsPerChannel.size(); i++) {
++                        writeInt8(mProperties[propIndex].bitsPerChannel[i]); // Channel bit depth
++                    }
++                    endBox();
++                }
++                break;
++            }
+             default:
+                 ALOGW("Skipping unrecognized property: type 0x%08x",
+                         mProperties[propIndex].type);
+@@ -5574,6 +5825,12 @@ void MPEG4Writer::writeFileLevelMetaBox() {
+     for (auto it = mItems.begin(); it != mItems.end(); it++) {
+         ItemInfo &item = it->second;
+ 
++        if (item.isGainmapMeta() && !item.properties.empty() &&
++            flags_camera::camera_heif_gainmap()) {
++            mAssociationEntryCount++;
++            continue;
++        }
++
+         if (!item.isImage()) continue;
+ 
+         if (item.isPrimary) {
+@@ -5605,11 +5862,27 @@ void MPEG4Writer::writeFileLevelMetaBox() {
+         }
+     }
+ 
++    uint16_t gainmapItemId = 0;
++    uint16_t gainmapMetaItemId = 0;
+     for (List<Track *>::iterator it = mTracks.begin();
+         it != mTracks.end(); ++it) {
+         if ((*it)->isHeif()) {
+             (*it)->flushItemRefs();
+         }
++        if (flags_camera::camera_heif_gainmap()) {
++            if ((*it)->getGainmapItemId() > 0) {
++                gainmapItemId = (*it)->getGainmapItemId();
++            }
++            if ((*it)->getGainmapMetaItemId() > 0) {
++                gainmapMetaItemId = (*it)->getGainmapMetaItemId();
++            }
++        }
++    }
++    if ((gainmapItemId > 0) && (gainmapMetaItemId > 0) && flags_camera::camera_heif_gainmap()) {
++        ItemRefs gainmapRefs("dimg");
++        gainmapRefs.value.push_back(mPrimaryItemId);
++        gainmapRefs.value.push_back(gainmapItemId);
++        addRefs_l(gainmapMetaItemId, gainmapRefs);
+     }
+ 
+     beginBox("meta");
+@@ -5625,6 +5898,12 @@ void MPEG4Writer::writeFileLevelMetaBox() {
+     if (mHasRefs) {
+         writeIrefBox();
+     }
++    if ((gainmapItemId > 0) && (gainmapMetaItemId > 0) && flags_camera::camera_heif_gainmap()) {
++        Vector<uint16_t> itemIds;
++        itemIds.push_back(gainmapMetaItemId);
++        itemIds.push_back(mPrimaryItemId);
++        writeGrplBox(itemIds);
++    }
+     endBox();
+ }
+ 
+diff --git a/media/libstagefright/MediaMuxer.cpp b/media/libstagefright/MediaMuxer.cpp
+index 10084453a1..96e399bc82 100644
+--- a/media/libstagefright/MediaMuxer.cpp
++++ b/media/libstagefright/MediaMuxer.cpp
+@@ -19,6 +19,8 @@
+ 
+ #include "webm/WebmWriter.h"
+ 
++#include <com_android_internal_camera_flags.h>
++
+ #include <utils/Log.h>
+ 
+ #include <media/stagefright/MediaMuxer.h>
+@@ -38,6 +40,8 @@
+ #include <media/stagefright/OggWriter.h>
+ #include <media/stagefright/Utils.h>
+ 
++namespace flags_camera = com::android::internal::camera::flags;
++
+ namespace android {
+ 
+ static bool isMp4Format(MediaMuxer::OutputFormat format) {
+@@ -270,6 +274,25 @@ status_t MediaMuxer::writeSampleData(const sp<ABuffer> &buffer, size_t trackInde
+         sampleMetaData.setInt64(kKeyLastSampleIndexInChunk, val64);
+     }
+ 
++    if (flags_camera::camera_heif_gainmap()) {
++        int32_t val32;
++        if (bufMeta->findInt32("color-primaries", &val32)) {
++            sampleMetaData.setInt32(kKeyColorPrimaries, val32);
++        }
++        if (bufMeta->findInt32("color-transfer", &val32)) {
++            sampleMetaData.setInt32(kKeyTransferFunction, val32);
++        }
++        if (bufMeta->findInt32("color-matrix", &val32)) {
++            sampleMetaData.setInt32(kKeyColorMatrix, val32);
++        }
++        if (bufMeta->findInt32("color-range", &val32)) {
++            sampleMetaData.setInt32(kKeyColorRange, val32);
++        }
++        if (bufMeta->findInt32(KEY_COLOR_FORMAT, &val32)) {
++            sampleMetaData.setInt32(kKeyColorFormat, val32);
++        }
++    }
++
+     sp<MediaAdapter> currentTrack = mTrackList[trackIndex];
+     // This pushBuffer will wait until the mediaBuffer is consumed.
+     return currentTrack->pushBuffer(mediaBuffer);
+diff --git a/media/libstagefright/include/media/stagefright/MPEG4Writer.h b/media/libstagefright/include/media/stagefright/MPEG4Writer.h
+index ee75129e96..a409e4622d 100644
+--- a/media/libstagefright/include/media/stagefright/MPEG4Writer.h
++++ b/media/libstagefright/include/media/stagefright/MPEG4Writer.h
+@@ -200,6 +200,9 @@ private:
+         bool isImage() const {
+             return !strcmp("hvc1", itemType) || !strcmp("av01", itemType) || isGrid();
+         }
++        bool isGainmapMeta() const {
++            return !strcmp("tmap", itemType);
++        }
+         const char *itemType;
+         uint16_t itemId;
+         bool isPrimary;
+@@ -227,6 +230,11 @@ private:
+         int32_t width;
+         int32_t height;
+         int32_t rotation;
++        int32_t colorPrimaries;
++        int32_t colorTransfer;
++        int32_t colorMatrix;
++        bool colorRange;
++        Vector<uint8_t> bitsPerChannel;
+         sp<ABuffer> data;
+     } ItemProperty;
+ 
+@@ -347,6 +355,7 @@ private:
+     void writeIdatBox();
+     void writeIrefBox();
+     void writePitmBox();
++    void writeGrplBox(const Vector<uint16_t> &items);
+     void writeFileLevelMetaBox();
+ 
+     void sendSessionSummary();
+diff --git a/media/libstagefright/writer_fuzzers/Android.bp b/media/libstagefright/writer_fuzzers/Android.bp
+index 840c6b3c52..483175c47e 100644
+--- a/media/libstagefright/writer_fuzzers/Android.bp
++++ b/media/libstagefright/writer_fuzzers/Android.bp
+@@ -47,6 +47,7 @@ cc_defaults {
+         "libcutils",
+         "libutils",
+         "server_configurable_flags",
++        "camera_platform_flags_c_lib",
+     ],
+ }
+ 
+diff --git a/services/camera/libcameraservice/aidl/VndkVersionMetadataTags.h b/services/camera/libcameraservice/aidl/VndkVersionMetadataTags.h
+index 158ee69e85..2030c6802c 100644
+--- a/services/camera/libcameraservice/aidl/VndkVersionMetadataTags.h
++++ b/services/camera/libcameraservice/aidl/VndkVersionMetadataTags.h
+@@ -96,6 +96,12 @@ std::map<int, std::vector<camera_metadata_tag>> static_api_level_to_keys{
+       {36, {
+           ANDROID_COLOR_CORRECTION_AVAILABLE_MODES,
+           ANDROID_COLOR_CORRECTION_COLOR_TEMPERATURE_RANGE,
++          ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_MIN_FRAME_DURATIONS,
++          ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_MIN_FRAME_DURATIONS_MAXIMUM_RESOLUTION,
++          ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STALL_DURATIONS,
++          ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STALL_DURATIONS_MAXIMUM_RESOLUTION,
++          ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS,
++          ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS_MAXIMUM_RESOLUTION,
+         } },
+ };
+ 
+diff --git a/services/camera/libcameraservice/api2/HeicCompositeStream.cpp b/services/camera/libcameraservice/api2/HeicCompositeStream.cpp
+index 0f4ba654c0..20e6205a4e 100644
+--- a/services/camera/libcameraservice/api2/HeicCompositeStream.cpp
++++ b/services/camera/libcameraservice/api2/HeicCompositeStream.cpp
+@@ -27,27 +27,35 @@
+ #include <aidl/android/hardware/camera/device/CameraBlobId.h>
+ #include <camera/StringUtils.h>
+ #include <com_android_graphics_libgui_flags.h>
++#include <com_android_internal_camera_flags.h>
+ #include <gui/Surface.h>
+ #include <libyuv.h>
+ #include <utils/Log.h>
+ #include <utils/Trace.h>
++#include <ultrahdr/jpegr.h>
++#include <ultrahdr/ultrahdrcommon.h>
+ 
+-#include <mediadrm/ICrypto.h>
+ #include <media/MediaCodecBuffer.h>
++#include <media/stagefright/MediaCodecConstants.h>
++#include <media/stagefright/MetaData.h>
+ #include <media/stagefright/foundation/ABuffer.h>
+ #include <media/stagefright/foundation/MediaDefs.h>
+-#include <media/stagefright/MediaCodecConstants.h>
++#include <mediadrm/ICrypto.h>
++#include <memory>
+ 
++#include "HeicCompositeStream.h"
++#include "HeicEncoderInfoManager.h"
+ #include "common/CameraDeviceBase.h"
++#include "system/camera_metadata.h"
+ #include "utils/ExifUtils.h"
+ #include "utils/SessionConfigurationUtils.h"
+ #include "utils/Utils.h"
+-#include "HeicEncoderInfoManager.h"
+-#include "HeicCompositeStream.h"
+ 
+ using aidl::android::hardware::camera::device::CameraBlob;
+ using aidl::android::hardware::camera::device::CameraBlobId;
+ 
++namespace flags = com::android::internal::camera::flags;
++
+ namespace android {
+ namespace camera3 {
+ 
+@@ -72,9 +80,18 @@ HeicCompositeStream::HeicCompositeStream(sp<CameraDeviceBase> device,
+         mStreamSurfaceListener(new StreamSurfaceListener()),
+         mDequeuedOutputBufferCnt(0),
+         mCodecOutputCounter(0),
++        mCodecGainmapOutputCounter(0),
+         mQuality(-1),
+         mGridTimestampUs(0),
+         mStatusId(StatusTracker::NO_STATUS_ID) {
++    mStaticInfo = device->info();
++    camera_metadata_entry halHeicSupport = mStaticInfo.find(ANDROID_HEIC_INFO_SUPPORTED);
++    if (halHeicSupport.count == 1 &&
++            halHeicSupport.data.u8[0] == ANDROID_HEIC_INFO_SUPPORTED_TRUE) {
++        // The camera device supports the HEIC stream combination,
++        // use the standard stream combintion.
++        mAppSegmentSupported = true;
++    }
+ }
+ 
+ HeicCompositeStream::~HeicCompositeStream() {
+@@ -84,6 +101,7 @@ HeicCompositeStream::~HeicCompositeStream() {
+ 
+     mInputAppSegmentBuffers.clear();
+     mCodecOutputBuffers.clear();
++    mGainmapCodecOutputBuffers.clear();
+ 
+     mAppSegmentStreamId = -1;
+     mAppSegmentSurfaceId = -1;
+@@ -97,7 +115,8 @@ HeicCompositeStream::~HeicCompositeStream() {
+ }
+ 
+ bool HeicCompositeStream::isHeicCompositeStreamInfo(const OutputStreamInfo& streamInfo) {
+-    return ((streamInfo.dataSpace == static_cast<android_dataspace_t>(HAL_DATASPACE_HEIF)) &&
++    return ((streamInfo.dataSpace == static_cast<android_dataspace_t>(HAL_DATASPACE_HEIF) ||
++                (streamInfo.dataSpace == static_cast<android_dataspace_t>(kUltraHDRDataSpace))) &&
+             (streamInfo.format == HAL_PIXEL_FORMAT_BLOB));
+ }
+ 
+@@ -120,7 +139,8 @@ bool HeicCompositeStream::isHeicCompositeStream(const sp<Surface> &surface) {
+         return false;
+     }
+ 
+-    return ((format == HAL_PIXEL_FORMAT_BLOB) && (dataspace == HAL_DATASPACE_HEIF));
++    return ((format == HAL_PIXEL_FORMAT_BLOB) && ((dataspace == HAL_DATASPACE_HEIF) ||
++                (dataspace == static_cast<int>(kUltraHDRDataSpace))));
+ }
+ 
+ status_t HeicCompositeStream::createInternalStreams(const std::vector<SurfaceHolder>& consumers,
+@@ -130,13 +150,27 @@ status_t HeicCompositeStream::createInternalStreams(const std::vector<SurfaceHol
+         std::vector<int> *surfaceIds,
+         int /*streamSetId*/, bool /*isShared*/, int32_t colorSpace,
+         int64_t /*dynamicProfile*/, int64_t /*streamUseCase*/, bool useReadoutTimestamp) {
++
+     sp<CameraDeviceBase> device = mDevice.promote();
+     if (!device.get()) {
+         ALOGE("%s: Invalid camera device!", __FUNCTION__);
+         return NO_INIT;
+     }
+ 
+-    status_t res = initializeCodec(width, height, device);
++    ANativeWindow* anw = consumers[0].mSurface.get();
++    int dataspace;
++    status_t res;
++    if ((res = anw->query(anw, NATIVE_WINDOW_DEFAULT_DATASPACE, &dataspace)) != OK) {
++        ALOGE("%s: Failed to query Surface dataspace: %s (%d)", __FUNCTION__, strerror(-res),
++                res);
++        return res;
++    }
++    if ((dataspace == static_cast<int>(kUltraHDRDataSpace)) && flags::camera_heif_gainmap()) {
++        mHDRGainmapEnabled = true;
++        mInternalDataSpace = static_cast<android_dataspace_t>(HAL_DATASPACE_BT2020_HLG);
++    }
++
++    res = initializeCodec(width, height, device);
+     if (res != OK) {
+         ALOGE("%s: Failed to initialize HEIC/HEVC codec: %s (%d)",
+                 __FUNCTION__, strerror(-res), res);
+@@ -144,42 +178,48 @@ status_t HeicCompositeStream::createInternalStreams(const std::vector<SurfaceHol
+     }
+ 
+ #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+-    mAppSegmentConsumer = new CpuConsumer(kMaxAcquiredAppSegment);
+-    mAppSegmentConsumer->setFrameAvailableListener(this);
+-    mAppSegmentConsumer->setName(String8("Camera3-HeicComposite-AppSegmentStream"));
+-    mAppSegmentSurface = mAppSegmentConsumer->getSurface();
+-    sp<IGraphicBufferProducer> producer = mAppSegmentSurface->getIGraphicBufferProducer();
++    if (mAppSegmentSupported) {
++        mAppSegmentConsumer = new CpuConsumer(kMaxAcquiredAppSegment);
++        mAppSegmentConsumer->setFrameAvailableListener(this);
++        mAppSegmentConsumer->setName(String8("Camera3-HeicComposite-AppSegmentStream"));
++        mAppSegmentSurface = mAppSegmentConsumer->getSurface();
++    }
++    sp<IGraphicBufferProducer> producer = mAppSegmentSurface.get() != nullptr ?
++        mAppSegmentSurface->getIGraphicBufferProducer() : nullptr;
+ #else
+     sp<IGraphicBufferProducer> producer;
+     sp<IGraphicBufferConsumer> consumer;
+-    BufferQueue::createBufferQueue(&producer, &consumer);
+-    mAppSegmentConsumer = new CpuConsumer(consumer, kMaxAcquiredAppSegment);
+-    mAppSegmentConsumer->setFrameAvailableListener(this);
+-    mAppSegmentConsumer->setName(String8("Camera3-HeicComposite-AppSegmentStream"));
+-    mAppSegmentSurface = new Surface(producer);
++    if (mAppSegmentSupported) {
++        BufferQueue::createBufferQueue(&producer, &consumer);
++        mAppSegmentConsumer = new CpuConsumer(consumer, kMaxAcquiredAppSegment);
++        mAppSegmentConsumer->setFrameAvailableListener(this);
++        mAppSegmentConsumer->setName(String8("Camera3-HeicComposite-AppSegmentStream"));
++        mAppSegmentSurface = new Surface(producer);
++    }
+ #endif  // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+ 
+-    mStaticInfo = device->info();
+-
+-    res = device->createStream(mAppSegmentSurface, mAppSegmentMaxSize, 1, format,
+-            kAppSegmentDataSpace, rotation, &mAppSegmentStreamId, physicalCameraId,
+-            sensorPixelModesUsed, surfaceIds, camera3::CAMERA3_STREAM_SET_ID_INVALID,
+-            /*isShared*/false, /*isMultiResolution*/false,
+-            /*consumerUsage*/0, ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD,
+-            ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
+-            OutputConfiguration::TIMESTAMP_BASE_DEFAULT,
+-            OutputConfiguration::MIRROR_MODE_AUTO,
+-            colorSpace,
+-            useReadoutTimestamp);
+-    if (res == OK) {
+-        mAppSegmentSurfaceId = (*surfaceIds)[0];
+-    } else {
+-        ALOGE("%s: Failed to create JPEG App segment stream: %s (%d)", __FUNCTION__,
+-                strerror(-res), res);
+-        return res;
++    if (mAppSegmentSupported) {
++        std::vector<int> sourceSurfaceId;
++        res = device->createStream(mAppSegmentSurface, mAppSegmentMaxSize, 1, format,
++                kAppSegmentDataSpace, rotation, &mAppSegmentStreamId, physicalCameraId,
++                sensorPixelModesUsed, &sourceSurfaceId, camera3::CAMERA3_STREAM_SET_ID_INVALID,
++                /*isShared*/false, /*isMultiResolution*/false,
++                /*consumerUsage*/0, ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD,
++                ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
++                OutputConfiguration::TIMESTAMP_BASE_DEFAULT,
++                OutputConfiguration::MIRROR_MODE_AUTO,
++                colorSpace,
++                useReadoutTimestamp);
++        if (res == OK) {
++            mAppSegmentSurfaceId = sourceSurfaceId[0];
++        } else {
++            ALOGE("%s: Failed to create JPEG App segment stream: %s (%d)", __FUNCTION__,
++                    strerror(-res), res);
++            return res;
++        }
+     }
+ 
+-    if (!mUseGrid) {
++    if (!mUseGrid && !mHDRGainmapEnabled) {
+         res = mCodec->createInputSurface(&producer);
+         if (res != OK) {
+             ALOGE("%s: Failed to create input surface for Heic codec: %s (%d)",
+@@ -206,21 +246,32 @@ status_t HeicCompositeStream::createInternalStreams(const std::vector<SurfaceHol
+         return res;
+     }
+ 
+-    std::vector<int> sourceSurfaceId;
+-    //Use YUV_888 format if framework tiling is needed.
+-    int srcStreamFmt = mUseGrid ? HAL_PIXEL_FORMAT_YCbCr_420_888 :
+-            HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED;
+-    res = device->createStream(mMainImageSurface, width, height, srcStreamFmt, kHeifDataSpace,
+-            rotation, id, physicalCameraId, sensorPixelModesUsed, &sourceSurfaceId,
++    if (mHDRGainmapEnabled) {
++        res = mGainmapCodec->start();
++        if (res != OK) {
++            ALOGE("%s: Failed to start gainmap codec: %s (%d)", __FUNCTION__,
++                    strerror(-res), res);
++            return res;
++        }
++    }
++
++    //Use YUV_420 format if framework tiling is needed.
++    int srcStreamFmt = mHDRGainmapEnabled ?
++        static_cast<android_pixel_format_t>(HAL_PIXEL_FORMAT_YCBCR_P010) : mUseGrid ?
++        HAL_PIXEL_FORMAT_YCbCr_420_888 : HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED;
++    res = device->createStream(mMainImageSurface, width, height, srcStreamFmt, mInternalDataSpace,
++            rotation, id, physicalCameraId, sensorPixelModesUsed, surfaceIds,
+             camera3::CAMERA3_STREAM_SET_ID_INVALID, /*isShared*/false, /*isMultiResolution*/false,
+-            /*consumerUsage*/0, ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD,
++            /*consumerUsage*/0, mHDRGainmapEnabled ?
++            ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_HLG10 :
++            ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD,
+             ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
+             OutputConfiguration::TIMESTAMP_BASE_DEFAULT,
+             OutputConfiguration::MIRROR_MODE_AUTO,
+             colorSpace,
+             useReadoutTimestamp);
+     if (res == OK) {
+-        mMainImageSurfaceId = sourceSurfaceId[0];
++        mMainImageSurfaceId = (*surfaceIds)[0];
+         mMainImageStreamId = *id;
+     } else {
+         ALOGE("%s: Failed to create main image stream: %s (%d)", __FUNCTION__,
+@@ -236,11 +287,13 @@ status_t HeicCompositeStream::createInternalStreams(const std::vector<SurfaceHol
+         return res;
+     }
+ 
+-    res = registerCompositeStreamListener(mAppSegmentStreamId);
+-    if (res != OK) {
+-        ALOGE("%s: Failed to register HAL app segment stream: %s (%d)", __FUNCTION__,
+-                strerror(-res), res);
+-        return res;
++    if (mAppSegmentSupported) {
++        res = registerCompositeStreamListener(mAppSegmentStreamId);
++        if (res != OK) {
++            ALOGE("%s: Failed to register HAL app segment stream: %s (%d)", __FUNCTION__,
++                    strerror(-res), res);
++            return res;
++        }
+     }
+ 
+     initCopyRowFunction(width);
+@@ -299,6 +352,9 @@ void HeicCompositeStream::onBufferReleased(const BufferInfo& bufferInfo) {
+         mCodecOutputBufferFrameNumbers.push(bufferInfo.mFrameNumber);
+         ALOGV("%s: [%" PRId64 "]: Adding main image frame number (%zu frame numbers in total)",
+                 __FUNCTION__, bufferInfo.mFrameNumber, mMainImageFrameNumbers.size());
++        if (mHDRGainmapEnabled) {
++            mCodecGainmapOutputBufferFrameNumbers.push(bufferInfo.mFrameNumber);
++        }
+     } else if (bufferInfo.mStreamId == mAppSegmentStreamId) {
+         mAppSegmentFrameNumbers.push(bufferInfo.mFrameNumber);
+         ALOGV("%s: [%" PRId64 "]: Adding app segment frame number (%zu frame numbers in total)",
+@@ -346,13 +402,13 @@ void HeicCompositeStream::onFrameAvailable(const BufferItem& item) {
+             mInputAppSegmentBuffers.push_back(item.mTimestamp);
+             mInputReadyCondition.signal();
+         }
+-    } else if (item.mDataSpace == kHeifDataSpace) {
+-        ALOGV("%s: YUV_888 buffer with ts: %" PRIu64 " ms. arrived!",
++    } else if (item.mDataSpace == mInternalDataSpace) {
++        ALOGV("%s: YUV_420 buffer with ts: %" PRIu64 " ms. arrived!",
+                 __func__, ns2ms(item.mTimestamp));
+ 
+         Mutex::Autolock l(mMutex);
+-        if (!mUseGrid) {
+-            ALOGE("%s: YUV_888 internal stream is only supported for HEVC tiling",
++        if (!mUseGrid && !mHDRGainmapEnabled) {
++            ALOGE("%s: YUV_420 internal stream is only supported for HEVC tiling",
+                     __FUNCTION__);
+             return;
+         }
+@@ -367,6 +423,7 @@ void HeicCompositeStream::onFrameAvailable(const BufferItem& item) {
+ 
+ status_t HeicCompositeStream::getCompositeStreamInfo(const OutputStreamInfo &streamInfo,
+             const CameraMetadata& ch, std::vector<OutputStreamInfo>* compositeOutput /*out*/) {
++    bool gainmapEnabled = false;
+     if (compositeOutput == nullptr) {
+         return BAD_VALUE;
+     }
+@@ -381,30 +438,44 @@ status_t HeicCompositeStream::getCompositeStreamInfo(const OutputStreamInfo &str
+         return OK;
+     }
+ 
+-    compositeOutput->insert(compositeOutput->end(), 2, streamInfo);
++    if (streamInfo.dataSpace == static_cast<android_dataspace_t>(kUltraHDRDataSpace)) {
++        gainmapEnabled = true;
++    }
+ 
+-    // JPEG APPS segments Blob stream info
+-    (*compositeOutput)[0].width = calcAppSegmentMaxSize(ch);
+-    (*compositeOutput)[0].height = 1;
+-    (*compositeOutput)[0].format = HAL_PIXEL_FORMAT_BLOB;
+-    (*compositeOutput)[0].dataSpace = kAppSegmentDataSpace;
+-    (*compositeOutput)[0].consumerUsage = GRALLOC_USAGE_SW_READ_OFTEN;
++    compositeOutput->clear();
++    compositeOutput->push_back({});
+ 
+     // YUV/IMPLEMENTATION_DEFINED stream info
+-    (*compositeOutput)[1].width = streamInfo.width;
+-    (*compositeOutput)[1].height = streamInfo.height;
+-    (*compositeOutput)[1].format = useGrid ? HAL_PIXEL_FORMAT_YCbCr_420_888 :
+-            HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED;
+-    (*compositeOutput)[1].dataSpace = kHeifDataSpace;
+-    (*compositeOutput)[1].consumerUsage = useHeic ? GRALLOC_USAGE_HW_IMAGE_ENCODER :
++    (*compositeOutput)[0].width = streamInfo.width;
++    (*compositeOutput)[0].height = streamInfo.height;
++    (*compositeOutput)[0].format = gainmapEnabled ?
++        static_cast<android_pixel_format_t>(HAL_PIXEL_FORMAT_YCBCR_P010) : useGrid ?
++        HAL_PIXEL_FORMAT_YCbCr_420_888 : HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED;
++    (*compositeOutput)[0].dataSpace = gainmapEnabled ?
++        static_cast<android_dataspace_t>(HAL_DATASPACE_BT2020_HLG) : kHeifDataSpace;
++    (*compositeOutput)[0].consumerUsage = useHeic ? GRALLOC_USAGE_HW_IMAGE_ENCODER :
+             useGrid ? GRALLOC_USAGE_SW_READ_OFTEN : GRALLOC_USAGE_HW_VIDEO_ENCODER;
+ 
++
++    camera_metadata_ro_entry halHeicSupport = ch.find(ANDROID_HEIC_INFO_SUPPORTED);
++    if (halHeicSupport.count == 1 &&
++            halHeicSupport.data.u8[0] == ANDROID_HEIC_INFO_SUPPORTED_TRUE) {
++
++        compositeOutput->push_back({});
++        // JPEG APPS segments Blob stream info
++        (*compositeOutput)[1].width = calcAppSegmentMaxSize(ch);
++        (*compositeOutput)[1].height = 1;
++        (*compositeOutput)[1].format = HAL_PIXEL_FORMAT_BLOB;
++        (*compositeOutput)[1].dataSpace = kAppSegmentDataSpace;
++        (*compositeOutput)[1].consumerUsage = GRALLOC_USAGE_SW_READ_OFTEN;
++    }
++
+     return NO_ERROR;
+ }
+ 
+ bool HeicCompositeStream::isSizeSupportedByHeifEncoder(int32_t width, int32_t height,
+-        bool* useHeic, bool* useGrid, int64_t* stall, AString* hevcName) {
+-    static HeicEncoderInfoManager& heicManager = HeicEncoderInfoManager::getInstance();
++        bool* useHeic, bool* useGrid, int64_t* stall, AString* hevcName, bool allowSWCodec) {
++    static HeicEncoderInfoManager& heicManager = HeicEncoderInfoManager::getInstance(allowSWCodec);
+     return heicManager.isSizeSupported(width, height, useHeic, useGrid, stall, hevcName);
+ }
+ 
+@@ -421,7 +492,7 @@ bool HeicCompositeStream::isInMemoryTempFileSupported() {
+ }
+ 
+ void HeicCompositeStream::onHeicOutputFrameAvailable(
+-        const CodecOutputBufferInfo& outputBufferInfo) {
++        const CodecOutputBufferInfo& outputBufferInfo, bool isGainmap) {
+     Mutex::Autolock l(mMutex);
+ 
+     ALOGV("%s: index %d, offset %d, size %d, time %" PRId64 ", flags 0x%x",
+@@ -431,36 +502,99 @@ void HeicCompositeStream::onHeicOutputFrameAvailable(
+     if (!mErrorState) {
+         if ((outputBufferInfo.size > 0) &&
+                 ((outputBufferInfo.flags & MediaCodec::BUFFER_FLAG_CODECCONFIG) == 0)) {
+-            mCodecOutputBuffers.push_back(outputBufferInfo);
++            isGainmap ? mGainmapCodecOutputBuffers.push_back(outputBufferInfo) :
++                mCodecOutputBuffers.push_back(outputBufferInfo);
+             mInputReadyCondition.signal();
+         } else {
+             ALOGV("%s: Releasing output buffer: size %d flags: 0x%x ", __FUNCTION__,
+                 outputBufferInfo.size, outputBufferInfo.flags);
+-            mCodec->releaseOutputBuffer(outputBufferInfo.index);
++            isGainmap ? mGainmapCodec->releaseOutputBuffer(outputBufferInfo.index) :
++                mCodec->releaseOutputBuffer(outputBufferInfo.index);
+         }
+     } else {
+-        mCodec->releaseOutputBuffer(outputBufferInfo.index);
++        isGainmap ? mGainmapCodec->releaseOutputBuffer(outputBufferInfo.index) :
++            mCodec->releaseOutputBuffer(outputBufferInfo.index);
+     }
+ }
+ 
+-void HeicCompositeStream::onHeicInputFrameAvailable(int32_t index) {
++void HeicCompositeStream::onHeicInputFrameAvailable(int32_t index, bool isGainmap) {
+     Mutex::Autolock l(mMutex);
+ 
+-    if (!mUseGrid) {
++    if (!mUseGrid && !mHDRGainmapEnabled) {
+         ALOGE("%s: Codec YUV input mode must only be used for Hevc tiling mode", __FUNCTION__);
+         return;
+     }
+ 
+-    mCodecInputBuffers.push_back(index);
++    isGainmap ? mGainmapCodecInputBuffers.push_back(index) : mCodecInputBuffers.push_back(index);
++    mInputReadyCondition.signal();
++}
++
++void HeicCompositeStream::onHeicGainmapFormatChanged(sp<AMessage>& newFormat) {
++    if (newFormat == nullptr) {
++        ALOGE("%s: newFormat must not be null!", __FUNCTION__);
++        return;
++    }
++
++    Mutex::Autolock l(mMutex);
++
++    AString mime;
++    AString mimeHeic(MIMETYPE_IMAGE_ANDROID_HEIC);
++    newFormat->findString(KEY_MIME, &mime);
++    if (mime != mimeHeic) {
++        // For HEVC codec, below keys need to be filled out or overwritten so that the
++        // muxer can handle them as HEIC output image.
++        newFormat->setString(KEY_MIME, mimeHeic);
++        newFormat->setInt32(KEY_WIDTH, mGainmapOutputWidth);
++        newFormat->setInt32(KEY_HEIGHT, mGainmapOutputHeight);
++    }
++
++    if (mGainmapUseGrid) {
++        int32_t gridRows, gridCols, tileWidth, tileHeight;
++        if (newFormat->findInt32(KEY_GRID_ROWS, &gridRows) &&
++                newFormat->findInt32(KEY_GRID_COLUMNS, &gridCols) &&
++                newFormat->findInt32(KEY_TILE_WIDTH, &tileWidth) &&
++                newFormat->findInt32(KEY_TILE_HEIGHT, &tileHeight)) {
++            mGainmapGridWidth = tileWidth;
++            mGainmapGridHeight = tileHeight;
++            mGainmapGridRows = gridRows;
++            mGainmapGridCols = gridCols;
++        } else {
++            newFormat->setInt32(KEY_TILE_WIDTH, mGainmapGridWidth);
++            newFormat->setInt32(KEY_TILE_HEIGHT, mGainmapGridHeight);
++            newFormat->setInt32(KEY_GRID_ROWS, mGainmapGridRows);
++            newFormat->setInt32(KEY_GRID_COLUMNS, mGainmapGridCols);
++        }
++        int32_t left, top, right, bottom;
++        if (newFormat->findRect("crop", &left, &top, &right, &bottom)) {
++            newFormat->setRect("crop", 0, 0, mGainmapOutputWidth - 1, mGainmapOutputHeight - 1);
++        }
++    }
++    newFormat->setInt32(KEY_IS_DEFAULT, 1 /*isPrimary*/);
++
++    int32_t gridRows, gridCols;
++    if (newFormat->findInt32(KEY_GRID_ROWS, &gridRows) &&
++            newFormat->findInt32(KEY_GRID_COLUMNS, &gridCols)) {
++        mNumGainmapOutputTiles = gridRows * gridCols;
++    } else {
++        mNumGainmapOutputTiles = 1;
++    }
++
++    mGainmapFormat = newFormat;
++
++    ALOGV("%s: mNumOutputTiles is %zu", __FUNCTION__, mNumOutputTiles);
+     mInputReadyCondition.signal();
+ }
+ 
+-void HeicCompositeStream::onHeicFormatChanged(sp<AMessage>& newFormat) {
++
++void HeicCompositeStream::onHeicFormatChanged(sp<AMessage>& newFormat, bool isGainmap) {
+     if (newFormat == nullptr) {
+         ALOGE("%s: newFormat must not be null!", __FUNCTION__);
+         return;
+     }
+ 
++    if (isGainmap) {
++        return onHeicGainmapFormatChanged(newFormat);
++    }
+     Mutex::Autolock l(mMutex);
+ 
+     AString mime;
+@@ -577,10 +711,12 @@ status_t HeicCompositeStream::configureStream() {
+ 
+ status_t HeicCompositeStream::insertGbp(SurfaceMap* /*out*/outSurfaceMap,
+         Vector<int32_t>* /*out*/outputStreamIds, int32_t* /*out*/currentStreamId) {
+-    if (outSurfaceMap->find(mAppSegmentStreamId) == outSurfaceMap->end()) {
+-        outputStreamIds->push_back(mAppSegmentStreamId);
++    if (mAppSegmentSupported) {
++        if (outSurfaceMap->find(mAppSegmentStreamId) == outSurfaceMap->end()) {
++            outputStreamIds->push_back(mAppSegmentStreamId);
++        }
++        (*outSurfaceMap)[mAppSegmentStreamId].push_back(mAppSegmentSurfaceId);
+     }
+-    (*outSurfaceMap)[mAppSegmentStreamId].push_back(mAppSegmentSurfaceId);
+ 
+     if (outSurfaceMap->find(mMainImageStreamId) == outSurfaceMap->end()) {
+         outputStreamIds->push_back(mMainImageStreamId);
+@@ -600,7 +736,9 @@ status_t HeicCompositeStream::insertCompositeStreamIds(
+         return BAD_VALUE;
+     }
+ 
+-    compositeStreamIds->push_back(mAppSegmentStreamId);
++    if (mAppSegmentSupported) {
++        compositeStreamIds->push_back(mAppSegmentStreamId);
++    }
+     compositeStreamIds->push_back(mMainImageStreamId);
+ 
+     return OK;
+@@ -762,6 +900,31 @@ void HeicCompositeStream::compilePendingInputLocked() {
+         mCodecOutputBuffers.erase(it);
+     }
+ 
++    while (!mGainmapCodecOutputBuffers.empty()) {
++        auto it = mGainmapCodecOutputBuffers.begin();
++        // Assume encoder input to output is FIFO, use a queue to look up
++        // frameNumber when handling codec outputs.
++        int64_t bufferFrameNumber = -1;
++        if (mCodecGainmapOutputBufferFrameNumbers.empty()) {
++            ALOGV("%s: Failed to find buffer frameNumber for gainmap codec output buffer!",
++                    __FUNCTION__);
++            break;
++        } else {
++            // Direct mapping between camera frame number and codec timestamp (in us).
++            bufferFrameNumber = mCodecGainmapOutputBufferFrameNumbers.front();
++            mCodecGainmapOutputCounter++;
++            if (mCodecGainmapOutputCounter == mNumGainmapOutputTiles) {
++                mCodecGainmapOutputBufferFrameNumbers.pop();
++                mCodecGainmapOutputCounter = 0;
++            }
++
++            mPendingInputFrames[bufferFrameNumber].gainmapCodecOutputBuffers.push_back(*it);
++            ALOGV("%s: [%" PRId64 "]: Pushing gainmap codecOutputBuffers (frameNumber %" PRId64 ")",
++                    __FUNCTION__, bufferFrameNumber, it->timeUs);
++        }
++        mGainmapCodecOutputBuffers.erase(it);
++    }
++
+     while (!mCaptureResults.empty()) {
+         auto it = mCaptureResults.begin();
+         // Negative frame number indicates that something went wrong during the capture result
+@@ -772,6 +935,9 @@ void HeicCompositeStream::compilePendingInputLocked() {
+             if (mPendingInputFrames[frameNumber].timestamp == it->first) {
+                 mPendingInputFrames[frameNumber].result =
+                         std::make_unique<CameraMetadata>(std::get<1>(it->second));
++                if (!mAppSegmentSupported) {
++                    mPendingInputFrames[frameNumber].exifError = true;
++                }
+             } else {
+                 ALOGE("%s: Capture result frameNumber/timestamp mapping changed between "
+                         "shutter and capture result! before: %" PRId64 ", after: %" PRId64,
+@@ -825,6 +991,27 @@ void HeicCompositeStream::compilePendingInputLocked() {
+             break;
+         }
+     }
++
++    // Distribute codec input buffers to be filled out from YUV output
++    for (auto it = mPendingInputFrames.begin();
++            it != mPendingInputFrames.end() && mGainmapCodecInputBuffers.size() > 0; it++) {
++        InputFrame& inputFrame(it->second);
++        if (inputFrame.gainmapCodecInputCounter < mGainmapGridRows * mGainmapGridCols) {
++            // Available input tiles that are required for the current input
++            // image.
++            size_t newInputTiles = std::min(mGainmapCodecInputBuffers.size(),
++                    mGainmapGridRows * mGainmapGridCols - inputFrame.gainmapCodecInputCounter);
++            for (size_t i = 0; i < newInputTiles; i++) {
++                CodecInputBufferInfo inputInfo = { mGainmapCodecInputBuffers[0],
++                    mGridTimestampUs++, inputFrame.gainmapCodecInputCounter };
++                inputFrame.gainmapCodecInputBuffers.push_back(inputInfo);
++
++                mGainmapCodecInputBuffers.erase(mGainmapCodecInputBuffers.begin());
++                inputFrame.gainmapCodecInputCounter++;
++            }
++            break;
++        }
++    }
+ }
+ 
+ bool HeicCompositeStream::getNextReadyInputLocked(int64_t *frameNumber /*out*/) {
+@@ -845,7 +1032,8 @@ bool HeicCompositeStream::getNextReadyInputLocked(int64_t *frameNumber /*out*/)
+                 (it.second.appSegmentBuffer.data != nullptr || it.second.exifError) &&
+                 !it.second.appSegmentWritten && it.second.result != nullptr &&
+                 it.second.muxer != nullptr;
+-        bool codecOutputReady = !it.second.codecOutputBuffers.empty();
++        bool codecOutputReady = !it.second.codecOutputBuffers.empty() ||
++                !it.second.gainmapCodecOutputBuffers.empty();
+         bool codecInputReady = (it.second.yuvBuffer.data != nullptr) &&
+                 (!it.second.codecInputBuffers.empty());
+         bool hasOutputBuffer = it.second.muxer != nullptr ||
+@@ -856,6 +1044,9 @@ bool HeicCompositeStream::getNextReadyInputLocked(int64_t *frameNumber /*out*/)
+             if (it.second.format == nullptr && mFormat != nullptr) {
+                 it.second.format = mFormat->dup();
+             }
++            if (it.second.gainmapFormat == nullptr && mGainmapFormat != nullptr){
++                it.second.gainmapFormat = mGainmapFormat->dup();
++            }
+             newInputAvailable = true;
+             break;
+         }
+@@ -886,11 +1077,15 @@ status_t HeicCompositeStream::processInputFrame(int64_t frameNumber,
+             (inputFrame.appSegmentBuffer.data != nullptr || inputFrame.exifError) &&
+             !inputFrame.appSegmentWritten && inputFrame.result != nullptr &&
+             inputFrame.muxer != nullptr;
+-    bool codecOutputReady = inputFrame.codecOutputBuffers.size() > 0;
++    bool codecOutputReady = inputFrame.codecOutputBuffers.size() > 0 ||
++            inputFrame.gainmapCodecOutputBuffers.size() > 0;
+     bool codecInputReady = inputFrame.yuvBuffer.data != nullptr &&
+             !inputFrame.codecInputBuffers.empty();
++    bool gainmapCodecInputReady = inputFrame.gainmapImage.get() != nullptr &&
++            !inputFrame.gainmapCodecInputBuffers.empty();
+     bool hasOutputBuffer = inputFrame.muxer != nullptr ||
+             (mDequeuedOutputBufferCnt < kMaxOutputSurfaceProducerCount);
++    bool hasGainmapMetadata = !inputFrame.isoGainmapMetadata.empty();
+ 
+     ALOGV("%s: [%" PRId64 "]: appSegmentReady %d, codecOutputReady %d, codecInputReady %d,"
+             " dequeuedOutputBuffer %d, timestamp %" PRId64, __FUNCTION__, frameNumber,
+@@ -899,6 +1094,15 @@ status_t HeicCompositeStream::processInputFrame(int64_t frameNumber,
+ 
+     // Handle inputs for Hevc tiling
+     if (codecInputReady) {
++        if (mHDRGainmapEnabled && (inputFrame.baseBuffer.get() == nullptr)) {
++            auto res = generateBaseImageAndGainmap(inputFrame);
++            if (res != OK) {
++                ALOGE("%s: Error generating SDR base image and HDR gainmap: %s (%d)", __FUNCTION__,
++                        strerror(-res), res);
++                return res;
++            }
++        }
++
+         res = processCodecInputFrame(inputFrame);
+         if (res != OK) {
+             ALOGE("%s: Failed to process codec input frame: %s (%d)", __FUNCTION__,
+@@ -907,6 +1111,15 @@ status_t HeicCompositeStream::processInputFrame(int64_t frameNumber,
+         }
+     }
+ 
++    if (gainmapCodecInputReady) {
++        res = processCodecGainmapInputFrame(inputFrame);
++        if (res != OK) {
++            ALOGE("%s: Failed to process gainmap codec input frame: %s (%d)", __FUNCTION__,
++                    strerror(-res), res);
++            return res;
++        }
++    }
++
+     if (!(codecOutputReady && hasOutputBuffer) && !appSegmentReady) {
+         return OK;
+     }
+@@ -923,6 +1136,31 @@ status_t HeicCompositeStream::processInputFrame(int64_t frameNumber,
+         }
+     }
+ 
++    // Write the HDR gainmap metadata
++    if (hasGainmapMetadata) {
++        uint8_t kGainmapMetaMarker[] = {'t', 'm', 'a', 'p', '\0', '\0'};
++        sp<ABuffer> aBuffer =
++                new ABuffer(inputFrame.isoGainmapMetadata.size() + sizeof(kGainmapMetaMarker));
++        memcpy(aBuffer->data(), kGainmapMetaMarker, sizeof(kGainmapMetaMarker));
++        memcpy(aBuffer->data() + sizeof(kGainmapMetaMarker), inputFrame.isoGainmapMetadata.data(),
++               inputFrame.isoGainmapMetadata.size());
++
++        aBuffer->meta()->setInt32(KEY_COLOR_FORMAT, kCodecColorFormat);
++        aBuffer->meta()->setInt32("color-primaries", kCodecColorPrimaries);
++        aBuffer->meta()->setInt32("color-transfer", kCodecColorTransfer);
++        aBuffer->meta()->setInt32("color-matrix", kCodecColorMatrix);
++        aBuffer->meta()->setInt32("color-range", kCodecColorRange);
++        auto res = inputFrame.muxer->writeSampleData(aBuffer, inputFrame.trackIndex,
++                                                     inputFrame.timestamp,
++                                                     MediaCodec::BUFFER_FLAG_MUXER_DATA);
++        if (res != OK) {
++            ALOGE("%s: Failed to write HDR gainmap metadata to muxer: %s (%d)",
++                    __FUNCTION__, strerror(-res), res);
++            return res;
++        }
++        inputFrame.isoGainmapMetadata.clear();
++    }
++
+     // Write JPEG APP segments data to the muxer.
+     if (appSegmentReady) {
+         res = processAppSegment(frameNumber, inputFrame);
+@@ -943,7 +1181,17 @@ status_t HeicCompositeStream::processInputFrame(int64_t frameNumber,
+         }
+     }
+ 
+-    if (inputFrame.pendingOutputTiles == 0) {
++    // Write media codec gainmap bitstream buffers to muxer.
++    while (!inputFrame.gainmapCodecOutputBuffers.empty()) {
++        res = processOneCodecGainmapOutputFrame(frameNumber, inputFrame);
++        if (res != OK) {
++            ALOGE("%s: Failed to process codec gainmap output frame: %s (%d)", __FUNCTION__,
++                    strerror(-res), res);
++            return res;
++        }
++    }
++
++    if ((inputFrame.pendingOutputTiles == 0) && (inputFrame.gainmapPendingOutputTiles == 0)) {
+         if (inputFrame.appSegmentWritten) {
+             res = processCompletedInputFrame(frameNumber, inputFrame);
+             if (res != OK) {
+@@ -1001,6 +1249,16 @@ status_t HeicCompositeStream::startMuxerForInputFrame(int64_t frameNumber, Input
+     inputFrame.trackIndex = trackId;
+     inputFrame.pendingOutputTiles = mNumOutputTiles;
+ 
++    if (inputFrame.gainmapFormat.get() != nullptr) {
++        trackId = inputFrame.muxer->addTrack(inputFrame.gainmapFormat);
++        if (trackId < 0) {
++            ALOGE("%s: Failed to addTrack to the muxer: %zd", __FUNCTION__, trackId);
++            return NO_INIT;
++        }
++        inputFrame.gainmapTrackIndex = trackId;
++        inputFrame.gainmapPendingOutputTiles = mNumGainmapOutputTiles;
++    }
++
+     res = inputFrame.muxer->start();
+     if (res != OK) {
+         ALOGE("%s: Failed to start MediaMuxer: %s (%d)",
+@@ -1085,9 +1343,101 @@ status_t HeicCompositeStream::processAppSegment(int64_t frameNumber, InputFrame
+ 
+     inputFrame.appSegmentWritten = true;
+     // Release the buffer now so any pending input app segments can be processed
+-    mAppSegmentConsumer->unlockBuffer(inputFrame.appSegmentBuffer);
+-    inputFrame.appSegmentBuffer.data = nullptr;
+-    inputFrame.exifError = false;
++    if (!inputFrame.exifError) {
++        mAppSegmentConsumer->unlockBuffer(inputFrame.appSegmentBuffer);
++        inputFrame.appSegmentBuffer.data = nullptr;
++        inputFrame.exifError = false;
++    }
++
++    return OK;
++}
++
++status_t HeicCompositeStream::generateBaseImageAndGainmap(InputFrame &inputFrame) {
++    ultrahdr::JpegR jpegR(nullptr /*gles ctx*/, kGainmapScale);
++    inputFrame.baseBuffer = std::make_unique<ultrahdr::uhdr_raw_image_ext_t>(
++            kUltraHdrOutputFmt, kUltraHdrOutputGamut, kUltraHdrInputTransfer, kUltraHdrOutputRange,
++            inputFrame.yuvBuffer.width, inputFrame.yuvBuffer.height, 8/*stride*/);
++
++    uhdr_raw_image_t hdr_intent;
++    hdr_intent.fmt = kUltraHdrInputFmt;
++    hdr_intent.cg = kUltraHdrInputGamut;
++    hdr_intent.ct = kUltraHdrInputTransfer;
++    hdr_intent.range = kUltraHdrInputRange;
++    hdr_intent.w = inputFrame.yuvBuffer.width;
++    hdr_intent.h = inputFrame.yuvBuffer.height;
++    hdr_intent.planes[UHDR_PLANE_Y] = inputFrame.yuvBuffer.data;
++    hdr_intent.planes[UHDR_PLANE_UV] = inputFrame.yuvBuffer.dataCb;
++    hdr_intent.planes[UHDR_PLANE_V] = nullptr;
++    //libUltraHDR expects the stride in pixels
++    hdr_intent.stride[UHDR_PLANE_Y] = inputFrame.yuvBuffer.stride / 2;
++    hdr_intent.stride[UHDR_PLANE_UV] = inputFrame.yuvBuffer.chromaStride / 2;
++    hdr_intent.stride[UHDR_PLANE_V] = 0;
++    auto res = jpegR.toneMap(&hdr_intent, inputFrame.baseBuffer.get());
++    if (res.error_code == UHDR_CODEC_OK) {
++        ALOGV("%s: Base image tonemapped successfully", __FUNCTION__);
++    } else {
++        ALOGE("%s: Failed during HDR to SDR tonemap: %d", __FUNCTION__, res.error_code);
++        return BAD_VALUE;
++    }
++
++    inputFrame.baseImage = std::make_unique<CpuConsumer::LockedBuffer>();
++    *inputFrame.baseImage = inputFrame.yuvBuffer;
++    inputFrame.baseImage->data = reinterpret_cast<uint8_t*>(
++            inputFrame.baseBuffer->planes[UHDR_PLANE_Y]);
++    inputFrame.baseImage->dataCb = reinterpret_cast<uint8_t*>(
++            inputFrame.baseBuffer->planes[UHDR_PLANE_U]);
++    inputFrame.baseImage->dataCr = reinterpret_cast<uint8_t*>(
++            inputFrame.baseBuffer->planes[UHDR_PLANE_V]);
++    inputFrame.baseImage->chromaStep = 1;
++    inputFrame.baseImage->stride = inputFrame.baseBuffer->stride[UHDR_PLANE_Y];
++    inputFrame.baseImage->chromaStride = inputFrame.baseBuffer->stride[UHDR_PLANE_UV];
++    inputFrame.baseImage->dataSpace = HAL_DATASPACE_V0_JFIF;
++
++    ultrahdr::uhdr_gainmap_metadata_ext_t metadata;
++    res = jpegR.generateGainMap(inputFrame.baseBuffer.get(), &hdr_intent, &metadata,
++            inputFrame.gainmap, false /*sdr_is_601*/, true /*use_luminance*/);
++    if (res.error_code == UHDR_CODEC_OK) {
++        ALOGV("%s: HDR gainmap generated successfully!", __FUNCTION__);
++    } else {
++        ALOGE("%s: Failed HDR gainmap: %d", __FUNCTION__, res.error_code);
++        return BAD_VALUE;
++    }
++    // Ensure the gaimap U/V planes are all 0
++    inputFrame.gainmapChroma = std::make_unique<uint8_t[]>(
++            inputFrame.gainmap->w * inputFrame.gainmap->h / 2);
++    memset(inputFrame.gainmapChroma.get(), 0, inputFrame.gainmap->w * inputFrame.gainmap->h / 2);
++
++    ultrahdr::uhdr_gainmap_metadata_frac iso_secondary_metadata;
++    res = ultrahdr::uhdr_gainmap_metadata_frac::gainmapMetadataFloatToFraction(
++                &metadata, &iso_secondary_metadata);
++    if (res.error_code == UHDR_CODEC_OK) {
++        ALOGV("%s: HDR gainmap converted to fractions successfully!", __FUNCTION__);
++    } else {
++        ALOGE("%s: Failed to convert HDR gainmap to fractions: %d", __FUNCTION__,
++                res.error_code);
++        return BAD_VALUE;
++    }
++
++    res = ultrahdr::uhdr_gainmap_metadata_frac::encodeGainmapMetadata(&iso_secondary_metadata,
++                                                               inputFrame.isoGainmapMetadata);
++    if (res.error_code == UHDR_CODEC_OK) {
++        ALOGV("%s: HDR gainmap encoded to ISO format successfully!", __FUNCTION__);
++    } else {
++        ALOGE("%s: Failed to encode HDR gainmap to ISO format: %d", __FUNCTION__,
++                res.error_code);
++        return BAD_VALUE;
++    }
++
++    inputFrame.gainmapImage = std::make_unique<CpuConsumer::LockedBuffer>();
++    *inputFrame.gainmapImage = inputFrame.yuvBuffer;
++    inputFrame.gainmapImage->data = reinterpret_cast<uint8_t*>(
++            inputFrame.gainmap->planes[UHDR_PLANE_Y]);
++    inputFrame.gainmapImage->dataCb = inputFrame.gainmapChroma.get();
++    inputFrame.gainmapImage->dataCr = inputFrame.gainmapChroma.get() + 1;
++    inputFrame.gainmapImage->chromaStep = 2;
++    inputFrame.gainmapImage->stride = inputFrame.gainmap->stride[UHDR_PLANE_Y];
++    inputFrame.gainmapImage->chromaStride = inputFrame.gainmap->w;
++    inputFrame.gainmapImage->dataSpace = HAL_DATASPACE_V0_JFIF;
+ 
+     return OK;
+ }
+@@ -1115,7 +1465,9 @@ status_t HeicCompositeStream::processCodecInputFrame(InputFrame &inputFrame) {
+                 " timeUs %" PRId64, __FUNCTION__, tileX, tileY, top, left, width, height,
+                 inputBuffer.timeUs);
+ 
+-        res = copyOneYuvTile(buffer, inputFrame.yuvBuffer, top, left, width, height);
++        auto yuvInput = (inputFrame.baseImage.get() != nullptr) ?
++            *inputFrame.baseImage.get() : inputFrame.yuvBuffer;
++        res = copyOneYuvTile(buffer, yuvInput, top, left, width, height);
+         if (res != OK) {
+             ALOGE("%s: Failed to copy YUV tile %s (%d)", __FUNCTION__,
+                     strerror(-res), res);
+@@ -1135,6 +1487,50 @@ status_t HeicCompositeStream::processCodecInputFrame(InputFrame &inputFrame) {
+     return OK;
+ }
+ 
++status_t HeicCompositeStream::processCodecGainmapInputFrame(InputFrame &inputFrame) {
++    for (auto& inputBuffer : inputFrame.gainmapCodecInputBuffers) {
++        sp<MediaCodecBuffer> buffer;
++        auto res = mGainmapCodec->getInputBuffer(inputBuffer.index, &buffer);
++        if (res != OK) {
++            ALOGE("%s: Error getting codec input buffer: %s (%d)", __FUNCTION__,
++                    strerror(-res), res);
++            return res;
++        }
++
++        // Copy one tile from source to destination.
++        size_t tileX = inputBuffer.tileIndex % mGainmapGridCols;
++        size_t tileY = inputBuffer.tileIndex / mGainmapGridCols;
++        size_t top = mGainmapGridHeight * tileY;
++        size_t left = mGainmapGridWidth * tileX;
++        size_t width = (tileX == static_cast<size_t>(mGainmapGridCols) - 1) ?
++                mGainmapOutputWidth - tileX * mGainmapGridWidth : mGainmapGridWidth;
++        size_t height = (tileY == static_cast<size_t>(mGainmapGridRows) - 1) ?
++                mGainmapOutputHeight - tileY * mGainmapGridHeight : mGainmapGridHeight;
++        ALOGV("%s: gainmap inputBuffer tileIndex [%zu, %zu], top %zu, left %zu, width %zu, "
++                "height %zu, timeUs %" PRId64, __FUNCTION__, tileX, tileY, top, left, width, height,
++                inputBuffer.timeUs);
++
++        auto yuvInput = *inputFrame.gainmapImage;
++        res = copyOneYuvTile(buffer, yuvInput, top, left, width, height);
++        if (res != OK) {
++            ALOGE("%s: Failed to copy YUV tile %s (%d)", __FUNCTION__,
++                    strerror(-res), res);
++            return res;
++        }
++
++        res = mGainmapCodec->queueInputBuffer(inputBuffer.index, 0, buffer->capacity(),
++                inputBuffer.timeUs, 0, nullptr /*errorDetailMsg*/);
++        if (res != OK) {
++            ALOGE("%s: Failed to queueInputBuffer to Codec: %s (%d)",
++                    __FUNCTION__, strerror(-res), res);
++            return res;
++        }
++    }
++
++    inputFrame.gainmapCodecInputBuffers.clear();
++    return OK;
++}
++
+ status_t HeicCompositeStream::processOneCodecOutputFrame(int64_t frameNumber,
+         InputFrame &inputFrame) {
+     auto it = inputFrame.codecOutputBuffers.begin();
+@@ -1152,6 +1548,13 @@ status_t HeicCompositeStream::processOneCodecOutputFrame(int64_t frameNumber,
+     }
+ 
+     sp<ABuffer> aBuffer = new ABuffer(buffer->data(), buffer->size());
++    if (mHDRGainmapEnabled) {
++        aBuffer->meta()->setInt32(KEY_COLOR_FORMAT, kCodecColorFormat);
++        aBuffer->meta()->setInt32("color-primaries", kCodecColorPrimaries);
++        aBuffer->meta()->setInt32("color-transfer", kCodecColorTransfer);
++        aBuffer->meta()->setInt32("color-matrix", kCodecColorMatrix);
++        aBuffer->meta()->setInt32("color-range", kCodecColorRange);
++    }
+     res = inputFrame.muxer->writeSampleData(
+             aBuffer, inputFrame.trackIndex, inputFrame.timestamp, 0 /*flags*/);
+     if (res != OK) {
+@@ -1174,6 +1577,54 @@ status_t HeicCompositeStream::processOneCodecOutputFrame(int64_t frameNumber,
+     return OK;
+ }
+ 
++status_t HeicCompositeStream::processOneCodecGainmapOutputFrame(int64_t frameNumber,
++        InputFrame &inputFrame) {
++    auto it = inputFrame.gainmapCodecOutputBuffers.begin();
++    sp<MediaCodecBuffer> buffer;
++    status_t res = mGainmapCodec->getOutputBuffer(it->index, &buffer);
++    if (res != OK) {
++        ALOGE("%s: Error getting Heic gainmap codec output buffer at index %d: %s (%d)",
++                __FUNCTION__, it->index, strerror(-res), res);
++        return res;
++    }
++    if (buffer == nullptr) {
++        ALOGE("%s: Invalid Heic gainmap codec output buffer at index %d",
++                __FUNCTION__, it->index);
++        return BAD_VALUE;
++    }
++
++    uint8_t kGainmapMarker[] = {'g', 'm', 'a', 'p', '\0', '\0'};
++    sp<ABuffer> aBuffer = new ABuffer(buffer->size() + sizeof(kGainmapMarker));
++    memcpy(aBuffer->data(), kGainmapMarker, sizeof(kGainmapMarker));
++    memcpy(aBuffer->data() + sizeof(kGainmapMarker), buffer->data(), buffer->size());
++    aBuffer->meta()->setInt32(KEY_COLOR_FORMAT, kCodecGainmapColorFormat);
++    aBuffer->meta()->setInt32("color-primaries", kCodecGainmapColorPrimaries);
++    aBuffer->meta()->setInt32("color-transfer", kCodecGainmapColorTransfer);
++    aBuffer->meta()->setInt32("color-matrix", kCodecGainmapColorMatrix);
++    aBuffer->meta()->setInt32("color-range", kCodecGainmapColorRange);
++    res = inputFrame.muxer->writeSampleData(aBuffer, inputFrame.gainmapTrackIndex,
++                                            inputFrame.timestamp,
++                                            MediaCodec::BUFFER_FLAG_MUXER_DATA);
++    if (res != OK) {
++        ALOGE("%s: Failed to write buffer index %d to muxer: %s (%d)",
++                __FUNCTION__, it->index, strerror(-res), res);
++        return res;
++    }
++
++    mGainmapCodec->releaseOutputBuffer(it->index);
++    if (inputFrame.gainmapPendingOutputTiles == 0) {
++        ALOGW("%s: Codec generated more gainmap tiles than expected!", __FUNCTION__);
++    } else {
++        inputFrame.gainmapPendingOutputTiles--;
++    }
++
++    inputFrame.gainmapCodecOutputBuffers.erase(inputFrame.gainmapCodecOutputBuffers.begin());
++
++    ALOGV("%s: [%" PRId64 "]: Gainmap output buffer index %d",
++        __FUNCTION__, frameNumber, it->index);
++    return OK;
++}
++
+ status_t HeicCompositeStream::processCompletedInputFrame(int64_t frameNumber,
+         InputFrame &inputFrame) {
+     sp<ANativeWindow> outputANW = mOutputSurface;
+@@ -1256,6 +1707,13 @@ void HeicCompositeStream::releaseInputFrameLocked(int64_t frameNumber,
+         inputFrame->codecOutputBuffers.erase(it);
+     }
+ 
++    while (!inputFrame->gainmapCodecOutputBuffers.empty()) {
++        auto it = inputFrame->gainmapCodecOutputBuffers.begin();
++        ALOGV("%s: release gainmap output buffer index %d", __FUNCTION__, it->index);
++        mGainmapCodec->releaseOutputBuffer(it->index);
++        inputFrame->gainmapCodecOutputBuffers.erase(it);
++    }
++
+     if (inputFrame->yuvBuffer.data != nullptr) {
+         mMainImageConsumer->unlockBuffer(inputFrame->yuvBuffer);
+         inputFrame->yuvBuffer.data = nullptr;
+@@ -1267,6 +1725,11 @@ void HeicCompositeStream::releaseInputFrameLocked(int64_t frameNumber,
+         inputFrame->codecInputBuffers.erase(it);
+     }
+ 
++    while (!inputFrame->gainmapCodecInputBuffers.empty()) {
++        auto it = inputFrame->gainmapCodecInputBuffers.begin();
++        inputFrame->gainmapCodecInputBuffers.erase(it);
++    }
++
+     if (inputFrame->error || mErrorState) {
+         ALOGV("%s: notifyError called for frameNumber %" PRId64, __FUNCTION__, frameNumber);
+         notifyError(frameNumber, inputFrame->requestId);
+@@ -1292,7 +1755,8 @@ void HeicCompositeStream::releaseInputFramesLocked() {
+     while (it != mPendingInputFrames.end()) {
+         auto& inputFrame = it->second;
+         if (inputFrame.error ||
+-                (inputFrame.appSegmentWritten && inputFrame.pendingOutputTiles == 0)) {
++                (inputFrame.appSegmentWritten && inputFrame.pendingOutputTiles == 0 &&
++                 inputFrame.gainmapPendingOutputTiles == 0)) {
+             releaseInputFrameLocked(it->first, &inputFrame);
+             it = mPendingInputFrames.erase(it);
+             inputFrameDone = true;
+@@ -1318,6 +1782,110 @@ void HeicCompositeStream::releaseInputFramesLocked() {
+     }
+ }
+ 
++status_t HeicCompositeStream::initializeGainmapCodec() {
++    ALOGV("%s", __FUNCTION__);
++
++    if (!mHDRGainmapEnabled) {
++        return OK;
++    }
++    uint32_t width = mOutputWidth / kGainmapScale;
++    uint32_t height = mOutputHeight / kGainmapScale;
++    bool useGrid = false;
++    bool useHeic = false;
++    AString hevcName;
++    bool isSizeSupported = isSizeSupportedByHeifEncoder(width, height,
++            &useHeic, &useGrid, nullptr, &hevcName);
++    if (!isSizeSupported) {
++        ALOGE("%s: Encoder doesn't support size %u x %u!",
++                __FUNCTION__, width, height);
++        return BAD_VALUE;
++    }
++
++    // Create HEVC codec.
++    mGainmapCodec = MediaCodec::CreateByComponentName(mCodecLooper, hevcName);
++    if (mGainmapCodec == nullptr) {
++        ALOGE("%s: Failed to create gainmap codec", __FUNCTION__);
++        return NO_INIT;
++    }
++
++    // Create Looper and handler for Codec callback.
++    mGainmapCodecCallbackHandler = new CodecCallbackHandler(this, true /*isGainmap*/);
++    if (mGainmapCodecCallbackHandler == nullptr) {
++        ALOGE("%s: Failed to create gainmap codec callback handler", __FUNCTION__);
++        return NO_MEMORY;
++    }
++    mGainmapCallbackLooper = new ALooper;
++    mGainmapCallbackLooper->setName("Camera3-HeicComposite-MediaCodecGainmapCallbackLooper");
++    auto res = mGainmapCallbackLooper->start(
++            false,   // runOnCallingThread
++            false,    // canCallJava
++            PRIORITY_AUDIO);
++    if (res != OK) {
++        ALOGE("%s: Failed to start gainmap media callback looper: %s (%d)",
++                __FUNCTION__, strerror(-res), res);
++        return NO_INIT;
++    }
++    mGainmapCallbackLooper->registerHandler(mGainmapCodecCallbackHandler);
++
++    mGainmapAsyncNotify = new AMessage(kWhatCallbackNotify, mGainmapCodecCallbackHandler);
++    res = mGainmapCodec->setCallback(mGainmapAsyncNotify);
++    if (res != OK) {
++        ALOGE("%s: Failed to set MediaCodec callback: %s (%d)", __FUNCTION__,
++                strerror(-res), res);
++        return res;
++    }
++
++    // Create output format and configure the Codec.
++    sp<AMessage> outputFormat = new AMessage();
++    outputFormat->setString(KEY_MIME, MIMETYPE_VIDEO_HEVC);
++    outputFormat->setInt32(KEY_BITRATE_MODE, BITRATE_MODE_CQ);
++    outputFormat->setInt32(KEY_QUALITY, kDefaultJpegQuality);
++    // Ask codec to skip timestamp check and encode all frames.
++    outputFormat->setInt64(KEY_MAX_PTS_GAP_TO_ENCODER, kNoFrameDropMaxPtsGap);
++
++    int32_t gridWidth, gridHeight, gridRows, gridCols;
++    if (useGrid){
++        gridWidth = HeicEncoderInfoManager::kGridWidth;
++        gridHeight = HeicEncoderInfoManager::kGridHeight;
++        gridRows = (height + gridHeight - 1)/gridHeight;
++        gridCols = (width + gridWidth - 1)/gridWidth;
++    } else {
++        gridWidth = width;
++        gridHeight = height;
++        gridRows = 1;
++        gridCols = 1;
++    }
++
++    outputFormat->setInt32(KEY_WIDTH, !useGrid ? width : gridWidth);
++    outputFormat->setInt32(KEY_HEIGHT, !useGrid ? height : gridHeight);
++    outputFormat->setInt32(KEY_I_FRAME_INTERVAL, 0);
++    outputFormat->setInt32(KEY_COLOR_FORMAT, COLOR_FormatYUV420Flexible);
++    outputFormat->setInt32(KEY_FRAME_RATE, useGrid ? gridRows * gridCols : kNoGridOpRate);
++    // This only serves as a hint to encoder when encoding is not real-time.
++    outputFormat->setInt32(KEY_OPERATING_RATE, useGrid ? kGridOpRate : kNoGridOpRate);
++
++    res = mGainmapCodec->configure(outputFormat, nullptr /*nativeWindow*/,
++            nullptr /*crypto*/, CONFIGURE_FLAG_ENCODE);
++    if (res != OK) {
++        ALOGE("%s: Failed to configure codec: %s (%d)", __FUNCTION__,
++                strerror(-res), res);
++        return res;
++    }
++
++    mGainmapGridWidth = gridWidth;
++    mGainmapGridHeight = gridHeight;
++    mGainmapGridRows = gridRows;
++    mGainmapGridCols = gridCols;
++    mGainmapUseGrid = useGrid;
++    mGainmapOutputWidth = width;
++    mGainmapOutputHeight = height;
++    mMaxHeicBufferSize +=
++        ALIGN(mGainmapOutputWidth, HeicEncoderInfoManager::kGridWidth) *
++        ALIGN(mGainmapOutputHeight, HeicEncoderInfoManager::kGridHeight) * 3 / 2;
++
++    return OK;
++}
++
+ status_t HeicCompositeStream::initializeCodec(uint32_t width, uint32_t height,
+         const sp<CameraDeviceBase>& cameraDevice) {
+     ALOGV("%s", __FUNCTION__);
+@@ -1331,6 +1899,12 @@ status_t HeicCompositeStream::initializeCodec(uint32_t width, uint32_t height,
+                 __FUNCTION__, width, height);
+         return BAD_VALUE;
+     }
++    if (mHDRGainmapEnabled) {
++        // HDR Gainmap tonemapping and generation can only be done in SW
++        // using P010 as input. HEIC codecs expect private/impl.defined
++        // which is opaque.
++        mUseHeic = false;
++    }
+ 
+     // Create Looper for MediaCodec.
+     auto desiredMime = mUseHeic ? MIMETYPE_IMAGE_ANDROID_HEIC : MIMETYPE_VIDEO_HEVC;
+@@ -1417,7 +1991,7 @@ status_t HeicCompositeStream::initializeCodec(uint32_t width, uint32_t height,
+     outputFormat->setInt32(KEY_HEIGHT, !useGrid ? height : gridHeight);
+     outputFormat->setInt32(KEY_I_FRAME_INTERVAL, 0);
+     outputFormat->setInt32(KEY_COLOR_FORMAT,
+-            useGrid ? COLOR_FormatYUV420Flexible : COLOR_FormatSurface);
++            useGrid || mHDRGainmapEnabled ? COLOR_FormatYUV420Flexible : COLOR_FormatSurface);
+     outputFormat->setInt32(KEY_FRAME_RATE, useGrid ? gridRows * gridCols : kNoGridOpRate);
+     // This only serves as a hint to encoder when encoding is not real-time.
+     outputFormat->setInt32(KEY_OPERATING_RATE, useGrid ? kGridOpRate : kNoGridOpRate);
+@@ -1442,7 +2016,24 @@ status_t HeicCompositeStream::initializeCodec(uint32_t width, uint32_t height,
+         ALIGN(mOutputWidth, HeicEncoderInfoManager::kGridWidth) *
+         ALIGN(mOutputHeight, HeicEncoderInfoManager::kGridHeight) * 3 / 2 + mAppSegmentMaxSize;
+ 
+-    return OK;
++    return initializeGainmapCodec();
++}
++
++void HeicCompositeStream::deinitGainmapCodec() {
++    ALOGV("%s", __FUNCTION__);
++    if (mGainmapCodec != nullptr) {
++        mGainmapCodec->stop();
++        mGainmapCodec->release();
++        mGainmapCodec.clear();
++    }
++
++    if (mGainmapCallbackLooper != nullptr) {
++        mGainmapCallbackLooper->stop();
++        mGainmapCallbackLooper.clear();
++    }
++
++    mGainmapAsyncNotify.clear();
++    mGainmapFormat.clear();
+ }
+ 
+ void HeicCompositeStream::deinitCodec() {
+@@ -1453,6 +2044,8 @@ void HeicCompositeStream::deinitCodec() {
+         mCodec.clear();
+     }
+ 
++    deinitGainmapCodec();
++
+     if (mCodecLooper != nullptr) {
+         mCodecLooper->stop();
+         mCodecLooper.clear();
+@@ -1873,7 +2466,7 @@ void HeicCompositeStream::CodecCallbackHandler::onMessageReceived(const sp<AMess
+                          ALOGE("CB_INPUT_AVAILABLE: index is expected.");
+                          break;
+                      }
+-                     parent->onHeicInputFrameAvailable(index);
++                     parent->onHeicInputFrameAvailable(index, mIsGainmap);
+                      break;
+                  }
+ 
+@@ -1912,7 +2505,7 @@ void HeicCompositeStream::CodecCallbackHandler::onMessageReceived(const sp<AMess
+                          timeUs,
+                          (uint32_t)flags};
+ 
+-                     parent->onHeicOutputFrameAvailable(bufferInfo);
++                     parent->onHeicOutputFrameAvailable(bufferInfo, mIsGainmap);
+                      break;
+                  }
+ 
+@@ -1928,7 +2521,7 @@ void HeicCompositeStream::CodecCallbackHandler::onMessageReceived(const sp<AMess
+                      if (format != nullptr) {
+                          formatCopy = format->dup();
+                      }
+-                     parent->onHeicFormatChanged(formatCopy);
++                     parent->onHeicFormatChanged(formatCopy, mIsGainmap);
+                      break;
+                  }
+ 
+diff --git a/services/camera/libcameraservice/api2/HeicCompositeStream.h b/services/camera/libcameraservice/api2/HeicCompositeStream.h
+index fad968aa00..bfcd668181 100644
+--- a/services/camera/libcameraservice/api2/HeicCompositeStream.h
++++ b/services/camera/libcameraservice/api2/HeicCompositeStream.h
+@@ -17,6 +17,9 @@
+ #ifndef ANDROID_SERVERS_CAMERA_CAMERA3_HEIC_COMPOSITE_STREAM_H
+ #define ANDROID_SERVERS_CAMERA_CAMERA3_HEIC_COMPOSITE_STREAM_H
+ 
++#include <algorithm>
++#include <android/data_space.h>
++#include <memory>
+ #include <queue>
+ 
+ #include <gui/CpuConsumer.h>
+@@ -27,6 +30,8 @@
+ #include <media/stagefright/foundation/AMessage.h>
+ #include <media/stagefright/MediaCodec.h>
+ #include <media/stagefright/MediaMuxer.h>
++#include <ultrahdr/ultrahdrcommon.h>
++#include <ultrahdr/gainmapmetadata.h>
+ 
+ #include "CompositeStream.h"
+ 
+@@ -79,8 +84,13 @@ public:
+     void getStreamStats(hardware::CameraStreamStats*) override {};
+ 
+     static bool isSizeSupportedByHeifEncoder(int32_t width, int32_t height,
+-            bool* useHeic, bool* useGrid, int64_t* stall, AString* hevcName = nullptr);
++            bool* useHeic, bool* useGrid, int64_t* stall, AString* hevcName = nullptr,
++            bool allowSWCodec = false);
+     static bool isInMemoryTempFileSupported();
++
++    // HDR Gainmap subsampling
++    static const size_t kGainmapScale = 4;
++
+ protected:
+ 
+     bool threadLoop() override;
+@@ -108,12 +118,12 @@ private:
+ 
+     class CodecCallbackHandler : public AHandler {
+     public:
+-        explicit CodecCallbackHandler(wp<HeicCompositeStream> parent) {
+-            mParent = parent;
+-        }
++        explicit CodecCallbackHandler(wp<HeicCompositeStream> parent, bool isGainmap = false) :
++            mParent(parent), mIsGainmap(isGainmap) {}
+         virtual void onMessageReceived(const sp<AMessage> &msg);
+     private:
+         wp<HeicCompositeStream> mParent;
++        bool mIsGainmap;
+     };
+ 
+     enum {
+@@ -122,30 +132,34 @@ private:
+ 
+     bool              mUseHeic;
+     sp<MediaCodec>    mCodec;
+-    sp<ALooper>       mCodecLooper, mCallbackLooper;
+-    sp<CodecCallbackHandler> mCodecCallbackHandler;
+-    sp<AMessage>      mAsyncNotify;
+-    sp<AMessage>      mFormat;
+-    size_t            mNumOutputTiles;
+-
+-    int32_t           mOutputWidth, mOutputHeight;
++    sp<MediaCodec>    mGainmapCodec;
++    sp<ALooper>       mCodecLooper, mCallbackLooper, mGainmapCallbackLooper;
++    sp<CodecCallbackHandler> mCodecCallbackHandler, mGainmapCodecCallbackHandler;
++    sp<AMessage>      mAsyncNotify, mGainmapAsyncNotify;
++    sp<AMessage>      mFormat, mGainmapFormat;
++    size_t            mNumOutputTiles, mNumGainmapOutputTiles;
++
++    int32_t           mOutputWidth, mOutputHeight, mGainmapOutputWidth, mGainmapOutputHeight;
+     size_t            mMaxHeicBufferSize;
+-    int32_t           mGridWidth, mGridHeight;
+-    size_t            mGridRows, mGridCols;
+-    bool              mUseGrid; // Whether to use framework YUV frame tiling.
++    int32_t           mGridWidth, mGridHeight, mGainmapGridWidth, mGainmapGridHeight;
++    size_t            mGridRows, mGridCols, mGainmapGridRows, mGainmapGridCols;
++    bool              mUseGrid, mGainmapUseGrid; // Whether to use framework YUV frame tiling.
+ 
+     static const int64_t kNoFrameDropMaxPtsGap = -1000000;
+     static const int32_t kNoGridOpRate = 30;
+     static const int32_t kGridOpRate = 120;
+ 
+-    void onHeicOutputFrameAvailable(const CodecOutputBufferInfo& bufferInfo);
+-    void onHeicInputFrameAvailable(int32_t index);  // Only called for YUV input mode.
+-    void onHeicFormatChanged(sp<AMessage>& newFormat);
++    void onHeicOutputFrameAvailable(const CodecOutputBufferInfo& bufferInfo, bool isGainmap);
++    void onHeicInputFrameAvailable(int32_t index, bool isGainmap);// Only called for YUV input mode.
++    void onHeicFormatChanged(sp<AMessage>& newFormat, bool isGainmap);
++    void onHeicGainmapFormatChanged(sp<AMessage>& newFormat);
+     void onHeicCodecError();
+ 
+     status_t initializeCodec(uint32_t width, uint32_t height,
+             const sp<CameraDeviceBase>& cameraDevice);
+     void deinitCodec();
++    status_t initializeGainmapCodec();
++    void deinitGainmapCodec();
+ 
+     //
+     // Composite stream related structures, utility functions and callbacks.
+@@ -155,33 +169,39 @@ private:
+         int32_t                   quality;
+ 
+         CpuConsumer::LockedBuffer          appSegmentBuffer;
+-        std::vector<CodecOutputBufferInfo> codecOutputBuffers;
++        std::vector<CodecOutputBufferInfo> codecOutputBuffers, gainmapCodecOutputBuffers;
+         std::unique_ptr<CameraMetadata>    result;
+ 
+         // Fields that are only applicable to HEVC tiling.
+         CpuConsumer::LockedBuffer          yuvBuffer;
+-        std::vector<CodecInputBufferInfo>  codecInputBuffers;
++        std::vector<CodecInputBufferInfo>  codecInputBuffers, gainmapCodecInputBuffers;
+ 
+         bool                      error;     // Main input image buffer error
+         bool                      exifError; // Exif/APP_SEGMENT buffer error
+         int64_t                   timestamp;
+         int32_t                   requestId;
+ 
+-        sp<AMessage>              format;
++        sp<AMessage>              format, gainmapFormat;
+         sp<MediaMuxer>            muxer;
+         int                       fenceFd;
+         int                       fileFd;
+-        ssize_t                   trackIndex;
++        ssize_t                   trackIndex, gainmapTrackIndex;
+         ANativeWindowBuffer       *anb;
+ 
+         bool                      appSegmentWritten;
+-        size_t                    pendingOutputTiles;
+-        size_t                    codecInputCounter;
++        size_t                    pendingOutputTiles, gainmapPendingOutputTiles;
++        size_t                    codecInputCounter, gainmapCodecInputCounter;
++
++        std::unique_ptr<CpuConsumer::LockedBuffer> baseImage, gainmapImage;
++        std::unique_ptr<ultrahdr::uhdr_raw_image_ext> baseBuffer, gainmap;
++        std::unique_ptr<uint8_t[]> gainmapChroma;
++        std::vector<uint8_t> isoGainmapMetadata;
+ 
+         InputFrame() : orientation(0), quality(kDefaultJpegQuality), error(false),
+                        exifError(false), timestamp(-1), requestId(-1), fenceFd(-1),
+                        fileFd(-1), trackIndex(-1), anb(nullptr), appSegmentWritten(false),
+-                       pendingOutputTiles(0), codecInputCounter(0) { }
++                       pendingOutputTiles(0), gainmapPendingOutputTiles(0),
++                       codecInputCounter(0), gainmapCodecInputCounter(0) { }
+     };
+ 
+     void compilePendingInputLocked();
+@@ -192,9 +212,11 @@ private:
+ 
+     status_t processInputFrame(int64_t frameNumber, InputFrame &inputFrame);
+     status_t processCodecInputFrame(InputFrame &inputFrame);
++    status_t processCodecGainmapInputFrame(InputFrame &inputFrame);
+     status_t startMuxerForInputFrame(int64_t frameNumber, InputFrame &inputFrame);
+     status_t processAppSegment(int64_t frameNumber, InputFrame &inputFrame);
+     status_t processOneCodecOutputFrame(int64_t frameNumber, InputFrame &inputFrame);
++    status_t processOneCodecGainmapOutputFrame(int64_t frameNumber, InputFrame &inputFrame);
+     status_t processCompletedInputFrame(int64_t frameNumber, InputFrame &inputFrame);
+ 
+     void releaseInputFrameLocked(int64_t frameNumber, InputFrame *inputFrame /*out*/);
+@@ -216,6 +238,7 @@ private:
+             static_cast<android_dataspace>(HAL_DATASPACE_JPEG_APP_SEGMENTS);
+     static const android_dataspace kHeifDataSpace =
+             static_cast<android_dataspace>(HAL_DATASPACE_HEIF);
++    android_dataspace mInternalDataSpace = kHeifDataSpace;
+     // Use the limit of pipeline depth in the API sepc as maximum number of acquired
+     // app segment buffers.
+     static const uint32_t kMaxAcquiredAppSegment = 8;
+@@ -260,15 +283,15 @@ private:
+     std::vector<int64_t> mInputAppSegmentBuffers;
+ 
+     // Keep all incoming HEIC blob buffer pending further processing.
+-    std::vector<CodecOutputBufferInfo> mCodecOutputBuffers;
+-    std::queue<int64_t> mCodecOutputBufferFrameNumbers;
+-    size_t mCodecOutputCounter;
++    std::vector<CodecOutputBufferInfo> mCodecOutputBuffers, mGainmapCodecOutputBuffers;
++    std::queue<int64_t> mCodecOutputBufferFrameNumbers, mCodecGainmapOutputBufferFrameNumbers;
++    size_t mCodecOutputCounter, mCodecGainmapOutputCounter;
+     int32_t mQuality;
+ 
+     // Keep all incoming Yuv buffer pending tiling and encoding (for HEVC YUV tiling only)
+     std::vector<int64_t> mInputYuvBuffers;
+     // Keep all codec input buffers ready to be filled out (for HEVC YUV tiling only)
+-    std::vector<int32_t> mCodecInputBuffers;
++    std::vector<int32_t> mCodecInputBuffers, mGainmapCodecInputBuffers;
+ 
+     // Artificial strictly incremental YUV grid timestamp to make encoder happy.
+     int64_t mGridTimestampUs;
+@@ -286,6 +309,49 @@ private:
+     // The status id for tracking the active/idle status of this composite stream
+     int mStatusId;
+     void markTrackerIdle();
++
++    //APP_SEGMENT stream supported
++    bool mAppSegmentSupported = false;
++
++    bool mHDRGainmapEnabled = false;
++
++    // UltraHDR tonemap color and format aspects
++    static const uhdr_img_fmt_t kUltraHdrInputFmt = UHDR_IMG_FMT_24bppYCbCrP010;
++    static const uhdr_color_gamut kUltraHdrInputGamut = UHDR_CG_BT_2100;
++    static const uhdr_color_transfer kUltraHdrInputTransfer = UHDR_CT_HLG;
++    static const uhdr_color_range kUltraHdrInputRange = UHDR_CR_FULL_RANGE;
++
++    static const uhdr_img_fmt_t kUltraHdrOutputFmt = UHDR_IMG_FMT_12bppYCbCr420;
++    static const uhdr_color_gamut kUltraHdrOutputGamut = UHDR_CG_DISPLAY_P3;
++    static const uhdr_color_transfer kUltraHdrOutputTransfer = UHDR_CT_SRGB;
++    static const uhdr_color_range kUltraHdrOutputRange = UHDR_CR_FULL_RANGE;
++
++    static const auto kUltraHDRDataSpace = ADATASPACE_HEIF_ULTRAHDR;
++
++    // MediaMuxer/Codec color and format aspects for base image and gainmap metadata
++    static const int32_t kCodecColorFormat = COLOR_FormatYUV420Flexible;
++    static const ColorAspects::Primaries kCodecColorPrimaries =
++        ColorAspects::Primaries::PrimariesEG432;
++    static const ColorAspects::MatrixCoeffs kCodecColorMatrix =
++        ColorAspects::MatrixCoeffs::MatrixUnspecified;
++    static const ColorAspects::Transfer kCodecColorTransfer =
++        ColorAspects::Transfer::TransferSRGB;
++    static const ColorAspects::Range kCodecColorRange =
++        ColorAspects::Range::RangeFull;
++
++    // MediaMuxer/Codec color and format aspects for gainmap as per ISO 23008-12:2024
++    static const int32_t kCodecGainmapColorFormat = COLOR_FormatYUV420Flexible;
++    static const ColorAspects::Primaries kCodecGainmapColorPrimaries =
++        ColorAspects::Primaries::PrimariesUnspecified;
++    static const ColorAspects::MatrixCoeffs kCodecGainmapColorMatrix =
++        ColorAspects::MatrixCoeffs::MatrixUnspecified;
++    static const ColorAspects::Transfer kCodecGainmapColorTransfer =
++        ColorAspects::Transfer::TransferUnspecified;
++    static const ColorAspects::Range kCodecGainmapColorRange =
++        ColorAspects::Range::RangeFull;
++
++
++    status_t generateBaseImageAndGainmap(InputFrame &inputFrame);
+ };
+ 
+ }; // namespace camera3
+diff --git a/services/camera/libcameraservice/api2/HeicEncoderInfoManager.cpp b/services/camera/libcameraservice/api2/HeicEncoderInfoManager.cpp
+index d36ca3b97a..92072b002a 100644
+--- a/services/camera/libcameraservice/api2/HeicEncoderInfoManager.cpp
++++ b/services/camera/libcameraservice/api2/HeicEncoderInfoManager.cpp
+@@ -20,6 +20,7 @@
+ #include <cstdint>
+ #include <regex>
+ 
++#include <com_android_internal_camera_flags.h>
+ #include <cutils/properties.h>
+ #include <log/log_main.h>
+ #include <system/graphics.h>
+@@ -33,14 +34,16 @@
+ namespace android {
+ namespace camera3 {
+ 
+-HeicEncoderInfoManager::HeicEncoderInfoManager() :
++namespace flags = com::android::internal::camera::flags;
++
++HeicEncoderInfoManager::HeicEncoderInfoManager(bool useSWCodec) :
+         mIsInited(false),
+         mMinSizeHeic(0, 0),
+         mMaxSizeHeic(INT32_MAX, INT32_MAX),
+         mHasHEVC(false),
+         mHasHEIC(false),
+         mDisableGrid(false) {
+-    if (initialize() == OK) {
++    if (initialize(useSWCodec) == OK) {
+         mIsInited = true;
+     }
+ }
+@@ -72,14 +75,15 @@ bool HeicEncoderInfoManager::isSizeSupported(int32_t width, int32_t height, bool
+                 (width <= 1920 && height <= 1080))) {
+             enableGrid = false;
+         }
+-        if (hevcName != nullptr) {
+-            *hevcName = mHevcName;
+-        }
+     } else {
+         // No encoder available for the requested size.
+         return false;
+     }
+ 
++    if (hevcName != nullptr) {
++        *hevcName = mHevcName;
++    }
++
+     if (stall != nullptr) {
+         // Find preferred encoder which advertise
+         // "measured-frame-rate-WIDTHxHEIGHT-range" key.
+@@ -109,7 +113,7 @@ bool HeicEncoderInfoManager::isSizeSupported(int32_t width, int32_t height, bool
+     return true;
+ }
+ 
+-status_t HeicEncoderInfoManager::initialize() {
++status_t HeicEncoderInfoManager::initialize(bool allowSWCodec) {
+     mDisableGrid = property_get_bool("camera.heic.disable_grid", false);
+     sp<IMediaCodecList> codecsList = MediaCodecList::getInstance();
+     if (codecsList == nullptr) {
+@@ -119,7 +123,7 @@ status_t HeicEncoderInfoManager::initialize() {
+ 
+     sp<AMessage> heicDetails = getCodecDetails(codecsList, MEDIA_MIMETYPE_IMAGE_ANDROID_HEIC);
+ 
+-    if (!getHevcCodecDetails(codecsList, MEDIA_MIMETYPE_VIDEO_HEVC)) {
++    if (!getHevcCodecDetails(codecsList, MEDIA_MIMETYPE_VIDEO_HEVC, allowSWCodec)) {
+         if (heicDetails != nullptr) {
+             ALOGE("%s: Device must support HEVC codec if HEIC codec is available!",
+                     __FUNCTION__);
+@@ -268,7 +272,7 @@ sp<AMessage> HeicEncoderInfoManager::getCodecDetails(
+ }
+ 
+ bool HeicEncoderInfoManager::getHevcCodecDetails(
+-        sp<IMediaCodecList> codecsList, const char* mime) {
++        sp<IMediaCodecList> codecsList, const char* mime, bool allowSWCodec) {
+     bool found = false;
+     ssize_t idx = 0;
+     while ((idx = codecsList->findCodecByType(mime, true /*encoder*/, idx)) >= 0) {
+@@ -280,11 +284,13 @@ bool HeicEncoderInfoManager::getHevcCodecDetails(
+         ALOGV("%s: [%s] codec found", __FUNCTION__,
+                 info->getCodecName());
+ 
+-        // Filter out software ones as they may be too slow
+-        if (!(info->getAttributes() & MediaCodecInfo::kFlagIsHardwareAccelerated)) {
+-            ALOGV("%s: [%s] Filter out software ones as they may be too slow", __FUNCTION__,
+-                    info->getCodecName());
+-            continue;
++        if (!allowSWCodec) {
++            // Filter out software ones as they may be too slow
++            if (!(info->getAttributes() & MediaCodecInfo::kFlagIsHardwareAccelerated)) {
++                ALOGV("%s: [%s] Filter out software ones as they may be too slow", __FUNCTION__,
++                        info->getCodecName());
++                continue;
++            }
+         }
+ 
+         const sp<MediaCodecInfo::Capabilities> caps =
+diff --git a/services/camera/libcameraservice/api2/HeicEncoderInfoManager.h b/services/camera/libcameraservice/api2/HeicEncoderInfoManager.h
+index a65be9c394..1e28ecaaa9 100644
+--- a/services/camera/libcameraservice/api2/HeicEncoderInfoManager.h
++++ b/services/camera/libcameraservice/api2/HeicEncoderInfoManager.h
+@@ -30,8 +30,8 @@ namespace camera3 {
+ 
+ class HeicEncoderInfoManager {
+ public:
+-    static HeicEncoderInfoManager& getInstance() {
+-        static HeicEncoderInfoManager instance;
++    static HeicEncoderInfoManager& getInstance(bool useSWCodec) {
++        static HeicEncoderInfoManager instance(useSWCodec);
+         return instance;
+     }
+ 
+@@ -51,10 +51,10 @@ private:
+     typedef std::unordered_map<std::pair<int32_t, int32_t>,
+             std::pair<int32_t, int32_t>, SizePairHash> FrameRateMaps;
+ 
+-    HeicEncoderInfoManager();
++    HeicEncoderInfoManager(bool useSWCodec);
+     virtual ~HeicEncoderInfoManager();
+ 
+-    status_t initialize();
++    status_t initialize(bool allowSWCodec);
+     status_t getFrameRateMaps(sp<AMessage> details, FrameRateMaps* maps);
+     status_t getCodecSizeRange(const char* codecName, sp<AMessage> details,
+             std::pair<int32_t, int32_t>* minSize, std::pair<int32_t, int32_t>* maxSize,
+@@ -62,7 +62,8 @@ private:
+     FrameRateMaps::const_iterator findClosestSize(const FrameRateMaps& maps,
+             int32_t width, int32_t height) const;
+     sp<AMessage> getCodecDetails(sp<IMediaCodecList> codecsList, const char* name);
+-    bool getHevcCodecDetails(sp<IMediaCodecList> codecsList, const char* mime);
++    bool getHevcCodecDetails(sp<IMediaCodecList> codecsList, const char* mime,
++            bool allowSWCodec = false);
+ 
+     bool mIsInited;
+     std::pair<int32_t, int32_t> mMinSizeHeic, mMaxSizeHeic;
+diff --git a/services/camera/libcameraservice/common/CameraDeviceBase.h b/services/camera/libcameraservice/common/CameraDeviceBase.h
+index f5e960b1e8..e17d7000d4 100644
+--- a/services/camera/libcameraservice/common/CameraDeviceBase.h
++++ b/services/camera/libcameraservice/common/CameraDeviceBase.h
+@@ -44,6 +44,10 @@ namespace android {
+ 
+ namespace camera3 {
+ 
++// TODO: Remove this once the GFX native dataspace
++// dependencies are available
++enum { HEIC_ULTRAHDR, ADATASPACE_HEIF_ULTRAHDR = 0x1006 };
++
+ typedef enum camera_stream_configuration_mode {
+     CAMERA_STREAM_CONFIGURATION_NORMAL_MODE = 0,
+     CAMERA_STREAM_CONFIGURATION_CONSTRAINED_HIGH_SPEED_MODE = 1,
+diff --git a/services/camera/libcameraservice/common/CameraProviderManager.cpp b/services/camera/libcameraservice/common/CameraProviderManager.cpp
+index 6394ec1198..2d58652840 100644
+--- a/services/camera/libcameraservice/common/CameraProviderManager.cpp
++++ b/services/camera/libcameraservice/common/CameraProviderManager.cpp
+@@ -14,6 +14,7 @@
+  * limitations under the License.
+  */
+ 
++#include "system/camera_metadata.h"
+ #include "system/graphics-base-v1.0.h"
+ #include "system/graphics-base-v1.1.h"
+ #define LOG_TAG "CameraProviderManager"
+@@ -76,6 +77,10 @@ const std::string kVirtualProviderName = "virtual/0";
+ const float CameraProviderManager::kDepthARTolerance = .1f;
+ const bool CameraProviderManager::kFrameworkJpegRDisabled =
+         property_get_bool("ro.camera.disableJpegR", false);
++const bool CameraProviderManager::kFrameworkHeicUltraHDRDisabled =
++    property_get_bool("ro.camera.disableHeicUltraHDR", false);
++const bool CameraProviderManager::kFrameworkHeicAllowSWCodecs =
++    property_get_bool("ro.camera.enableSWHEVC", false);
+ 
+ CameraProviderManager::HidlServiceInteractionProxyImpl
+ CameraProviderManager::sHidlServiceInteractionProxy{};
+@@ -1246,6 +1251,165 @@ bool CameraProviderManager::isConcurrentDynamicRangeCaptureSupported(
+     return false;
+ }
+ 
++status_t CameraProviderManager::ProviderInfo::DeviceInfo3::deriveHeicUltraHDRTags(
++        bool maxResolution) {
++    if (!flags::camera_heif_gainmap() || kFrameworkHeicUltraHDRDisabled ||
++            mCompositeHeicUltraHDRDisabled ||
++            !camera3::HeicCompositeStream::isInMemoryTempFileSupported()) {
++        return OK;
++    }
++
++    const int32_t scalerSizesTag =
++              SessionConfigurationUtils::getAppropriateModeTag(
++                      ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS, maxResolution);
++    const int32_t scalerMinFrameDurationsTag = SessionConfigurationUtils::getAppropriateModeTag(
++            ANDROID_SCALER_AVAILABLE_MIN_FRAME_DURATIONS, maxResolution);
++    const int32_t scalerStallDurationsTag =
++                 SessionConfigurationUtils::getAppropriateModeTag(
++                        ANDROID_SCALER_AVAILABLE_STALL_DURATIONS, maxResolution);
++
++    const int32_t heicUltraHDRSizesTag =
++            SessionConfigurationUtils::getAppropriateModeTag(
++                    ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS, maxResolution);
++    const int32_t heicUltraHDRStallDurationsTag =
++            SessionConfigurationUtils::getAppropriateModeTag(
++                    ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STALL_DURATIONS, maxResolution);
++    const int32_t heicUltraHDRFrameDurationsTag =
++            SessionConfigurationUtils::getAppropriateModeTag(
++                 ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_MIN_FRAME_DURATIONS, maxResolution);
++
++    auto& c = mCameraCharacteristics;
++    std::vector<std::tuple<size_t, size_t>> supportedP010Sizes, filteredSizes;
++    auto capabilities = c.find(ANDROID_REQUEST_AVAILABLE_CAPABILITIES);
++    if (capabilities.count == 0) {
++        ALOGE("%s: Supported camera capabilities is empty!", __FUNCTION__);
++        return BAD_VALUE;
++    }
++
++    auto end = capabilities.data.u8 + capabilities.count;
++    bool isTenBitOutputSupported = std::find(capabilities.data.u8, end,
++            ANDROID_REQUEST_AVAILABLE_CAPABILITIES_DYNAMIC_RANGE_TEN_BIT) != end;
++    if (!isTenBitOutputSupported) {
++        // No 10-bit support, nothing more to do.
++        return OK;
++    }
++
++    getSupportedSizes(c, scalerSizesTag,
++            static_cast<android_pixel_format_t>(HAL_PIXEL_FORMAT_YCBCR_P010), &supportedP010Sizes);
++    auto it = supportedP010Sizes.begin();
++    if (supportedP010Sizes.empty()) {
++        // Nothing to do in this case.
++        return OK;
++    }
++
++    std::vector<int32_t> heicUltraHDREntries;
++    int64_t stall = 0;
++    bool useHeic = false;
++    bool useGrid = false;
++    for (const auto& it : supportedP010Sizes) {
++        int32_t width = std::get<0>(it);
++        int32_t height = std::get<1>(it);
++        int32_t gainmapWidth = std::get<0>(it) / HeicCompositeStream::kGainmapScale;
++        int32_t gainmapHeight = std::get<1>(it) / HeicCompositeStream::kGainmapScale;
++        if (camera3::HeicCompositeStream::isSizeSupportedByHeifEncoder(width, height,
++                &useHeic, &useGrid, &stall, nullptr /*hevcName*/, kFrameworkHeicAllowSWCodecs) &&
++               camera3::HeicCompositeStream::isSizeSupportedByHeifEncoder(gainmapWidth,
++                   gainmapHeight, &useHeic, &useGrid, &stall, nullptr /*hevcName*/,
++                   kFrameworkHeicAllowSWCodecs) ) {
++            int32_t entry[4] = {HAL_PIXEL_FORMAT_BLOB, static_cast<int32_t> (std::get<0>(it)),
++                    static_cast<int32_t> (std::get<1>(it)),
++                    ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS_OUTPUT };
++            heicUltraHDREntries.insert(heicUltraHDREntries.end(), entry, entry + 4);
++            filteredSizes.push_back(it);
++        }
++    }
++
++    std::vector<int64_t> heicUltraHDRMinDurations, heicUltraHDRStallDurations;
++    auto ret = deriveBlobDurationEntries(c, maxResolution, filteredSizes,
++                                         &heicUltraHDRStallDurations, &heicUltraHDRMinDurations);
++    if (ret != OK) {
++        return ret;
++    }
++
++    return insertStreamConfigTags(heicUltraHDRSizesTag, heicUltraHDRFrameDurationsTag,
++                                  heicUltraHDRStallDurationsTag, heicUltraHDREntries,
++                                  heicUltraHDRMinDurations, heicUltraHDRStallDurations, &c);
++}
++
++status_t CameraProviderManager::ProviderInfo::DeviceInfo3::insertStreamConfigTags(
++        int32_t sizeTag, int32_t minFrameDurationTag, int32_t stallDurationTag,
++        const std::vector<int32_t>& sizeEntries,
++        const std::vector<int64_t>& minFrameDurationEntries,
++        const std::vector<int64_t>& stallDurationEntries, CameraMetadata* c /*out*/) {
++    std::vector<int32_t> supportedChTags;
++    auto chTags = c->find(ANDROID_REQUEST_AVAILABLE_CHARACTERISTICS_KEYS);
++    if (chTags.count == 0) {
++        ALOGE("%s: No supported camera characteristics keys!", __FUNCTION__);
++        return BAD_VALUE;
++    }
++    supportedChTags.reserve(chTags.count + 3);
++    supportedChTags.insert(supportedChTags.end(), chTags.data.i32, chTags.data.i32 + chTags.count);
++    supportedChTags.push_back(sizeTag);
++    supportedChTags.push_back(minFrameDurationTag);
++    supportedChTags.push_back(stallDurationTag);
++    c->update(sizeTag, sizeEntries.data(), sizeEntries.size());
++    c->update(minFrameDurationTag, minFrameDurationEntries.data(), minFrameDurationEntries.size());
++    c->update(stallDurationTag, stallDurationEntries.data(), stallDurationEntries.size());
++    c->update(ANDROID_REQUEST_AVAILABLE_CHARACTERISTICS_KEYS, supportedChTags.data(),
++              supportedChTags.size());
++
++    return OK;
++}
++
++status_t CameraProviderManager::ProviderInfo::DeviceInfo3::deriveBlobDurationEntries(
++        const CameraMetadata& c, bool maxResolution,
++        const std::vector<std::tuple<size_t, size_t>>& filteredSizes,
++        std::vector<int64_t>* filteredStallDurations /*out*/,
++        std::vector<int64_t>* filteredMinDurations /*out*/) {
++    std::vector<int64_t> blobMinDurations, blobStallDurations;
++    const int32_t scalerMinFrameDurationsTag = SessionConfigurationUtils::getAppropriateModeTag(
++            ANDROID_SCALER_AVAILABLE_MIN_FRAME_DURATIONS, maxResolution);
++    const int32_t scalerStallDurationsTag = SessionConfigurationUtils::getAppropriateModeTag(
++            ANDROID_SCALER_AVAILABLE_STALL_DURATIONS, maxResolution);
++    // We use the jpeg stall and min frame durations to approximate the respective Heic UltraHDR
++    // durations.
++    getSupportedDurations(c, scalerMinFrameDurationsTag, HAL_PIXEL_FORMAT_BLOB, filteredSizes,
++                          &blobMinDurations);
++    getSupportedDurations(c, scalerStallDurationsTag, HAL_PIXEL_FORMAT_BLOB, filteredSizes,
++                          &blobStallDurations);
++    if (blobStallDurations.empty() || blobMinDurations.empty() ||
++        filteredSizes.size() != blobMinDurations.size() ||
++        blobMinDurations.size() != blobStallDurations.size()) {
++        ALOGE("%s: Unexpected number of available blob durations! %zu vs. %zu with "
++              "filteredSizes size: %zu",
++              __FUNCTION__, blobMinDurations.size(), blobStallDurations.size(),
++              filteredSizes.size());
++        return BAD_VALUE;
++    }
++
++    auto itDuration = blobMinDurations.begin();
++    auto itSize = filteredSizes.begin();
++    while (itDuration != blobMinDurations.end()) {
++        int64_t entry[4] = {HAL_PIXEL_FORMAT_BLOB, static_cast<int32_t>(std::get<0>(*itSize)),
++                            static_cast<int32_t>(std::get<1>(*itSize)), *itDuration};
++        filteredMinDurations->insert(filteredMinDurations->end(), entry, entry + 4);
++        itDuration++;
++        itSize++;
++    }
++
++    itDuration = blobStallDurations.begin();
++    itSize = filteredSizes.begin();
++    while (itDuration != blobStallDurations.end()) {
++        int64_t entry[4] = {HAL_PIXEL_FORMAT_BLOB, static_cast<int32_t>(std::get<0>(*itSize)),
++                            static_cast<int32_t>(std::get<1>(*itSize)), *itDuration};
++        filteredStallDurations->insert(filteredStallDurations->end(), entry, entry + 4);
++        itDuration++;
++        itSize++;
++    }
++
++    return OK;
++}
++
+ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::deriveJpegRTags(bool maxResolution) {
+     if (kFrameworkJpegRDisabled || mCompositeJpegRDisabled) {
+         return OK;
+@@ -1271,13 +1435,6 @@ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::deriveJpegRTags(bool
+                  ANDROID_JPEGR_AVAILABLE_JPEG_R_MIN_FRAME_DURATIONS, maxResolution);
+ 
+     auto& c = mCameraCharacteristics;
+-    std::vector<int32_t> supportedChTags;
+-    auto chTags = c.find(ANDROID_REQUEST_AVAILABLE_CHARACTERISTICS_KEYS);
+-    if (chTags.count == 0) {
+-        ALOGE("%s: No supported camera characteristics keys!", __FUNCTION__);
+-        return BAD_VALUE;
+-    }
+-
+     std::vector<std::tuple<size_t, size_t>> supportedP010Sizes, supportedBlobSizes;
+     auto capabilities = c.find(ANDROID_REQUEST_AVAILABLE_CAPABILITIES);
+     if (capabilities.count == 0) {
+@@ -1331,54 +1488,19 @@ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::deriveJpegRTags(bool
+         jpegREntries.insert(jpegREntries.end(), entry, entry + 4);
+     }
+ 
+-    std::vector<int64_t> blobMinDurations, blobStallDurations;
+     std::vector<int64_t> jpegRMinDurations, jpegRStallDurations;
+-
+-    // We use the jpeg stall and min frame durations to approximate the respective jpeg/r
+-    // durations.
+-    getSupportedDurations(c, scalerMinFrameDurationsTag, HAL_PIXEL_FORMAT_BLOB,
+-            supportedP010Sizes, &blobMinDurations);
+-    getSupportedDurations(c, scalerStallDurationsTag, HAL_PIXEL_FORMAT_BLOB,
+-            supportedP010Sizes, &blobStallDurations);
+-    if (blobStallDurations.empty() || blobMinDurations.empty() ||
+-            supportedP010Sizes.size() != blobMinDurations.size() ||
+-            blobMinDurations.size() != blobStallDurations.size()) {
+-        ALOGE("%s: Unexpected number of available blob durations! %zu vs. %zu with "
+-                "supportedP010Sizes size: %zu", __FUNCTION__, blobMinDurations.size(),
+-                blobStallDurations.size(), supportedP010Sizes.size());
+-        return BAD_VALUE;
+-    }
+-
+-    auto itDuration = blobMinDurations.begin();
+-    auto itSize = supportedP010Sizes.begin();
+-    while (itDuration != blobMinDurations.end()) {
+-        int64_t entry[4] = {HAL_PIXEL_FORMAT_BLOB, static_cast<int32_t> (std::get<0>(*itSize)),
+-                static_cast<int32_t> (std::get<1>(*itSize)), *itDuration};
+-        jpegRMinDurations.insert(jpegRMinDurations.end(), entry, entry + 4);
+-        itDuration++; itSize++;
++    auto ret = deriveBlobDurationEntries(c, maxResolution, supportedP010Sizes, &jpegRStallDurations,
++                                         &jpegRMinDurations);
++    if (ret != OK) {
++        return ret;
+     }
+ 
+-    itDuration = blobStallDurations.begin();
+-    itSize = supportedP010Sizes.begin();
+-    while (itDuration != blobStallDurations.end()) {
+-        int64_t entry[4] = {HAL_PIXEL_FORMAT_BLOB, static_cast<int32_t> (std::get<0>(*itSize)),
+-                static_cast<int32_t> (std::get<1>(*itSize)), *itDuration};
+-        jpegRStallDurations.insert(jpegRStallDurations.end(), entry, entry + 4);
+-        itDuration++; itSize++;
++    ret = insertStreamConfigTags(jpegRSizesTag, jpegRMinFrameDurationsTag, jpegRStallDurationsTag,
++                                 jpegREntries, jpegRMinDurations, jpegRStallDurations, &c);
++    if (ret != OK) {
++        return ret;
+     }
+ 
+-    supportedChTags.reserve(chTags.count + 3);
+-    supportedChTags.insert(supportedChTags.end(), chTags.data.i32,
+-            chTags.data.i32 + chTags.count);
+-    supportedChTags.push_back(jpegRSizesTag);
+-    supportedChTags.push_back(jpegRMinFrameDurationsTag);
+-    supportedChTags.push_back(jpegRStallDurationsTag);
+-    c.update(jpegRSizesTag, jpegREntries.data(), jpegREntries.size());
+-    c.update(jpegRMinFrameDurationsTag, jpegRMinDurations.data(), jpegRMinDurations.size());
+-    c.update(jpegRStallDurationsTag, jpegRStallDurations.data(), jpegRStallDurations.size());
+-    c.update(ANDROID_REQUEST_AVAILABLE_CHARACTERISTICS_KEYS, supportedChTags.data(),
+-            supportedChTags.size());
+-
+     auto colorSpaces = c.find(ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP);
+     if (colorSpaces.count > 0 && !maxResolution) {
+         bool displayP3Support = false;
+@@ -1976,7 +2098,7 @@ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::fillHeicStreamCombina
+         bool useGrid = false;
+         if (camera3::HeicCompositeStream::isSizeSupportedByHeifEncoder(
+                 halStreamConfigs.data.i32[i+1], halStreamConfigs.data.i32[i+2],
+-                &useHeic, &useGrid, &stall)) {
++                &useHeic, &useGrid, &stall, nullptr /*hevcName*/, kFrameworkHeicAllowSWCodecs)) {
+             if (useGrid != (format == HAL_PIXEL_FORMAT_YCBCR_420_888)) {
+                 continue;
+             }
+diff --git a/services/camera/libcameraservice/common/CameraProviderManager.h b/services/camera/libcameraservice/common/CameraProviderManager.h
+index f0db8bc87a..e629218b16 100644
+--- a/services/camera/libcameraservice/common/CameraProviderManager.h
++++ b/services/camera/libcameraservice/common/CameraProviderManager.h
+@@ -470,6 +470,9 @@ public:
+ 
+     static const float kDepthARTolerance;
+     static const bool kFrameworkJpegRDisabled;
++    static const bool kFrameworkHeicUltraHDRDisabled;
++    static const bool kFrameworkHeicAllowSWCodecs;
++
+ private:
+     // All private members, unless otherwise noted, expect mInterfaceMutex to be locked before use
+     mutable std::mutex mInterfaceMutex;
+@@ -629,6 +632,7 @@ private:
+             bool hasFlashUnit() const { return mHasFlashUnit; }
+             bool supportNativeZoomRatio() const { return mSupportNativeZoomRatio; }
+             bool isCompositeJpegRDisabled() const { return mCompositeJpegRDisabled; }
++            bool isCompositeHeicUltraHDRDisabled() const { return mCompositeHeicUltraHDRDisabled; }
+             virtual status_t setTorchMode(bool enabled) = 0;
+             virtual status_t turnOnTorchWithStrengthLevel(int32_t torchStrength) = 0;
+             virtual status_t getTorchStrengthLevel(int32_t *torchStrength) = 0;
+@@ -685,14 +689,15 @@ private:
+                     mParentProvider(parentProvider), mTorchStrengthLevel(0),
+                     mTorchMaximumStrengthLevel(0), mTorchDefaultStrengthLevel(0),
+                     mHasFlashUnit(false), mSupportNativeZoomRatio(false),
+-                    mPublicCameraIds(publicCameraIds), mCompositeJpegRDisabled(false) {}
++                    mPublicCameraIds(publicCameraIds), mCompositeJpegRDisabled(false),
++                    mCompositeHeicUltraHDRDisabled(false) {}
+             virtual ~DeviceInfo() {}
+         protected:
+ 
+             bool mHasFlashUnit; // const after constructor
+             bool mSupportNativeZoomRatio; // const after constructor
+             const std::vector<std::string>& mPublicCameraIds;
+-            bool mCompositeJpegRDisabled;
++            bool mCompositeJpegRDisabled, mCompositeHeicUltraHDRDisabled;
+         };
+         std::vector<std::unique_ptr<DeviceInfo>> mDevices;
+         std::unordered_set<std::string> mUniqueCameraIds;
+@@ -757,6 +762,18 @@ private:
+             status_t addDynamicDepthTags(bool maxResolution = false);
+             status_t deriveHeicTags(bool maxResolution = false);
+             status_t deriveJpegRTags(bool maxResolution = false);
++            status_t deriveHeicUltraHDRTags(bool maxResolution = false);
++            status_t deriveBlobDurationEntries(
++                    const CameraMetadata& c, bool maxResolution,
++                    const std::vector<std::tuple<size_t, size_t>>& filteredSizes,
++                    std::vector<int64_t>* filteredStallDurations /*out*/,
++                    std::vector<int64_t>* filteredMinDurations /*out*/);
++            status_t insertStreamConfigTags(int32_t sizeTag, int32_t minFrameDurationTag,
++                                            int32_t stallDurationTag,
++                                            const std::vector<int32_t>& sizeEntries,
++                                            const std::vector<int64_t>& minFrameDurationEntries,
++                                            const std::vector<int64_t>& stallDurationEntries,
++                                            CameraMetadata* c /*out*/);
+             status_t addRotateCropTags();
+             status_t addAutoframingTags();
+             status_t addPreCorrectionActiveArraySize();
+diff --git a/services/camera/libcameraservice/common/aidl/AidlProviderInfo.cpp b/services/camera/libcameraservice/common/aidl/AidlProviderInfo.cpp
+index e1efd90fd4..3d6a23f93d 100644
+--- a/services/camera/libcameraservice/common/aidl/AidlProviderInfo.cpp
++++ b/services/camera/libcameraservice/common/aidl/AidlProviderInfo.cpp
+@@ -517,6 +517,8 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
+ 
+     mCompositeJpegRDisabled = mCameraCharacteristics.exists(
+             ANDROID_JPEGR_AVAILABLE_JPEG_R_STREAM_CONFIGURATIONS);
++    mCompositeHeicUltraHDRDisabled = mCameraCharacteristics.exists(
++            ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS);
+ 
+     mSystemCameraKind = getSystemCameraKind();
+ 
+@@ -548,6 +550,12 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
+         ALOGE("%s: Unable to derive Jpeg/R tags based on camera and media capabilities: %s (%d)",
+                 __FUNCTION__, strerror(-res), res);
+     }
++    res = deriveHeicUltraHDRTags();
++    if (OK != res) {
++        ALOGE("%s: Unable to derive Heic UltraHDR tags based on camera and "
++                "media capabilities: %s (%d)",
++                __FUNCTION__, strerror(-res), res);
++    }
+     using camera3::SessionConfigurationUtils::supportsUltraHighResolutionCapture;
+     if (supportsUltraHighResolutionCapture(mCameraCharacteristics)) {
+         status_t status = addDynamicDepthTags(/*maxResolution*/true);
+@@ -567,6 +575,12 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
+             ALOGE("%s: Unable to derive Jpeg/R tags based on camera and media capabilities for"
+                     "maximum resolution mode: %s (%d)", __FUNCTION__, strerror(-status), status);
+         }
++        status = deriveHeicUltraHDRTags(/*maxResolution*/true);
++        if (OK != status) {
++            ALOGE("%s: Unable to derive Heic UltraHDR tags based on camera and "
++                    "media capabilities: %s (%d)",
++                    __FUNCTION__, strerror(-status), status);
++        }
+     }
+ 
+     res = addRotateCropTags();
+diff --git a/services/camera/libcameraservice/device3/Camera3Device.cpp b/services/camera/libcameraservice/device3/Camera3Device.cpp
+index eb8cb9df10..52954427c5 100644
+--- a/services/camera/libcameraservice/device3/Camera3Device.cpp
++++ b/services/camera/libcameraservice/device3/Camera3Device.cpp
+@@ -44,6 +44,7 @@
+ 
+ #include <utility>
+ 
++#include <android/data_space.h>
+ #include <android-base/stringprintf.h>
+ #include <sched.h>
+ #include <utils/Log.h>
+@@ -2560,6 +2561,8 @@ status_t Camera3Device::configureStreamsLocked(int operatingMode,
+             size_t k = i + ((mInputStream != nullptr) ? 1 : 0); // Input stream if present should
+                                                                 // always occupy the initial entry.
+             if ((outputStream->data_space == HAL_DATASPACE_V0_JFIF) ||
++                    (outputStream->data_space ==
++                     static_cast<android_dataspace_t>(ADATASPACE_HEIF_ULTRAHDR)) ||
+                     (outputStream->data_space ==
+                      static_cast<android_dataspace_t>(
+                          aidl::android::hardware::graphics::common::Dataspace::JPEG_R))) {
+diff --git a/services/camera/libcameraservice/device3/Camera3OutputStream.cpp b/services/camera/libcameraservice/device3/Camera3OutputStream.cpp
+index dc663f3043..2eba5a7675 100644
+--- a/services/camera/libcameraservice/device3/Camera3OutputStream.cpp
++++ b/services/camera/libcameraservice/device3/Camera3OutputStream.cpp
+@@ -26,6 +26,7 @@
+ #include <aidl/android/hardware/camera/device/CameraBlobId.h>
+ #include "aidl/android/hardware/graphics/common/Dataspace.h"
+ 
++#include <android/data_space.h>
+ #include <android-base/unique_fd.h>
+ #include <com_android_internal_camera_flags.h>
+ #include <cutils/properties.h>
+@@ -401,6 +402,8 @@ status_t Camera3OutputStream::returnBufferCheckedLocked(
+         }
+         // Fix CameraBlob id type discrepancy between HIDL and AIDL, details : http://b/229688810
+         if (getFormat() == HAL_PIXEL_FORMAT_BLOB && (getDataSpace() == HAL_DATASPACE_V0_JFIF ||
++                    (getDataSpace() ==
++                     static_cast<android_dataspace_t>(ADATASPACE_HEIF_ULTRAHDR)) ||
+                     (getDataSpace() ==
+                      static_cast<android_dataspace_t>(
+                          aidl::android::hardware::graphics::common::Dataspace::JPEG_R)))) {
+diff --git a/services/camera/libcameraservice/utils/SessionConfigurationUtils.cpp b/services/camera/libcameraservice/utils/SessionConfigurationUtils.cpp
+index d937fe96e3..08f6314c63 100644
+--- a/services/camera/libcameraservice/utils/SessionConfigurationUtils.cpp
++++ b/services/camera/libcameraservice/utils/SessionConfigurationUtils.cpp
+@@ -17,6 +17,7 @@
+ #include <cutils/properties.h>
+ 
+ #include "SessionConfigurationUtils.h"
++#include <android/data_space.h>
+ #include "../api2/DepthCompositeStream.h"
+ #include "../api2/HeicCompositeStream.h"
+ #include "aidl/android/hardware/graphics/common/Dataspace.h"
+@@ -167,11 +168,16 @@ bool roundBufferDimensionNearest(int32_t width, int32_t height,
+             getAppropriateModeTag(ANDROID_HEIC_AVAILABLE_HEIC_STREAM_CONFIGURATIONS, maxResolution);
+     const int32_t jpegRSizesTag = getAppropriateModeTag(
+             ANDROID_JPEGR_AVAILABLE_JPEG_R_STREAM_CONFIGURATIONS, maxResolution);
++    const int32_t heicUltraHDRSizesTag = getAppropriateModeTag(
++            ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS, maxResolution);
+ 
+     bool isJpegRDataSpace = (dataSpace == static_cast<android_dataspace_t>(
+                 ::aidl::android::hardware::graphics::common::Dataspace::JPEG_R));
++    bool isHeicUltraHDRDataSpace = (dataSpace == static_cast<android_dataspace_t>(
++                ADATASPACE_HEIF_ULTRAHDR));
+     camera_metadata_ro_entry streamConfigs =
+             (isJpegRDataSpace) ? info.find(jpegRSizesTag) :
++            (isHeicUltraHDRDataSpace) ? info.find(heicUltraHDRSizesTag) :
+             (dataSpace == HAL_DATASPACE_DEPTH) ? info.find(depthSizesTag) :
+             (dataSpace == static_cast<android_dataspace>(HAL_DATASPACE_HEIF)) ?
+             info.find(heicSizesTag) :
+@@ -232,6 +238,8 @@ bool is10bitCompatibleFormat(int32_t format, android_dataspace_t dataSpace) {
+             if (dataSpace == static_cast<android_dataspace_t>(
+                         ::aidl::android::hardware::graphics::common::Dataspace::JPEG_R)) {
+                 return true;
++            } else if (dataSpace == static_cast<android_dataspace_t>(ADATASPACE_HEIF_ULTRAHDR)) {
++                return true;
+             }
+ 
+             return false;
+@@ -341,6 +349,9 @@ bool isColorSpaceSupported(int32_t colorSpace, int32_t format, android_dataspace
+             static_cast<android_dataspace>(
+                 ::aidl::android::hardware::graphics::common::Dataspace::JPEG_R)) {
+         format64 = static_cast<int64_t>(PublicFormat::JPEG_R);
++    } else if (format == HAL_PIXEL_FORMAT_BLOB && dataSpace ==
++            static_cast<android_dataspace>(ADATASPACE_HEIF_ULTRAHDR)) {
++        format64 = static_cast<int64_t>(HEIC_ULTRAHDR);
+     }
+ 
+     camera_metadata_ro_entry_t entry =
+diff --git a/services/camera/libcameraservice/utils/SessionConfigurationUtilsHost.cpp b/services/camera/libcameraservice/utils/SessionConfigurationUtilsHost.cpp
+index 7d344f88e6..2f4e83ad3b 100644
+--- a/services/camera/libcameraservice/utils/SessionConfigurationUtilsHost.cpp
++++ b/services/camera/libcameraservice/utils/SessionConfigurationUtilsHost.cpp
+@@ -49,6 +49,12 @@ int32_t getAppropriateModeTag(int32_t defaultTag, bool maxResolution) {
+             return ANDROID_HEIC_AVAILABLE_HEIC_MIN_FRAME_DURATIONS_MAXIMUM_RESOLUTION;
+         case ANDROID_HEIC_AVAILABLE_HEIC_STALL_DURATIONS:
+             return ANDROID_HEIC_AVAILABLE_HEIC_STALL_DURATIONS_MAXIMUM_RESOLUTION;
++        case ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS:
++            return ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS_MAXIMUM_RESOLUTION;
++        case ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_MIN_FRAME_DURATIONS:
++            return ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_MIN_FRAME_DURATIONS_MAXIMUM_RESOLUTION;
++        case ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STALL_DURATIONS:
++            return ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STALL_DURATIONS_MAXIMUM_RESOLUTION;
+         case ANDROID_JPEGR_AVAILABLE_JPEG_R_STREAM_CONFIGURATIONS:
+             return ANDROID_JPEGR_AVAILABLE_JPEG_R_STREAM_CONFIGURATIONS_MAXIMUM_RESOLUTION;
+         case ANDROID_JPEGR_AVAILABLE_JPEG_R_MIN_FRAME_DURATIONS:
+-- 
+2.43.0
+

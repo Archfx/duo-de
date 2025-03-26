@@ -1,0 +1,27 @@
+From ae42ccfe28b6346b71d1ded03f85b5b090188512 Mon Sep 17 00:00:00 2001
+From: Pierre-Hugues Husson <phh@phh.me>
+Date: Sun, 28 Mar 2021 18:54:47 +0200
+Subject: [PATCH 427/436] Not all sources in a route are valid. Dont ignore the
+ whole route because of one broken source
+
+Change-Id: If8a51740e71bef3a4738262ad7b43a337b0ec36d
+---
+ .../audiopolicy/common/managerdefinitions/src/Serializer.cpp    | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp b/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp
+index 6ee076660b..146c78b8f6 100644
+--- a/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp
++++ b/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp
+@@ -670,7 +670,7 @@ std::variant<status_t, RouteTraits::Element> PolicySerializer::deserialize<Route
+                 source = ctx->findPortByTagName(trim(devTag));
+             }
+             if (source == NULL) {
+-                if (!mIgnoreVendorExtensions) {
++                if (false && !mIgnoreVendorExtensions) {
+                     ALOGE("%s: no source found with name \"%s\"", __func__, devTag);
+                     return BAD_VALUE;
+                 } else {
+-- 
+2.43.0
+

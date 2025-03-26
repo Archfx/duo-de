@@ -1,0 +1,33 @@
+From 790b37377f3737d3abe2f56a5948f785121c330a Mon Sep 17 00:00:00 2001
+From: Steven Moreland <smoreland@google.com>
+Date: Wed, 2 Oct 2024 01:22:19 +0000
+Subject: [PATCH 052/436] writeUnpadded->write
+
+This test should still do the same thing with write.
+write padded pads the entry to 4 bytes, which should
+be good for this test as well, since it's expecting
+16 bytes.
+
+Bug: 328161314
+Test: N/A
+Change-Id: Iefdf27ea4bb9a152d84ffcdb17c8b47ee976feb8
+---
+ media/libmedia/tests/mediaplayer/IMediaPlayerTest.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/media/libmedia/tests/mediaplayer/IMediaPlayerTest.cpp b/media/libmedia/tests/mediaplayer/IMediaPlayerTest.cpp
+index cc609336c9..f0db0189e0 100644
+--- a/media/libmedia/tests/mediaplayer/IMediaPlayerTest.cpp
++++ b/media/libmedia/tests/mediaplayer/IMediaPlayerTest.cpp
+@@ -50,7 +50,7 @@ TEST_F(IMediaPlayerTest, PrepareDrmInvalidTransaction) {
+ 
+     // We write a length greater than the following session id array. Should be discarded.
+     data.writeUint32(2);
+-    data.writeUnpadded(kMockByteArray, 1);
++    data.write(kMockByteArray, 1);
+ 
+     status_t result = IMediaPlayer::asBinder(iMediaPlayer_)
+             ->transact(PREPARE_DRM, data, &reply);
+-- 
+2.43.0
+

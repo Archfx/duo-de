@@ -1,0 +1,356 @@
+From cd240713593f705239ff7e42637fd69b8f53f391 Mon Sep 17 00:00:00 2001
+From: Ravneet Dhanjal <rdhanjal@google.com>
+Date: Thu, 24 Oct 2024 04:11:59 +0000
+Subject: [PATCH 183/436] Camera: Add color temperature metadata tags
+
+- Add metadata for manual color temperature feature
+- Update COLOR_CORRECTION_AVAILABLE_MODES tag to include
+existing supported color correction modes
+
+Bug: 359409044
+Flag: com.android.internal.camera.flags.color_temperature
+Test: Camera CTS with flag disabled and enabled
+Change-Id: Iabfa21cecc1dd1708dcd8ef0e72338d095ebcfc7
+---
+ camera/camera_platform.aconfig                |   7 ++
+ camera/ndk/impl/ACameraMetadata.cpp           |   2 +
+ .../include/camera/NdkCameraMetadataTags.h    | 108 ++++++++++++++++++
+ .../aidl/VndkVersionMetadataTags.h            |   8 ++
+ .../common/CameraProviderManager.cpp          |  61 ++++++++++
+ .../common/CameraProviderManager.h            |   1 +
+ .../common/aidl/AidlProviderInfo.cpp          |  16 +++
+ .../common/hidl/HidlProviderInfo.cpp          |  15 +++
+ 8 files changed, 218 insertions(+)
+
+diff --git a/camera/camera_platform.aconfig b/camera/camera_platform.aconfig
+index c9e8ffde50..323b23a1cc 100644
+--- a/camera/camera_platform.aconfig
++++ b/camera/camera_platform.aconfig
+@@ -195,3 +195,10 @@ flag {
+     bug: "338621560"
+ }
+ 
++flag {
++    namespace: "camera_platform"
++    name: "color_temperature"
++    description: "Add keys to manually set color temperature and color tint"
++    bug: "359409044"
++}
++
+diff --git a/camera/ndk/impl/ACameraMetadata.cpp b/camera/ndk/impl/ACameraMetadata.cpp
+index 69b30f7d4d..fef6443b46 100644
+--- a/camera/ndk/impl/ACameraMetadata.cpp
++++ b/camera/ndk/impl/ACameraMetadata.cpp
+@@ -536,6 +536,8 @@ ACameraMetadata::isCaptureRequestTag(const uint32_t tag) {
+         case ACAMERA_COLOR_CORRECTION_TRANSFORM:
+         case ACAMERA_COLOR_CORRECTION_GAINS:
+         case ACAMERA_COLOR_CORRECTION_ABERRATION_MODE:
++        case ACAMERA_COLOR_CORRECTION_COLOR_TEMPERATURE:
++        case ACAMERA_COLOR_CORRECTION_COLOR_TINT:
+         case ACAMERA_CONTROL_AE_ANTIBANDING_MODE:
+         case ACAMERA_CONTROL_AE_EXPOSURE_COMPENSATION:
+         case ACAMERA_CONTROL_AE_LOCK:
+diff --git a/camera/ndk/include/camera/NdkCameraMetadataTags.h b/camera/ndk/include/camera/NdkCameraMetadataTags.h
+index acc3c7c1a1..44aac2907d 100644
+--- a/camera/ndk/include/camera/NdkCameraMetadataTags.h
++++ b/camera/ndk/include/camera/NdkCameraMetadataTags.h
+@@ -307,6 +307,100 @@ typedef enum acamera_metadata_tag {
+      */
+     ACAMERA_COLOR_CORRECTION_AVAILABLE_ABERRATION_MODES =       // byte[n]
+             ACAMERA_COLOR_CORRECTION_START + 4,
++    /**
++     * <p>Specifies the color temperature for CCT mode in Kelvin
++     * to adjust the white balance of the image.</p>
++     *
++     * <p>Type: int32</p>
++     *
++     * <p>This tag may appear in:
++     * <ul>
++     *   <li>ACameraMetadata from ACameraCaptureSession_captureCallback_result callbacks</li>
++     *   <li>ACaptureRequest</li>
++     * </ul></p>
++     *
++     * <p>Sets the color temperature in Kelvin units for when
++     * ACAMERA_COLOR_CORRECTION_MODE is CCT to adjust the
++     * white balance of the image.</p>
++     * <p>If CCT mode is enabled without a requested color temperature,
++     * a default value will be set by the camera device. The default value can be
++     * retrieved by checking the corresponding capture result. Color temperatures
++     * requested outside the advertised ACAMERA_COLOR_CORRECTION_COLOR_TEMPERATURE_RANGE
++     * will be clamped.</p>
++     *
++     * @see ACAMERA_COLOR_CORRECTION_COLOR_TEMPERATURE_RANGE
++     * @see ACAMERA_COLOR_CORRECTION_MODE
++     */
++    ACAMERA_COLOR_CORRECTION_COLOR_TEMPERATURE =                // int32
++            ACAMERA_COLOR_CORRECTION_START + 5,
++    /**
++     * <p>Specifies the color tint for CCT mode to adjust the white
++     * balance of the image.</p>
++     *
++     * <p>Type: int32</p>
++     *
++     * <p>This tag may appear in:
++     * <ul>
++     *   <li>ACameraMetadata from ACameraCaptureSession_captureCallback_result callbacks</li>
++     *   <li>ACaptureRequest</li>
++     * </ul></p>
++     *
++     * <p>Sets the color tint for when ACAMERA_COLOR_CORRECTION_MODE
++     * is CCT to adjust the white balance of the image.</p>
++     * <p>If CCT mode is enabled without a requested color tint,
++     * a default value will be set by the camera device. The default value can be
++     * retrieved by checking the corresponding capture result. Color tints requested
++     * outside the supported range will be clamped to the nearest limit (-50 or +50).</p>
++     *
++     * @see ACAMERA_COLOR_CORRECTION_MODE
++     */
++    ACAMERA_COLOR_CORRECTION_COLOR_TINT =                       // int32
++            ACAMERA_COLOR_CORRECTION_START + 6,
++    /**
++     * <p>The range of supported color temperature values for
++     * ACAMERA_COLOR_CORRECTION_COLOR_TEMPERATURE.</p>
++     *
++     * @see ACAMERA_COLOR_CORRECTION_COLOR_TEMPERATURE
++     *
++     * <p>Type: int32[2]</p>
++     *
++     * <p>This tag may appear in:
++     * <ul>
++     *   <li>ACameraMetadata from ACameraManager_getCameraCharacteristics</li>
++     * </ul></p>
++     *
++     * <p>This key lists the valid range of color temperature values for
++     * ACAMERA_COLOR_CORRECTION_COLOR_TEMPERATURE supported by this camera device.</p>
++     * <p>This key will be null on devices that do not support CCT mode for
++     * ACAMERA_COLOR_CORRECTION_MODE.</p>
++     *
++     * @see ACAMERA_COLOR_CORRECTION_COLOR_TEMPERATURE
++     * @see ACAMERA_COLOR_CORRECTION_MODE
++     */
++    ACAMERA_COLOR_CORRECTION_COLOR_TEMPERATURE_RANGE =          // int32[2]
++            ACAMERA_COLOR_CORRECTION_START + 7,
++    /**
++     * <p>List of color correction modes for ACAMERA_COLOR_CORRECTION_MODE that are
++     * supported by this camera device.</p>
++     *
++     * @see ACAMERA_COLOR_CORRECTION_MODE
++     *
++     * <p>Type: byte[n]</p>
++     *
++     * <p>This tag may appear in:
++     * <ul>
++     *   <li>ACameraMetadata from ACameraManager_getCameraCharacteristics</li>
++     * </ul></p>
++     *
++     * <p>This key lists the valid modes for ACAMERA_COLOR_CORRECTION_MODE. If no
++     * color correction modes are available for a device, this key will be null.</p>
++     * <p>Camera devices that have a FULL hardware level will always include at least
++     * FAST, HIGH_QUALITY, and TRANSFORM_MATRIX modes.</p>
++     *
++     * @see ACAMERA_COLOR_CORRECTION_MODE
++     */
++    ACAMERA_COLOR_CORRECTION_AVAILABLE_MODES =                  // byte[n]
++            ACAMERA_COLOR_CORRECTION_START + 8,
+     ACAMERA_COLOR_CORRECTION_END,
+ 
+     /**
+@@ -8137,6 +8231,20 @@ typedef enum acamera_metadata_enum_acamera_color_correction_mode {
+      */
+     ACAMERA_COLOR_CORRECTION_MODE_HIGH_QUALITY                       = 2,
+ 
++    /**
++     * <p>Use
++     * ACAMERA_COLOR_CORRECTION_COLOR_TEMPERATURE and
++     * ACAMERA_COLOR_CORRECTION_COLOR_TINT to adjust the white balance based
++     * on correlated color temperature.</p>
++     * <p>If AWB is enabled with <code>ACAMERA_CONTROL_AWB_MODE != OFF</code>, then
++     * CCT is ignored.</p>
++     *
++     * @see ACAMERA_COLOR_CORRECTION_COLOR_TEMPERATURE
++     * @see ACAMERA_COLOR_CORRECTION_COLOR_TINT
++     * @see ACAMERA_CONTROL_AWB_MODE
++     */
++    ACAMERA_COLOR_CORRECTION_MODE_CCT                                = 3,
++
+ } acamera_metadata_enum_android_color_correction_mode_t;
+ 
+ // ACAMERA_COLOR_CORRECTION_ABERRATION_MODE
+diff --git a/services/camera/libcameraservice/aidl/VndkVersionMetadataTags.h b/services/camera/libcameraservice/aidl/VndkVersionMetadataTags.h
+index b07d8d5488..158ee69e85 100644
+--- a/services/camera/libcameraservice/aidl/VndkVersionMetadataTags.h
++++ b/services/camera/libcameraservice/aidl/VndkVersionMetadataTags.h
+@@ -93,6 +93,10 @@ std::map<int, std::vector<camera_metadata_tag>> static_api_level_to_keys{
+           ANDROID_FLASH_TORCH_STRENGTH_MAX_LEVEL,
+           ANDROID_INFO_SESSION_CONFIGURATION_QUERY_VERSION,
+         } },
++      {36, {
++          ANDROID_COLOR_CORRECTION_AVAILABLE_MODES,
++          ANDROID_COLOR_CORRECTION_COLOR_TEMPERATURE_RANGE,
++        } },
+ };
+ 
+ /**
+@@ -125,4 +129,8 @@ std::map<int, std::vector<camera_metadata_tag>> dynamic_api_level_to_keys{
+           ANDROID_STATISTICS_LENS_INTRINSIC_SAMPLES,
+           ANDROID_STATISTICS_LENS_INTRINSIC_TIMESTAMPS,
+         }  },
++      {36, {
++          ANDROID_COLOR_CORRECTION_COLOR_TEMPERATURE,
++          ANDROID_COLOR_CORRECTION_COLOR_TINT,
++        }  },
+ };
+diff --git a/services/camera/libcameraservice/common/CameraProviderManager.cpp b/services/camera/libcameraservice/common/CameraProviderManager.cpp
+index a03d199344..6394ec1198 100644
+--- a/services/camera/libcameraservice/common/CameraProviderManager.cpp
++++ b/services/camera/libcameraservice/common/CameraProviderManager.cpp
+@@ -1833,6 +1833,67 @@ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addReadoutTimestampTa
+     return res;
+ }
+ 
++status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addColorCorrectionAvailableModesTag(
++            CameraMetadata& c) {
++    status_t res = OK;
++
++    // The COLOR_CORRECTION_AVAILABLE_MODES key advertises the
++    // supported color correction modes. Previously, if color correction was
++    // supported (COLOR_CORRECTION_MODE was not null), it was assumed
++    // that all existing options, TRANSFORM_MATRIX, FAST, and HIGH_QUALITY, were supported.
++    // However, a new optional mode, CCT, has been introduced. To indicate
++    // whether CCT is supported, the camera device must now explicitly list all
++    // available modes using the COLOR_CORRECTION_AVAILABLE_MODES key.
++    // If the camera device doesn't set COLOR_CORRECTION_AVAILABLE_MODES,
++    // this code falls back to checking for the COLOR_CORRECTION_MODE key.
++    // If present, this adds the required supported modes TRANSFORM_MATRIX,
++    // FAST, HIGH_QUALITY.
++    auto entry = c.find(ANDROID_COLOR_CORRECTION_AVAILABLE_MODES);
++    if (entry.count != 0) {
++        return res;
++    }
++
++    auto reqKeys = c.find(ANDROID_REQUEST_AVAILABLE_REQUEST_KEYS);
++    if (reqKeys.count == 0) {
++        ALOGE("%s: No supported camera request keys!", __FUNCTION__);
++        return BAD_VALUE;
++    }
++
++    bool colorCorrectionModeAvailable = false;
++    for (size_t i = 0; i < reqKeys.count; i++) {
++        if (reqKeys.data.i32[i] == ANDROID_COLOR_CORRECTION_MODE) {
++            colorCorrectionModeAvailable = true;
++            break;
++        }
++    }
++
++    if (!colorCorrectionModeAvailable) {
++        return res;
++    }
++
++    std::vector<int32_t> supportedChTags;
++    auto chTags = c.find(ANDROID_REQUEST_AVAILABLE_CHARACTERISTICS_KEYS);
++    if (chTags.count == 0) {
++        ALOGE("%s: No supported camera characteristics keys!", __FUNCTION__);
++        return BAD_VALUE;
++    }
++
++    std::vector<uint8_t> colorCorrectionAvailableModes = {
++            ANDROID_COLOR_CORRECTION_MODE_TRANSFORM_MATRIX,
++            ANDROID_COLOR_CORRECTION_MODE_FAST,
++            ANDROID_COLOR_CORRECTION_MODE_HIGH_QUALITY };
++    supportedChTags.reserve(chTags.count + 1);
++    supportedChTags.insert(supportedChTags.end(), chTags.data.i32,
++            chTags.data.i32 + chTags.count);
++    supportedChTags.push_back(ANDROID_COLOR_CORRECTION_AVAILABLE_MODES);
++    c.update(ANDROID_COLOR_CORRECTION_AVAILABLE_MODES,
++            colorCorrectionAvailableModes.data(), colorCorrectionAvailableModes.size());
++    c.update(ANDROID_REQUEST_AVAILABLE_CHARACTERISTICS_KEYS, supportedChTags.data(),
++             supportedChTags.size());
++
++    return res;
++}
++
+ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addSessionConfigQueryVersionTag() {
+     sp<ProviderInfo> parentProvider = mParentProvider.promote();
+     if (parentProvider == nullptr) {
+diff --git a/services/camera/libcameraservice/common/CameraProviderManager.h b/services/camera/libcameraservice/common/CameraProviderManager.h
+index b686a58d0f..f0db8bc87a 100644
+--- a/services/camera/libcameraservice/common/CameraProviderManager.h
++++ b/services/camera/libcameraservice/common/CameraProviderManager.h
+@@ -761,6 +761,7 @@ private:
+             status_t addAutoframingTags();
+             status_t addPreCorrectionActiveArraySize();
+             status_t addReadoutTimestampTag(bool readoutTimestampSupported = true);
++            status_t addColorCorrectionAvailableModesTag(CameraMetadata& ch);
+             status_t addSessionConfigQueryVersionTag();
+ 
+             static void getSupportedSizes(const CameraMetadata& ch, uint32_t tag,
+diff --git a/services/camera/libcameraservice/common/aidl/AidlProviderInfo.cpp b/services/camera/libcameraservice/common/aidl/AidlProviderInfo.cpp
+index 4bfe11d5c6..e1efd90fd4 100644
+--- a/services/camera/libcameraservice/common/aidl/AidlProviderInfo.cpp
++++ b/services/camera/libcameraservice/common/aidl/AidlProviderInfo.cpp
+@@ -596,6 +596,14 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
+                 __FUNCTION__, strerror(-res), res);
+     }
+ 
++    if (flags::color_temperature()) {
++        res = addColorCorrectionAvailableModesTag(mCameraCharacteristics);
++        if (OK != res) {
++            ALOGE("%s: Unable to add COLOR_CORRECTION_AVAILABLE_MODES tag: %s (%d)",
++                    __FUNCTION__, strerror(-res), res);
++        }
++    }
++
+     camera_metadata_entry flashAvailable =
+             mCameraCharacteristics.find(ANDROID_FLASH_INFO_AVAILABLE);
+     if (flashAvailable.count == 1 &&
+@@ -683,6 +691,14 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
+                         __FUNCTION__, strerror(-res), res);
+                 return;
+             }
++
++            if (flags::color_temperature()) {
++                res = addColorCorrectionAvailableModesTag(mPhysicalCameraCharacteristics[id]);
++                if (OK != res) {
++                    ALOGE("%s: Unable to add COLOR_CORRECTION_AVAILABLE_MODES tag: %s (%d)",
++                            __FUNCTION__, strerror(-res), res);
++                }
++            }
+         }
+     }
+ 
+diff --git a/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp b/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp
+index 6cedb04bb9..edaee6ea26 100644
+--- a/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp
++++ b/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp
+@@ -675,6 +675,13 @@ HidlProviderInfo::HidlDeviceInfo3::HidlDeviceInfo3(
+         ALOGE("%s: Unable to add sensorReadoutTimestamp tag: %s (%d)",
+                 __FUNCTION__, strerror(-res), res);
+     }
++    if (flags::color_temperature()) {
++        res = addColorCorrectionAvailableModesTag(mCameraCharacteristics);
++        if (OK != res) {
++            ALOGE("%s: Unable to add COLOR_CORRECTION_AVAILABLE_MODES tag: %s (%d)",
++                    __FUNCTION__, strerror(-res), res);
++        }
++    }
+ 
+     camera_metadata_entry flashAvailable =
+             mCameraCharacteristics.find(ANDROID_FLASH_INFO_AVAILABLE);
+@@ -785,6 +792,14 @@ HidlProviderInfo::HidlDeviceInfo3::HidlDeviceInfo3(
+                         __FUNCTION__, strerror(-res), res);
+                 return;
+             }
++
++            if (flags::color_temperature()) {
++                res = addColorCorrectionAvailableModesTag(mPhysicalCameraCharacteristics[id]);
++                if (OK != res) {
++                    ALOGE("%s: Unable to add COLOR_CORRECTION_AVAILABLE_MODES tag: %s (%d)",
++                            __FUNCTION__, strerror(-res), res);
++                }
++            }
+         }
+     }
+ }
+-- 
+2.43.0
+

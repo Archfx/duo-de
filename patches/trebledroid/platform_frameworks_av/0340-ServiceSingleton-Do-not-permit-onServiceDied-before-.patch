@@ -1,0 +1,194 @@
+From b94582c6cb409e0d82aa02715deaa691e452b2e9 Mon Sep 17 00:00:00 2001
+From: Andy Hung <hunga@google.com>
+Date: Mon, 18 Nov 2024 16:19:45 -0800
+Subject: [PATCH 340/436] ServiceSingleton: Do not permit onServiceDied before
+ onNewService
+
+Remove race with binder death notification.
+Fix deallocation race in NDK singleton implementation.
+
+Flag: EXEMPT bugfix
+Test: atest service_singleton_tests
+Test: for run in {1..100}; do (sleep 8; echo $run; adb shell pkill audioserver); done
+Bug: 379427790
+Change-Id: I9dadb512dce8140a31e79acd6dfdff9946d1f8bc
+---
+ .../include/mediautils/BinderGenericUtils.h   | 37 ++++++++++---------
+ .../include/mediautils/ServiceSingleton.h     | 22 ++++++++---
+ media/utils/tests/service_singleton_tests.cpp | 20 ++++++++++
+ 3 files changed, 57 insertions(+), 22 deletions(-)
+
+diff --git a/media/utils/include/mediautils/BinderGenericUtils.h b/media/utils/include/mediautils/BinderGenericUtils.h
+index c2bbde1598..5f3b9f3796 100644
+--- a/media/utils/include/mediautils/BinderGenericUtils.h
++++ b/media/utils/include/mediautils/BinderGenericUtils.h
+@@ -298,20 +298,21 @@ private:
+ class RequestDeathNotificationNdk {
+ public:
+     RequestDeathNotificationNdk(
+-            const ::ndk::SpAIBinder &binder, std::function<void()> &&onBinderDied)
+-            : mOnBinderDied(std::move(onBinderDied)),
+-              mRecipient(::AIBinder_DeathRecipient_new(OnBinderDiedStatic),
+-                         &AIBinder_DeathRecipient_delete), mStatus{AIBinder_linkToDeath(
+-                    binder.get(), mRecipient.get(), /* cookie */ this)} {
++            const ::ndk::SpAIBinder &binder, std::function<void()>&& onBinderDied)
++            : mRecipient(::AIBinder_DeathRecipient_new(OnBinderDiedStatic),
++                         &AIBinder_DeathRecipient_delete),
++              mStatus{(AIBinder_DeathRecipient_setOnUnlinked(  // sets cookie deleter
++                              mRecipient.get(), OnBinderDiedUnlinkedStatic),
++                      AIBinder_linkToDeath(  // registers callback
++                              binder.get(), mRecipient.get(),
++                              // we create functional cookie ptr which may outlive this object.
++                              new std::function<void()>(std::move(onBinderDied))))} {
+         ALOGW_IF(mStatus != OK, "%s: AIBinder_linkToDeath status:%d", __func__, mStatus);
+-        // We do not use AIBinder_DeathRecipient_setOnUnlinked() to do resource deallocation
+-        // as the functor mOnBinderDied is kept alive by this class.
+     }
+ 
+     ~RequestDeathNotificationNdk() {
+-        // The AIBinder_DeathRecipient dtor automatically unlinks all registered notifications,
+-        // so AIBinder_unlinkToDeath() is not needed here (elsewise we need to maintain a
+-        // AIBinder_Weak here).
++        // mRecipient's unique_ptr calls AIBinder_DeathRecipient_delete to unlink the recipient.
++        // Then OnBinderDiedUnlinkedStatic eventually deletes the cookie.
+     }
+ 
+     status_t getStatus() const {
+@@ -319,15 +320,14 @@ public:
+     }
+ 
+ private:
+-    void onBinderDied() {
+-        mOnBinderDied();
++    static void OnBinderDiedUnlinkedStatic(void* cookie) {
++        delete reinterpret_cast<std::function<void()>*>(cookie);
+     }
+ 
+-    static void OnBinderDiedStatic(void *cookie) {
+-        reinterpret_cast<RequestDeathNotificationNdk *>(cookie)->onBinderDied();
++    static void OnBinderDiedStatic(void* cookie) {
++        (*reinterpret_cast<std::function<void()>*>(cookie))();
+     }
+ 
+-    const std::function<void()> mOnBinderDied;
+     const std::unique_ptr<AIBinder_DeathRecipient, decltype(
+             &AIBinder_DeathRecipient_delete)>
+             mRecipient;
+@@ -362,8 +362,11 @@ std::shared_ptr<void> requestServiceNotification(
+ /**
+  * Requests a death notification.
+  *
+- * An opaque handle is returned - after clearing it is guaranteed that
+- * no notification will occur.
++ * An opaque handle is returned.  If the service is already dead, the
++ * handle will be null.
++ *
++ * Implementation detail: A callback may occur after the handle is released
++ * if a death notification is in progress.
+  *
+  * The callback will be of form void onBinderDied();
+  */
+diff --git a/media/utils/include/mediautils/ServiceSingleton.h b/media/utils/include/mediautils/ServiceSingleton.h
+index 644d9cd54c..fe8e9f2a8c 100644
+--- a/media/utils/include/mediautils/ServiceSingleton.h
++++ b/media/utils/include/mediautils/ServiceSingleton.h
+@@ -175,10 +175,14 @@ public:
+                 if (service_new) {
+                     mValid = true;
+                     service = std::move(service_new);
+-                    setDeathNotifier_l<Service>();
+-                    auto service_fixed = service;  // we're releasing the mutex.
++                    // service is a reference, so we copy to service_fixed as
++                    // we're releasing the mutex.
++                    const auto service_fixed = service;
+                     ul.unlock();
+                     traits->onNewService(interfaceFromBase<Service>(service_fixed));
++                    ul.lock();
++                    setDeathNotifier_l<Service>(service_fixed);
++                    ul.unlock();
+                     mCv.notify_all();
+                     return service_fixed;
+                 }
+@@ -297,8 +301,10 @@ private:
+                     if (originalService != service) {
+                         mService = service;
+                         mValid = true;
+-                        setDeathNotifier_l<Service>();
++                        ul.unlock();
+                         traits->onNewService(service);
++                        ul.lock();
++                        setDeathNotifier_l<Service>(service);
+                     }
+                     ul.unlock();
+                     mCv.notify_all();
+@@ -310,8 +316,12 @@ private:
+ 
+     // sets the death notifier for mService (mService must be non-null).
+     template <typename Service>
+-    void setDeathNotifier_l() REQUIRES(mMutex) {
+-        auto base = std::get<BaseInterfaceType<Service>>(mService);
++    void setDeathNotifier_l(const BaseInterfaceType<Service>& base) REQUIRES(mMutex) {
++        if (base != std::get<BaseInterfaceType<Service>>(mService)) {
++            ALOGW("%s: service has changed for %s, skipping death notification registration",
++                    __func__, toString(Service::descriptor).c_str());
++            return;
++        }
+         auto service = interfaceFromBase<Service>(base);
+         const auto binder = binderFromInterface(service);
+         if (binder.get()) {
+@@ -326,6 +336,8 @@ private:
+                         }
+                         traits->onServiceDied(service);
+                     });
++            // Implementation detail: if the service has already died,
++            // we do not call the death notification, but log the issue here.
+             ALOGW_IF(!mDeathNotificationHandle, "%s: cannot register death notification %s"
+                                                 " (already died?)",
+                     __func__, toString(Service::descriptor).c_str());
+diff --git a/media/utils/tests/service_singleton_tests.cpp b/media/utils/tests/service_singleton_tests.cpp
+index 8656a20b47..18d7f3dd73 100644
+--- a/media/utils/tests/service_singleton_tests.cpp
++++ b/media/utils/tests/service_singleton_tests.cpp
+@@ -258,7 +258,9 @@ TEST(service_singleton_tests, one_and_only) {
+ 
+         // we can also request our own death notifications (outside of the service traits).
+         handle3 = mediautils::requestDeathNotification(service, [&] { ++listenerServiceDied; });
++        EXPECT_TRUE(handle3);
+         handle4 = mediautils::requestDeathNotification(service2, [&] { ++listenerServiceDied; });
++        EXPECT_TRUE(handle4);
+     }
+ 
+     EXPECT_EQ(4, sNewService);
+@@ -352,6 +354,13 @@ TEST(service_singleton_tests, one_and_only) {
+ 
+     EXPECT_EQ(6, listenerServiceCreated);  // listener associated with service name picks up info.
+ 
++    // get service pointers that will be made stale later.
++    auto stale_service = mediautils::getService<IServiceSingletonTest>();
++    EXPECT_TRUE(stale_service);  // not stale yet.
++
++    auto stale_service2 = mediautils::getService<aidl::IServiceSingletonTest>();
++    EXPECT_TRUE(stale_service2);  // not stale yet.
++
+     // Release the service.
+     remoteWorker->putc('b');
+     EXPECT_EQ('b', remoteWorker->getc());
+@@ -362,4 +371,15 @@ TEST(service_singleton_tests, one_and_only) {
+     EXPECT_EQ(4, sServiceDied);
+     EXPECT_EQ(2, sNewService2);   // new counters change
+     EXPECT_EQ(2, sServiceDied2);
++
++    // The service handles are now stale, verify that we can't register a death notification.
++    {
++        std::atomic_int32_t postDied = 0;
++        // we cannot register death notification so handles are null.
++        auto handle1 = mediautils::requestDeathNotification(stale_service, [&] { ++postDied; });
++        EXPECT_FALSE(handle1);
++        auto handle2= mediautils::requestDeathNotification(stale_service2, [&] { ++postDied; });
++        EXPECT_FALSE(handle2);
++        EXPECT_EQ(0, postDied);  // no callbacks issued.
++    }
+ }
+-- 
+2.43.0
+

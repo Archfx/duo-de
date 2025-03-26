@@ -1,0 +1,133 @@
+From 23fb5fd4fbd9469565d95768ff099cdb18f1b311 Mon Sep 17 00:00:00 2001
+From: William Escande <wescande@google.com>
+Date: Tue, 3 Dec 2024 05:58:00 +0000
+Subject: [PATCH 387/436] Revert "Update bluetooth perm checking to perm cache"
+
+This reverts commit fe085f77819c7a71380a4c2d9d543aa854c80743.
+
+Reason for revert: b/381940267
+
+Will test with abtd prior to merge
+(cherry picked from https://googleplex-android-review.googlesource.com/q/commit:8b79359eb7a51a2ff0a4285801636dab600f0080)
+Merged-In: I621307c17c5377d3f89053fecc32486b16d57061
+Change-Id: I621307c17c5377d3f89053fecc32486b16d57061
+---
+ .../AidlConversionCppNdk.cpp                  |  2 +-
+ media/utils/ServiceUtilities.cpp              |  2 +-
+ .../include/mediautils/ServiceUtilities.h     |  2 +-
+ .../service/AudioPolicyInterfaceImpl.cpp      | 32 ++-----------------
+ 4 files changed, 6 insertions(+), 32 deletions(-)
+
+diff --git a/media/audioaidlconversion/AidlConversionCppNdk.cpp b/media/audioaidlconversion/AidlConversionCppNdk.cpp
+index 99b538152c..cb08b8c091 100644
+--- a/media/audioaidlconversion/AidlConversionCppNdk.cpp
++++ b/media/audioaidlconversion/AidlConversionCppNdk.cpp
+@@ -1100,7 +1100,7 @@ namespace {
+     // Use '01' for LSB bits 0 and 1 as Bluetooth MAC addresses are never multicast
+     // and universaly administered
+     constexpr std::array<uint8_t, 4> BTANON_PREFIX {0xFD, 0xFF, 0xFF, 0xFF};
+-    // Keep sync with ServiceUtilities.cpp anonymizeBluetoothAddress
++    // Keep sync with ServiceUtilities.cpp mustAnonymizeBluetoothAddress
+     constexpr const char * BTANON_PREFIX_STR = "XX:XX:XX:XX:";
+ }
+ 
+diff --git a/media/utils/ServiceUtilities.cpp b/media/utils/ServiceUtilities.cpp
+index ce8e00e945..8ceff96888 100644
+--- a/media/utils/ServiceUtilities.cpp
++++ b/media/utils/ServiceUtilities.cpp
+@@ -544,7 +544,7 @@ bool checkBluetoothPermission(const AttributionSourceState& attr) {
+  * @param caller string identifying the caller for logging.
+  * @return true if the MAC addresses must be anonymized, false otherwise.
+  */
+-bool mustAnonymizeBluetoothAddressLegacy(
++bool mustAnonymizeBluetoothAddress(
+         const AttributionSourceState& attributionSource, const String16&) {
+     uid_t uid = VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid));
+     bool res;
+diff --git a/media/utils/include/mediautils/ServiceUtilities.h b/media/utils/include/mediautils/ServiceUtilities.h
+index 2960232b39..42789d5b20 100644
+--- a/media/utils/include/mediautils/ServiceUtilities.h
++++ b/media/utils/include/mediautils/ServiceUtilities.h
+@@ -116,7 +116,7 @@ bool modifyPhoneStateAllowed(const AttributionSourceState& attributionSource);
+ bool bypassInterruptionPolicyAllowed(const AttributionSourceState& attributionSource);
+ bool callAudioInterceptionAllowed(const AttributionSourceState& attributionSource);
+ void purgePermissionCache();
+-bool mustAnonymizeBluetoothAddressLegacy(
++bool mustAnonymizeBluetoothAddress(
+         const AttributionSourceState& attributionSource, const String16& caller);
+ void anonymizeBluetoothAddress(char *address);
+ 
+diff --git a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+index 0d342a8c89..802ebeb318 100644
+--- a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
++++ b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+@@ -78,7 +78,6 @@ using com::android::media::permission::PermissionEnum::MODIFY_DEFAULT_AUDIO_EFFE
+ using com::android::media::permission::PermissionEnum::MODIFY_PHONE_STATE;
+ using com::android::media::permission::PermissionEnum::RECORD_AUDIO;
+ using com::android::media::permission::PermissionEnum::WRITE_SECURE_SETTINGS;
+-using com::android::media::permission::PermissionEnum::BLUETOOTH_CONNECT;
+ using com::android::media::permission::PermissionEnum::BYPASS_CONCURRENT_RECORD_AUDIO_RESTRICTION;
+ using content::AttributionSourceState;
+ using media::audio::common::AudioConfig;
+@@ -99,28 +98,6 @@ constexpr int kDefaultVirtualDeviceId = 0;
+ namespace {
+ constexpr auto PERMISSION_HARD_DENIED = permission::PermissionChecker::PERMISSION_HARD_DENIED;
+ constexpr auto PERMISSION_GRANTED = permission::PermissionChecker::PERMISSION_GRANTED;
+-
+-bool mustAnonymizeBluetoothAddress(const AttributionSourceState& attributionSource,
+-                                   const String16& caller,
+-                                   const IPermissionProvider& provider) {
+-    if (audioserver_permissions()) {
+-        switch(multiuser_get_app_id(attributionSource.uid)) {
+-            // out of caution, to prevent regression
+-            case AID_RADIO:
+-            case AID_BLUETOOTH:
+-            case AID_MEDIA:
+-                return true;
+-        }
+-        const auto res = provider.checkPermission(BLUETOOTH_CONNECT, attributionSource.uid);
+-        if (!res.has_value()) {
+-            ALOGE("%s: error: %s", __func__, res.error().toString8().c_str());
+-        }
+-        return *res;
+-    } else {
+-        return mustAnonymizeBluetoothAddressLegacy(attributionSource, caller);
+-    }
+-}
+-
+ }
+ 
+ const std::vector<audio_usage_t>& SYSTEM_USAGES = {
+@@ -1804,8 +1781,7 @@ Status AudioPolicyService::listAudioPorts(media::AudioPortRole roleAidl,
+         numPortsReq = std::min(numPortsReq, num_ports);
+     }
+ 
+-    if (mustAnonymizeBluetoothAddress(attributionSource, String16(__func__),
+-                                      getPermissionProvider())) {
++    if (mustAnonymizeBluetoothAddress(attributionSource, String16(__func__))) {
+         for (size_t i = 0; i < numPortsReq; ++i) {
+             anonymizePortBluetoothAddress(ports[i]);
+         }
+@@ -1847,8 +1823,7 @@ Status AudioPolicyService::getAudioPort(int portId,
+         RETURN_IF_BINDER_ERROR(binderStatusFromStatusT(mAudioPolicyManager->getAudioPort(&port)));
+     }
+ 
+-    if (mustAnonymizeBluetoothAddress(attributionSource, String16(__func__),
+-                                      getPermissionProvider())) {
++    if (mustAnonymizeBluetoothAddress(attributionSource, String16(__func__))) {
+         anonymizePortBluetoothAddress(port);
+     }
+ 
+@@ -1928,8 +1903,7 @@ Status AudioPolicyService::listAudioPatches(Int* count,
+         numPatchesReq = std::min(numPatchesReq, num_patches);
+     }
+ 
+-    if (mustAnonymizeBluetoothAddress(attributionSource, String16(__func__),
+-                                      getPermissionProvider())) {
++    if (mustAnonymizeBluetoothAddress(attributionSource, String16(__func__))) {
+         for (size_t i = 0; i < numPatchesReq; ++i) {
+             for (size_t j = 0; j < patches[i].num_sources; ++j) {
+                 anonymizePortBluetoothAddress(patches[i].sources[j]);
+-- 
+2.43.0
+

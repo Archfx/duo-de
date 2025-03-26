@@ -1,0 +1,125 @@
+From 376e28527e427aabc0e8f96bf3e8466507dcf034 Mon Sep 17 00:00:00 2001
+From: Arun Johnson <arunjohnson@google.com>
+Date: Tue, 15 Oct 2024 23:20:19 +0000
+Subject: [PATCH 107/436] MultiAccessunit benchmarks transfer multiple access
+ unit infos
+
+Multiple access units can be send with this change
+
+Bug: 361349204
+Flag: EXEMPT does not affect framework behaviour
+
+Change-Id: I2d644c0d9730006a55efb05c67b02ba49bcb3fca
+---
+ .../media/benchmark/library/IBufferXfer.java  | 11 +++--
+ .../benchmark/library/IBufferXferImpl.java    |  2 +-
+ .../library/MultiAccessUnitDecoder.java       | 40 ++++++-------------
+ 3 files changed, 21 insertions(+), 32 deletions(-)
+
+diff --git a/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/IBufferXfer.java b/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/IBufferXfer.java
+index c97a35cc22..bbc3d48fad 100644
+--- a/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/IBufferXfer.java
++++ b/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/IBufferXfer.java
+@@ -16,6 +16,8 @@
+ 
+ package com.android.media.benchmark.library;
+ import android.media.MediaCodec;
++
++import java.util.ArrayDeque;
+ import java.nio.ByteBuffer;
+ /**
+  * interfaces that can be used to implement
+@@ -26,10 +28,11 @@ public class IBufferXfer {
+       public ByteBuffer buf;
+       public int idx;
+       public Object obj;
+-      int flag;
+-      int bytesRead;
+-      boolean isComplete = true;
+-      long presentationTimeUs;
++      public ArrayDeque<MediaCodec.BufferInfo> infos;
++      public int flag;
++      public int bytesRead;
++      public boolean isComplete = true;
++      public long presentationTimeUs;
+   }
+ 
+   public interface IReceiveBuffer {
+diff --git a/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/IBufferXferImpl.java b/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/IBufferXferImpl.java
+index 3e6cee1e05..c68ac8aeee 100644
+--- a/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/IBufferXferImpl.java
++++ b/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/IBufferXferImpl.java
+@@ -96,10 +96,10 @@ public class IBufferXferImpl implements IBufferXfer.ISendBuffer {
+                       pBuf.info.buf.remaining() +" C:" + cBuf.info.buf.remaining());
+               }
+           }
++          cBuf.info.infos = pBuf.info.infos;
+           cBuf.info.bytesRead = bytesRead;
+           cBuf.info.presentationTimeUs = pBuf.info.presentationTimeUs;
+           cBuf.info.flag = pBuf.info.flag;
+-
+           if (pBuf.rIface != null) {
+               pBuf.rIface.receiveBuffer(pBuf.info);
+           }
+diff --git a/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/MultiAccessUnitDecoder.java b/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/MultiAccessUnitDecoder.java
+index dd4b0af47c..fd8859beb5 100644
+--- a/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/MultiAccessUnitDecoder.java
++++ b/media/tests/benchmark/MediaBenchmarkTest/src/main/java/com/android/media/benchmark/library/MultiAccessUnitDecoder.java
+@@ -199,41 +199,27 @@ public class MultiAccessUnitDecoder extends Decoder {
+                 Log.d(TAG, "Error Dumping File: Exception " + e.toString());
+             }
+         }
+-        Iterator<BufferInfo> iter = infos.iterator();
+-        while (iter.hasNext()) {
+-            BufferInfo bufferInfo = iter.next();
+-            mNumOutputFrame++;
+-            if (DEBUG) {
+-                Log.d(TAG,
+-                        "In OutputBuffersAvailable ,"
+-                                + " OutputBuffer ID " + outputBufferId
+-                                + " output frame number = " + mNumOutputFrame
+-                                + " timestamp = " + bufferInfo.presentationTimeUs
+-                                + " size = " + bufferInfo.size);
+-            }
+-            if (mIBufferSend != null && mFrameReleaseQueue == null) {
+-                IBufferXfer.BufferXferInfo info = new IBufferXfer.BufferXferInfo();
+-                info.buf = mc.getOutputBuffer(outputBufferId);
+-                info.idx = outputBufferId;
+-                info.obj = mc;
+-                info.bytesRead = bufferInfo.size;
+-                info.presentationTimeUs = bufferInfo.presentationTimeUs;
+-                info.flag = bufferInfo.flags;
+-                info.isComplete = iter.hasNext() ? false : true;
+-                mIBufferSend.sendBuffer(this, info);
+-            }
+-            mSawOutputEOS |= (bufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0;
++        mNumOutputFrame += infos.size();
++        MediaCodec.BufferInfo last = infos.peekLast();
++        if (last != null) {
++            mSawOutputEOS |= ((last.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0);
+         }
+-        if (mFrameReleaseQueue != null) {
++        if (mIBufferSend != null) {
++            IBufferXfer.BufferXferInfo info = new IBufferXfer.BufferXferInfo();
++            info.buf = mc.getOutputBuffer(outputBufferId);
++            info.idx = outputBufferId;
++            info.obj = mc;
++            info.infos = infos;
++            mIBufferSend.sendBuffer(this, info);
++        } else if (mFrameReleaseQueue != null) {
+             ByteBuffer outputBuffer = mc.getOutputBuffer(outputBufferId);
+             mFrameReleaseQueue.pushFrame(
+                     outputBufferId, outputBuffer.remaining());
+-        } else if (mIBufferSend == null) {
++        } else {
+             mc.releaseOutputBuffer(outputBufferId, mRender);
+         }
+         if (mSawOutputEOS) {
+             Log.i(TAG, "Large frame - saw output EOS");
+         }
+-        // we don't support frame release queue for large audio frame
+     }
+ }
+-- 
+2.43.0
+

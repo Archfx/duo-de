@@ -1,0 +1,400 @@
+From 07971a32acb95fe50f5055e81ce32fb0a0cd8872 Mon Sep 17 00:00:00 2001
+From: Atneya Nair <atneya@google.com>
+Date: Fri, 4 Oct 2024 14:33:21 -0700
+Subject: [PATCH 057/436] Anonymize bt addresses in listAudioPorts
+
+Fix a security bypass where listAudioPorts would provide BT MAC
+addresses without the required permission.
+
+If a client doesn't have BLUETOOTH_CONNECT, partially redact the
+address. To avoid performance issues, this change:
+ - Caches uids which hold the permission, invalidating them on the
+   package manager cache invalidation sysprop
+ - Ensures we only call the check outside of any locks in audioserver.
+
+Soaking for backport on main, a better solution to follow.
+
+Test: Manual repro using the POC app
+Bug: 285588444
+Flag: EXEMPT security
+Change-Id: Ide27226237236380814e6f19a74d1ce1e72828fd
+---
+ .../AidlConversionCppNdk.cpp                  |  36 +++++-
+ .../audio_aidl_legacy_conversion_tests.cpp    |  19 ++++
+ media/utils/ServiceUtilities.cpp              | 105 +++++++++++++++++-
+ .../include/mediautils/ServiceUtilities.h     |   4 +
+ .../service/AudioPolicyInterfaceImpl.cpp      |  94 ++++++++++++----
+ 5 files changed, 234 insertions(+), 24 deletions(-)
+
+diff --git a/media/audioaidlconversion/AidlConversionCppNdk.cpp b/media/audioaidlconversion/AidlConversionCppNdk.cpp
+index 01b6e429ce..890a1c72e8 100644
+--- a/media/audioaidlconversion/AidlConversionCppNdk.cpp
++++ b/media/audioaidlconversion/AidlConversionCppNdk.cpp
+@@ -1055,6 +1055,14 @@ AudioDeviceAddress::Tag suggestDeviceAddressTag(const AudioDeviceDescription& de
+     return OK;
+ }
+ 
++namespace {
++    // Use '01' for LSB bits 0 and 1 as Bluetooth MAC addresses are never multicast
++    // and universaly administered
++    constexpr std::array<uint8_t, 4> BTANON_PREFIX {0xFD, 0xFF, 0xFF, 0xFF};
++    // Keep sync with ServiceUtilities.cpp mustAnonymizeBluetoothAddress
++    constexpr const char * BTANON_PREFIX_STR = "XX:XX:XX:XX:";
++}
++
+ ::android::status_t aidl2legacy_AudioDevice_audio_device(
+         const AudioDevice& aidl,
+         audio_devices_t* legacyType, std::string* legacyAddress) {
+@@ -1069,8 +1077,16 @@ AudioDeviceAddress::Tag suggestDeviceAddressTag(const AudioDeviceDescription& de
+         case Tag::mac: {
+             const std::vector<uint8_t>& mac = aidl.address.get<AudioDeviceAddress::mac>();
+             if (mac.size() != 6) return BAD_VALUE;
+-            snprintf(addressBuffer, AUDIO_DEVICE_MAX_ADDRESS_LEN, "%02X:%02X:%02X:%02X:%02X:%02X",
+-                    mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
++            if (std::equal(BTANON_PREFIX.begin(), BTANON_PREFIX.end(), mac.begin())) {
++                // special case for anonymized mac address:
++                // change anonymized bytes back from FD:FF:FF:FF: to XX:XX:XX:XX:
++                snprintf(addressBuffer, AUDIO_DEVICE_MAX_ADDRESS_LEN,
++                        "%s%02X:%02X", BTANON_PREFIX_STR, mac[4], mac[5]);
++            } else {
++                snprintf(addressBuffer, AUDIO_DEVICE_MAX_ADDRESS_LEN,
++                        "%02X:%02X:%02X:%02X:%02X:%02X",
++                        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
++            }
+         } break;
+         case Tag::ipv4: {
+             const std::vector<uint8_t>& ipv4 = aidl.address.get<AudioDeviceAddress::ipv4>();
+@@ -1132,8 +1148,20 @@ legacy2aidl_audio_device_AudioDevice(
+         switch (suggestDeviceAddressTag(aidl.type)) {
+             case Tag::mac: {
+                 std::vector<uint8_t> mac(6);
+-                int status = sscanf(legacyAddress.c_str(), "%hhX:%hhX:%hhX:%hhX:%hhX:%hhX",
+-                        &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]);
++                int status;
++                // special case for anonymized mac address:
++                // change anonymized bytes so that they can be scanned as HEX bytes
++                if (legacyAddress.starts_with(BTANON_PREFIX_STR)) {
++                    std::copy(BTANON_PREFIX.begin(), BTANON_PREFIX.end(), mac.begin());
++                    LOG_ALWAYS_FATAL_IF(legacyAddress.length() <= strlen(BTANON_PREFIX_STR));
++                    status = sscanf(legacyAddress.c_str() + strlen(BTANON_PREFIX_STR),
++                                        "%hhX:%hhX",
++                                        &mac[4], &mac[5]);
++                    status += 4;
++                } else {
++                    status = sscanf(legacyAddress.c_str(), "%hhX:%hhX:%hhX:%hhX:%hhX:%hhX",
++                            &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]);
++                }
+                 if (status != mac.size()) {
+                     ALOGE("%s: malformed MAC address: \"%s\"", __func__, legacyAddress.c_str());
+                     return unexpected(BAD_VALUE);
+diff --git a/media/libaudioclient/tests/audio_aidl_legacy_conversion_tests.cpp b/media/libaudioclient/tests/audio_aidl_legacy_conversion_tests.cpp
+index 7f55e48b21..20760451d0 100644
+--- a/media/libaudioclient/tests/audio_aidl_legacy_conversion_tests.cpp
++++ b/media/libaudioclient/tests/audio_aidl_legacy_conversion_tests.cpp
+@@ -483,8 +483,27 @@ INSTANTIATE_TEST_SUITE_P(
+                                  AudioDeviceAddress::make<AudioDeviceAddress::Tag::alsa>(
+                                          std::vector<int32_t>{1, 2}))));
+ 
++TEST(AnonymizedBluetoothAddressRoundTripTest, Legacy2Aidl2Legacy) {
++    const std::vector<uint8_t> sAnonymizedAidlAddress {0xFD, 0xFF, 0xFF, 0xFF, 0xAB, 0xCD};
++    const std::string sAnonymizedLegacyAddress = std::string("XX:XX:XX:XX:AB:CD");
++    auto device = legacy2aidl_audio_device_AudioDevice(AUDIO_DEVICE_OUT_BLUETOOTH_A2DP,
++                                                       sAnonymizedLegacyAddress);
++    ASSERT_TRUE(device.ok());
++    ASSERT_EQ(AudioDeviceAddress::Tag::mac, device.value().address.getTag());
++    ASSERT_EQ(sAnonymizedAidlAddress, device.value().address.get<AudioDeviceAddress::mac>());
++
++    audio_devices_t legacyType;
++    std::string legacyAddress;
++    status_t status =
++            aidl2legacy_AudioDevice_audio_device(device.value(), &legacyType, &legacyAddress);
++    ASSERT_EQ(OK, status);
++    EXPECT_EQ(legacyType, AUDIO_DEVICE_OUT_BLUETOOTH_A2DP);
++    EXPECT_EQ(sAnonymizedLegacyAddress, legacyAddress);
++}
++
+ class AudioFormatDescriptionRoundTripTest : public testing::TestWithParam<AudioFormatDescription> {
+ };
++
+ TEST_P(AudioFormatDescriptionRoundTripTest, Aidl2Legacy2Aidl) {
+     const auto initial = GetParam();
+     auto conv = aidl2legacy_AudioFormatDescription_audio_format_t(initial);
+diff --git a/media/utils/ServiceUtilities.cpp b/media/utils/ServiceUtilities.cpp
+index e13f8f7581..4e6492fe36 100644
+--- a/media/utils/ServiceUtilities.cpp
++++ b/media/utils/ServiceUtilities.cpp
+@@ -18,6 +18,7 @@
+ #define LOG_TAG "ServiceUtilities"
+ 
+ #include <audio_utils/clock.h>
++#include <android-base/properties.h>
+ #include <binder/AppOpsManager.h>
+ #include <binder/IPCThreadState.h>
+ #include <binder/IServiceManager.h>
+@@ -28,9 +29,11 @@
+ #include <media/AidlConversionUtil.h>
+ #include <android/content/AttributionSourceState.h>
+ 
+-#include <iterator>
+ #include <algorithm>
++#include <iterator>
++#include <mutex>
+ #include <pwd.h>
++#include <thread>
+ 
+ /* When performing permission checks we do not use permission cache for
+  * runtime permissions (protection level dangerous) as they may change at
+@@ -396,6 +399,106 @@ status_t checkIMemory(const sp<IMemory>& iMemory)
+     return NO_ERROR;
+ }
+ 
++// TODO(b/285588444), clean this up on main, but soak it for backporting purposes for now
++namespace {
++class BluetoothPermissionCache {
++    static constexpr auto SYSPROP_NAME = "cache_key.system_server.package_info";
++    const String16 BLUETOOTH_PERM {"android.permission.BLUETOOTH_CONNECT"};
++    mutable std::mutex mLock;
++    // Cached property conditionally defined, since only avail on bionic. On host, don't inval cache
++#if defined(__BIONIC__)
++    // Unlocked, but only accessed from mListenerThread
++    base::CachedProperty mCachedProperty;
++#endif
++    // This thread is designed to never join/terminate, so no signal is fine
++    const std::thread mListenerThread;
++    GUARDED_BY(mLock)
++    std::string mPropValue;
++    GUARDED_BY(mLock)
++    std::unordered_map<uid_t, bool> mCache;
++    PermissionController mPc{};
++public:
++    BluetoothPermissionCache()
++#if defined(__BIONIC__)
++            : mCachedProperty{SYSPROP_NAME},
++            mListenerThread([this]() mutable {
++                    while (true) {
++                        std::string newVal = mCachedProperty.WaitForChange() ?: "";
++                        std::lock_guard l{mLock};
++                        if (newVal != mPropValue) {
++                            ALOGV("Bluetooth permission update");
++                            mPropValue = newVal;
++                            mCache.clear();
++                        }
++                    }
++                })
++#endif
++            {}
++
++    bool checkPermission(uid_t uid, pid_t pid) {
++        std::lock_guard l{mLock};
++        auto it = mCache.find(uid);
++        if (it == mCache.end()) {
++            it = mCache.insert({uid, mPc.checkPermission(BLUETOOTH_PERM, uid, pid)}).first;
++        }
++        return it->second;
++    }
++};
++
++// Don't call this from locks, since it potentially calls up to system server!
++// Check for non-app UIDs above this method!
++bool checkBluetoothPermission(const AttributionSourceState& attr) {
++    [[clang::no_destroy]]  static BluetoothPermissionCache impl{};
++    return impl.checkPermission(attr.uid, attr.pid);
++}
++} // anonymous
++
++/**
++ * Determines if the MAC address in Bluetooth device descriptors returned by APIs of
++ * a native audio service (audio flinger, audio policy) must be anonymized.
++ * MAC addresses returned to system server or apps with BLUETOOTH_CONNECT permission
++ * are not anonymized.
++ *
++ * @param attributionSource The attribution source of the calling app.
++ * @param caller string identifying the caller for logging.
++ * @return true if the MAC addresses must be anonymized, false otherwise.
++ */
++bool mustAnonymizeBluetoothAddress(
++        const AttributionSourceState& attributionSource, const String16&) {
++    uid_t uid = VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid));
++    bool res;
++    switch(multiuser_get_app_id(uid)) {
++        case AID_ROOT:
++        case AID_SYSTEM:
++        case AID_RADIO:
++        case AID_BLUETOOTH:
++        case AID_MEDIA:
++        case AID_AUDIOSERVER:
++            // Don't anonymize for privileged clients
++            res = false;
++            break;
++        default:
++            res = !checkBluetoothPermission(attributionSource);
++            break;
++    }
++    ALOGV("%s uid: %d, result: %d", __func__, uid, res);
++    return res;
++}
++
++/**
++ * Modifies the passed MAC address string in place for consumption by unprivileged clients.
++ * the string is assumed to have a valid MAC address format.
++ * the anonymization must be kept in sync with toAnonymizedAddress() in BluetoothUtils.java
++ *
++ * @param address input/output the char string contining the MAC address to anonymize.
++ */
++void anonymizeBluetoothAddress(char *address) {
++    if (address == nullptr || strlen(address) != strlen("AA:BB:CC:DD:EE:FF")) {
++        return;
++    }
++    memcpy(address, "XX:XX:XX:XX", strlen("XX:XX:XX:XX"));
++}
++
+ sp<content::pm::IPackageManagerNative> MediaPackageManager::retrievePackageManager() {
+     const sp<IServiceManager> sm = defaultServiceManager();
+     if (sm == nullptr) {
+diff --git a/media/utils/include/mediautils/ServiceUtilities.h b/media/utils/include/mediautils/ServiceUtilities.h
+index 2631469719..461e190745 100644
+--- a/media/utils/include/mediautils/ServiceUtilities.h
++++ b/media/utils/include/mediautils/ServiceUtilities.h
+@@ -114,6 +114,10 @@ bool modifyPhoneStateAllowed(const AttributionSourceState& attributionSource);
+ bool bypassInterruptionPolicyAllowed(const AttributionSourceState& attributionSource);
+ bool callAudioInterceptionAllowed(const AttributionSourceState& attributionSource);
+ void purgePermissionCache();
++bool mustAnonymizeBluetoothAddress(
++        const AttributionSourceState& attributionSource, const String16& caller);
++void anonymizeBluetoothAddress(char *address);
++
+ int32_t getOpForSource(audio_source_t source);
+ 
+ AttributionSourceState getCallingAttributionSource();
+diff --git a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+index 24ab6a1c6e..60b155daa0 100644
+--- a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
++++ b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+@@ -1687,6 +1687,19 @@ Status AudioPolicyService::isDirectOutputSupported(
+     return Status::ok();
+ }
+ 
++template <typename Port>
++void anonymizePortBluetoothAddress(Port& port) {
++    if (port.type != AUDIO_PORT_TYPE_DEVICE) {
++        return;
++    }
++    if (!(audio_is_a2dp_device(port.ext.device.type)
++            || audio_is_ble_device(port.ext.device.type)
++            || audio_is_bluetooth_sco_device(port.ext.device.type)
++            || audio_is_hearing_aid_out_device(port.ext.device.type))) {
++        return;
++    }
++    anonymizeBluetoothAddress(port.ext.device.address);
++}
+ 
+ Status AudioPolicyService::listAudioPorts(media::AudioPortRole roleAidl,
+                                           media::AudioPortType typeAidl, Int* count,
+@@ -1705,14 +1718,27 @@ Status AudioPolicyService::listAudioPorts(media::AudioPortRole roleAidl,
+     std::unique_ptr<audio_port_v7[]> ports(new audio_port_v7[num_ports]);
+     unsigned int generation;
+ 
+-    audio_utils::lock_guard _l(mMutex);
+-    if (mAudioPolicyManager == NULL) {
+-        return binderStatusFromStatusT(NO_INIT);
+-    }
++    const AttributionSourceState attributionSource = getCallingAttributionSource();
+     AutoCallerClear acc;
+-    RETURN_IF_BINDER_ERROR(binderStatusFromStatusT(
+-            mAudioPolicyManager->listAudioPorts(role, type, &num_ports, ports.get(), &generation)));
+-    numPortsReq = std::min(numPortsReq, num_ports);
++    {
++        audio_utils::lock_guard _l(mMutex);
++        if (mAudioPolicyManager == NULL) {
++            return binderStatusFromStatusT(NO_INIT);
++        }
++        // AudioPolicyManager->listAudioPorts makes a deep copy of port structs into ports
++        // so it is safe to access after releasing the mutex
++        RETURN_IF_BINDER_ERROR(binderStatusFromStatusT(
++                mAudioPolicyManager->listAudioPorts(
++                        role, type, &num_ports, ports.get(), &generation)));
++        numPortsReq = std::min(numPortsReq, num_ports);
++    }
++
++    if (mustAnonymizeBluetoothAddress(attributionSource, String16(__func__))) {
++        for (size_t i = 0; i < numPortsReq; ++i) {
++            anonymizePortBluetoothAddress(ports[i]);
++        }
++    }
++
+     RETURN_IF_BINDER_ERROR(binderStatusFromStatusT(
+             convertRange(ports.get(), ports.get() + numPortsReq, std::back_inserter(*portsAidl),
+                          legacy2aidl_audio_port_v7_AudioPortFw)));
+@@ -1735,12 +1761,24 @@ Status AudioPolicyService::listDeclaredDevicePorts(media::AudioPortRole role,
+ Status AudioPolicyService::getAudioPort(int portId,
+                                         media::AudioPortFw* _aidl_return) {
+     audio_port_v7 port{ .id = portId };
+-    audio_utils::lock_guard _l(mMutex);
+-    if (mAudioPolicyManager == NULL) {
+-        return binderStatusFromStatusT(NO_INIT);
+-    }
++
++    const AttributionSourceState attributionSource = getCallingAttributionSource();
+     AutoCallerClear acc;
+-    RETURN_IF_BINDER_ERROR(binderStatusFromStatusT(mAudioPolicyManager->getAudioPort(&port)));
++
++    {
++        audio_utils::lock_guard _l(mMutex);
++        if (mAudioPolicyManager == NULL) {
++            return binderStatusFromStatusT(NO_INIT);
++        }
++        // AudioPolicyManager->getAudioPort makes a deep copy of the port struct into port
++        // so it is safe to access after releasing the mutex
++        RETURN_IF_BINDER_ERROR(binderStatusFromStatusT(mAudioPolicyManager->getAudioPort(&port)));
++    }
++
++    if (mustAnonymizeBluetoothAddress(attributionSource, String16(__func__))) {
++        anonymizePortBluetoothAddress(port);
++    }
++
+     *_aidl_return = VALUE_OR_RETURN_BINDER_STATUS(legacy2aidl_audio_port_v7_AudioPortFw(port));
+     return Status::ok();
+ }
+@@ -1802,14 +1840,32 @@ Status AudioPolicyService::listAudioPatches(Int* count,
+     std::unique_ptr<audio_patch[]> patches(new audio_patch[num_patches]);
+     unsigned int generation;
+ 
+-    audio_utils::lock_guard _l(mMutex);
+-    if (mAudioPolicyManager == NULL) {
+-        return binderStatusFromStatusT(NO_INIT);
+-    }
++    const AttributionSourceState attributionSource = getCallingAttributionSource();
+     AutoCallerClear acc;
+-    RETURN_IF_BINDER_ERROR(binderStatusFromStatusT(
+-            mAudioPolicyManager->listAudioPatches(&num_patches, patches.get(), &generation)));
+-    numPatchesReq = std::min(numPatchesReq, num_patches);
++
++    {
++        audio_utils::lock_guard _l(mMutex);
++        if (mAudioPolicyManager == NULL) {
++            return binderStatusFromStatusT(NO_INIT);
++        }
++        // AudioPolicyManager->listAudioPatches makes a deep copy of patches structs into patches
++        // so it is safe to access after releasing the mutex
++        RETURN_IF_BINDER_ERROR(binderStatusFromStatusT(
++                mAudioPolicyManager->listAudioPatches(&num_patches, patches.get(), &generation)));
++        numPatchesReq = std::min(numPatchesReq, num_patches);
++    }
++
++    if (mustAnonymizeBluetoothAddress(attributionSource, String16(__func__))) {
++        for (size_t i = 0; i < numPatchesReq; ++i) {
++            for (size_t j = 0; j < patches[i].num_sources; ++j) {
++                anonymizePortBluetoothAddress(patches[i].sources[j]);
++            }
++            for (size_t j = 0; j < patches[i].num_sinks; ++j) {
++                anonymizePortBluetoothAddress(patches[i].sinks[j]);
++            }
++        }
++    }
++
+     RETURN_IF_BINDER_ERROR(binderStatusFromStatusT(
+             convertRange(patches.get(), patches.get() + numPatchesReq,
+                          std::back_inserter(*patchesAidl), legacy2aidl_audio_patch_AudioPatchFw)));
+-- 
+2.43.0
+

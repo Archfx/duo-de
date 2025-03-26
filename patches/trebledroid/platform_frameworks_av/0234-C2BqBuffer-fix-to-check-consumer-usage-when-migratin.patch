@@ -1,0 +1,31 @@
+From 8a007370c558fb45ebfa5f31a5c636901b0ae548 Mon Sep 17 00:00:00 2001
+From: Taehwan Kim <t_h.kim@samsung.com>
+Date: Wed, 6 Nov 2024 13:05:31 +0900
+Subject: [PATCH 234/436] C2BqBuffer: fix to check consumer usage when
+ migrating during surface change
+
+Bug: 373331408
+Test: atest android.mediav2.cts.CodecDecoderSurfaceTest
+
+Signed-off-by: Taehwan Kim <t_h.kim@samsung.com>
+Change-Id: I7f2ed15faab87d833da8ace4923c735e6e7a5407
+---
+ media/codec2/vndk/platform/C2BqBuffer.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/media/codec2/vndk/platform/C2BqBuffer.cpp b/media/codec2/vndk/platform/C2BqBuffer.cpp
+index 665f9fc757..17dfe9c95f 100644
+--- a/media/codec2/vndk/platform/C2BqBuffer.cpp
++++ b/media/codec2/vndk/platform/C2BqBuffer.cpp
+@@ -997,7 +997,7 @@ int C2BufferQueueBlockPoolData::migrate(
+         return -1;
+     }
+ 
+-    if (toUsage != graphicBuffer->getUsage()) {
++    if ((toUsage & graphicBuffer->getUsage()) != toUsage) {
+         sp<GraphicBuffer> newBuffer = new GraphicBuffer(
+             graphicBuffer->handle, GraphicBuffer::CLONE_HANDLE,
+             graphicBuffer->width, graphicBuffer->height, graphicBuffer->format,
+-- 
+2.43.0
+

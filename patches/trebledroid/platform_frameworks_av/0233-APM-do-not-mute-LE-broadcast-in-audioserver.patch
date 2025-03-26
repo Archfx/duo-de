@@ -1,0 +1,34 @@
+From 444e95e5c92620a585b201c3b995bb59a3b53bad Mon Sep 17 00:00:00 2001
+From: Vlad Popa <pvlad@google.com>
+Date: Thu, 7 Nov 2024 18:26:20 -0800
+Subject: [PATCH 233/436] APM: do not mute LE broadcast in audioserver
+
+This way the primary device will still be muted by the LE volume API and
+the secondary device can continue playing music content.
+
+Test: manual
+Flag: EXEMPT bugfix
+Bug: 359715033
+Change-Id: I0265017697456bc3bf1d30e389c8957e90b4e92b
+---
+ services/audiopolicy/managerdefault/AudioPolicyManager.cpp | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index 000b5717e8..addbd10e32 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -8341,7 +8341,9 @@ float AudioPolicyManager::adjustDeviceAttenuationForAbsVolume(IVolumeCurves &cur
+             VolumeSource vsToDriveAbs = toVolumeSource(groupToDriveAbs);
+             if (vsToDriveAbs == volumeSource) {
+                 // attenuation is applied by the abs volume controller
+-                return (index != 0) ? volumeDbMax : volumeDb;
++                // do not mute LE broadcast to allow the secondary device to continue playing
++                return (index != 0 || volumeDevice == AUDIO_DEVICE_OUT_BLE_BROADCAST) ? volumeDbMax
++                                                                                      : volumeDb;
+             } else {
+                 IVolumeCurves &curvesAbs = getVolumeCurves(vsToDriveAbs);
+                 int indexAbs = curvesAbs.getVolumeIndex({volumeDevice});
+-- 
+2.43.0
+

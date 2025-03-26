@@ -1,0 +1,640 @@
+From c07437e7666eefba5079e8f0cf887a813fc66f29 Mon Sep 17 00:00:00 2001
+From: Songyue Han <songyueh@google.com>
+Date: Fri, 8 Nov 2024 07:43:06 +0000
+Subject: [PATCH 286/436] CodecCapabilities: Replace ParseIntRange with
+ Range::Parse and replace int with int32_t.
+
+Test: atest AudioCapsAacTest AudioCapsRawTest
+Bug: Bug: 306023029
+Change-Id: I183e2c616d00a5e3af4eb464415c9ba26b2293da
+---
+ media/libmedia/AudioCapabilities.cpp          | 152 +++++++++---------
+ media/libmedia/CodecCapabilitiesUtils.cpp     |  19 ---
+ .../include/media/AudioCapabilities.h         |  28 ++--
+ .../include/media/CodecCapabilitiesUtils.h    |  38 ++++-
+ .../CodecCapabilitiesTest.cpp                 |  18 +--
+ 5 files changed, 135 insertions(+), 120 deletions(-)
+
+diff --git a/media/libmedia/AudioCapabilities.cpp b/media/libmedia/AudioCapabilities.cpp
+index 1a923076c6..dbbe9e81a5 100644
+--- a/media/libmedia/AudioCapabilities.cpp
++++ b/media/libmedia/AudioCapabilities.cpp
+@@ -30,19 +30,19 @@ const Range<int32_t>& AudioCapabilities::getBitrateRange() const {
+     return mBitrateRange;
+ }
+ 
+-const std::vector<int>& AudioCapabilities::getSupportedSampleRates() const {
++const std::vector<int32_t>& AudioCapabilities::getSupportedSampleRates() const {
+     return mSampleRates;
+ }
+ 
+-const std::vector<Range<int>>&
++const std::vector<Range<int32_t>>&
+         AudioCapabilities::getSupportedSampleRateRanges() const {
+     return mSampleRateRanges;
+ }
+ 
+-int AudioCapabilities::getMaxInputChannelCount() const {
+-    int overallMax = 0;
++int32_t AudioCapabilities::getMaxInputChannelCount() const {
++    int32_t overallMax = 0;
+     for (int i = mInputChannelRanges.size() - 1; i >= 0; i--) {
+-        int lmax = mInputChannelRanges[i].upper();
++        int32_t lmax = mInputChannelRanges[i].upper();
+         if (lmax > overallMax) {
+             overallMax = lmax;
+         }
+@@ -50,10 +50,10 @@ int AudioCapabilities::getMaxInputChannelCount() const {
+     return overallMax;
+ }
+ 
+-int AudioCapabilities::getMinInputChannelCount() const {
+-    int overallMin = MAX_INPUT_CHANNEL_COUNT;
++int32_t AudioCapabilities::getMinInputChannelCount() const {
++    int32_t overallMin = MAX_INPUT_CHANNEL_COUNT;
+     for (int i = mInputChannelRanges.size() - 1; i >= 0; i--) {
+-        int lmin = mInputChannelRanges[i].lower();
++        int32_t lmin = mInputChannelRanges[i].lower();
+         if (lmin < overallMin) {
+             overallMin = lmin;
+         }
+@@ -61,7 +61,7 @@ int AudioCapabilities::getMinInputChannelCount() const {
+     return overallMin;
+ }
+ 
+-const std::vector<Range<int>>&
++const std::vector<Range<int32_t>>&
+         AudioCapabilities::getInputChannelCountRanges() const {
+     return mInputChannelRanges;
+ }
+@@ -86,40 +86,41 @@ void AudioCapabilities::init(std::string mediaType, std::vector<ProfileLevel> pr
+ }
+ 
+ void AudioCapabilities::initWithPlatformLimits() {
+-    mBitrateRange = Range<int>(0, INT32_MAX);
+-    mInputChannelRanges.push_back(Range<int>(1, MAX_INPUT_CHANNEL_COUNT));
++    mBitrateRange = Range<int32_t>(0, INT32_MAX);
++    mInputChannelRanges.push_back(Range<int32_t>(1, MAX_INPUT_CHANNEL_COUNT));
+ 
+-    const int minSampleRate = base::GetIntProperty("ro.mediacodec.min_sample_rate", 7350);
+-    const int maxSampleRate = base::GetIntProperty("ro.mediacodec.max_sample_rate", 192000);
+-    mSampleRateRanges.push_back(Range<int>(minSampleRate, maxSampleRate));
++    const int32_t minSampleRate = base::GetIntProperty("ro.mediacodec.min_sample_rate", 7350);
++    const int32_t maxSampleRate = base::GetIntProperty("ro.mediacodec.max_sample_rate", 192000);
++    mSampleRateRanges.push_back(Range<int32_t>(minSampleRate, maxSampleRate));
+ }
+ 
+-bool AudioCapabilities::supports(std::optional<int> sampleRate,
+-        std::optional<int> inputChannels) {
++bool AudioCapabilities::supports(std::optional<int32_t> sampleRate,
++        std::optional<int32_t> inputChannels) {
+     // channels and sample rates are checked orthogonally
+     if (inputChannels
+             && !std::any_of(mInputChannelRanges.begin(), mInputChannelRanges.end(),
+-            [inputChannels](const Range<int> &a) { return a.contains(inputChannels.value()); })) {
++            [inputChannels](const Range<int32_t> &a) {
++                    return a.contains(inputChannels.value()); })) {
+         return false;
+     }
+     if (sampleRate
+             && !std::any_of(mSampleRateRanges.begin(), mSampleRateRanges.end(),
+-            [sampleRate](const Range<int> &a) { return a.contains(sampleRate.value()); })) {
++            [sampleRate](const Range<int32_t> &a) { return a.contains(sampleRate.value()); })) {
+         return false;
+     }
+     return true;
+ }
+ 
+-bool AudioCapabilities::isSampleRateSupported(int sampleRate) {
+-    return supports(std::make_optional<int>(sampleRate), std::nullopt);
++bool AudioCapabilities::isSampleRateSupported(int32_t sampleRate) {
++    return supports(std::make_optional<int32_t>(sampleRate), std::nullopt);
+ }
+ 
+-void AudioCapabilities::limitSampleRates(std::vector<int> rates) {
+-    std::vector<Range<int>> sampleRateRanges;
++void AudioCapabilities::limitSampleRates(std::vector<int32_t> rates) {
++    std::vector<Range<int32_t>> sampleRateRanges;
+     std::sort(rates.begin(), rates.end());
+-    for (int rate : rates) {
+-        if (supports(std::make_optional<int>(rate), std::nullopt /* channels */)) {
+-            sampleRateRanges.push_back(Range<int>(rate, rate));
++    for (int32_t rate : rates) {
++        if (supports(std::make_optional<int32_t>(rate), std::nullopt /* channels */)) {
++            sampleRateRanges.push_back(Range<int32_t>(rate, rate));
+         }
+     }
+     mSampleRateRanges = intersectSortedDistinctRanges(mSampleRateRanges, sampleRateRanges);
+@@ -133,11 +134,11 @@ void AudioCapabilities::createDiscreteSampleRates() {
+     }
+ }
+ 
+-void AudioCapabilities::limitSampleRates(std::vector<Range<int>> rateRanges) {
++void AudioCapabilities::limitSampleRates(std::vector<Range<int32_t>> rateRanges) {
+     sortDistinctRanges(&rateRanges);
+     mSampleRateRanges = intersectSortedDistinctRanges(mSampleRateRanges, rateRanges);
+     // check if all values are discrete
+-    for (Range<int> range: mSampleRateRanges) {
++    for (Range<int32_t> range: mSampleRateRanges) {
+         if (range.lower() != range.upper()) {
+             mSampleRates.clear();
+             return;
+@@ -147,10 +148,10 @@ void AudioCapabilities::limitSampleRates(std::vector<Range<int>> rateRanges) {
+ }
+ 
+ void AudioCapabilities::applyLevelLimits() {
+-    std::vector<int> sampleRates;
+-    std::optional<Range<int>> sampleRateRange;
+-    std::optional<Range<int>> bitRates;
+-    int maxChannels = MAX_INPUT_CHANNEL_COUNT;
++    std::vector<int32_t> sampleRates;
++    std::optional<Range<int32_t>> sampleRateRange;
++    std::optional<Range<int32_t>> bitRates;
++    int32_t maxChannels = MAX_INPUT_CHANNEL_COUNT;
+ 
+     // const char *mediaType = mMediaType.c_str();
+     if (base::EqualsIgnoreCase(mMediaType, MIMETYPE_AUDIO_MPEG)) {
+@@ -158,15 +159,15 @@ void AudioCapabilities::applyLevelLimits() {
+                 8000, 11025, 12000,
+                 16000, 22050, 24000,
+                 32000, 44100, 48000 };
+-        bitRates = Range<int>(8000, 320000);
++        bitRates = Range<int32_t>(8000, 320000);
+         maxChannels = 2;
+     } else if (base::EqualsIgnoreCase(mMediaType, MIMETYPE_AUDIO_AMR_NB)) {
+         sampleRates = { 8000 };
+-        bitRates = Range<int>(4750, 12200);
++        bitRates = Range<int32_t>(4750, 12200);
+         maxChannels = 1;
+     } else if (base::EqualsIgnoreCase(mMediaType, MIMETYPE_AUDIO_AMR_WB)) {
+         sampleRates = { 16000 };
+-        bitRates = Range<int>(6600, 23850);
++        bitRates = Range<int32_t>(6600, 23850);
+         maxChannels = 1;
+     } else if (base::EqualsIgnoreCase(mMediaType, MIMETYPE_AUDIO_AAC)) {
+         sampleRates = {
+@@ -175,32 +176,32 @@ void AudioCapabilities::applyLevelLimits() {
+                 22050, 24000, 32000,
+                 44100, 48000, 64000,
+                 88200, 96000 };
+-        bitRates = Range<int>(8000, 510000);
++        bitRates = Range<int32_t>(8000, 510000);
+         maxChannels = 48;
+     } else if (base::EqualsIgnoreCase(mMediaType, MIMETYPE_AUDIO_VORBIS)) {
+-        bitRates = Range<int>(32000, 500000);
+-        sampleRateRange = Range<int>(8000, 192000);
++        bitRates = Range<int32_t>(32000, 500000);
++        sampleRateRange = Range<int32_t>(8000, 192000);
+         maxChannels = 255;
+     } else if (base::EqualsIgnoreCase(mMediaType, MIMETYPE_AUDIO_OPUS)) {
+-        bitRates = Range<int>(6000, 510000);
++        bitRates = Range<int32_t>(6000, 510000);
+         sampleRates = { 8000, 12000, 16000, 24000, 48000 };
+         maxChannels = 255;
+     } else if (base::EqualsIgnoreCase(mMediaType, MIMETYPE_AUDIO_RAW)) {
+-        sampleRateRange = Range<int>(1, 192000);
+-        bitRates = Range<int>(1, 10000000);
++        sampleRateRange = Range<int32_t>(1, 192000);
++        bitRates = Range<int32_t>(1, 10000000);
+         maxChannels = MAX_NUM_CHANNELS;
+     } else if (base::EqualsIgnoreCase(mMediaType, MIMETYPE_AUDIO_FLAC)) {
+-        sampleRateRange = Range<int>(1, 655350);
++        sampleRateRange = Range<int32_t>(1, 655350);
+         // lossless codec, so bitrate is ignored
+         maxChannels = 255;
+     } else if (base::EqualsIgnoreCase(mMediaType, MIMETYPE_AUDIO_G711_ALAW)
+             || base::EqualsIgnoreCase(mMediaType, MIMETYPE_AUDIO_G711_MLAW)) {
+         sampleRates = { 8000 };
+-        bitRates = Range<int>(64000, 64000);
++        bitRates = Range<int32_t>(64000, 64000);
+         // platform allows multiple channels for this format
+     } else if (base::EqualsIgnoreCase(mMediaType, MIMETYPE_AUDIO_MSGSM)) {
+         sampleRates = { 8000 };
+-        bitRates = Range<int>(13000, 13000);
++        bitRates = Range<int32_t>(13000, 13000);
+         maxChannels = 1;
+     } else if (base::EqualsIgnoreCase(mMediaType, MIMETYPE_AUDIO_AC3)) {
+         maxChannels = 6;
+@@ -208,34 +209,34 @@ void AudioCapabilities::applyLevelLimits() {
+         maxChannels = 16;
+     } else if (base::EqualsIgnoreCase(mMediaType, MIMETYPE_AUDIO_EAC3_JOC)) {
+         sampleRates = { 48000 };
+-        bitRates = Range<int>(32000, 6144000);
++        bitRates = Range<int32_t>(32000, 6144000);
+         maxChannels = 16;
+     } else if (base::EqualsIgnoreCase(mMediaType, MIMETYPE_AUDIO_AC4)) {
+         sampleRates = { 44100, 48000, 96000, 192000 };
+-        bitRates = Range<int>(16000, 2688000);
++        bitRates = Range<int32_t>(16000, 2688000);
+         maxChannels = 24;
+     } else if (base::EqualsIgnoreCase(mMediaType, MIMETYPE_AUDIO_DTS)) {
+         sampleRates = { 44100, 48000 };
+-        bitRates = Range<int>(96000, 1524000);
++        bitRates = Range<int32_t>(96000, 1524000);
+         maxChannels = 6;
+     } else if (base::EqualsIgnoreCase(mMediaType, MIMETYPE_AUDIO_DTS_HD)) {
+         for (ProfileLevel profileLevel: mProfileLevels) {
+             switch (profileLevel.mProfile) {
+                 case DTS_HDProfileLBR:
+                     sampleRates = { 22050, 24000, 44100, 48000 };
+-                    bitRates = Range<int>(32000, 768000);
++                    bitRates = Range<int32_t>(32000, 768000);
+                     break;
+                 case DTS_HDProfileHRA:
+                 case DTS_HDProfileMA:
+                     sampleRates = { 44100, 48000, 88200, 96000, 176400, 192000 };
+-                    bitRates = Range<int>(96000, 24500000);
++                    bitRates = Range<int32_t>(96000, 24500000);
+                     break;
+                 default:
+                     ALOGW("Unrecognized profile %d for %s", profileLevel.mProfile,
+                             mMediaType.c_str());
+                     mError |= ERROR_CAPABILITIES_UNRECOGNIZED;
+                     sampleRates = { 44100, 48000, 88200, 96000, 176400, 192000 };
+-                    bitRates = Range<int>(96000, 24500000);
++                    bitRates = Range<int32_t>(96000, 24500000);
+             }
+         }
+         maxChannels = 8;
+@@ -244,12 +245,12 @@ void AudioCapabilities::applyLevelLimits() {
+             switch (profileLevel.mProfile) {
+                 case DTS_UHDProfileP2:
+                     sampleRates = { 48000 };
+-                    bitRates = Range<int>(96000, 768000);
++                    bitRates = Range<int32_t>(96000, 768000);
+                     maxChannels = 10;
+                     break;
+                 case DTS_UHDProfileP1:
+                     sampleRates = { 44100, 48000, 88200, 96000, 176400, 192000 };
+-                    bitRates = Range<int>(96000, 24500000);
++                    bitRates = Range<int32_t>(96000, 24500000);
+                     maxChannels = 32;
+                     break;
+                 default:
+@@ -257,7 +258,7 @@ void AudioCapabilities::applyLevelLimits() {
+                             mMediaType.c_str());
+                     mError |= ERROR_CAPABILITIES_UNRECOGNIZED;
+                     sampleRates = { 44100, 48000, 88200, 96000, 176400, 192000 };
+-                    bitRates = Range<int>(96000, 24500000);
++                    bitRates = Range<int32_t>(96000, 24500000);
+                     maxChannels = 32;
+             }
+         }
+@@ -270,24 +271,24 @@ void AudioCapabilities::applyLevelLimits() {
+     if (!sampleRates.empty()) {
+         limitSampleRates(sampleRates);
+     } else if (sampleRateRange) {
+-        std::vector<Range<int>> rateRanges = { sampleRateRange.value() };
++        std::vector<Range<int32_t>> rateRanges = { sampleRateRange.value() };
+         limitSampleRates(rateRanges);
+     }
+ 
+-    Range<int> channelRange = Range<int>(1, maxChannels);
+-    std::vector<Range<int>> inputChannels = { channelRange };
++    Range<int32_t> channelRange = Range<int32_t>(1, maxChannels);
++    std::vector<Range<int32_t>> inputChannels = { channelRange };
+     applyLimits(inputChannels, bitRates);
+ }
+ 
+ void AudioCapabilities::applyLimits(
+-        const std::vector<Range<int>> &inputChannels,
++        const std::vector<Range<int32_t>> &inputChannels,
+         const std::optional<Range<int32_t>> &bitRates) {
+     // clamp & make a local copy
+-    std::vector<Range<int>> inputChannelsCopy(inputChannels.size());
++    std::vector<Range<int32_t>> inputChannelsCopy(inputChannels.size());
+     for (int i = 0; i < inputChannels.size(); i++) {
+-        int lower = inputChannels[i].clamp(1);
+-        int upper = inputChannels[i].clamp(MAX_INPUT_CHANNEL_COUNT);
+-        inputChannelsCopy[i] = Range<int>(lower, upper);
++        int32_t lower = inputChannels[i].clamp(1);
++        int32_t upper = inputChannels[i].clamp(MAX_INPUT_CHANNEL_COUNT);
++        inputChannelsCopy[i] = Range<int32_t>(lower, upper);
+     }
+ 
+     // sort, intersect with existing, & save channel list
+@@ -300,16 +301,16 @@ void AudioCapabilities::applyLimits(
+ }
+ 
+ void AudioCapabilities::parseFromInfo(const sp<AMessage> &format) {
+-    int maxInputChannels = MAX_INPUT_CHANNEL_COUNT;
+-    std::vector<Range<int>> channels = { Range<int>(1, maxInputChannels) };
++    int32_t maxInputChannels = MAX_INPUT_CHANNEL_COUNT;
++    std::vector<Range<int32_t>> channels = { Range<int32_t>(1, maxInputChannels) };
+     std::optional<Range<int32_t>> bitRates = POSITIVE_INT32;
+ 
+     AString rateAString;
+     if (format->findString("sample-rate-ranges", &rateAString)) {
+         std::vector<std::string> rateStrings = base::Split(std::string(rateAString.c_str()), ",");
+-        std::vector<Range<int>> rateRanges;
++        std::vector<Range<int32_t>> rateRanges;
+         for (std::string rateString : rateStrings) {
+-            std::optional<Range<int>> rateRange = ParseIntRange(rateString);
++            std::optional<Range<int32_t>> rateRange = Range<int32_t>::Parse(rateString);
+             if (!rateRange) {
+                 continue;
+             }
+@@ -322,9 +323,9 @@ void AudioCapabilities::parseFromInfo(const sp<AMessage> &format) {
+     AString valueStr;
+     if (format->findString("channel-ranges", &valueStr)) {
+         std::vector<std::string> channelStrings = base::Split(std::string(valueStr.c_str()), ",");
+-        std::vector<Range<int>> channelRanges;
++        std::vector<Range<int32_t>> channelRanges;
+         for (std::string channelString : channelStrings) {
+-            std::optional<Range<int>> channelRange = ParseIntRange(channelString);
++            std::optional<Range<int32_t>> channelRange = Range<int32_t>::Parse(channelString);
+             if (!channelRange) {
+                 continue;
+             }
+@@ -332,24 +333,25 @@ void AudioCapabilities::parseFromInfo(const sp<AMessage> &format) {
+         }
+         channels = channelRanges;
+     } else if (format->findString("channel-range", &valueStr)) {
+-        std::optional<Range<int>> oneRange = ParseIntRange(std::string(valueStr.c_str()));
++        std::optional<Range<int32_t>> oneRange
++                = Range<int32_t>::Parse(std::string(valueStr.c_str()));
+         if (oneRange) {
+             channels = { oneRange.value() };
+         }
+     } else if (format->findString("max-channel-count", &valueStr)) {
+         maxInputChannels = std::atoi(valueStr.c_str());
+         if (maxInputChannels == 0) {
+-            channels = { Range<int>(0, 0) };
++            channels = { Range<int32_t>(0, 0) };
+         } else {
+-            channels = { Range<int>(1, maxInputChannels) };
++            channels = { Range<int32_t>(1, maxInputChannels) };
+         }
+     } else if ((mError & ERROR_CAPABILITIES_UNSUPPORTED) != 0) {
+         maxInputChannels = 0;
+-        channels = { Range<int>(0, 0) };
++        channels = { Range<int32_t>(0, 0) };
+     }
+ 
+     if (format->findString("bitrate-range", &valueStr)) {
+-        std::optional<Range<int32_t>> parsedBitrate = ParseIntRange(valueStr.c_str());
++        std::optional<Range<int32_t>> parsedBitrate = Range<int32_t>::Parse(valueStr.c_str());
+         if (parsedBitrate) {
+             bitRates = bitRates.value().intersect(parsedBitrate.value());
+         }
+@@ -374,11 +376,11 @@ void AudioCapabilities::getDefaultFormat(sp<AMessage> &format) {
+ 
+ bool AudioCapabilities::supportsFormat(const sp<AMessage> &format) {
+     int32_t sampleRateValue;
+-    std::optional<int> sampleRate = format->findInt32(KEY_SAMPLE_RATE, &sampleRateValue)
+-            ? std::make_optional<int>(sampleRateValue) : std::nullopt;
++    std::optional<int32_t> sampleRate = format->findInt32(KEY_SAMPLE_RATE, &sampleRateValue)
++            ? std::make_optional<int32_t>(sampleRateValue) : std::nullopt;
+     int32_t channelsValue;
+-    std::optional<int> channels = format->findInt32(KEY_CHANNEL_COUNT, &channelsValue)
+-            ? std::make_optional<int>(channelsValue) : std::nullopt;
++    std::optional<int32_t> channels = format->findInt32(KEY_CHANNEL_COUNT, &channelsValue)
++            ? std::make_optional<int32_t>(channelsValue) : std::nullopt;
+ 
+     if (!supports(sampleRate, channels)) {
+         return false;
+diff --git a/media/libmedia/CodecCapabilitiesUtils.cpp b/media/libmedia/CodecCapabilitiesUtils.cpp
+index edfc9beb9a..ef28fcb043 100644
+--- a/media/libmedia/CodecCapabilitiesUtils.cpp
++++ b/media/libmedia/CodecCapabilitiesUtils.cpp
+@@ -30,24 +30,5 @@
+ 
+ namespace android {
+ 
+-std::optional<Range<int>> ParseIntRange(const std::string &str) {
+-    if (str.empty()) {
+-        ALOGW("could not parse empty integer range");
+-        return std::nullopt;
+-    }
+-    int lower, upper;
+-    std::regex regex("([0-9]+)-([0-9]+)");
+-    std::smatch match;
+-    if (std::regex_match(str, match, regex)) {
+-        lower = std::atoi(match[1].str().c_str());
+-        upper = std::atoi(match[2].str().c_str());
+-    } else if (std::atoi(str.c_str()) != 0) {
+-        lower = upper = std::atoi(str.c_str());
+-    } else {
+-        ALOGW("could not parse integer range: %s", str.c_str());
+-        return std::nullopt;
+-    }
+-    return std::make_optional<Range<int>>(lower, upper);
+-}
+ 
+ }  // namespace android
+\ No newline at end of file
+diff --git a/media/libmedia/include/media/AudioCapabilities.h b/media/libmedia/include/media/AudioCapabilities.h
+index d2bd9d7b58..3e1c9dff6a 100644
+--- a/media/libmedia/include/media/AudioCapabilities.h
++++ b/media/libmedia/include/media/AudioCapabilities.h
+@@ -44,14 +44,14 @@ struct AudioCapabilities {
+      * supports only discrete values. Otherwise, it returns an empty array.
+      * The array is sorted in ascending order.
+      */
+-    const std::vector<int>& getSupportedSampleRates() const;
++    const std::vector<int32_t>& getSupportedSampleRates() const;
+ 
+     /**
+      * Returns the array of supported sample rate ranges.  The
+      * array is sorted in ascending order, and the ranges are
+      * distinct.
+      */
+-    const std::vector<Range<int>>& getSupportedSampleRateRanges() const;
++    const std::vector<Range<int32_t>>& getSupportedSampleRateRanges() const;
+ 
+     /**
+      * Returns the maximum number of input channels supported.
+@@ -68,7 +68,7 @@ struct AudioCapabilities {
+      * The {@link #getMaxInputChannelCount} method will return the highest value
+      * in the ranges returned by {@link #getInputChannelCountRanges}
+      */
+-    int getMaxInputChannelCount() const;
++    int32_t getMaxInputChannelCount() const;
+ 
+     /**
+      * Returns the minimum number of input channels supported.
+@@ -77,7 +77,7 @@ struct AudioCapabilities {
+      * This returns the lowest channel count in the ranges returned by
+      * {@link #getInputChannelCountRanges}.
+      */
+-    int getMinInputChannelCount() const;
++    int32_t getMinInputChannelCount() const;
+ 
+     /**
+      * Returns an array of ranges representing the number of input channels supported.
+@@ -89,12 +89,12 @@ struct AudioCapabilities {
+      *
+      * The returned array cannot be empty.
+      */
+-    const std::vector<Range<int>>& getInputChannelCountRanges() const;
++    const std::vector<Range<int32_t>>& getInputChannelCountRanges() const;
+ 
+     /**
+      * Query whether the sample rate is supported by the codec.
+      */
+-    bool isSampleRateSupported(int sampleRate);
++    bool isSampleRateSupported(int32_t sampleRate);
+ 
+     /* For internal use only. Not exposed as a public API */
+     void getDefaultFormat(sp<AMessage> &format);
+@@ -103,7 +103,7 @@ struct AudioCapabilities {
+     bool supportsFormat(const sp<AMessage> &format);
+ 
+ private:
+-    static constexpr int MAX_INPUT_CHANNEL_COUNT = 30;
++    static constexpr int32_t MAX_INPUT_CHANNEL_COUNT = 30;
+     static constexpr uint32_t MAX_NUM_CHANNELS = FCC_LIMIT;
+ 
+     int mError;
+@@ -112,21 +112,21 @@ private:
+ 
+     Range<int32_t> mBitrateRange;
+ 
+-    std::vector<int> mSampleRates;
+-    std::vector<Range<int>> mSampleRateRanges;
+-    std::vector<Range<int>> mInputChannelRanges;
++    std::vector<int32_t> mSampleRates;
++    std::vector<Range<int32_t>> mSampleRateRanges;
++    std::vector<Range<int32_t>> mInputChannelRanges;
+ 
+     /* no public constructor */
+     AudioCapabilities() {}
+     void init(std::string mediaType, std::vector<ProfileLevel> profLevs,
+             const sp<AMessage> &format);
+     void initWithPlatformLimits();
+-    bool supports(std::optional<int> sampleRate, std::optional<int> inputChannels);
+-    void limitSampleRates(std::vector<int> rates);
++    bool supports(std::optional<int32_t> sampleRate, std::optional<int32_t> inputChannels);
++    void limitSampleRates(std::vector<int32_t> rates);
+     void createDiscreteSampleRates();
+-    void limitSampleRates(std::vector<Range<int>> rateRanges);
++    void limitSampleRates(std::vector<Range<int32_t>> rateRanges);
+     void applyLevelLimits();
+-    void applyLimits(const std::vector<Range<int>> &inputChannels,
++    void applyLimits(const std::vector<Range<int32_t>> &inputChannels,
+             const std::optional<Range<int32_t>> &bitRates);
+     void parseFromInfo(const sp<AMessage> &format);
+ 
+diff --git a/media/libmedia/include/media/CodecCapabilitiesUtils.h b/media/libmedia/include/media/CodecCapabilitiesUtils.h
+index 89a452c550..4ee8f046a8 100644
+--- a/media/libmedia/include/media/CodecCapabilitiesUtils.h
++++ b/media/libmedia/include/media/CodecCapabilitiesUtils.h
+@@ -19,8 +19,12 @@
+ #define CODEC_CAPABILITIES__UTILS_H_
+ 
+ #include <algorithm>
++#include <cerrno>
+ #include <cmath>
++#include <cstdlib>
++#include <numeric>
+ #include <optional>
++#include <regex>
+ #include <string>
+ #include <vector>
+ 
+@@ -113,6 +117,37 @@ struct Range {
+         return Range(std::max(lower_, lower), std::min(upper_, upper));
+     }
+ 
++    // parse a string into a range
++    static std::optional<Range<T>> Parse(const std::string &str) {
++        if (str.empty()) {
++            ALOGW("could not parse empty integer range");
++            return std::nullopt;
++        }
++        long long lower, upper;
++        std::regex regex("^([0-9]+)-([0-9]+)$");
++        std::smatch match;
++        errno = 0;
++        if (std::regex_match(str, match, regex)) {
++            lower = std::strtoll(match[1].str().c_str(), NULL, 10);
++            upper = std::strtoll(match[2].str().c_str(), NULL, 10);
++        } else {
++            char *end;
++            lower = upper = std::strtoll(str.c_str(), &end, 10);
++            if (*end != '\0') {
++                ALOGW("could not parse integer range: %s", str.c_str());
++                return std::nullopt;
++            }
++        }
++
++        if (errno == ERANGE || lower < std::numeric_limits<T>::min()
++                || std::numeric_limits<T>::max() < upper || upper < lower) {
++            ALOGW("could not parse integer range: %s", str.c_str());
++            return std::nullopt;
++        }
++
++        return std::make_optional<Range<T>>((T)lower, (T)upper);
++    }
++
+ private:
+     T lower_;
+     T upper_;
+@@ -176,9 +211,6 @@ std::vector<Range<T>> intersectSortedDistinctRanges(
+     return result;
+ }
+ 
+-// parse string into int range
+-std::optional<Range<int>> ParseIntRange(const std::string &str);
+-
+ }  // namespace android
+ 
+ #endif  // CODEC_CAPABILITIES__UTILS_H_
+\ No newline at end of file
+diff --git a/media/libmedia/tests/codeccapabilities/CodecCapabilitiesTest.cpp b/media/libmedia/tests/codeccapabilities/CodecCapabilitiesTest.cpp
+index 02e43a41d6..83483d57c1 100644
+--- a/media/libmedia/tests/codeccapabilities/CodecCapabilitiesTest.cpp
++++ b/media/libmedia/tests/codeccapabilities/CodecCapabilitiesTest.cpp
+@@ -72,15 +72,15 @@ TEST_F(AudioCapsAacTest, AudioCaps_Aac_Bitrate) {
+ }
+ 
+ TEST_F(AudioCapsAacTest, AudioCaps_Aac_InputChannelCount) {
+-    int maxInputChannelCount = audioCaps->getMaxInputChannelCount();
++    int32_t maxInputChannelCount = audioCaps->getMaxInputChannelCount();
+     EXPECT_EQ(maxInputChannelCount, 8);
+-    int minInputChannelCount = audioCaps->getMinInputChannelCount();
++    int32_t minInputChannelCount = audioCaps->getMinInputChannelCount();
+     EXPECT_EQ(minInputChannelCount, 1);
+ }
+ 
+ TEST_F(AudioCapsAacTest, AudioCaps_Aac_SupportedSampleRates) {
+-    const std::vector<int>& sampleRates = audioCaps->getSupportedSampleRates();
+-    EXPECT_EQ(sampleRates, std::vector<int>({7350, 8000, 11025, 12000, 16000, 22050,
++    const std::vector<int32_t>& sampleRates = audioCaps->getSupportedSampleRates();
++    EXPECT_EQ(sampleRates, std::vector<int32_t>({7350, 8000, 11025, 12000, 16000, 22050,
+             24000, 32000, 44100, 48000}));
+ 
+     EXPECT_FALSE(audioCaps->isSampleRateSupported(6000))
+@@ -120,16 +120,16 @@ TEST_F(AudioCapsRawTest, AudioCaps_Raw_Bitrate) {
+ }
+ 
+ TEST_F(AudioCapsRawTest, AudioCaps_Raw_InputChannelCount) {
+-    int maxInputChannelCount = audioCaps->getMaxInputChannelCount();
++    int32_t maxInputChannelCount = audioCaps->getMaxInputChannelCount();
+     EXPECT_EQ(maxInputChannelCount, 12);
+-    int minInputChannelCount = audioCaps->getMinInputChannelCount();
++    int32_t minInputChannelCount = audioCaps->getMinInputChannelCount();
+     EXPECT_EQ(minInputChannelCount, 1);
+ }
+ 
+ TEST_F(AudioCapsRawTest, AudioCaps_Raw_InputChannelCountRanges) {
+-    const std::vector<Range<int>>& inputChannelCountRanges
++    const std::vector<Range<int32_t>>& inputChannelCountRanges
+             = audioCaps->getInputChannelCountRanges();
+-    std::vector<Range<int>> expectedOutput({{1,1}, {2,2}, {3,3}, {4,4}, {5,5},
++    std::vector<Range<int32_t>> expectedOutput({{1,1}, {2,2}, {3,3}, {4,4}, {5,5},
+             {6,6}, {7,7}, {8,8}, {9,9}, {10,10}, {11,11}, {12,12}});
+     ASSERT_EQ(inputChannelCountRanges.size(), expectedOutput.size());
+     for (int i = 0; i < inputChannelCountRanges.size(); i++) {
+@@ -139,7 +139,7 @@ TEST_F(AudioCapsRawTest, AudioCaps_Raw_InputChannelCountRanges) {
+ }
+ 
+ TEST_F(AudioCapsRawTest, AudioCaps_Raw_SupportedSampleRates) {
+-    const std::vector<Range<int>>& sampleRateRanges = audioCaps->getSupportedSampleRateRanges();
++    const std::vector<Range<int32_t>>& sampleRateRanges = audioCaps->getSupportedSampleRateRanges();
+     EXPECT_EQ(sampleRateRanges.size(), 1);
+     EXPECT_EQ(sampleRateRanges.at(0).lower(), 8000);
+     EXPECT_EQ(sampleRateRanges.at(0).upper(), 192000);
+-- 
+2.43.0
+

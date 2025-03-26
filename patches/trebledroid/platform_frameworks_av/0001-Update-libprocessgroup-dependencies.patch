@@ -1,0 +1,53 @@
+From 8d2abbd961dd4ddc04c5e081cb932cfa05cc2463 Mon Sep 17 00:00:00 2001
+From: "T.J. Mercier" <tjmercier@google.com>
+Date: Fri, 9 Aug 2024 01:15:58 +0000
+Subject: [PATCH 001/436] Update libprocessgroup dependencies
+
+Bug: 349105928
+Test: m
+Change-Id: Ib1b39cdff173e7c098111949c6be44dce0b60b95
+---
+ media/libaaudio/fuzzer/Android.bp           | 1 +
+ media/libaudioclient/aidl/fuzzer/Android.bp | 1 +
+ media/libaudioclient/fuzzer/Android.bp      | 1 +
+ 3 files changed, 3 insertions(+)
+
+diff --git a/media/libaaudio/fuzzer/Android.bp b/media/libaaudio/fuzzer/Android.bp
+index fc8ad777de..f56de76922 100644
+--- a/media/libaaudio/fuzzer/Android.bp
++++ b/media/libaaudio/fuzzer/Android.bp
+@@ -65,6 +65,7 @@ cc_fuzz {
+         "libmedia_helper",
+         "libmediametrics",
+         "libprocessgroup",
++        "libprocessgroup_util",
+         "mediametricsservice-aidl-cpp",
+         "shared-file-region-aidl-cpp",
+     ],
+diff --git a/media/libaudioclient/aidl/fuzzer/Android.bp b/media/libaudioclient/aidl/fuzzer/Android.bp
+index bb06bffdb7..ff0704c230 100644
+--- a/media/libaudioclient/aidl/fuzzer/Android.bp
++++ b/media/libaudioclient/aidl/fuzzer/Android.bp
+@@ -29,6 +29,7 @@ cc_defaults {
+         "libjsoncpp",
+         "libmediametricsservice",
+         "libprocessgroup",
++        "libprocessgroup_util",
+         "shared-file-region-aidl-cpp",
+     ],
+     shared_libs: [
+diff --git a/media/libaudioclient/fuzzer/Android.bp b/media/libaudioclient/fuzzer/Android.bp
+index a95c700c00..8bca8dfebf 100644
+--- a/media/libaudioclient/fuzzer/Android.bp
++++ b/media/libaudioclient/fuzzer/Android.bp
+@@ -46,6 +46,7 @@ cc_fuzz {
+         "libmediametrics",
+         "libmediametricsservice",
+         "libprocessgroup",
++        "libprocessgroup_util",
+         "shared-file-region-aidl-cpp",
+     ],
+     shared_libs: [
+-- 
+2.43.0
+

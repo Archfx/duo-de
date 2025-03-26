@@ -1,0 +1,29 @@
+From c9c36e660211d57fd7f3ed623318768faf8a977e Mon Sep 17 00:00:00 2001
+From: Vlad Popa <pvlad@google.com>
+Date: Wed, 16 Oct 2024 16:40:29 -0700
+Subject: [PATCH 102/436] AudioFlinger: patch track initial mute state false
+
+Flag: EXEMPT bugfix
+Test: atest AudioPlaybackCaptureTest
+Bug: 373873731
+Change-Id: I0dacf1a6fdddbb10a1db263a2d15f23e72a13f0a
+---
+ services/audioflinger/AudioFlinger.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/services/audioflinger/AudioFlinger.cpp b/services/audioflinger/AudioFlinger.cpp
+index 70fa2ca4e1..a1a0634f55 100644
+--- a/services/audioflinger/AudioFlinger.cpp
++++ b/services/audioflinger/AudioFlinger.cpp
+@@ -4121,7 +4121,7 @@ void AudioFlinger::updateSecondaryOutputsForTrack_l(
+                                                        frameCountToBeReady,
+                                                        track->getSpeed(),
+                                                        1.f /* volume */,
+-                                                       track->getPortMute() /* muted */);
++                                                       false /* muted */);
+         status = patchTrack->initCheck();
+         if (status != NO_ERROR) {
+             ALOGE("Secondary output patchTrack init failed: %d", status);
+-- 
+2.43.0
+

@@ -1,0 +1,33 @@
+From 93812447f0fc706954e6e6e7b3e13be388a8147f Mon Sep 17 00:00:00 2001
+From: Vlad Popa <pvlad@google.com>
+Date: Tue, 24 Sep 2024 18:07:18 -0700
+Subject: [PATCH 020/436] Remove unnecessary oneway call optimization
+
+Flag: EXEMPT bugfix
+Test: manual
+Bug: 350103953
+Change-Id: I3c66ea19823b91411695f82e581c2b4082c36191
+---
+ .../aidl/android/media/IAudioPolicyService.aidl             | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/media/libaudioclient/aidl/android/media/IAudioPolicyService.aidl b/media/libaudioclient/aidl/android/media/IAudioPolicyService.aidl
+index 7f5e8e2b43..b4f879a021 100644
+--- a/media/libaudioclient/aidl/android/media/IAudioPolicyService.aidl
++++ b/media/libaudioclient/aidl/android/media/IAudioPolicyService.aidl
+@@ -116,9 +116,9 @@ interface IAudioPolicyService {
+ 
+     void releaseInput(int /* audio_port_handle_t */ portId);
+ 
+-    oneway void setDeviceAbsoluteVolumeEnabled(in AudioDevice device,
+-                                               boolean enabled,
+-                                               AudioStreamType streamToDriveAbs);
++    void setDeviceAbsoluteVolumeEnabled(in AudioDevice device,
++                                        boolean enabled,
++                                        AudioStreamType streamToDriveAbs);
+ 
+     void initStreamVolume(AudioStreamType stream,
+                           int indexMin,
+-- 
+2.43.0
+

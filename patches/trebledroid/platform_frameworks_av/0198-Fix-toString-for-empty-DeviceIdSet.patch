@@ -1,0 +1,31 @@
+From 45113402484bb9036a7d399006b42a72ef63d066 Mon Sep 17 00:00:00 2001
+From: Robert Wu <robertwu@google.com>
+Date: Mon, 4 Nov 2024 23:47:47 +0000
+Subject: [PATCH 198/436] Fix toString() for empty DeviceIdSet
+
+This makes parsing more consistent.
+
+Bug: 367816690
+Change-Id: I818aea519d14cdf34d3beeacc02b723034408265
+Test: make
+Flag: android.media.audio.routed_device_ids
+---
+ media/libaudiofoundation/AudioContainers.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/media/libaudiofoundation/AudioContainers.cpp b/media/libaudiofoundation/AudioContainers.cpp
+index 6727562170..7964e6df4b 100644
+--- a/media/libaudiofoundation/AudioContainers.cpp
++++ b/media/libaudiofoundation/AudioContainers.cpp
+@@ -132,7 +132,7 @@ std::string dumpMixerBehaviors(const MixerBehaviorSet& mixerBehaviors) {
+ 
+ std::string toString(const DeviceIdSet& deviceIds) {
+     if (deviceIds.empty()) {
+-        return "Empty device ids";
++        return "AUDIO_PORT_HANDLE_NONE";
+     }
+     std::stringstream ss;
+     for (auto it = deviceIds.begin(); it != deviceIds.end(); ++it) {
+-- 
+2.43.0
+

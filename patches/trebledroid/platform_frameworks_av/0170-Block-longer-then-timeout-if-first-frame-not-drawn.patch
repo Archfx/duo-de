@@ -1,0 +1,432 @@
+From dd48ca6a25d61a9b06402b837ba4d9464492da15 Mon Sep 17 00:00:00 2001
+From: Vadim Caen <caen@google.com>
+Date: Tue, 29 Oct 2024 16:18:37 +0100
+Subject: [PATCH 170/436] Block longer then timeout if first frame not drawn
+
+The render thread repeats the last drawn frame when the virtual camera
+owner fails to write a new buffer in time for the next capture request.
+The time before the last buffer is repeated is define by the min fps and
+the time of the last capture.
+
+For the first frame, there is not last capture, so we need compute the
+timeout differently. Also, to give time to the virtual camera owner
+to setup the rendering for the first frame, we increase the allowed
+waiting time for the first frame only.
+
+Test: android.virtualdevice.cts.camera.VirtualCameraCaptureTest
+Fixes: 364268484
+Flag: EXEMPT Bug Fix
+Change-Id: I302dc07b3cafc76f28d8aae763d6061472063afe
+---
+ .../VirtualCameraCaptureResult.cc             |   7 +-
+ .../VirtualCameraCaptureResult.h              |  13 +-
+ .../VirtualCameraRenderThread.cc              | 198 ++++++++++++------
+ .../virtualcamera/VirtualCameraRenderThread.h |  30 +++
+ .../virtualcamera/util/EglSurfaceTexture.cc   |   4 +
+ .../virtualcamera/util/EglSurfaceTexture.h    |   3 +
+ 6 files changed, 174 insertions(+), 81 deletions(-)
+
+diff --git a/services/camera/virtualcamera/VirtualCameraCaptureResult.cc b/services/camera/virtualcamera/VirtualCameraCaptureResult.cc
+index a61f553d09..da1c208b0a 100644
+--- a/services/camera/virtualcamera/VirtualCameraCaptureResult.cc
++++ b/services/camera/virtualcamera/VirtualCameraCaptureResult.cc
+@@ -16,6 +16,7 @@
+ #include "VirtualCameraCaptureResult.h"
+ 
+ #include <cstdint>
++#include <memory>
+ 
+ #include "VirtualCameraCaptureRequest.h"
+ #include "aidl/android/hardware/camera/device/CameraMetadata.h"
+@@ -34,7 +35,7 @@ static constexpr uint8_t kPipelineDepth = 2;
+ 
+ }  // namespace
+ 
+-CameraMetadata createCaptureResultMetadata(
++std::unique_ptr<CameraMetadata> createCaptureResultMetadata(
+     const std::chrono::nanoseconds timestamp,
+     const RequestSettings& requestSettings,
+     const Resolution reportedSensorSize) {
+@@ -109,9 +110,9 @@ CameraMetadata createCaptureResultMetadata(
+ 
+   if (metadata == nullptr) {
+     ALOGE("%s: Failed to build capture result metadata", __func__);
+-    return CameraMetadata();
++    return std::make_unique<CameraMetadata>();
+   }
+-  return std::move(*metadata);
++  return metadata;
+ }
+ 
+ }  // namespace virtualcamera
+diff --git a/services/camera/virtualcamera/VirtualCameraCaptureResult.h b/services/camera/virtualcamera/VirtualCameraCaptureResult.h
+index 9e5b4d7076..c3978f7a49 100644
+--- a/services/camera/virtualcamera/VirtualCameraCaptureResult.h
++++ b/services/camera/virtualcamera/VirtualCameraCaptureResult.h
+@@ -18,21 +18,10 @@
+ #define ANDROID_COMPANION_VIRTUALCAMERA_VIRTUALCAMERACAPTURERESULT_H
+ 
+ #include <chrono>
+-#include <cstdint>
+ #include <cstring>
+-#include <future>
+ #include <memory>
+-#include <mutex>
+-#include <thread>
+-#include <utility>
+-#include <vector>
+ 
+-#include "Exif.h"
+-#include "GLES/gl.h"
+ #include "VirtualCameraCaptureRequest.h"
+-#include "VirtualCameraDevice.h"
+-#include "VirtualCameraRenderThread.h"
+-#include "VirtualCameraSessionContext.h"
+ #include "aidl/android/hardware/camera/device/CameraMetadata.h"
+ 
+ namespace android {
+@@ -41,7 +30,7 @@ namespace virtualcamera {
+ 
+ // Construct the Metadata for the Capture result based on the request
+ // settings, timestamp and reported sensore size
+-::aidl::android::hardware::camera::device::CameraMetadata
++std::unique_ptr<::aidl::android::hardware::camera::device::CameraMetadata>
+ createCaptureResultMetadata(std::chrono::nanoseconds timestamp,
+                             const RequestSettings& requestSettings,
+                             Resolution reportedSensorSize);
+diff --git a/services/camera/virtualcamera/VirtualCameraRenderThread.cc b/services/camera/virtualcamera/VirtualCameraRenderThread.cc
+index becba905ff..836d4e02de 100644
+--- a/services/camera/virtualcamera/VirtualCameraRenderThread.cc
++++ b/services/camera/virtualcamera/VirtualCameraRenderThread.cc
+@@ -100,6 +100,9 @@ static constexpr size_t kJpegThumbnailBufferSize = 32 * 1024;  // 32 KiB
+ 
+ static constexpr UpdateTextureTask kUpdateTextureTask;
+ 
++// The number of nanosecond to wait for the first frame to be drawn on the input surface
++static constexpr std::chrono::nanoseconds kMaxWaitFirstFrame = 3s;
++
+ NotifyMsg createShutterNotifyMsg(int frameNumber,
+                                  std::chrono::nanoseconds timestamp) {
+   NotifyMsg msg;
+@@ -110,11 +113,13 @@ NotifyMsg createShutterNotifyMsg(int frameNumber,
+   return msg;
+ }
+ 
+-NotifyMsg createBufferErrorNotifyMsg(int frameNumber, int streamId) {
++// Create a NotifyMsg for an error case. The default error is ERROR_BUFFER.
++NotifyMsg createErrorNotifyMsg(int frameNumber, int streamId,
++                               ErrorCode errorCode = ErrorCode::ERROR_BUFFER) {
+   NotifyMsg msg;
+   msg.set<NotifyMsg::Tag::error>(ErrorMsg{.frameNumber = frameNumber,
+                                           .errorStreamId = streamId,
+-                                          .errorCode = ErrorCode::ERROR_BUFFER});
++                                          .errorCode = errorCode});
+   return msg;
+ }
+ 
+@@ -421,10 +426,15 @@ void VirtualCameraRenderThread::processTask(
+   }
+ 
+   // Calculate the maximal amount of time we can afford to wait for next frame.
++  const bool isFirstFrameDrawn = mEglSurfaceTexture->isFirstFrameDrawn();
++  ALOGV("First Frame Drawn: %s", isFirstFrameDrawn ? "Yes" : "No");
++
+   const std::chrono::nanoseconds maxFrameDuration =
+-      getMaxFrameDuration(request.getRequestSettings());
++      isFirstFrameDrawn ? getMaxFrameDuration(request.getRequestSettings())
++                        : kMaxWaitFirstFrame;
+   const std::chrono::nanoseconds elapsedDuration =
+-      timestamp - lastAcquisitionTimestamp;
++      isFirstFrameDrawn ? timestamp - lastAcquisitionTimestamp : 0ns;
++
+   if (elapsedDuration < maxFrameDuration) {
+     // We can afford to wait for next frame.
+     // Note that if there's already new frame in the input Surface, the call
+@@ -434,6 +444,17 @@ void VirtualCameraRenderThread::processTask(
+     timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(
+         std::chrono::steady_clock::now().time_since_epoch());
+     if (!gotNewFrame) {
++      if (!mEglSurfaceTexture->isFirstFrameDrawn()) {
++        // We don't have any input ever drawn. This is considered as an error
++        // case. Notify the framework of the failure and return early.
++        ALOGW("Timed out waiting for first frame to be drawn.");
++        std::unique_ptr<CaptureResult> captureResult = createCaptureResult(
++            request.getFrameNumber(), /* metadata = */ nullptr);
++        notifyTimeout(request, *captureResult);
++        submitCaptureResult(std::move(captureResult));
++        return;
++      }
++
+       ALOGV(
+           "%s: No new frame received on input surface after waiting for "
+           "%" PRIu64 "ns, repeating last frame.",
+@@ -457,75 +478,20 @@ void VirtualCameraRenderThread::processTask(
+           captureTimestamp.count(), timestamp.count());
+   }
+ 
+-  CaptureResult captureResult;
+-  captureResult.fmqResultSize = 0;
+-  captureResult.frameNumber = request.getFrameNumber();
+-  // Partial result needs to be set to 1 when metadata are present.
+-  captureResult.partialResult = 1;
+-  captureResult.inputBuffer.streamId = -1;
+-  captureResult.physicalCameraMetadata.resize(0);
+-  captureResult.result = createCaptureResultMetadata(
+-      captureTimestamp, request.getRequestSettings(), mReportedSensorSize);
+-
+-  const std::vector<CaptureRequestBuffer>& buffers = request.getBuffers();
+-  captureResult.outputBuffers.resize(buffers.size());
+-
+-  for (int i = 0; i < buffers.size(); ++i) {
+-    const CaptureRequestBuffer& reqBuffer = buffers[i];
+-    StreamBuffer& resBuffer = captureResult.outputBuffers[i];
+-    resBuffer.streamId = reqBuffer.getStreamId();
+-    resBuffer.bufferId = reqBuffer.getBufferId();
+-    resBuffer.status = BufferStatus::OK;
+-
+-    const std::optional<Stream> streamConfig =
+-        mSessionContext.getStreamConfig(reqBuffer.getStreamId());
+-
+-    if (!streamConfig.has_value()) {
+-      resBuffer.status = BufferStatus::ERROR;
+-      continue;
+-    }
++  std::unique_ptr<CaptureResult> captureResult = createCaptureResult(
++      request.getFrameNumber(),
++      createCaptureResultMetadata(
++          captureTimestamp, request.getRequestSettings(), mReportedSensorSize));
++  renderOutputBuffers(request, *captureResult);
+ 
+-    auto status = streamConfig->format == PixelFormat::BLOB
+-                      ? renderIntoBlobStreamBuffer(
+-                            reqBuffer.getStreamId(), reqBuffer.getBufferId(),
+-                            captureResult.result, request.getRequestSettings(),
+-                            reqBuffer.getFence())
+-                      : renderIntoImageStreamBuffer(reqBuffer.getStreamId(),
+-                                                    reqBuffer.getBufferId(),
+-                                                    reqBuffer.getFence());
+-    if (!status.isOk()) {
+-      resBuffer.status = BufferStatus::ERROR;
+-    }
+-  }
+-
+-  std::vector<NotifyMsg> notifyMsg{
+-      createShutterNotifyMsg(request.getFrameNumber(), captureTimestamp)};
+-  for (const StreamBuffer& resBuffer : captureResult.outputBuffers) {
+-    if (resBuffer.status != BufferStatus::OK) {
+-      notifyMsg.push_back(createBufferErrorNotifyMsg(request.getFrameNumber(),
+-                                                     resBuffer.streamId));
+-    }
+-  }
+-
+-  auto status = mCameraDeviceCallback->notify(notifyMsg);
++  auto status = notifyShutter(request, *captureResult, captureTimestamp);
+   if (!status.isOk()) {
+     ALOGE("%s: notify call failed: %s", __func__,
+           status.getDescription().c_str());
+     return;
+   }
+ 
+-  std::vector<::aidl::android::hardware::camera::device::CaptureResult>
+-      captureResults(1);
+-  captureResults[0] = std::move(captureResult);
+-
+-  status = mCameraDeviceCallback->processCaptureResult(captureResults);
+-  if (!status.isOk()) {
+-    ALOGE("%s: processCaptureResult call failed: %s", __func__,
+-          status.getDescription().c_str());
+-    return;
+-  }
+-
+-  ALOGV("%s: Successfully called processCaptureResult", __func__);
++  submitCaptureResult(std::move(captureResult));
+ }
+ 
+ std::chrono::nanoseconds VirtualCameraRenderThread::throttleRendering(
+@@ -574,6 +540,106 @@ std::chrono::nanoseconds VirtualCameraRenderThread::getSurfaceTimestamp(
+   return surfaceTimestamp;
+ }
+ 
++std::unique_ptr<CaptureResult> VirtualCameraRenderThread::createCaptureResult(
++    int frameNumber, std::unique_ptr<CameraMetadata> metadata) {
++  std::unique_ptr<CaptureResult> captureResult =
++      std::make_unique<CaptureResult>();
++  captureResult->fmqResultSize = 0;
++  captureResult->frameNumber = frameNumber;
++  // Partial result needs to be set to 1 when metadata are present.
++  captureResult->partialResult = 1;
++  captureResult->inputBuffer.streamId = -1;
++  captureResult->physicalCameraMetadata.resize(0);
++  captureResult->result = metadata != nullptr ? *metadata : CameraMetadata();
++  return captureResult;
++}
++
++void VirtualCameraRenderThread::renderOutputBuffers(
++    const ProcessCaptureRequestTask& request, CaptureResult& captureResult) {
++  const std::vector<CaptureRequestBuffer>& buffers = request.getBuffers();
++  captureResult.outputBuffers.resize(buffers.size());
++
++  for (int i = 0; i < buffers.size(); ++i) {
++    const CaptureRequestBuffer& reqBuffer = buffers[i];
++    StreamBuffer& resBuffer = captureResult.outputBuffers[i];
++    resBuffer.streamId = reqBuffer.getStreamId();
++    resBuffer.bufferId = reqBuffer.getBufferId();
++    resBuffer.status = BufferStatus::OK;
++
++    const std::optional<Stream> streamConfig =
++        mSessionContext.getStreamConfig(reqBuffer.getStreamId());
++
++    if (!streamConfig.has_value()) {
++      resBuffer.status = BufferStatus::ERROR;
++      continue;
++    }
++
++    auto status = streamConfig->format == PixelFormat::BLOB
++                      ? renderIntoBlobStreamBuffer(
++                            reqBuffer.getStreamId(), reqBuffer.getBufferId(),
++                            captureResult.result, request.getRequestSettings(),
++                            reqBuffer.getFence())
++                      : renderIntoImageStreamBuffer(reqBuffer.getStreamId(),
++                                                    reqBuffer.getBufferId(),
++                                                    reqBuffer.getFence());
++    if (!status.isOk()) {
++      resBuffer.status = BufferStatus::ERROR;
++    }
++  }
++}
++
++::ndk::ScopedAStatus VirtualCameraRenderThread::notifyTimeout(
++    const ProcessCaptureRequestTask& request, CaptureResult& captureResult) {
++  const std::vector<CaptureRequestBuffer>& buffers = request.getBuffers();
++  captureResult.outputBuffers.resize(buffers.size());
++
++  std::vector<NotifyMsg> notifyMsgs;
++
++  for (int i = 0; i < buffers.size(); ++i) {
++    const CaptureRequestBuffer& reqBuffer = buffers[i];
++    StreamBuffer& resBuffer = captureResult.outputBuffers[i];
++    resBuffer.streamId = reqBuffer.getStreamId();
++    resBuffer.bufferId = reqBuffer.getBufferId();
++    resBuffer.status = BufferStatus::ERROR;
++    notifyMsgs.push_back(createErrorNotifyMsg(
++        request.getFrameNumber(), resBuffer.streamId, ErrorCode::ERROR_REQUEST));
++  }
++  return mCameraDeviceCallback->notify(notifyMsgs);
++}
++
++::ndk::ScopedAStatus VirtualCameraRenderThread::notifyShutter(
++    const ProcessCaptureRequestTask& request, const CaptureResult& captureResult,
++    std::chrono::nanoseconds captureTimestamp) {
++  std::vector<NotifyMsg> notifyMsgs{
++      createShutterNotifyMsg(request.getFrameNumber(), captureTimestamp)};
++  for (const StreamBuffer& resBuffer : captureResult.outputBuffers) {
++    if (resBuffer.status != BufferStatus::OK) {
++      notifyMsgs.push_back(
++          createErrorNotifyMsg(request.getFrameNumber(), resBuffer.streamId));
++    }
++  }
++
++  return mCameraDeviceCallback->notify(notifyMsgs);
++}
++
++::ndk::ScopedAStatus VirtualCameraRenderThread::submitCaptureResult(
++    std::unique_ptr<CaptureResult> captureResult) {
++  std::vector<::aidl::android::hardware::camera::device::CaptureResult>
++      captureResults;
++  captureResults.push_back(std::move(*captureResult));
++
++  ::ndk::ScopedAStatus status =
++      mCameraDeviceCallback->processCaptureResult(captureResults);
++  if (!status.isOk()) {
++    ALOGE("%s: processCaptureResult call failed: %s", __func__,
++          status.getDescription().c_str());
++    return status;
++  }
++
++  ALOGV("%s: Successfully called processCaptureResult", __func__);
++  return status;
++}
++
+ void VirtualCameraRenderThread::flushCaptureRequest(
+     const ProcessCaptureRequestTask& request) {
+   CaptureResult captureResult;
+diff --git a/services/camera/virtualcamera/VirtualCameraRenderThread.h b/services/camera/virtualcamera/VirtualCameraRenderThread.h
+index 1fb4e84bad..4cad39e4be 100644
+--- a/services/camera/virtualcamera/VirtualCameraRenderThread.h
++++ b/services/camera/virtualcamera/VirtualCameraRenderThread.h
+@@ -19,6 +19,7 @@
+ 
+ #include <atomic>
+ #include <chrono>
++#include <cstddef>
+ #include <cstdint>
+ #include <deque>
+ #include <future>
+@@ -205,6 +206,35 @@ class VirtualCameraRenderThread {
+   std::chrono::nanoseconds getSurfaceTimestamp(
+       std::chrono::nanoseconds timeSinceLastFrame);
+ 
++  // Build a default capture result object populating the metadata from the request.
++  std::unique_ptr<::aidl::android::hardware::camera::device::CaptureResult>
++  createCaptureResult(
++      int frameNumber,
++      std::unique_ptr<aidl::android::hardware::camera::device::CameraMetadata>
++          metadata);
++
++  // Renders the images from the input surface into the request's buffers.
++  void renderOutputBuffers(
++      const ProcessCaptureRequestTask& request,
++      ::aidl::android::hardware::camera::device::CaptureResult& captureResult);
++
++  // Notify a shutter event for all the buffers in this request.
++  ::ndk::ScopedAStatus notifyShutter(
++      const ProcessCaptureRequestTask& request,
++      const ::aidl::android::hardware::camera::device::CaptureResult& captureResult,
++      std::chrono::nanoseconds captureTimestamp);
++
++  // Notify a timeout error for this request. The capture result still needs to
++  // be submitted after this call.
++  ::ndk::ScopedAStatus notifyTimeout(
++      const ProcessCaptureRequestTask& request,
++      ::aidl::android::hardware::camera::device::CaptureResult& captureResult);
++
++  // Submit the capture result to the camera callback.
++  ::ndk::ScopedAStatus submitCaptureResult(
++      std::unique_ptr<::aidl::android::hardware::camera::device::CaptureResult>
++          captureResult);
++
+   // Camera callback
+   const std::shared_ptr<
+       ::aidl::android::hardware::camera::device::ICameraDeviceCallback>
+diff --git a/services/camera/virtualcamera/util/EglSurfaceTexture.cc b/services/camera/virtualcamera/util/EglSurfaceTexture.cc
+index be36ec4040..fc469a0d3a 100644
+--- a/services/camera/virtualcamera/util/EglSurfaceTexture.cc
++++ b/services/camera/virtualcamera/util/EglSurfaceTexture.cc
+@@ -105,6 +105,10 @@ std::chrono::nanoseconds EglSurfaceTexture::getTimestamp() {
+   return std::chrono::nanoseconds(mGlConsumer->getTimestamp());
+ }
+ 
++bool EglSurfaceTexture::isFirstFrameDrawn() {
++  return mGlConsumer->getFrameNumber() > 0;
++}
++
+ GLuint EglSurfaceTexture::updateTexture() {
+   int previousFrameId;
+   int framesAdvance = 0;
+diff --git a/services/camera/virtualcamera/util/EglSurfaceTexture.h b/services/camera/virtualcamera/util/EglSurfaceTexture.h
+index c1f11691a7..9f753153db 100644
+--- a/services/camera/virtualcamera/util/EglSurfaceTexture.h
++++ b/services/camera/virtualcamera/util/EglSurfaceTexture.h
+@@ -86,6 +86,9 @@ class EglSurfaceTexture {
+   // set by the most recent call to updateTexture.
+   std::chrono::nanoseconds getTimestamp();
+ 
++  // Returns true is a frame has ever been drawn on this surface.
++  bool isFirstFrameDrawn();
++
+  private:
+ #if !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+   sp<IGraphicBufferProducer> mBufferProducer;
+-- 
+2.43.0
+

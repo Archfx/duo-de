@@ -1,0 +1,35 @@
+From 2c3b49a7633c84eaa62be4d3daf9672ea4f75e5f Mon Sep 17 00:00:00 2001
+From: Febin Thattil <febinthattil@google.com>
+Date: Mon, 4 Nov 2024 06:01:25 +0000
+Subject: [PATCH 194/436] Changes to OWNERS files for USB.
+
+Ashish and Sarup have moved away from USB and often get pinged or assigned bugs under USB component. This also means we may miss important issues relevant to Android USB because they're assigned to them.
+Adding myself and moving Arun lower in priority to OWNERS so that bugs will go through Mark, myself and Arun instead.
+
+Change-Id: If8f3beb622ad4c2f9d18d2134b170f27194f542f
+---
+ media/mtp/OWNERS | 7 +++----
+ 1 file changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/media/mtp/OWNERS b/media/mtp/OWNERS
+index 6b5336e83b..bdb6cdbea3 100644
+--- a/media/mtp/OWNERS
++++ b/media/mtp/OWNERS
+@@ -1,10 +1,9 @@
+ set noparent
+ 
+-aprasath@google.com
+ anothermark@google.com
+-kumarashishg@google.com
+-sarup@google.com
++febinthattil@google.com
++aprasath@google.com
+ jsharkey@android.com
+ jameswei@google.com
+ rmojumder@google.com
+-
++kumarashishg@google.com
+\ No newline at end of file
+-- 
+2.43.0
+

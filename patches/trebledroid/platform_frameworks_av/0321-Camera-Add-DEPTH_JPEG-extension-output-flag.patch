@@ -1,0 +1,34 @@
+From 7ed0b4bffba76885ba9d6062426b7e350c35230b Mon Sep 17 00:00:00 2001
+From: Emilian Peev <epeev@google.com>
+Date: Tue, 12 Nov 2024 20:38:01 +0000
+Subject: [PATCH 321/436] Camera: Add DEPTH_JPEG extension output flag
+
+Flag: com.android.internal.camera.flags.depth_jpeg_extensions
+Bug: 362788689
+Test: Camera CTS
+Change-Id: Ibe1228852bd4923456455ed9ea16f1a55d340bed
+---
+ camera/camera_platform.aconfig | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/camera/camera_platform.aconfig b/camera/camera_platform.aconfig
+index 2feebb4d49..3b199b3ede 100644
+--- a/camera/camera_platform.aconfig
++++ b/camera/camera_platform.aconfig
+@@ -181,6 +181,13 @@ flag {
+     is_fixed_read_only: true
+ }
+ 
++flag {
++    namespace: "camera_platform"
++    name: "depth_jpeg_extensions"
++    description: "Add Depth Jpeg extension output support"
++    bug: "362788689"
++}
++
+ flag {
+     namespace: "camera_platform"
+     name: "mirror_mode_shared_surfaces"
+-- 
+2.43.0
+

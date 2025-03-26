@@ -1,0 +1,33 @@
+From 32a850f23c01d74478c9f620805ce9b3afdd8fb6 Mon Sep 17 00:00:00 2001
+From: Lajos Molnar <lajos@google.com>
+Date: Fri, 8 Nov 2024 09:24:02 -0800
+Subject: [PATCH 239/436] MediaCodec: define ID for metrics flushed callback
+
+Bug: 363382811
+Flag: EXEMPT const definition only
+Change-Id: I0fd20e2553a914b9468b58827ac95ab17d4fcde0
+---
+ .../libstagefright/include/media/stagefright/MediaCodec.h  | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/media/libstagefright/include/media/stagefright/MediaCodec.h b/media/libstagefright/include/media/stagefright/MediaCodec.h
+index 7169b1e174..b4794f17f0 100644
+--- a/media/libstagefright/include/media/stagefright/MediaCodec.h
++++ b/media/libstagefright/include/media/stagefright/MediaCodec.h
+@@ -123,6 +123,13 @@ struct MediaCodec : public AHandler {
+         CB_RESOURCE_RECLAIMED = 5,
+         CB_CRYPTO_ERROR = 6,
+         CB_LARGE_FRAME_OUTPUT_AVAILABLE = 7,
++
++        /** Callback ID for when the metrics for this codec have been flushed
++         * due to the start of a new subsession. The associated AMessage will
++         * contain an sp<WrapperObject<std::unique_ptr<mediametrics::Item>>>
++         * Object at the "metrics" key.
++         */
++        CB_METRICS_FLUSHED = 8,
+     };
+ 
+     static const pid_t kNoPid = -1;
+-- 
+2.43.0
+

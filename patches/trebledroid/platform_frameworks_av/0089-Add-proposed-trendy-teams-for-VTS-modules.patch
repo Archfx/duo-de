@@ -1,0 +1,27 @@
+From 9351ef9396b0c0cad8b3c4da00afa73a8ffb2f85 Mon Sep 17 00:00:00 2001
+From: Yihan Dong <slotus@google.com>
+Date: Sat, 12 Oct 2024 09:16:06 +0000
+Subject: [PATCH 089/436] Add proposed trendy teams for VTS modules
+
+Change-Id: I2bab83aaf462acb7b3d9b76202215b184f7a86de
+Test: build locally
+Bug: 368362374
+---
+ media/libstagefright/xmlparser/vts/Android.bp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/media/libstagefright/xmlparser/vts/Android.bp b/media/libstagefright/xmlparser/vts/Android.bp
+index 1e36c8fa8e..527230c83c 100644
+--- a/media/libstagefright/xmlparser/vts/Android.bp
++++ b/media/libstagefright/xmlparser/vts/Android.bp
+@@ -15,6 +15,7 @@
+ //
+ 
+ package {
++    default_team: "trendy_team_android_media_codec_framework",
+     // See: http://go/android-license-faq
+     // A large-scale-change added 'default_applicable_licenses' to import
+     // all of the 'license_kinds' from "frameworks_av_media_libstagefright_license"
+-- 
+2.43.0
+

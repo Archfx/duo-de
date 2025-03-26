@@ -1,0 +1,35 @@
+From ad904a8c2d2ed56d70c9d641d367bb424ccc57d1 Mon Sep 17 00:00:00 2001
+From: Austin Borger <borgera@google.com>
+Date: Tue, 12 Nov 2024 15:16:52 -0800
+Subject: [PATCH 269/436] Create a token for the AttributionSource
+ ACameraManager passes to connectDevice
+
+If an AttributionSource does not have a token, data delivery permission checks
+fail with "Attempt to invoke interface method
+'void android.os.IBinder.linkToDeath(android.os.IBinder$DeathRecipient, int)'
+on a null object reference" due to the null binder. Create a token before
+passing it to connectDevice.
+
+Bug: 190657833
+Flag: com.android.internal.camera.flags.data_delivery_permission_checks
+Test: Ran new CameraPermissionTest for ndk clients.
+Change-Id: Id7f173ae155b26c723c39cccc8fcbbdc482479a3
+---
+ camera/ndk/impl/ACameraManager.cpp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/camera/ndk/impl/ACameraManager.cpp b/camera/ndk/impl/ACameraManager.cpp
+index 5dddd29c74..f9c1a8aa46 100644
+--- a/camera/ndk/impl/ACameraManager.cpp
++++ b/camera/ndk/impl/ACameraManager.cpp
+@@ -920,6 +920,7 @@ ACameraManager::openCamera(
+     clientAttribution.deviceId = mDeviceContext.deviceId;
+     clientAttribution.packageName = "";
+     clientAttribution.attributionTag = std::nullopt;
++    clientAttribution.token = sp<BBinder>::make();
+ 
+     // No way to get package name from native.
+     // Send a zero length package name and let camera service figure it out from UID
+-- 
+2.43.0
+

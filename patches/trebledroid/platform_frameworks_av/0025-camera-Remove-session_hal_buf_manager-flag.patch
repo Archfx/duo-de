@@ -1,0 +1,255 @@
+From 54fab70df8072b89c54dc7f5477a0a396e99a261 Mon Sep 17 00:00:00 2001
+From: Jayant Chowdhary <jchowdhary@google.com>
+Date: Wed, 25 Sep 2024 20:21:02 +0000
+Subject: [PATCH 025/436] camera: Remove session_hal_buf_manager flag
+
+Note: mUseHalBufManager in Camera3Device will be removed after initial flag
+removal.
+
+Bug: 365555557
+
+Test: Camera CTS, GCA
+
+Flag: EXEMPT flag removal
+
+Change-Id: I88975ca675b6ba753112e700fa28701a3acc121e
+Signed-off-by: Jayant Chowdhary <jchowdhary@google.com>
+---
+ camera/camera_platform.aconfig                |  7 ----
+ .../device3/Camera3Device.cpp                 | 41 ++++++++-----------
+ .../device3/Camera3OutputUtils.cpp            |  3 +-
+ .../device3/Camera3OutputUtilsTemplated.h     |  6 +--
+ .../device3/aidl/AidlCamera3Device.cpp        | 33 +++++----------
+ .../device3/hidl/HidlCamera3Device.cpp        |  2 +-
+ 6 files changed, 33 insertions(+), 59 deletions(-)
+
+diff --git a/camera/camera_platform.aconfig b/camera/camera_platform.aconfig
+index 8ed23fdab7..a1e01b8b2f 100644
+--- a/camera/camera_platform.aconfig
++++ b/camera/camera_platform.aconfig
+@@ -33,13 +33,6 @@ flag {
+     bug: "238348881"
+ }
+ 
+-flag {
+-    namespace: "camera_platform"
+-    name: "session_hal_buf_manager"
+-    description: "Enable or disable HAL buffer manager as requested by the camera HAL"
+-    bug: "311263114"
+-}
+-
+ flag {
+     namespace: "camera_platform"
+     name: "inject_session_params"
+diff --git a/services/camera/libcameraservice/device3/Camera3Device.cpp b/services/camera/libcameraservice/device3/Camera3Device.cpp
+index bb54f259bd..57217453eb 100644
+--- a/services/camera/libcameraservice/device3/Camera3Device.cpp
++++ b/services/camera/libcameraservice/device3/Camera3Device.cpp
+@@ -1648,7 +1648,7 @@ status_t Camera3Device::waitUntilStateThenRelock(bool active, nsecs_t timeout,
+     bool signalPipelineDrain = false;
+     if (!active &&
+             (mUseHalBufManager ||
+-                    (flags::session_hal_buf_manager() && mHalBufManagedStreamIds.size() != 0))) {
++                    (mHalBufManagedStreamIds.size() != 0))) {
+         auto streamIds = mOutputStreams.getStreamIds();
+         if (mStatus == STATUS_ACTIVE) {
+             mRequestThread->signalPipelineDrain(streamIds);
+@@ -2598,25 +2598,23 @@ status_t Camera3Device::configureStreamsLocked(int operatingMode,
+     // It is possible that use hal buffer manager behavior was changed by the
+     // configureStreams call.
+     mUseHalBufManager = config.use_hal_buf_manager;
+-    if (flags::session_hal_buf_manager()) {
+-        bool prevSessionHalBufManager = (mHalBufManagedStreamIds.size() != 0);
+-        // It is possible that configureStreams() changed config.hal_buffer_managed_streams
+-        mHalBufManagedStreamIds = config.hal_buffer_managed_streams;
++    bool prevSessionHalBufManager = (mHalBufManagedStreamIds.size() != 0);
++    // It is possible that configureStreams() changed config.hal_buffer_managed_streams
++    mHalBufManagedStreamIds = config.hal_buffer_managed_streams;
+ 
+-        bool thisSessionHalBufManager = mHalBufManagedStreamIds.size() != 0;
++    bool thisSessionHalBufManager = mHalBufManagedStreamIds.size() != 0;
+ 
+-        if (prevSessionHalBufManager && !thisSessionHalBufManager) {
+-            mRequestBufferSM.deInit();
+-        } else if (!prevSessionHalBufManager && thisSessionHalBufManager) {
+-            res = mRequestBufferSM.initialize(mStatusTracker);
+-            if (res != OK) {
+-                SET_ERR_L("%s: Camera %s: RequestBuffer State machine couldn't be initialized!",
+-                          __FUNCTION__, mId.c_str());
+-                return res;
+-            }
++    if (prevSessionHalBufManager && !thisSessionHalBufManager) {
++        mRequestBufferSM.deInit();
++    } else if (!prevSessionHalBufManager && thisSessionHalBufManager) {
++        res = mRequestBufferSM.initialize(mStatusTracker);
++        if (res != OK) {
++            SET_ERR_L("%s: Camera %s: RequestBuffer State machine couldn't be initialized!",
++                        __FUNCTION__, mId.c_str());
++            return res;
+         }
+-        mRequestThread->setHalBufferManagedStreams(mHalBufManagedStreamIds);
+     }
++    mRequestThread->setHalBufferManagedStreams(mHalBufManagedStreamIds);
+ 
+     // Finish all stream configuration immediately.
+     // TODO: Try to relax this later back to lazy completion, which should be
+@@ -3021,8 +3019,7 @@ bool Camera3Device::HalInterface::verifyBufferIds(
+ }
+ 
+ bool Camera3Device::HalInterface::isHalBufferManagedStream(int32_t streamId) const {
+-    return (mUseHalBufManager || (flags::session_hal_buf_manager() &&
+-                                  contains(mHalBufManagedStreamIds, streamId)));
++    return (mUseHalBufManager || contains(mHalBufManagedStreamIds, streamId));
+ }
+ 
+ status_t Camera3Device::HalInterface::popInflightBuffer(
+@@ -4184,8 +4181,7 @@ status_t Camera3Device::RequestThread::prepareHalRequests() {
+             }
+         }
+         bool passSurfaceMap =
+-                mUseHalBufManager ||
+-                        (flags::session_hal_buf_manager() && containsHalBufferManagedStream);
++                mUseHalBufManager || containsHalBufferManagedStream;
+         auto expectedDurationInfo = calculateExpectedDurationRange(settings);
+         res = parent->registerInFlight(halRequest->frame_number,
+                 totalNumBuffers, captureRequest->mResultExtras,
+@@ -4301,7 +4297,7 @@ bool Camera3Device::RequestThread::isOutputSurfacePending(int streamId, size_t s
+ 
+ void Camera3Device::RequestThread::signalPipelineDrain(const std::vector<int>& streamIds) {
+     if (!mUseHalBufManager &&
+-            (flags::session_hal_buf_manager() && mHalBufManagedStreamIds.size() == 0)) {
++            (mHalBufManagedStreamIds.size() == 0)) {
+         ALOGE("%s called for camera device not supporting HAL buffer management", __FUNCTION__);
+         return;
+     }
+@@ -4459,8 +4455,7 @@ void Camera3Device::RequestThread::cleanUpFailedRequests(bool sendRequestError)
+             Camera3Stream *stream = Camera3Stream::cast((*outputBuffers)[i].stream);
+             int32_t streamId = stream->getId();
+             bool skipBufferForStream =
+-                    mUseHalBufManager || (flags::session_hal_buf_manager() &&
+-                            contains(mHalBufManagedStreamIds, streamId));
++                    mUseHalBufManager || (contains(mHalBufManagedStreamIds, streamId));
+             if (skipBufferForStream) {
+                 // No output buffer can be returned when using HAL buffer manager for its stream
+                 continue;
+diff --git a/services/camera/libcameraservice/device3/Camera3OutputUtils.cpp b/services/camera/libcameraservice/device3/Camera3OutputUtils.cpp
+index 31707ec42c..62226e1aed 100644
+--- a/services/camera/libcameraservice/device3/Camera3OutputUtils.cpp
++++ b/services/camera/libcameraservice/device3/Camera3OutputUtils.cpp
+@@ -894,8 +894,7 @@ void collectReturnableOutputBuffers(
+ 
+         if (outputBuffers[i].buffer == nullptr) {
+             if (!useHalBufManager &&
+-                    !(flags::session_hal_buf_manager() &&
+-                            contains(halBufferManagedStreams, streamId))) {
++                    !contains(halBufferManagedStreams, streamId)) {
+                 // With HAL buffer management API, HAL sometimes will have to return buffers that
+                 // has not got a output buffer handle filled yet. This is though illegal if HAL
+                 // buffer management API is not being used.
+diff --git a/services/camera/libcameraservice/device3/Camera3OutputUtilsTemplated.h b/services/camera/libcameraservice/device3/Camera3OutputUtilsTemplated.h
+index aca7a67030..2d75d03e43 100644
+--- a/services/camera/libcameraservice/device3/Camera3OutputUtilsTemplated.h
++++ b/services/camera/libcameraservice/device3/Camera3OutputUtilsTemplated.h
+@@ -212,8 +212,7 @@ void processOneCaptureResultLockedT(
+         bool noBufferReturned = false;
+         buffer_handle_t *buffer = nullptr;
+         if (states.useHalBufManager ||
+-                (flags::session_hal_buf_manager() &&
+-                        contains(states.halBufManagedStreamIds, bSrc.streamId))) {
++                contains(states.halBufManagedStreamIds, bSrc.streamId)) {
+             // This is suspicious most of the time but can be correct during flush where HAL
+             // has to return capture result before a buffer is requested
+             if (bSrc.bufferId == BUFFER_ID_NO_BUFFER) {
+@@ -303,8 +302,7 @@ void returnStreamBuffersT(ReturnBufferStates& states,
+ 
+     for (const auto& buf : buffers) {
+         if (!states.useHalBufManager &&
+-            !(flags::session_hal_buf_manager() &&
+-             contains(states.halBufManagedStreamIds, buf.streamId))) {
++            !contains(states.halBufManagedStreamIds, buf.streamId)) {
+             ALOGE("%s: Camera %s does not support HAL buffer management for stream id %d",
+                   __FUNCTION__, states.cameraId.c_str(), buf.streamId);
+             return;
+diff --git a/services/camera/libcameraservice/device3/aidl/AidlCamera3Device.cpp b/services/camera/libcameraservice/device3/aidl/AidlCamera3Device.cpp
+index 868b7ef8a8..e52e9a28df 100644
+--- a/services/camera/libcameraservice/device3/aidl/AidlCamera3Device.cpp
++++ b/services/camera/libcameraservice/device3/aidl/AidlCamera3Device.cpp
+@@ -918,12 +918,6 @@ status_t AidlCamera3Device::AidlHalInterface::configureStreams(
+         camera3::camera_stream_t *src = config->streams[i];
+ 
+         Camera3Stream* cam3stream = Camera3Stream::cast(src);
+-        // For stream configurations with multi res streams, hal buffer manager has to be used.
+-        if (!flags::session_hal_buf_manager() && cam3stream->getHalStreamGroupId() != -1 &&
+-                src->stream_type != CAMERA_STREAM_INPUT) {
+-            mUseHalBufManager = true;
+-            config->use_hal_buf_manager = true;
+-        }
+         cam3stream->setBufferFreedListener(this);
+         int streamId = cam3stream->getId();
+         StreamType streamType;
+@@ -1002,8 +996,7 @@ status_t AidlCamera3Device::AidlHalInterface::configureStreams(
+               err.getMessage());
+         return AidlProviderInfo::mapToStatusT(err);
+     }
+-    if (flags::session_hal_buf_manager() && interfaceVersion >= AIDL_DEVICE_SESSION_V3
+-            && mSupportSessionHalBufManager) {
++    if (interfaceVersion >= AIDL_DEVICE_SESSION_V3 && mSupportSessionHalBufManager) {
+         err = mAidlSession->configureStreamsV2(requestedConfiguration, &configureStreamsRet);
+         finalConfiguration = std::move(configureStreamsRet.halStreams);
+     } else {
+@@ -1015,18 +1008,16 @@ status_t AidlCamera3Device::AidlHalInterface::configureStreams(
+         return AidlProviderInfo::mapToStatusT(err);
+     }
+ 
+-    if (flags::session_hal_buf_manager()) {
+-        std::set<int32_t> halBufferManagedStreamIds;
+-        for (const auto &halStream: finalConfiguration) {
+-            if ((interfaceVersion >= AIDL_DEVICE_SESSION_V3 &&
+-                    mSupportSessionHalBufManager && halStream.enableHalBufferManager)
+-                    || mUseHalBufManager) {
+-                halBufferManagedStreamIds.insert(halStream.id);
+-            }
++    std::set<int32_t> halBufferManagedStreamIds;
++    for (const auto &halStream: finalConfiguration) {
++        if ((interfaceVersion >= AIDL_DEVICE_SESSION_V3 &&
++                mSupportSessionHalBufManager && halStream.enableHalBufferManager)
++                || mUseHalBufManager) {
++            halBufferManagedStreamIds.insert(halStream.id);
+         }
+-        mHalBufManagedStreamIds = std::move(halBufferManagedStreamIds);
+-        config->hal_buffer_managed_streams = mHalBufManagedStreamIds;
+     }
++    mHalBufManagedStreamIds = std::move(halBufferManagedStreamIds);
++    config->hal_buffer_managed_streams = mHalBufManagedStreamIds;
+     // And convert output stream configuration from AIDL
+     for (size_t i = 0; i < config->num_streams; i++) {
+         camera3::camera_stream_t *dst = config->streams[i];
+@@ -1096,10 +1087,8 @@ status_t AidlCamera3Device::AidlHalInterface::configureStreams(
+             }
+             dstStream->setUsage(
+                     mapProducerToFrameworkUsage(src.producerUsage));
+-            if (flags::session_hal_buf_manager()) {
+-                dstStream->setHalBufferManager(
+-                        contains(config->hal_buffer_managed_streams, streamId));
+-            }
++            dstStream->setHalBufferManager(
++                    contains(config->hal_buffer_managed_streams, streamId));
+         }
+         dst->max_buffers = src.maxBuffers;
+     }
+diff --git a/services/camera/libcameraservice/device3/hidl/HidlCamera3Device.cpp b/services/camera/libcameraservice/device3/hidl/HidlCamera3Device.cpp
+index f507df9bf7..6986d3c754 100644
+--- a/services/camera/libcameraservice/device3/hidl/HidlCamera3Device.cpp
++++ b/services/camera/libcameraservice/device3/hidl/HidlCamera3Device.cpp
+@@ -929,7 +929,7 @@ status_t HidlCamera3Device::HidlHalInterface::configureStreams(
+         switch (src->stream_type) {
+             case CAMERA_STREAM_OUTPUT:
+                 streamType = StreamType::OUTPUT;
+-                if (flags::session_hal_buf_manager() && mUseHalBufManager) {
++                if (mUseHalBufManager) {
+                     mHalBufManagedStreamIds.insert(streamId);
+                 }
+                 break;
+-- 
+2.43.0
+

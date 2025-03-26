@@ -1,0 +1,35 @@
+From da21163bc8101d6bd85a2d29464065fd6e9dffc0 Mon Sep 17 00:00:00 2001
+From: Austin Borger <borgera@google.com>
+Date: Mon, 2 Dec 2024 10:27:03 -0800
+Subject: [PATCH 371/436] Create a token for the AttributionSource CameraSource
+ passes to connect
+
+If an AttributionSource does not have a token, data delivery permission checks
+fail with "Attempt to invoke interface method
+'void android.os.IBinder.linkToDeath(android.os.IBinder$DeathRecipient, int)'
+on a null object reference" due to the null binder. Create a token before
+passing it to connect.
+
+Bug: 190657833
+Flag: com.android.internal.camera.flags.data_delivery_permission_checks
+Test: Ran CtsCameraTestCases
+Change-Id: I83c760c8a81976d899b75942eb5177baaa590a16
+---
+ media/libstagefright/CameraSource.cpp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/media/libstagefright/CameraSource.cpp b/media/libstagefright/CameraSource.cpp
+index 81a5508ff7..fe1d3b602a 100644
+--- a/media/libstagefright/CameraSource.cpp
++++ b/media/libstagefright/CameraSource.cpp
+@@ -157,6 +157,7 @@ status_t CameraSource::isCameraAvailable(
+         clientAttribution.uid = clientUid;
+         clientAttribution.deviceId = kDefaultDeviceId;
+         clientAttribution.packageName = clientName;
++        clientAttribution.token = sp<BBinder>::make();
+ 
+         mCamera = Camera::connect(cameraId, /*targetSdkVersion*/__ANDROID_API_FUTURE__,
+                 /*rotationOverride*/hardware::ICameraService::ROTATION_OVERRIDE_NONE,
+-- 
+2.43.0
+

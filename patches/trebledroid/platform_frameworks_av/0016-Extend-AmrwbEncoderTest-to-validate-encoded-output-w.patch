@@ -1,0 +1,256 @@
+From bffbebbc8695fe8817cceb5882c5148f7570413b Mon Sep 17 00:00:00 2001
+From: Sushant <sushant@ittiam.com>
+Date: Thu, 12 Sep 2024 17:26:25 +0530
+Subject: [PATCH 016/436] Extend AmrwbEncoderTest to validate encoded output
+ with reference files
+
+Bug: 357558004
+Test: atest AmrwbEncoderTest
+
+Change-Id: I5bd808e10338b8c24b5d7308eee9fc2769612984
+---
+ .../amrwb/enc/test/AmrwbEncoderTest.cpp       | 135 ++++++++++++++----
+ .../codecs/amrwb/enc/test/AndroidTest.xml     |   6 +-
+ .../codecs/amrwb/enc/test/DynamicConfig.xml   |   2 +-
+ media/module/codecs/amrwb/enc/test/README.md  |   4 +-
+ 4 files changed, 110 insertions(+), 37 deletions(-)
+
+diff --git a/media/module/codecs/amrwb/enc/test/AmrwbEncoderTest.cpp b/media/module/codecs/amrwb/enc/test/AmrwbEncoderTest.cpp
+index 1a6ee27f67..dc9c1b10ad 100644
+--- a/media/module/codecs/amrwb/enc/test/AmrwbEncoderTest.cpp
++++ b/media/module/codecs/amrwb/enc/test/AmrwbEncoderTest.cpp
+@@ -20,6 +20,7 @@
+ #include <utils/Log.h>
+ 
+ #include <stdio.h>
++#include <fstream>
+ 
+ #include "cmnMemory.h"
+ #include "voAMRWB.h"
+@@ -34,13 +35,15 @@ constexpr int32_t kOutputBufferSize = 1024;
+ 
+ static AmrwbEncTestEnvironment *gEnv = nullptr;
+ 
+-class AmrwbEncoderTest : public ::testing::TestWithParam<tuple<string, int32_t, VOAMRWBFRAMETYPE>> {
++class AmrwbEncoderTest : public ::testing::TestWithParam<tuple<string, int32_t,
++                                                               VOAMRWBFRAMETYPE, string>> {
+   public:
+     AmrwbEncoderTest() : mEncoderHandle(nullptr) {
+-        tuple<string, int32_t, VOAMRWBFRAMETYPE> params = GetParam();
++        tuple<string, int32_t, VOAMRWBFRAMETYPE, string> params = GetParam();
+         mInputFile = gEnv->getRes() + get<0>(params);
+         mMode = get<1>(params);
+         mFrameType = get<2>(params);
++        refFilePath = gEnv->getRes() + get<3>(params);
+         mMemOperator.Alloc = cmnMemAlloc;
+         mMemOperator.Copy = cmnMemCopy;
+         mMemOperator.Free = cmnMemFree;
+@@ -66,8 +69,47 @@ class AmrwbEncoderTest : public ::testing::TestWithParam<tuple<string, int32_t,
+     VO_CODEC_INIT_USERDATA mUserData;
+     VO_HANDLE mEncoderHandle;
+     int32_t mMode;
++    string refFilePath;
++
++    bool compareBinaryFiles(const string& refFilePath, const string& outFilePath);
+ };
+ 
++bool AmrwbEncoderTest::compareBinaryFiles(const std::string &refFilePath,
++                                          const std::string &outFilePath) {
++    std::ifstream refFile(refFilePath, std::ios::binary | std::ios::ate);
++    std::ifstream outFile(outFilePath, std::ios::binary | std::ios::ate);
++    assert(refFile.is_open() && "Error opening reference file " + refFilePath);
++    assert(outFile.is_open() && "Error opening output file " + outFilePath);
++
++    std::streamsize refFileSize = refFile.tellg();
++    std::streamsize outFileSize = outFile.tellg();
++    if (refFileSize != outFileSize) {
++        ALOGE("Error, File size mismatch: Reference file size = %td bytes,"
++               "but output file size = %td bytes", refFileSize, outFileSize);
++        return false;
++    }
++
++    refFile.seekg(0, std::ios::beg);
++    outFile.seekg(0, std::ios::beg);
++    constexpr std::streamsize kBufferSize = 16 * 1024;
++    char refBuffer[kBufferSize];
++    char outBuffer[kBufferSize];
++
++    while (refFile && outFile) {
++        refFile.read(refBuffer, kBufferSize);
++        outFile.read(outBuffer, kBufferSize);
++
++        std::streamsize refBytesRead = refFile.gcount();
++        std::streamsize outBytesRead = outFile.gcount();
++
++        if (refBytesRead != outBytesRead || memcmp(refBuffer, outBuffer, refBytesRead) != 0) {
++            ALOGE("Error, File content mismatch.");
++            return false;
++        }
++    }
++    return true;
++}
++
+ TEST_P(AmrwbEncoderTest, CreateAmrwbEncoderTest) {
+     int32_t status = voGetAMRWBEncAPI(&mApiHandle);
+     ASSERT_EQ(status, VO_ERR_NONE) << "Failed to get api handle";
+@@ -152,38 +194,69 @@ TEST_P(AmrwbEncoderTest, AmrwbEncodeTest) {
+     if (fpOutput) {
+         fclose(fpOutput);
+     }
++
++    ASSERT_TRUE(compareBinaryFiles(refFilePath, OUTPUT_FILE))
++    << "Error, Binary file comparison failed: Output file "
++    << OUTPUT_FILE << " does not match the reference file " << refFilePath << ".";
+ }
+ 
+ INSTANTIATE_TEST_SUITE_P(
+-        AmrwbEncoderTestAll, AmrwbEncoderTest,
+-        ::testing::Values(
+-                make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD66, VOAMRWB_DEFAULT),
+-                make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD885, VOAMRWB_DEFAULT),
+-                make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1265, VOAMRWB_DEFAULT),
+-                make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1425, VOAMRWB_DEFAULT),
+-                make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1585, VOAMRWB_DEFAULT),
+-                make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1825, VOAMRWB_DEFAULT),
+-                make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1985, VOAMRWB_DEFAULT),
+-                make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD2305, VOAMRWB_DEFAULT),
+-                make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD2385, VOAMRWB_DEFAULT),
+-                make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD66, VOAMRWB_ITU),
+-                make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD885, VOAMRWB_ITU),
+-                make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1265, VOAMRWB_ITU),
+-                make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1425, VOAMRWB_ITU),
+-                make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1585, VOAMRWB_ITU),
+-                make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1825, VOAMRWB_ITU),
+-                make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1985, VOAMRWB_ITU),
+-                make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD2305, VOAMRWB_ITU),
+-                make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD2385, VOAMRWB_ITU),
+-                make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD66, VOAMRWB_RFC3267),
+-                make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD885, VOAMRWB_RFC3267),
+-                make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1265, VOAMRWB_RFC3267),
+-                make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1425, VOAMRWB_RFC3267),
+-                make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1585, VOAMRWB_RFC3267),
+-                make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1825, VOAMRWB_RFC3267),
+-                make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1985, VOAMRWB_RFC3267),
+-                make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD2305, VOAMRWB_RFC3267),
+-                make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD2385, VOAMRWB_RFC3267)));
++    AmrwbEncoderTestAll, AmrwbEncoderTest,
++    ::testing::Values(
++        make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD66, VOAMRWB_DEFAULT,
++                    "bbb_raw_1ch_16khz_s16le_VOAMRWB_MD66_VOAMRWB_DEFAULT_ref.amrwb"),
++        make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD885, VOAMRWB_DEFAULT,
++                    "bbb_raw_1ch_16khz_s16le_VOAMRWB_MD885_VOAMRWB_DEFAULT_ref.amrwb"),
++        make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1265, VOAMRWB_DEFAULT,
++                    "bbb_raw_1ch_16khz_s16le_VOAMRWB_MD1265_VOAMRWB_DEFAULT_ref.amrwb"),
++        make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1425, VOAMRWB_DEFAULT,
++                    "bbb_raw_1ch_16khz_s16le_VOAMRWB_MD1425_VOAMRWB_DEFAULT_ref.amrwb"),
++        make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1585, VOAMRWB_DEFAULT,
++                    "bbb_raw_1ch_16khz_s16le_VOAMRWB_MD1585_VOAMRWB_DEFAULT_ref.amrwb"),
++        make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1825, VOAMRWB_DEFAULT,
++                    "bbb_raw_1ch_16khz_s16le_VOAMRWB_MD1825_VOAMRWB_DEFAULT_ref.amrwb"),
++        make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1985, VOAMRWB_DEFAULT,
++                    "bbb_raw_1ch_16khz_s16le_VOAMRWB_MD1985_VOAMRWB_DEFAULT_ref.amrwb"),
++        make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD2305, VOAMRWB_DEFAULT,
++                    "bbb_raw_1ch_16khz_s16le_VOAMRWB_MD2305_VOAMRWB_DEFAULT_ref.amrwb"),
++        make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD2385, VOAMRWB_DEFAULT,
++                    "bbb_raw_1ch_16khz_s16le_VOAMRWB_MD2385_VOAMRWB_DEFAULT_ref.amrwb"),
++        make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD66, VOAMRWB_ITU,
++                    "bbb_raw_1ch_16khz_s16le_VOAMRWB_MD66_VOAMRWB_ITU_ref.amrwb"),
++        make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD885, VOAMRWB_ITU,
++                    "bbb_raw_1ch_16khz_s16le_VOAMRWB_MD885_VOAMRWB_ITU_ref.amrwb"),
++        make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1265, VOAMRWB_ITU,
++                    "bbb_raw_1ch_16khz_s16le_VOAMRWB_MD1265_VOAMRWB_ITU_ref.amrwb"),
++        make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1425, VOAMRWB_ITU,
++                    "bbb_raw_1ch_16khz_s16le_VOAMRWB_MD1425_VOAMRWB_ITU_ref.amrwb"),
++        make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1585, VOAMRWB_ITU,
++                    "bbb_raw_1ch_16khz_s16le_VOAMRWB_MD1585_VOAMRWB_ITU_ref.amrwb"),
++        make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1825, VOAMRWB_ITU,
++                    "bbb_raw_1ch_16khz_s16le_VOAMRWB_MD1825_VOAMRWB_ITU_ref.amrwb"),
++        make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1985, VOAMRWB_ITU,
++                    "bbb_raw_1ch_16khz_s16le_VOAMRWB_MD1985_VOAMRWB_ITU_ref.amrwb"),
++        make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD2305, VOAMRWB_ITU,
++                    "bbb_raw_1ch_16khz_s16le_VOAMRWB_MD2305_VOAMRWB_ITU_ref.amrwb"),
++        make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD2385, VOAMRWB_ITU,
++                    "bbb_raw_1ch_16khz_s16le_VOAMRWB_MD2385_VOAMRWB_ITU_ref.amrwb"),
++        make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD66, VOAMRWB_RFC3267,
++                    "bbb_raw_1ch_16khz_s16le_VOAMRWB_MD66_VOAMRWB_RFC3267_ref.amrwb"),
++        make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD885, VOAMRWB_RFC3267,
++                    "bbb_raw_1ch_16khz_s16le_VOAMRWB_MD885_VOAMRWB_RFC3267_ref.amrwb"),
++        make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1265, VOAMRWB_RFC3267,
++                    "bbb_raw_1ch_16khz_s16le_VOAMRWB_MD1265_VOAMRWB_RFC3267_ref.amrwb"),
++        make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1425, VOAMRWB_RFC3267,
++                    "bbb_raw_1ch_16khz_s16le_VOAMRWB_MD1425_VOAMRWB_RFC3267_ref.amrwb"),
++        make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1585, VOAMRWB_RFC3267,
++                    "bbb_raw_1ch_16khz_s16le_VOAMRWB_MD1585_VOAMRWB_RFC3267_ref.amrwb"),
++        make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1825, VOAMRWB_RFC3267,
++                    "bbb_raw_1ch_16khz_s16le_VOAMRWB_MD1825_VOAMRWB_RFC3267_ref.amrwb"),
++        make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD1985, VOAMRWB_RFC3267,
++                    "bbb_raw_1ch_16khz_s16le_VOAMRWB_MD1985_VOAMRWB_RFC3267_ref.amrwb"),
++        make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD2305, VOAMRWB_RFC3267,
++                    "bbb_raw_1ch_16khz_s16le_VOAMRWB_MD2305_VOAMRWB_RFC3267_ref.amrwb"),
++        make_tuple("bbb_raw_1ch_16khz_s16le.raw", VOAMRWB_MD2385, VOAMRWB_RFC3267,
++                    "bbb_raw_1ch_16khz_s16le_VOAMRWB_MD2385_VOAMRWB_RFC3267_ref.amrwb")));
+ 
+ int main(int argc, char **argv) {
+     gEnv = new AmrwbEncTestEnvironment();
+diff --git a/media/module/codecs/amrwb/enc/test/AndroidTest.xml b/media/module/codecs/amrwb/enc/test/AndroidTest.xml
+index 8822cb2b33..1f4121f35e 100644
+--- a/media/module/codecs/amrwb/enc/test/AndroidTest.xml
++++ b/media/module/codecs/amrwb/enc/test/AndroidTest.xml
+@@ -23,17 +23,17 @@
+     <target_preparer class="com.android.compatibility.common.tradefed.targetprep.DynamicConfigPusher">
+         <option name="target" value="host" />
+         <option name="config-filename" value="AmrwbEncoderTest" />
+-        <option name="version" value="1.0"/>
++        <option name="version" value="2.0"/>
+     </target_preparer>
+     <target_preparer class="com.android.compatibility.common.tradefed.targetprep.MediaPreparer">
+         <option name="push-all" value="true" />
+-        <option name="media-folder-name" value="AmrwbEncoderTest-1.0" />
++        <option name="media-folder-name" value="AmrwbEncoderTest-2.0" />
+         <option name="dynamic-config-module" value="AmrwbEncoderTest" />
+     </target_preparer>
+ 
+     <test class="com.android.tradefed.testtype.GTest" >
+         <option name="native-test-device-path" value="/data/local/tmp" />
+         <option name="module-name" value="AmrwbEncoderTest" />
+-        <option name="native-test-flag" value="-P /sdcard/test/AmrwbEncoderTest-1.0/" />
++        <option name="native-test-flag" value="-P /sdcard/test/AmrwbEncoderTest-2.0/" />
+     </test>
+ </configuration>
+diff --git a/media/module/codecs/amrwb/enc/test/DynamicConfig.xml b/media/module/codecs/amrwb/enc/test/DynamicConfig.xml
+index a0b621823a..59701ea33c 100644
+--- a/media/module/codecs/amrwb/enc/test/DynamicConfig.xml
++++ b/media/module/codecs/amrwb/enc/test/DynamicConfig.xml
+@@ -15,6 +15,6 @@
+ 
+ <dynamicConfig>
+     <entry key="media_files_url">
+-            <value>https://dl.google.com/android-unittest/media/frameworks/av/media/module/codecs/amrwb/enc/test/AmrwbEncoderTest-1.0.zip</value>
++            <value>https://dl.google.com/android-unittest/media/frameworks/av/media/module/codecs/amrwb/enc/test/AmrwbEncoderTest-2.0.zip</value>
+     </entry>
+ </dynamicConfig>
+diff --git a/media/module/codecs/amrwb/enc/test/README.md b/media/module/codecs/amrwb/enc/test/README.md
+index 3b9cc39938..ea2c31ec64 100644
+--- a/media/module/codecs/amrwb/enc/test/README.md
++++ b/media/module/codecs/amrwb/enc/test/README.md
+@@ -22,7 +22,7 @@ To test 32-bit binary push binaries from nativetest.
+ adb push ${OUT}/data/nativetest/AmrwbEncoderTest/AmrwbEncoderTest /data/local/tmp/
+ ```
+ 
+-The resource file for the tests is taken from [here](https://dl.google.com/android-unittest/media/frameworks/av/media/module/codecs/amrwb/enc/test/AmrwbEncoderTest-1.0.zip). Download, unzip and push these files into device for testing.
++The resource file for the tests is taken from [here](https://dl.google.com/android-unittest/media/frameworks/av/media/module/codecs/amrwb/enc/test/AmrwbEncoderTest-2.0.zip). Download, unzip and push these files into device for testing.
+ 
+ ```
+ adb push AmrwbEncoderTest-1.0 /data/local/tmp/
+@@ -30,7 +30,7 @@ adb push AmrwbEncoderTest-1.0 /data/local/tmp/
+ 
+ usage: AmrwbEncoderTest -P \<path_to_folder\>
+ ```
+-adb shell /data/local/tmp/AmrwbEncoderTest -P /data/local/tmp/AmrwbEncoderTest-1.0/
++adb shell /data/local/tmp/AmrwbEncoderTest -P /data/local/tmp/AmrwbEncoderTest-2.0/
+ ```
+ Alternatively, the test can also be run using atest command.
+ 
+-- 
+2.43.0
+

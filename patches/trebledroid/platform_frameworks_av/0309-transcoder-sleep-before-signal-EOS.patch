@@ -1,0 +1,31 @@
+From 0216f1fa74994d23753139374612de14c30ea18e Mon Sep 17 00:00:00 2001
+From: Wonsik Kim <wonsik@google.com>
+Date: Wed, 20 Nov 2024 21:09:54 +0000
+Subject: [PATCH 309/436] transcoder: sleep before signal EOS
+
+Bug: 264938310
+Change-Id: I1b72d7a77284470332e04ea4c31351352e42bb63
+---
+ .../libmediatranscoding/transcoder/VideoTrackTranscoder.cpp | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/media/module/libmediatranscoding/transcoder/VideoTrackTranscoder.cpp b/media/module/libmediatranscoding/transcoder/VideoTrackTranscoder.cpp
+index d21908f0a2..7905e4f274 100644
+--- a/media/module/libmediatranscoding/transcoder/VideoTrackTranscoder.cpp
++++ b/media/module/libmediatranscoding/transcoder/VideoTrackTranscoder.cpp
+@@ -458,6 +458,12 @@ void VideoTrackTranscoder::transferBuffer(int32_t bufferIndex, AMediaCodecBuffer
+ 
+     if (bufferInfo.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) {
+         LOG(DEBUG) << "EOS from decoder.";
++        // NOTE - b/360057459
++        // There is a synchronization problem between feeding the frame to the encoder input surface
++        // and signaling end of stream.
++        // Waiting before signaling end of stream so that input surface has time to feed remaining
++        // frames to the encoder.
++        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+         media_status_t status = AMediaCodec_signalEndOfInputStream(mEncoder->getCodec());
+         if (status != AMEDIA_OK) {
+             LOG(ERROR) << "SignalEOS on encoder returned error: " << status;
+-- 
+2.43.0
+

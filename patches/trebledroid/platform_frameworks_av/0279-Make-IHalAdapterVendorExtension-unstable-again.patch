@@ -1,0 +1,214 @@
+From e0540ea206eb62feb6920a7945adca545e98eb20 Mon Sep 17 00:00:00 2001
+From: Mikhail Naganov <mnaganov@google.com>
+Date: Fri, 15 Nov 2024 16:39:26 -0800
+Subject: [PATCH 279/436] Make 'IHalAdapterVendorExtension' unstable again
+
+There is no benefit in having this interface as "stable" because
+it still does not allow to use 'AServiceManager_isDeclared' for it.
+Keeping it as "stable" requires updating all the manifest fragments
+of its implementations.
+
+Flag: EXEMPT bugfix
+Bug: 378948881
+Test: m
+Change-Id: I040e7bce41d21fa2a63280a7c218c6b68240edcd
+---
+ Android.bp                                    | 25 +---------
+ aidl_api/av-audio-types-aidl/1/.hash          |  1 -
+ .../audio/IHalAdapterVendorExtension.aidl     | 46 -------------------
+ .../audio/IHalAdapterVendorExtension.aidl     | 46 -------------------
+ media/libaudiohal/impl/Android.bp             |  2 +-
+ services/audioparameterparser/Android.bp      |  2 +-
+ 6 files changed, 3 insertions(+), 119 deletions(-)
+ delete mode 100644 aidl_api/av-audio-types-aidl/1/.hash
+ delete mode 100644 aidl_api/av-audio-types-aidl/1/android/media/audio/IHalAdapterVendorExtension.aidl
+ delete mode 100644 aidl_api/av-audio-types-aidl/current/android/media/audio/IHalAdapterVendorExtension.aidl
+
+diff --git a/Android.bp b/Android.bp
+index 0c7ed6e9bb..c716a0672e 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -135,6 +135,7 @@ cc_library_headers {
+ 
+ aidl_interface {
+     name: "av-audio-types-aidl",
++    unstable: true,
+     host_supported: true,
+     vendor_available: true,
+     double_loadable: true,
+@@ -154,28 +155,4 @@ aidl_interface {
+             sdk_version: "module_current",
+         },
+     },
+-    versions_with_info: [
+-        {
+-            version: "1",
+-            imports: ["android.hardware.audio.core-V2"],
+-        },
+-    ],
+-    frozen: false,
+-
+-}
+-
+-latest_av_audio_types_aidl = "av-audio-types-aidl-V2"
+-
+-cc_defaults {
+-    name: "latest_av_audio_types_aidl_ndk_shared",
+-    shared_libs: [
+-        latest_av_audio_types_aidl + "-ndk",
+-    ],
+-}
+-
+-cc_defaults {
+-    name: "latest_av_audio_types_aidl_ndk_static",
+-    static_libs: [
+-        latest_av_audio_types_aidl + "-ndk",
+-    ],
+ }
+diff --git a/aidl_api/av-audio-types-aidl/1/.hash b/aidl_api/av-audio-types-aidl/1/.hash
+deleted file mode 100644
+index 0002682574..0000000000
+--- a/aidl_api/av-audio-types-aidl/1/.hash
++++ /dev/null
+@@ -1 +0,0 @@
+-ef1bc5ed9db445fbfc116cdec6e6ad081458ee40
+diff --git a/aidl_api/av-audio-types-aidl/1/android/media/audio/IHalAdapterVendorExtension.aidl b/aidl_api/av-audio-types-aidl/1/android/media/audio/IHalAdapterVendorExtension.aidl
+deleted file mode 100644
+index a9aa2c1376..0000000000
+--- a/aidl_api/av-audio-types-aidl/1/android/media/audio/IHalAdapterVendorExtension.aidl
++++ /dev/null
+@@ -1,46 +0,0 @@
+-/*
+- * Copyright (C) 2023 The Android Open Source Project
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *      http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-///////////////////////////////////////////////////////////////////////////////
+-// THIS FILE IS IMMUTABLE. DO NOT EDIT IN ANY CASE.                          //
+-///////////////////////////////////////////////////////////////////////////////
+-
+-// This file is a snapshot of an AIDL file. Do not edit it manually. There are
+-// two cases:
+-// 1). this is a frozen version file - do not edit this in any case.
+-// 2). this is a 'current' file. If you make a backwards compatible change to
+-//     the interface (from the latest frozen version), the build system will
+-//     prompt you to update this file with `m <name>-update-api`.
+-//
+-// You must not make a backward incompatible change to any AIDL file built
+-// with the aidl_interface module type with versions property set. The module
+-// type is used to build AIDL files in a way that they can be used across
+-// independently updatable components of the system. If a device is shipped
+-// with such a backward incompatible change, it has a high risk of breaking
+-// later when a module using the interface is updated, e.g., Mainline modules.
+-
+-package android.media.audio;
+-/* @hide */
+-interface IHalAdapterVendorExtension {
+-  @utf8InCpp String[] parseVendorParameterIds(android.media.audio.IHalAdapterVendorExtension.ParameterScope scope, in @utf8InCpp String rawKeys);
+-  void parseVendorParameters(android.media.audio.IHalAdapterVendorExtension.ParameterScope scope, in @utf8InCpp String rawKeysAndValues, out android.hardware.audio.core.VendorParameter[] syncParameters, out android.hardware.audio.core.VendorParameter[] asyncParameters);
+-  android.hardware.audio.core.VendorParameter[] parseBluetoothA2dpReconfigureOffload(in @utf8InCpp String rawValue);
+-  android.hardware.audio.core.VendorParameter[] parseBluetoothLeReconfigureOffload(in @utf8InCpp String rawValue);
+-  @utf8InCpp String processVendorParameters(android.media.audio.IHalAdapterVendorExtension.ParameterScope scope, in android.hardware.audio.core.VendorParameter[] parameters);
+-  enum ParameterScope {
+-    MODULE = 0,
+-    STREAM = 1,
+-  }
+-}
+diff --git a/aidl_api/av-audio-types-aidl/current/android/media/audio/IHalAdapterVendorExtension.aidl b/aidl_api/av-audio-types-aidl/current/android/media/audio/IHalAdapterVendorExtension.aidl
+deleted file mode 100644
+index a9aa2c1376..0000000000
+--- a/aidl_api/av-audio-types-aidl/current/android/media/audio/IHalAdapterVendorExtension.aidl
++++ /dev/null
+@@ -1,46 +0,0 @@
+-/*
+- * Copyright (C) 2023 The Android Open Source Project
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *      http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-///////////////////////////////////////////////////////////////////////////////
+-// THIS FILE IS IMMUTABLE. DO NOT EDIT IN ANY CASE.                          //
+-///////////////////////////////////////////////////////////////////////////////
+-
+-// This file is a snapshot of an AIDL file. Do not edit it manually. There are
+-// two cases:
+-// 1). this is a frozen version file - do not edit this in any case.
+-// 2). this is a 'current' file. If you make a backwards compatible change to
+-//     the interface (from the latest frozen version), the build system will
+-//     prompt you to update this file with `m <name>-update-api`.
+-//
+-// You must not make a backward incompatible change to any AIDL file built
+-// with the aidl_interface module type with versions property set. The module
+-// type is used to build AIDL files in a way that they can be used across
+-// independently updatable components of the system. If a device is shipped
+-// with such a backward incompatible change, it has a high risk of breaking
+-// later when a module using the interface is updated, e.g., Mainline modules.
+-
+-package android.media.audio;
+-/* @hide */
+-interface IHalAdapterVendorExtension {
+-  @utf8InCpp String[] parseVendorParameterIds(android.media.audio.IHalAdapterVendorExtension.ParameterScope scope, in @utf8InCpp String rawKeys);
+-  void parseVendorParameters(android.media.audio.IHalAdapterVendorExtension.ParameterScope scope, in @utf8InCpp String rawKeysAndValues, out android.hardware.audio.core.VendorParameter[] syncParameters, out android.hardware.audio.core.VendorParameter[] asyncParameters);
+-  android.hardware.audio.core.VendorParameter[] parseBluetoothA2dpReconfigureOffload(in @utf8InCpp String rawValue);
+-  android.hardware.audio.core.VendorParameter[] parseBluetoothLeReconfigureOffload(in @utf8InCpp String rawValue);
+-  @utf8InCpp String processVendorParameters(android.media.audio.IHalAdapterVendorExtension.ParameterScope scope, in android.hardware.audio.core.VendorParameter[] parameters);
+-  enum ParameterScope {
+-    MODULE = 0,
+-    STREAM = 1,
+-  }
+-}
+diff --git a/media/libaudiohal/impl/Android.bp b/media/libaudiohal/impl/Android.bp
+index ddef8520b7..00f3929bff 100644
+--- a/media/libaudiohal/impl/Android.bp
++++ b/media/libaudiohal/impl/Android.bp
+@@ -201,11 +201,11 @@ cc_defaults {
+         "latest_android_hardware_audio_core_sounddose_ndk_shared",
+         "latest_android_hardware_audio_effect_ndk_shared",
+         "latest_android_media_audio_common_types_ndk_shared",
+-        "latest_av_audio_types_aidl_ndk_shared",
+     ],
+     shared_libs: [
+         "android.hardware.common-V2-ndk",
+         "android.hardware.common.fmq-V1-ndk",
++        "av-audio-types-aidl-ndk",
+         "com.android.media.audio-aconfig-cc",
+         "libaudio_aidl_conversion_common_cpp",
+         "libaudio_aidl_conversion_common_ndk",
+diff --git a/services/audioparameterparser/Android.bp b/services/audioparameterparser/Android.bp
+index 1c1c1e19a9..0b2c1bac5b 100644
+--- a/services/audioparameterparser/Android.bp
++++ b/services/audioparameterparser/Android.bp
+@@ -35,10 +35,10 @@ cc_defaults {
+     name: "android.hardware.audio.parameter_parser.example_defaults",
+     defaults: [
+         "latest_android_hardware_audio_core_ndk_shared",
+-        "latest_av_audio_types_aidl_ndk_shared",
+     ],
+ 
+     shared_libs: [
++        "av-audio-types-aidl-ndk",
+         "libbase",
+         "libbinder_ndk",
+     ],
+-- 
+2.43.0
+

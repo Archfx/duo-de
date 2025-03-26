@@ -1,0 +1,34 @@
+From 71ff72b2ba45e4d7a470dac15c9ec4b5548ca0fa Mon Sep 17 00:00:00 2001
+From: Ian Baker <ibaker@google.com>
+Date: Thu, 14 Nov 2024 17:24:51 +0000
+Subject: [PATCH 267/436] Add US-MTV and TW TLs to media solutions OWNERS
+
+This ensures that someone can approve emergency rollbacks and fixes
+outside of LON hours for files exclusively owned by media
+solutions, as configured in
+https://android-review.git.corp.google.com/q/topic:%22media-playback-update-OWNERS%22.
+
+Bug: 285890867
+Test: None (OWNERS-only change)
+
+Change-Id: I3d0877a1928d3dfc359e420751ada1a6ae7fb106
+---
+ media/janitors/media_solutions_OWNERS | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/media/janitors/media_solutions_OWNERS b/media/janitors/media_solutions_OWNERS
+index 95c2b9794a..004fa30173 100644
+--- a/media/janitors/media_solutions_OWNERS
++++ b/media/janitors/media_solutions_OWNERS
+@@ -17,3 +17,8 @@ tonihei@google.com
+ 
+ # MediaRouter and native mirroring only:
+ aquilescanta@google.com
++
++# Emergency rollbacks and fixes outside LON timezone
++jmtrivi@google.com # US-MTV
++lajos@google.com # US-MTV
++scottnien@google.com # TW-NTC
+-- 
+2.43.0
+

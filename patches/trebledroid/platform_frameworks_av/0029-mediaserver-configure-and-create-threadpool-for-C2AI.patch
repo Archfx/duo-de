@@ -1,0 +1,89 @@
+From 1ed80f8f500362d888fa49c36285df5976ac8183 Mon Sep 17 00:00:00 2001
+From: Sungtak Lee <taklee@google.com>
+Date: Wed, 25 Sep 2024 03:47:31 +0000
+Subject: [PATCH 029/436] mediaserver: configure and create threadpool for
+ C2AIDL
+
+Flag: EXEMPT bugfix
+Bug: 359802236
+Test: presubmit
+Change-Id: I8b6c8e86b5d6f10dbc88ad3a69ed18f2aa589886
+---
+ media/mediaserver/Android.bp           |  3 +++
+ media/mediaserver/main_mediaserver.cpp | 21 ++++++++++++++++++---
+ 2 files changed, 21 insertions(+), 3 deletions(-)
+
+diff --git a/media/mediaserver/Android.bp b/media/mediaserver/Android.bp
+index 6ea40e379a..d916fd1347 100644
+--- a/media/mediaserver/Android.bp
++++ b/media/mediaserver/Android.bp
+@@ -54,6 +54,8 @@ soong_config_module_type {
+ mediaserver_cc_binary {
+     name: "mediaserver",
+ 
++    defaults: ["libcodec2_hal_selection"],
++
+     srcs: ["main_mediaserver.cpp"],
+ 
+     shared_libs: [
+@@ -61,6 +63,7 @@ mediaserver_cc_binary {
+         "libicu",
+         "libfmq",
+         "libbinder",
++        "libbinder_ndk",
+         "libhidlbase",
+         "liblog",
+         "libmediaplayerservice",
+diff --git a/media/mediaserver/main_mediaserver.cpp b/media/mediaserver/main_mediaserver.cpp
+index 026847a527..8a62f3011d 100644
+--- a/media/mediaserver/main_mediaserver.cpp
++++ b/media/mediaserver/main_mediaserver.cpp
+@@ -17,11 +17,12 @@
+ 
+ #define LOG_TAG "mediaserver"
+ //#define LOG_NDEBUG 0
+-
++#include <android/binder_process.h>
+ #include <binder/IPCThreadState.h>
+ #include <binder/ProcessState.h>
+ #include <binder/IServiceManager.h>
+ #include <hidl/HidlTransportSupport.h>
++#include <codec2/common/HalSelection.h>
+ #include <utils/Log.h>
+ #include "RegisterExtensions.h"
+ 
+@@ -30,6 +31,14 @@
+ 
+ using namespace android;
+ 
++namespace {
++    constexpr int kCodecThreadPoolCount = 16;
++
++    // This is the default thread count for binder thread pool
++    // if the thread count is not configured.
++    constexpr int kDefaultBinderThreadPoolCount = 15;
++}; // anonymous
++
+ int main(int argc __unused, char **argv __unused)
+ {
+     signal(SIGPIPE, SIG_IGN);
+@@ -40,8 +49,14 @@ int main(int argc __unused, char **argv __unused)
+     MediaPlayerService::instantiate();
+     ResourceManagerService::instantiate();
+     registerExtensions();
+-    ::android::hardware::configureRpcThreadpool(16, false);
++
++    bool aidl = ::android::IsCodec2AidlHalSelected();
++    if (!aidl) {
++        ::android::hardware::configureRpcThreadpool(kCodecThreadPoolCount, false);
++    } else {
++        ABinderProcess_setThreadPoolMaxThreadCount(
++                kCodecThreadPoolCount + kDefaultBinderThreadPoolCount);
++    }
+     ProcessState::self()->startThreadPool();
+     IPCThreadState::self()->joinThreadPool();
+-    ::android::hardware::joinRpcThreadpool();
+ }
+-- 
+2.43.0
+

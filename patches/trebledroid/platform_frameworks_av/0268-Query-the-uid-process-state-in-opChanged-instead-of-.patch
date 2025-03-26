@@ -1,0 +1,97 @@
+From f2da9c7c3c03b6e7ceb3bf94a8c516b7d0b0e2e6 Mon Sep 17 00:00:00 2001
+From: Austin Borger <borgera@google.com>
+Date: Tue, 12 Nov 2024 13:45:28 -0800
+Subject: [PATCH 268/436] Query the uid process state in opChanged instead of
+ relying on callbacks.
+
+Occasionally, Android may enter a state where onUidStateChanged arrives
+late or not at all until another process state change occurs. In some
+situations that may mean isUidVisible is (incorrectly) false when the
+app is in the foreground. Instead of relying on the onUidStateChanged
+callback, query the state directly through activity manager.
+
+The flag protecting this is only needed while data_delivery_permission_checks
+is not flipped, and can be removed if that advances first.
+
+Test: CameraPermissionTest
+Bug: 378016494
+Flag: com.android.internal.camera.flags.query_process_state
+Change-Id: Ie609c87f27dc0610f5fe9c735e68b4e9366c510f
+---
+ camera/camera_platform.aconfig                | 10 ++++++++++
+ .../camera/libcameraservice/CameraService.cpp | 20 +++++++++++++------
+ .../camera/libcameraservice/CameraService.h   |  2 ++
+ 3 files changed, 26 insertions(+), 6 deletions(-)
+
+diff --git a/camera/camera_platform.aconfig b/camera/camera_platform.aconfig
+index 968b28f08a..2feebb4d49 100644
+--- a/camera/camera_platform.aconfig
++++ b/camera/camera_platform.aconfig
+@@ -246,3 +246,13 @@ flag {
+         purpose: PURPOSE_FEATURE
+     }
+ }
++
++flag {
++    namespace: "camera_platform"
++    name: "query_process_state"
++    description: "In opChanged, query the process state from AM instead of relying on mUidPolicy"
++    bug: "378016494"
++    metadata {
++        purpose: PURPOSE_BUGFIX
++    }
++}
+diff --git a/services/camera/libcameraservice/CameraService.cpp b/services/camera/libcameraservice/CameraService.cpp
+index 20b78b7c15..df944781f4 100644
+--- a/services/camera/libcameraservice/CameraService.cpp
++++ b/services/camera/libcameraservice/CameraService.cpp
+@@ -4550,6 +4550,17 @@ status_t CameraService::BasicClient::notifyCameraClosing() {
+     return OK;
+ }
+ 
++int32_t CameraService::getUidProcessState(int32_t uid) {
++    const auto& activityManager = getActivityManager();
++    int32_t procState = ActivityManager::PROCESS_STATE_NONEXISTENT;
++    if (activityManager != nullptr) {
++        procState = activityManager->getUidProcessState(uid, toString16(kServiceName));
++    } else {
++        ALOGE("%s: getActivityManager returned nullptr.", __FUNCTION__);
++    }
++    return procState;
++}
++
+ void CameraService::BasicClient::opChanged(int32_t op, const String16&) {
+     ATRACE_CALL();
+     if (mAppOpsManager == nullptr) {
+@@ -4606,12 +4617,9 @@ void CameraService::BasicClient::opChanged(int32_t op, const String16&) {
+                       [&](const auto& attr) {
+                           uid = static_cast<uid_t>(attr.uid);
+                       });
+-            const auto& activityManager = getActivityManager();
+-            if (activityManager != nullptr) {
+-                procState = activityManager->getUidProcessState(uid, toString16(kServiceName));
+-            } else {
+-                ALOGD("%s: getActivityManager returned nullptr.", __FUNCTION__);
+-            }
++            procState = getUidProcessState(uid);
++        } else if (flags::query_process_state()) {
++            procState = getUidProcessState(getClientUid());
+         } else {
+             procState = sCameraService->mUidPolicy->getProcState(getClientUid());
+         }
+diff --git a/services/camera/libcameraservice/CameraService.h b/services/camera/libcameraservice/CameraService.h
+index 7e824014d7..9c75edeaf7 100644
+--- a/services/camera/libcameraservice/CameraService.h
++++ b/services/camera/libcameraservice/CameraService.h
+@@ -691,6 +691,8 @@ private:
+         return activityManager;
+     }
+ 
++    static int32_t getUidProcessState(int32_t uid);
++
+     /**
+      * Typesafe version of device status, containing both the HAL-layer and the service interface-
+      * layer values.
+-- 
+2.43.0
+

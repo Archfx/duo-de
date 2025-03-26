@@ -1,0 +1,49 @@
+From c4f7d87fa4e288cbb6ae25c5551e55c17fa8aa1e Mon Sep 17 00:00:00 2001
+From: Andy Hung <hunga@google.com>
+Date: Wed, 20 Nov 2024 20:29:32 -0800
+Subject: [PATCH 408/436] AudioSystem: Ensure no nullptr access
+
+Brute force nullptr check for safety. A warning is
+issued if nullptr is found, but it should not occur.
+
+Flag: EXEMPT bugfix
+Test: for run in {1..100}; do (sleep 8; echo $run; adb shell pkill audioserver); done
+Bug: 379427790
+Change-Id: I3ba7a89ecfaf35b658de9477e3f27dc3a59352b2
+---
+ media/libaudioclient/AudioSystem.cpp | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/media/libaudioclient/AudioSystem.cpp b/media/libaudioclient/AudioSystem.cpp
+index e3a96f551e..8094d07078 100644
+--- a/media/libaudioclient/AudioSystem.cpp
++++ b/media/libaudioclient/AudioSystem.cpp
+@@ -151,7 +151,11 @@ public:
+         {
+             std::lock_guard l(mMutex);
+             mValid = false;
+-            mClient->clearIoCache();
++            if (mClient) {
++                mClient->clearIoCache();
++            } else {
++                ALOGW("%s: null client", __func__);
++            }
+         }
+         AudioSystem::reportError(DEAD_OBJECT);
+     }
+@@ -1004,7 +1008,11 @@ public:
+             mValid = false;
+             client = mClient;
+         }
+-        client->onServiceDied();
++        if (client) {
++            client->onServiceDied();
++        } else {
++            ALOGW("%s: null client", __func__);
++        }
+     }
+ 
+     static constexpr mediautils::ServiceOptions options() {
+-- 
+2.43.0
+

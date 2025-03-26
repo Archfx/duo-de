@@ -1,0 +1,966 @@
+From f94040fd5adb81169e7bb8744340685e488728fd Mon Sep 17 00:00:00 2001
+From: Atneya Nair <atneya@google.com>
+Date: Mon, 7 Oct 2024 16:00:49 -0700
+Subject: [PATCH 062/436] Audioflinger dumpsys cleanup
+
+Re-order audioflinger dumpsys and add argument parsing for various sections.
+
+Additionally, to clean up:
+- Pull out dumpsys conditional locking logic into utilities, which
+  return guards
+- Add utility to write strings to fd
+
+Test: adb shell dumpsys media.audio_flinger with all combos
+Test: Compiles/boots
+Flag: EXEMPT logging only
+Bug: 372070273
+Change-Id: I8bcf467ee2792d90b298998267591a354e0661c3
+---
+ services/audioflinger/AudioFlinger.cpp        | 322 +++++++++---------
+ services/audioflinger/AudioFlinger.h          |   7 +-
+ services/audioflinger/DeviceEffectManager.cpp |  11 +-
+ services/audioflinger/Effects.cpp             | 160 ++++-----
+ services/audioflinger/Threads.cpp             |  24 +-
+ services/audioflinger/afutils/DumpTryLock.h   |  41 ---
+ .../audioflinger/afutils/FallibleLockGuard.h  |  69 ++++
+ 7 files changed, 326 insertions(+), 308 deletions(-)
+ delete mode 100644 services/audioflinger/afutils/DumpTryLock.h
+ create mode 100644 services/audioflinger/afutils/FallibleLockGuard.h
+
+diff --git a/services/audioflinger/AudioFlinger.cpp b/services/audioflinger/AudioFlinger.cpp
+index 00340274b3..f077c7ff6e 100644
+--- a/services/audioflinger/AudioFlinger.cpp
++++ b/services/audioflinger/AudioFlinger.cpp
+@@ -26,9 +26,7 @@
+ #include "Configuration.h"
+ #include "AudioFlinger.h"
+ 
+-//#define BUFLOG_NDEBUG 0
+-#include <afutils/BufLog.h>
+-#include <afutils/DumpTryLock.h>
++#include <afutils/FallibleLockGuard.h>
+ #include <afutils/NBAIO_Tee.h>
+ #include <afutils/Permission.h>
+ #include <afutils/PropertyUtils.h>
+@@ -68,6 +66,7 @@
+ // not needed with the includes above, added to prevent transitive include dependency.
+ #include <chrono>
+ #include <thread>
++#include <string_view>
+ 
+ // ----------------------------------------------------------------------------
+ 
+@@ -86,6 +85,8 @@
+ 
+ namespace android {
+ 
++using namespace std::string_view_literals;
++
+ using ::android::base::StringPrintf;
+ using aidl_utils::statusTFromBinderStatus;
+ using media::IEffectClient;
+@@ -102,10 +103,10 @@ using com::android::media::permission::ValidatedAttributionSourceState;
+ static const AudioHalVersionInfo kMaxAAudioPropertyDeviceHalVersion =
+         AudioHalVersionInfo(AudioHalVersionInfo::Type::HIDL, 7, 1);
+ 
+-static constexpr char kDeadlockedString[] = "AudioFlinger may be deadlocked\n";
+-static constexpr char kHardwareLockedString[] = "Hardware lock is taken\n";
+-static constexpr char kClientLockedString[] = "Client lock is taken\n";
+-static constexpr char kNoEffectsFactory[] = "Effects Factory is absent\n";
++constexpr auto kDeadlockedString = "AudioFlinger may be deadlocked\n"sv;
++constexpr auto kHardwareLockedString = "Hardware lock is taken\n"sv;
++constexpr auto kClientLockedString = "Client lock is taken\n"sv;
++constexpr auto kNoEffectsFactory = "Effects Factory is absent\n"sv;
+ 
+ static constexpr char kAudioServiceName[] = "audio";
+ 
+@@ -116,19 +117,26 @@ static const nsecs_t kMinGlobalEffectEnabletimeNs = seconds(7200);
+ // Keep a strong reference to media.log service around forever.
+ // The service is within our parent process so it can never die in a way that we could observe.
+ // These two variables are const after initialization.
+-static sp<IBinder> sMediaLogServiceAsBinder;
+ static sp<IMediaLogService> sMediaLogService;
+ 
+ static pthread_once_t sMediaLogOnce = PTHREAD_ONCE_INIT;
+ 
+ static void sMediaLogInit()
+ {
+-    sMediaLogServiceAsBinder = defaultServiceManager()->getService(String16("media.log"));
++    auto sMediaLogServiceAsBinder = defaultServiceManager()->getService(String16("media.log"));
+     if (sMediaLogServiceAsBinder != 0) {
+         sMediaLogService = interface_cast<IMediaLogService>(sMediaLogServiceAsBinder);
+     }
+ }
+ 
++static int writeStr(int fd, std::string_view s) {
++    return write(fd, s.data(), s.size());
++}
++
++static int writeStr(int fd, const String8& s) {
++    return write(fd, s.c_str(), s.size());
++}
++
+ static error::BinderResult<ValidatedAttributionSourceState>
+ validateAttributionFromContextOrTrustedCaller(AttributionSourceState attr,
+         const IPermissionProvider& provider) {
+@@ -738,18 +746,19 @@ AudioHwDevice* AudioFlinger::findSuitableHwDev_l(
+     return NULL;
+ }
+ 
+-void AudioFlinger::dumpClients_ll(int fd, const Vector<String16>& args __unused)
+-{
++void AudioFlinger::dumpClients_ll(int fd, bool dumpAllocators) {
+     String8 result;
+ 
+-    result.append("Client Allocators:\n");
+-    for (size_t i = 0; i < mClients.size(); ++i) {
+-        sp<Client> client = mClients.valueAt(i).promote();
+-        if (client != 0) {
+-          result.appendFormat("Client: %d\n", client->pid());
+-          result.append(client->allocator().dump().c_str());
++    if (dumpAllocators) {
++        result.append("Client Allocators:\n");
++        for (size_t i = 0; i < mClients.size(); ++i) {
++            sp<Client> client = mClients.valueAt(i).promote();
++            if (client != 0) {
++              result.appendFormat("Client: %d\n", client->pid());
++              result.append(client->allocator().dump().c_str());
++            }
+         }
+-   }
++    }
+ 
+     result.append("Notification Clients:\n");
+     result.append("   pid    uid  name\n");
+@@ -770,12 +779,11 @@ void AudioFlinger::dumpClients_ll(int fd, const Vector<String16>& args __unused)
+         result.appendFormat("  %7d %4d %7d %6u  %s\n", r->mSessionid, r->mCnt, r->mPid,
+                 r->mUid, info->package.c_str());
+     }
+-    write(fd, result.c_str(), result.size());
++    writeStr(fd, result);
+ }
+ 
+ 
+-void AudioFlinger::dumpInternals_l(int fd, const Vector<String16>& args __unused)
+-{
++void AudioFlinger::dumpInternals_l(int fd) {
+     const size_t SIZE = 256;
+     char buffer[SIZE];
+     String8 result;
+@@ -783,7 +791,7 @@ void AudioFlinger::dumpInternals_l(int fd, const Vector<String16>& args __unused
+ 
+     snprintf(buffer, SIZE, "Hardware status: %d\n", hardwareStatus);
+     result.append(buffer);
+-    write(fd, result.c_str(), result.size());
++    writeStr(fd, result);
+ 
+     dprintf(fd, "Vibrator infos(size=%zu):\n", mAudioVibratorInfos.size());
+     for (const auto& vibratorInfo : mAudioVibratorInfos) {
+@@ -793,8 +801,43 @@ void AudioFlinger::dumpInternals_l(int fd, const Vector<String16>& args __unused
+             mBluetoothLatencyModesEnabled ? "" : "not ");
+ }
+ 
+-void AudioFlinger::dumpPermissionDenial(int fd, const Vector<String16>& args __unused)
+-{
++void AudioFlinger::dumpStats(int fd) {
++    // Dump binder stats
++    dprintf(fd, "\nIAudioFlinger binder call profile:\n");
++    writeStr(fd, getIAudioFlingerStatistics().dump());
++
++    extern mediautils::MethodStatistics<int>& getIEffectStatistics();
++    dprintf(fd, "\nIEffect binder call profile:\n");
++    writeStr(fd, getIEffectStatistics().dump());
++
++    // Automatically fetch HIDL or AIDL statistics.
++    const std::string_view halType = (mDevicesFactoryHal->getHalVersion().getType() ==
++                              AudioHalVersionInfo::Type::HIDL)
++                                     ? METHOD_STATISTICS_MODULE_NAME_AUDIO_HIDL
++                                     : METHOD_STATISTICS_MODULE_NAME_AUDIO_AIDL;
++    const std::shared_ptr<std::vector<std::string>> halClassNames =
++            mediautils::getStatisticsClassesForModule(halType);
++    if (halClassNames) {
++        for (const auto& className : *halClassNames) {
++            auto stats = mediautils::getStatisticsForClass(className);
++            if (stats) {
++                dprintf(fd, "\n%s binder call profile:\n", className.c_str());
++                writeStr(fd, stats->dump());
++            }
++        }
++    }
++
++    dprintf(fd, "\nTimeCheck:\n");
++    writeStr(fd, mediautils::TimeCheck::toString());
++    dprintf(fd, "\n");
++    // dump mutex stats
++    writeStr(fd, audio_utils::mutex::all_stats_to_string());
++    // dump held mutexes
++    writeStr(fd, audio_utils::mutex::all_threads_to_string());
++
++}
++
++void AudioFlinger::dumpPermissionDenial(int fd) {
+     const size_t SIZE = 256;
+     char buffer[SIZE];
+     String8 result;
+@@ -803,52 +846,82 @@ void AudioFlinger::dumpPermissionDenial(int fd, const Vector<String16>& args __u
+             IPCThreadState::self()->getCallingPid(),
+             IPCThreadState::self()->getCallingUid());
+     result.append(buffer);
+-    write(fd, result.c_str(), result.size());
++    writeStr(fd, result);
++}
++
++static void dump_printHelp(int fd) {
++    constexpr static auto helpStr =
++            "AudioFlinger dumpsys help options\n"
++            "  -h/--help: Print this help text\n"
++            "  --hal: Include dump of audio hal\n"
++            "  --stats: Include call/lock/watchdog stats\n"
++            "  --effects: Include effect definitions\n"
++            "  --memory: Include memory dump\n"
++            "  -a/--all: Print all except --memory\n"sv;
++
++    write(fd, helpStr.data(), helpStr.length());
+ }
+ 
+ status_t AudioFlinger::dump(int fd, const Vector<String16>& args)
+-NO_THREAD_SAFETY_ANALYSIS  // conditional try lock
+ {
++    using afutils::FallibleLockGuard;
+     if (!dumpAllowed()) {
+-        dumpPermissionDenial(fd, args);
+-    } else {
+-        // get state of hardware lock
+-        const bool hardwareLocked = afutils::dumpTryLock(hardwareMutex());
+-        if (!hardwareLocked) {
+-            String8 result(kHardwareLockedString);
+-            write(fd, result.c_str(), result.size());
+-        } else {
+-            hardwareMutex().unlock();
+-        }
+-
+-        const bool locked = afutils::dumpTryLock(mutex());
++        dumpPermissionDenial(fd);
++        return NO_ERROR;
++    }
++    // Arg parsing
++    struct {
++        bool shouldDumpMem, shouldDumpStats, shouldDumpHal, shouldDumpEffects;
++    } parsedArgs {}; // zero-init
+ 
+-        // failed to lock - AudioFlinger is probably deadlocked
+-        if (!locked) {
+-            String8 result(kDeadlockedString);
+-            write(fd, result.c_str(), result.size());
++    for (const auto& arg : args) {
++        const String8 utf8arg{arg};
++        if (utf8arg == "-h" || utf8arg == "--help") {
++            dump_printHelp(fd);
++            return NO_ERROR;
+         }
+-
+-        const bool clientLocked = afutils::dumpTryLock(clientMutex());
+-        if (!clientLocked) {
+-            String8 result(kClientLockedString);
+-            write(fd, result.c_str(), result.size());
++        if (utf8arg == "-a" || utf8arg == "--all") {
++            parsedArgs.shouldDumpStats = true;
++            parsedArgs.shouldDumpHal = true;
++            parsedArgs.shouldDumpEffects = true;
++            continue;
+         }
+-
+-        if (mEffectsFactoryHal != 0) {
+-            mEffectsFactoryHal->dumpEffects(fd);
+-        } else {
+-            String8 result(kNoEffectsFactory);
+-            write(fd, result.c_str(), result.size());
++        if (utf8arg == "--hal") {
++            parsedArgs.shouldDumpHal = true;
++            continue;
++        }
++        if (utf8arg == "--stats") {
++            parsedArgs.shouldDumpStats = true;
++            continue;
++        }
++        if (utf8arg == "--effects") {
++            parsedArgs.shouldDumpEffects = true;
++            continue;
+         }
++        if (utf8arg == "--memory") {
++            parsedArgs.shouldDumpMem = true;
++            continue;
++        }
++        // Unknown arg silently ignored
++    }
+ 
+-        dumpClients_ll(fd, args);
+-        if (clientLocked) {
+-            clientMutex().unlock();
++    // get state of hardware lock
++    {
++        FallibleLockGuard l{hardwareMutex()};
++        if (!l) writeStr(fd, kHardwareLockedString);
++    }
++    {
++        FallibleLockGuard  l{mutex()};
++        if (!l) writeStr(fd, kDeadlockedString);
++        {
++            FallibleLockGuard ll{clientMutex()};
++            if (!ll) writeStr(fd, kClientLockedString);
++            dumpClients_ll(fd, parsedArgs.shouldDumpMem);
+         }
+ 
+-        dumpInternals_l(fd, args);
++        dumpInternals_l(fd);
+ 
++        dprintf(fd, "\n ## BEGIN thread dump \n");
+         // dump playback threads
+         for (size_t i = 0; i < mPlaybackThreads.size(); i++) {
+             mPlaybackThreads.valueAt(i)->dump(fd, args);
+@@ -866,130 +939,73 @@ NO_THREAD_SAFETY_ANALYSIS  // conditional try lock
+ 
+         // dump orphan effect chains
+         if (mOrphanEffectChains.size() != 0) {
+-            write(fd, "  Orphan Effect Chains\n", strlen("  Orphan Effect Chains\n"));
++            writeStr(fd, "  Orphan Effect Chains\n");
+             for (size_t i = 0; i < mOrphanEffectChains.size(); i++) {
+                 mOrphanEffectChains.valueAt(i)->dump(fd, args);
+             }
+         }
+-        // dump all hardware devs
+-        for (size_t i = 0; i < mAudioHwDevs.size(); i++) {
+-            sp<DeviceHalInterface> dev = mAudioHwDevs.valueAt(i)->hwDevice();
+-            dev->dump(fd, args);
+-        }
+-
+-        mPatchPanel->dump(fd);
+-
+-        mDeviceEffectManager->dump(fd);
+-
+-        std::string melOutput = mMelReporter->dump();
+-        write(fd, melOutput.c_str(), melOutput.size());
++        // dump historical threads in the last 10 seconds
++        writeStr(fd, mThreadLog.dumpToString(
++                "Historical Thread Log ", 0 /* lines */,
++                audio_utils_get_real_time_ns() - 10 * 60 * NANOS_PER_SECOND));
+ 
+         // dump external setParameters
++        dprintf(fd, "\n ## BEGIN setParameters dump \n");
+         auto dumpLogger = [fd](SimpleLog& logger, const char* name) {
+-            dprintf(fd, "\n%s setParameters:\n", name);
++            dprintf(fd, "\n  %s setParameters:\n", name);
+             logger.dump(fd, "    " /* prefix */);
+         };
+         dumpLogger(mRejectedSetParameterLog, "Rejected");
+         dumpLogger(mAppSetParameterLog, "App");
+         dumpLogger(mSystemSetParameterLog, "System");
+ 
+-        // dump historical threads in the last 10 seconds
+-        const std::string threadLog = mThreadLog.dumpToString(
+-                "Historical Thread Log ", 0 /* lines */,
+-                audio_utils_get_real_time_ns() - 10 * 60 * NANOS_PER_SECOND);
+-        write(fd, threadLog.c_str(), threadLog.size());
+ 
+-        BUFLOG_RESET;
++        dprintf(fd, "\n ## BEGIN misc af dump \n");
++        mPatchPanel->dump(fd);
++        mDeviceEffectManager->dump(fd);
++        writeStr(fd, mMelReporter->dump());
+ 
+         if (media::psh_utils::AudioPowerManager::enabled()) {
+             char value[PROPERTY_VALUE_MAX];
+             property_get("ro.build.display.id", value, "Unknown build");
+             std::string build(value);
+-            build.append("\n");
+-            write(fd, build.c_str(), build.size());
+-            const std::string powerLog =
+-                    media::psh_utils::AudioPowerManager::getAudioPowerManager().toString();
+-            write(fd, powerLog.c_str(), powerLog.size());
+-        }
+-
+-        if (locked) {
+-            mutex().unlock();
++            writeStr(fd, build + "\n");
++            writeStr(fd, media::psh_utils::AudioPowerManager::getAudioPowerManager().toString());
+         }
+ 
+-#ifdef TEE_SINK
+-        // NBAIO_Tee dump is safe to call outside of AF lock.
+-        NBAIO_Tee::dumpAll(fd, "_DUMP");
+-#endif
+-        // append a copy of media.log here by forwarding fd to it, but don't attempt
+-        // to lookup the service if it's not running, as it will block for a second
+-        if (sMediaLogServiceAsBinder != 0) {
+-            dprintf(fd, "\nmedia.log:\n");
+-            sMediaLogServiceAsBinder->dump(fd, args);
+-        }
+-
+-        // check for optional arguments
+-        bool dumpMem = false;
+-        bool unreachableMemory = false;
+-        for (const auto &arg : args) {
+-            if (arg == String16("-m")) {
+-                dumpMem = true;
+-            } else if (arg == String16("--unreachable")) {
+-                unreachableMemory = true;
++        if (parsedArgs.shouldDumpEffects) {
++            dprintf(fd, "\n ## BEGIN effects dump \n");
++            if (mEffectsFactoryHal != 0) {
++                mEffectsFactoryHal->dumpEffects(fd);
++            } else {
++                writeStr(fd, kNoEffectsFactory);
+             }
+         }
+ 
+-        if (dumpMem) {
+-            dprintf(fd, "\nDumping memory:\n");
+-            std::string s = dumpMemoryAddresses(100 /* limit */);
+-            write(fd, s.c_str(), s.size());
+-        }
+-        if (unreachableMemory) {
+-            dprintf(fd, "\nDumping unreachable memory:\n");
+-            // TODO - should limit be an argument parameter?
+-            std::string s = GetUnreachableMemoryString(true /* contents */, 100 /* limit */);
+-            write(fd, s.c_str(), s.size());
+-        }
+-        {
+-            std::string timeCheckStats = getIAudioFlingerStatistics().dump();
+-            dprintf(fd, "\nIAudioFlinger binder call profile:\n");
+-            write(fd, timeCheckStats.c_str(), timeCheckStats.size());
+-
+-            extern mediautils::MethodStatistics<int>& getIEffectStatistics();
+-            timeCheckStats = getIEffectStatistics().dump();
+-            dprintf(fd, "\nIEffect binder call profile:\n");
+-            write(fd, timeCheckStats.c_str(), timeCheckStats.size());
+-
+-            // Automatically fetch HIDL or AIDL statistics.
+-            const std::string_view halType = (mDevicesFactoryHal->getHalVersion().getType() ==
+-                                      AudioHalVersionInfo::Type::HIDL)
+-                                             ? METHOD_STATISTICS_MODULE_NAME_AUDIO_HIDL
+-                                             : METHOD_STATISTICS_MODULE_NAME_AUDIO_AIDL;
+-            const std::shared_ptr<std::vector<std::string>> halClassNames =
+-                    mediautils::getStatisticsClassesForModule(halType);
+-            if (halClassNames) {
+-                for (const auto& className : *halClassNames) {
+-                    auto stats = mediautils::getStatisticsForClass(className);
+-                    if (stats) {
+-                        timeCheckStats = stats->dump();
+-                        dprintf(fd, "\n%s binder call profile:\n", className.c_str());
+-                        write(fd, timeCheckStats.c_str(), timeCheckStats.size());
+-                    }
+-                }
++        if (parsedArgs.shouldDumpHal) {
++            dprintf(fd, "\n ## BEGIN HAL dump \n");
++            FallibleLockGuard ll{hardwareMutex()};
++            // dump all hardware devs
++            for (size_t i = 0; i < mAudioHwDevs.size(); i++) {
++                sp<DeviceHalInterface> dev = mAudioHwDevs.valueAt(i)->hwDevice();
++                dev->dump(fd, args);
+             }
+-
+-            timeCheckStats = mediautils::TimeCheck::toString();
+-            dprintf(fd, "\nTimeCheck:\n");
+-            write(fd, timeCheckStats.c_str(), timeCheckStats.size());
+-            dprintf(fd, "\n");
+         }
+-        // dump mutex stats
+-        const auto mutexStats = audio_utils::mutex::all_stats_to_string();
+-        write(fd, mutexStats.c_str(), mutexStats.size());
++    }  // end af lock
++
++    if (parsedArgs.shouldDumpStats) {
++        dprintf(fd, "\n ## BEGIN stats dump \n");
++        dumpStats(fd);
++    }
+ 
+-        // dump held mutexes
+-        const auto mutexThreadInfo = audio_utils::mutex::all_threads_to_string();
+-        write(fd, mutexThreadInfo.c_str(), mutexThreadInfo.size());
++    if (parsedArgs.shouldDumpMem) {
++        dprintf(fd, "\n ## BEGIN memory dump \n");
++        writeStr(fd, dumpMemoryAddresses(100 /* limit */));
++        dprintf(fd, "\nDumping unreachable memory:\n");
++        // TODO - should limit be an argument parameter?
++        writeStr(fd, GetUnreachableMemoryString(true /* contents */, 100 /* limit */));
+     }
++
+     return NO_ERROR;
+ }
+ 
+diff --git a/services/audioflinger/AudioFlinger.h b/services/audioflinger/AudioFlinger.h
+index ba2b9204ef..6d3eea55bf 100644
+--- a/services/audioflinger/AudioFlinger.h
++++ b/services/audioflinger/AudioFlinger.h
+@@ -469,9 +469,10 @@ private:
+     // AudioFlinger::setParameters() updates with mutex().
+     std::atomic_uint32_t mScreenState{};
+ 
+-    void dumpPermissionDenial(int fd, const Vector<String16>& args);
+-    void dumpClients_ll(int fd, const Vector<String16>& args) REQUIRES(mutex(), clientMutex());
+-    void dumpInternals_l(int fd, const Vector<String16>& args) REQUIRES(mutex());
++    void dumpPermissionDenial(int fd);
++    void dumpClients_ll(int fd, bool dumpAllocators) REQUIRES(mutex(), clientMutex());
++    void dumpInternals_l(int fd) REQUIRES(mutex());
++    void dumpStats(int fd);
+ 
+     SimpleLog mThreadLog{16}; // 16 Thread history limit
+ 
+diff --git a/services/audioflinger/DeviceEffectManager.cpp b/services/audioflinger/DeviceEffectManager.cpp
+index 7cb9329e6f..42c6401884 100644
+--- a/services/audioflinger/DeviceEffectManager.cpp
++++ b/services/audioflinger/DeviceEffectManager.cpp
+@@ -22,7 +22,7 @@
+ 
+ #include "EffectConfiguration.h"
+ 
+-#include <afutils/DumpTryLock.h>
++#include <afutils/FallibleLockGuard.h>
+ #include <audio_utils/primitives.h>
+ #include <media/audiohal/EffectsFactoryHalInterface.h>
+ #include <utils/Log.h>
+@@ -208,10 +208,9 @@ status_t DeviceEffectManager::createEffectHal(
+ }
+ 
+ void DeviceEffectManager::dump(int fd)
+-NO_THREAD_SAFETY_ANALYSIS  // conditional try lock
+ {
+-    const bool locked = afutils::dumpTryLock(mutex());
+-    if (!locked) {
++    afutils::FallibleLockGuard l{mutex()};
++    if (!l) {
+         String8 result("DeviceEffectManager may be deadlocked\n");
+         write(fd, result.c_str(), result.size());
+     }
+@@ -227,10 +226,6 @@ NO_THREAD_SAFETY_ANALYSIS  // conditional try lock
+             effect->dump2(fd, 4);
+         }
+     }
+-
+-    if (locked) {
+-        mutex().unlock();
+-    }
+ }
+ 
+ size_t DeviceEffectManager::removeEffect(const sp<IAfDeviceEffectProxy>& effect)
+diff --git a/services/audioflinger/Effects.cpp b/services/audioflinger/Effects.cpp
+index 84505d3502..b9d3ebea3e 100644
+--- a/services/audioflinger/Effects.cpp
++++ b/services/audioflinger/Effects.cpp
+@@ -24,7 +24,7 @@
+ #include "Client.h"
+ #include "EffectConfiguration.h"
+ 
+-#include <afutils/DumpTryLock.h>
++#include <afutils/FallibleLockGuard.h>
+ #include <audio_utils/channels.h>
+ #include <audio_utils/primitives.h>
+ #include <media/AudioCommonTypes.h>
+@@ -506,52 +506,50 @@ static String8 effectFlagsToString(uint32_t flags) {
+ }
+ 
+ void EffectBase::dump(int fd, const Vector<String16>& args __unused) const
+-NO_THREAD_SAFETY_ANALYSIS // conditional try lock
+ {
+     String8 result;
+ 
+     result.appendFormat("\tEffect ID %d:\n", mId);
+ 
+-    const bool locked = afutils::dumpTryLock(mutex());
+-    // failed to lock - AudioFlinger is probably deadlocked
+-    if (!locked) {
+-        result.append("\t\tCould not lock Fx mutex:\n");
+-    }
+-    bool isInternal = isInternal_l();
+-    result.append("\t\tSession State Registered Internal Enabled Suspended:\n");
+-    result.appendFormat("\t\t%05d   %03d   %s          %s        %s       %s\n",
+-            mSessionId, mState, mPolicyRegistered ? "y" : "n", isInternal ? "y" : "n",
+-            ((isInternal && isEnabled()) || (!isInternal && mPolicyEnabled)) ? "y" : "n",
+-            mSuspended ? "y" : "n");
+-
+-    result.append("\t\tDescriptor:\n");
+-    char uuidStr[64];
+-    AudioEffect::guidToString(&mDescriptor.uuid, uuidStr, sizeof(uuidStr));
+-    result.appendFormat("\t\t- UUID: %s\n", uuidStr);
+-    AudioEffect::guidToString(&mDescriptor.type, uuidStr, sizeof(uuidStr));
+-    result.appendFormat("\t\t- TYPE: %s\n", uuidStr);
+-    result.appendFormat("\t\t- apiVersion: %08X\n\t\t- flags: %08X (%s)\n",
+-            mDescriptor.apiVersion,
+-            mDescriptor.flags,
+-            effectFlagsToString(mDescriptor.flags).c_str());
+-    result.appendFormat("\t\t- name: %s\n",
+-            mDescriptor.name);
+-
+-    result.appendFormat("\t\t- implementor: %s\n",
+-            mDescriptor.implementor);
+-
+-    result.appendFormat("\t\t%zu Clients:\n", mHandles.size());
+-    result.append("\t\t\t  Pid Priority Ctrl Locked client server\n");
+-    char buffer[256];
+-    for (size_t i = 0; i < mHandles.size(); ++i) {
+-        IAfEffectHandle *handle = mHandles[i];
+-        if (handle != NULL && !handle->disconnected()) {
+-            handle->dumpToBuffer(buffer, sizeof(buffer));
+-            result.append(buffer);
+-        }
+-    }
+-    if (locked) {
+-        mutex().unlock();
++    {
++        afutils::FallibleLockGuard l{mutex()};
++        // failed to lock - AudioFlinger is probably deadlocked
++        if (!l) {
++            result.append("\t\tCould not lock Fx mutex:\n");
++        }
++        bool isInternal = isInternal_l();
++        result.append("\t\tSession State Registered Internal Enabled Suspended:\n");
++        result.appendFormat("\t\t%05d   %03d   %s          %s        %s       %s\n",
++                mSessionId, mState, mPolicyRegistered ? "y" : "n", isInternal ? "y" : "n",
++                ((isInternal && isEnabled()) || (!isInternal && mPolicyEnabled)) ? "y" : "n",
++                mSuspended ? "y" : "n");
++
++        result.append("\t\tDescriptor:\n");
++        char uuidStr[64];
++        AudioEffect::guidToString(&mDescriptor.uuid, uuidStr, sizeof(uuidStr));
++        result.appendFormat("\t\t- UUID: %s\n", uuidStr);
++        AudioEffect::guidToString(&mDescriptor.type, uuidStr, sizeof(uuidStr));
++        result.appendFormat("\t\t- TYPE: %s\n", uuidStr);
++        result.appendFormat("\t\t- apiVersion: %08X\n\t\t- flags: %08X (%s)\n",
++                mDescriptor.apiVersion,
++                mDescriptor.flags,
++                effectFlagsToString(mDescriptor.flags).c_str());
++        result.appendFormat("\t\t- name: %s\n",
++                mDescriptor.name);
++
++        result.appendFormat("\t\t- implementor: %s\n",
++                mDescriptor.implementor);
++
++        result.appendFormat("\t\t%zu Clients:\n", mHandles.size());
++        result.append("\t\t\t  Pid Priority Ctrl Locked client server\n");
++        char buffer[256];
++        for (size_t i = 0; i < mHandles.size(); ++i) {
++            IAfEffectHandle *handle = mHandles[i];
++            if (handle != NULL && !handle->disconnected()) {
++                handle->dumpToBuffer(buffer, sizeof(buffer));
++                result.append(buffer);
++            }
++        }
+     }
+ 
+     write(fd, result.c_str(), result.length());
+@@ -1710,13 +1708,11 @@ static std::string dumpInOutBuffer(bool isInput, const sp<EffectBufferHalInterfa
+     return ss.str();
+ }
+ 
+-void EffectModule::dump(int fd, const Vector<String16>& args) const
+-NO_THREAD_SAFETY_ANALYSIS  // conditional try lock
+-{
++void EffectModule::dump(int fd, const Vector<String16>& args) const {
+     EffectBase::dump(fd, args);
+ 
+     String8 result;
+-    const bool locked = afutils::dumpTryLock(mutex());
++    afutils::FallibleLockGuard l{mutex()};
+ 
+     result.append("\t\tStatus Engine:\n");
+     result.appendFormat("\t\t%03d    %p\n",
+@@ -1758,9 +1754,6 @@ NO_THREAD_SAFETY_ANALYSIS  // conditional try lock
+         (void)mEffectInterface->dump(fd);
+     }
+ 
+-    if (locked) {
+-        mutex().unlock();
+-    }
+ }
+ 
+ // ----------------------------------------------------------------------------
+@@ -2203,22 +2196,20 @@ void EffectHandle::framesProcessed(int32_t frames) const
+ }
+ 
+ void EffectHandle::dumpToBuffer(char* buffer, size_t size) const
+-NO_THREAD_SAFETY_ANALYSIS  // conditional try lock
+ {
+-    const bool locked = mCblk != nullptr && afutils::dumpTryLock(mCblk->lock);
++    std::optional<afutils::FallibleLockGuard> guard;
++    if (mCblk != nullptr) {
++        guard.emplace(mCblk->lock);
++    }
+ 
+     snprintf(buffer, size, "\t\t\t%5d    %5d  %3s    %3s  %5u  %5u\n",
+             (mClient == 0) ? getpid() : mClient->pid(),
+             mPriority,
+             mHasControl ? "yes" : "no",
+-            locked ? "yes" : "no",
++            guard.has_value() && *guard ? "yes" : "no",
+             mCblk ? mCblk->clientIndex : 0,
+             mCblk ? mCblk->serverIndex : 0
+             );
+-
+-    if (locked) {
+-        mCblk->lock.unlock();
+-    }
+ }
+ 
+ #undef LOG_TAG
+@@ -2803,41 +2794,36 @@ void EffectChain::syncHalEffectsState_l()
+ }
+ 
+ void EffectChain::dump(int fd, const Vector<String16>& args) const
+-NO_THREAD_SAFETY_ANALYSIS  // conditional try lock
+ {
+     String8 result;
+-
++    afutils::FallibleLockGuard l{mutex()};
+     const size_t numEffects = mEffects.size();
+     result.appendFormat("    %zu effects for session %d\n", numEffects, mSessionId);
++    if (numEffects == 0) {
++        write(fd, result.c_str(), result.size());
++        return;
++    }
+ 
+-    if (numEffects) {
+-        const bool locked = afutils::dumpTryLock(mutex());
+-        // failed to lock - AudioFlinger is probably deadlocked
+-        if (!locked) {
+-            result.append("\tCould not lock mutex:\n");
+-        }
+ 
+-        const std::string inBufferStr = dumpInOutBuffer(true /* isInput */, mInBuffer);
+-        const std::string outBufferStr = dumpInOutBuffer(false /* isInput */, mOutBuffer);
+-        result.appendFormat("\t%-*s%-*s   Active tracks:\n",
+-                (int)inBufferStr.size(), "In buffer    ",
+-                (int)outBufferStr.size(), "Out buffer      ");
+-        result.appendFormat("\t%s   %s   %d\n",
+-                inBufferStr.c_str(), outBufferStr.c_str(), mActiveTrackCnt);
+-        write(fd, result.c_str(), result.size());
++    // failed to lock - AudioFlinger is probably deadlocked
++    if (!l) {
++        result.append("\tCould not lock mutex:\n");
++    }
+ 
+-        for (size_t i = 0; i < numEffects; ++i) {
+-            sp<IAfEffectModule> effect = mEffects[i];
+-            if (effect != 0) {
+-                effect->dump(fd, args);
+-            }
+-        }
++    const std::string inBufferStr = dumpInOutBuffer(true /* isInput */, mInBuffer);
++    const std::string outBufferStr = dumpInOutBuffer(false /* isInput */, mOutBuffer);
++    result.appendFormat("\t%-*s%-*s   Active tracks:\n",
++            (int)inBufferStr.size(), "In buffer    ",
++            (int)outBufferStr.size(), "Out buffer      ");
++    result.appendFormat("\t%s   %s   %d\n",
++            inBufferStr.c_str(), outBufferStr.c_str(), mActiveTrackCnt);
++    write(fd, result.c_str(), result.size());
+ 
+-        if (locked) {
+-            mutex().unlock();
++    for (size_t i = 0; i < numEffects; ++i) {
++        sp<IAfEffectModule> effect = mEffects[i];
++        if (effect != 0) {
++            effect->dump(fd, args);
+         }
+-    } else {
+-        write(fd, result.c_str(), result.size());
+     }
+ }
+ 
+@@ -3712,13 +3698,13 @@ uint32_t DeviceEffectProxy::channelCount() const {
+ }
+ 
+ void DeviceEffectProxy::dump2(int fd, int spaces) const
+-NO_THREAD_SAFETY_ANALYSIS  // conditional try lock
+ {
+     const Vector<String16> args;
+     EffectBase::dump(fd, args);
+ 
+-    const bool locked = afutils::dumpTryLock(proxyMutex());
+-    if (!locked) {
++    afutils::FallibleLockGuard l{proxyMutex()};
++
++    if (!l) {
+         String8 result("DeviceEffectProxy may be deadlocked\n");
+         write(fd, result.c_str(), result.size());
+     }
+@@ -3745,10 +3731,6 @@ NO_THREAD_SAFETY_ANALYSIS  // conditional try lock
+             effect->dump(fd, args);
+         }
+     }
+-
+-    if (locked) {
+-        proxyMutex().unlock();
+-    }
+ }
+ 
+ #undef LOG_TAG
+diff --git a/services/audioflinger/Threads.cpp b/services/audioflinger/Threads.cpp
+index 3f0bd70c5d..8cb19655be 100644
+--- a/services/audioflinger/Threads.cpp
++++ b/services/audioflinger/Threads.cpp
+@@ -27,7 +27,7 @@
+ #include "MelReporter.h"
+ #include "ResamplerBufferProvider.h"
+ 
+-#include <afutils/DumpTryLock.h>
++#include <afutils/FallibleLockGuard.h>
+ #include <afutils/Permission.h>
+ #include <afutils/TypedLogger.h>
+ #include <afutils/Vibrator.h>
+@@ -1042,23 +1042,19 @@ String8 channelMaskToString(audio_channel_mask_t mask, bool output) {
+ }
+ 
+ void ThreadBase::dump(int fd, const Vector<String16>& args)
+-NO_THREAD_SAFETY_ANALYSIS  // conditional try lock
+ {
+     dprintf(fd, "\n%s thread %p, name %s, tid %d, type %d (%s):\n", isOutput() ? "Output" : "Input",
+             this, mThreadName, getTid(), type(), threadTypeToString(type()));
+ 
+-    const bool locked = afutils::dumpTryLock(mutex());
+-    if (!locked) {
+-        dprintf(fd, "  Thread may be deadlocked\n");
+-    }
+-
+-    dumpBase_l(fd, args);
+-    dumpInternals_l(fd, args);
+-    dumpTracks_l(fd, args);
+-    dumpEffectChains_l(fd, args);
+-
+-    if (locked) {
+-        mutex().unlock();
++    {
++        afutils::FallibleLockGuard l{mutex()};
++        if (!l) {
++            dprintf(fd, "  Thread may be deadlocked\n");
++        }
++        dumpBase_l(fd, args);
++        dumpInternals_l(fd, args);
++        dumpTracks_l(fd, args);
++        dumpEffectChains_l(fd, args);
+     }
+ 
+     dprintf(fd, "  Local log:\n");
+diff --git a/services/audioflinger/afutils/DumpTryLock.h b/services/audioflinger/afutils/DumpTryLock.h
+deleted file mode 100644
+index 05e050e8a8..0000000000
+--- a/services/audioflinger/afutils/DumpTryLock.h
++++ /dev/null
+@@ -1,41 +0,0 @@
+-/*
+- *
+- * Copyright 2023, The Android Open Source Project
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *     http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-#pragma once
+-
+-#include <audio_utils/mutex.h>
+-#include <utils/Mutex.h>
+-
+-namespace android::afutils {
+-
+-inline bool dumpTryLock(Mutex& mutex)
+-{
+-    static constexpr int kDumpLockTimeoutNs = 1'000'000'000;
+-    const status_t err = mutex.timedLock(kDumpLockTimeoutNs);
+-    return err == NO_ERROR;
+-}
+-
+-// Note: the std::timed_mutex try_lock_for and try_lock_until methods are inefficient.
+-// It is better to use std::mutex and call this method.
+-//
+-inline bool dumpTryLock(audio_utils::mutex& mutex) TRY_ACQUIRE(true, mutex)
+-{
+-    static constexpr int64_t kDumpLockTimeoutNs = 1'000'000'000;
+-    return mutex.try_lock(kDumpLockTimeoutNs);
+-}
+-
+-}  // android::afutils
+diff --git a/services/audioflinger/afutils/FallibleLockGuard.h b/services/audioflinger/afutils/FallibleLockGuard.h
+new file mode 100644
+index 0000000000..a2e66f6c1f
+--- /dev/null
++++ b/services/audioflinger/afutils/FallibleLockGuard.h
+@@ -0,0 +1,69 @@
++/*
++ *
++ * Copyright 2024, The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#pragma once
++
++#include <android-base/thread_annotations.h>
++#include <audio_utils/mutex.h>
++#include <utils/Mutex.h>
++
++#include <functional>
++
++namespace android::afutils {
++
++// Lock guard with a acquire timeout, which for the purpose of thread safety annotations acts as if
++// it has the capability (i.e. the thread annotations *lie*). Used for dump utilities, where if we
++// are deadlocked, we access without the lock since we are about to abort due to watchdog anyway.
++// If the lock was truly successfully acquired, unlock on dtor. Like all guards (if successful),
++// this guard is solely responsible for locking on ctor/unlocking on dtor, and the mutex reference
++// must be valid for the lifetime of the object
++class [[nodiscard]] SCOPED_CAPABILITY FallibleLockGuard {
++  public:
++    static constexpr int kDefaultTimeout = 1'000'000'000;
++
++    explicit FallibleLockGuard(Mutex& mutex, int64_t timeoutNs = kDefaultTimeout) ACQUIRE(mutex) {
++        if (mutex.timedLock(timeoutNs) == NO_ERROR) {
++            mUnlockFunc = [&mutex]() NO_THREAD_SAFETY_ANALYSIS { mutex.unlock(); };
++        }
++    }
++
++    explicit FallibleLockGuard(audio_utils::mutex& mutex, int64_t timeoutNs = kDefaultTimeout)
++            ACQUIRE(mutex) {
++        if (mutex.try_lock(timeoutNs)) {
++            mUnlockFunc = [&mutex]() NO_THREAD_SAFETY_ANALYSIS { mutex.unlock(); };
++        }
++    }
++
++    FallibleLockGuard(const FallibleLockGuard& other) = delete;
++
++    FallibleLockGuard(FallibleLockGuard&& other) {
++        mUnlockFunc.swap(other.mUnlockFunc);
++    }
++
++    FallibleLockGuard& operator=(const FallibleLockGuard& other) = delete;
++
++    // Return if the underlying lock was successfully locked
++    explicit operator bool() const { return static_cast<bool>(mUnlockFunc); }
++
++    ~FallibleLockGuard() RELEASE() {
++        if (mUnlockFunc) mUnlockFunc();
++    }
++
++  private:
++    std::function<void()> mUnlockFunc;
++};
++}  // android::afutils
+-- 
+2.43.0
+

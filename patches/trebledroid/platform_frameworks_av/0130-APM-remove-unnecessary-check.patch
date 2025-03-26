@@ -1,0 +1,54 @@
+From e2c5138e59eed434264898e93f6b145113baa674 Mon Sep 17 00:00:00 2001
+From: Vlad Popa <pvlad@google.com>
+Date: Tue, 22 Oct 2024 21:07:42 -0700
+Subject: [PATCH 130/436] APM: remove unnecessary check
+
+STREAM_DEFAULT is actually a negative value. When casting to uint it
+will result in a very large number which will fail the test for having a
+consistent stream value before sending to APM.
+
+Remove this check since the conversion code before checks for stream
+validity.
+
+Flag: EXEMPT bugfix
+Test: manual
+Bug: 361461410
+Bug: 361576207
+Change-Id: Ib023bdbcba48311a906128bd7394106a01e47dee
+---
+ .../audiopolicy/service/AudioPolicyInterfaceImpl.cpp | 12 +++++++-----
+ 1 file changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+index a8aefb09de..0442cae8b1 100644
+--- a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
++++ b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+@@ -1124,8 +1124,12 @@ Status AudioPolicyService::setDeviceAbsoluteVolumeEnabled(const AudioDevice& dev
+     ALOGI("%s: deviceAidl %s, enabled %d, streamToDriveAbsAidl %d", __func__,
+           deviceAidl.toString().c_str(), enabled, streamToDriveAbsAidl);
+ 
+-    audio_stream_type_t streamToDriveAbs = VALUE_OR_RETURN_BINDER_STATUS(
+-            aidl2legacy_AudioStreamType_audio_stream_type_t(streamToDriveAbsAidl));
++    audio_stream_type_t streamToDriveAbs = AUDIO_STREAM_DEFAULT;
++    if (enabled) {
++        streamToDriveAbs = VALUE_OR_RETURN_BINDER_STATUS(
++                aidl2legacy_AudioStreamType_audio_stream_type_t(streamToDriveAbsAidl));
++    }
++
+     audio_devices_t deviceType;
+     std::string address;
+     RETURN_BINDER_STATUS_IF_ERROR(
+@@ -1139,9 +1143,7 @@ Status AudioPolicyService::setDeviceAbsoluteVolumeEnabled(const AudioDevice& dev
+             : settingsAllowed())) {
+         return binderStatusFromStatusT(PERMISSION_DENIED);
+     }
+-    if (uint32_t(streamToDriveAbs) >= AUDIO_STREAM_PUBLIC_CNT) {
+-        return binderStatusFromStatusT(BAD_VALUE);
+-    }
++
+     audio_utils::lock_guard _l(mMutex);
+     AutoCallerClear acc;
+     return binderStatusFromStatusT(
+-- 
+2.43.0
+

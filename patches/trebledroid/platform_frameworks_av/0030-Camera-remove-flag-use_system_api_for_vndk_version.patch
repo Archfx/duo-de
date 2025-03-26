@@ -1,0 +1,104 @@
+From be0be6f5692c9ea3779cf0a38f6b4f6c976e9a17 Mon Sep 17 00:00:00 2001
+From: Avichal Rakesh <arakesh@google.com>
+Date: Wed, 25 Sep 2024 16:41:48 -0700
+Subject: [PATCH 030/436] Camera: remove flag use_system_api_for_vndk_version
+
+Cleanup from removing use_system_api_for_vndk_version also
+removes the flag  use_ro_board_api_level_for_vndk_version.
+
+Bug: 365555385
+Test: Build successfully, no logic change.
+Flag: EXEMPT flag removal
+Change-Id: I92270613adf195baff22e187ea4cd0f065c98437
+---
+ camera/camera_platform.aconfig                | 17 ---------
+ .../camera/libcameraservice/utils/Utils.cpp   | 37 -------------------
+ 2 files changed, 54 deletions(-)
+
+diff --git a/camera/camera_platform.aconfig b/camera/camera_platform.aconfig
+index d3cc7cba55..b4de874d4a 100644
+--- a/camera/camera_platform.aconfig
++++ b/camera/camera_platform.aconfig
+@@ -62,13 +62,6 @@ flag {
+     bug: "301588215"
+ }
+ 
+-flag {
+-    namespace: "camera_platform"
+-    name: "use_ro_board_api_level_for_vndk_version"
+-    description: "Enable using ro.board.api_level instead of ro.vndk.version to get VNDK version"
+-    bug: "312315580"
+-}
+-
+ flag {
+     namespace: "camera_platform"
+     name: "camera_extensions_characteristics_get"
+@@ -155,16 +148,6 @@ flag {
+     bug: "332557570"
+ }
+ 
+-flag {
+-    namespace: "camera_platform"
+-    name: "use_system_api_for_vndk_version"
+-    description: "ro.board.api_level isn't reliable. Use system api to replace ro.vndk.version"
+-    bug: "312315580"
+-    metadata {
+-        purpose: PURPOSE_BUGFIX
+-    }
+-}
+-
+ flag {
+     namespace: "camera_platform"
+     name: "multi_res_raw_reprocessing"
+diff --git a/services/camera/libcameraservice/utils/Utils.cpp b/services/camera/libcameraservice/utils/Utils.cpp
+index e9810c65c7..5f61de5d6e 100644
+--- a/services/camera/libcameraservice/utils/Utils.cpp
++++ b/services/camera/libcameraservice/utils/Utils.cpp
+@@ -25,44 +25,7 @@
+ 
+ namespace android {
+ 
+-namespace flags = com::android::internal::camera::flags;
+-
+-namespace {
+-constexpr const char* LEGACY_VNDK_VERSION_PROP = "ro.vndk.version";
+-constexpr const char* BOARD_API_LEVEL_PROP = "ro.board.api_level";
+-constexpr int MAX_VENDOR_API_LEVEL = 1000000;
+-constexpr int FIRST_VNDK_VERSION = 202404;
+-
+-int legacyGetVNDKVersionFromProp(int defaultVersion) {
+-    if (!flags::use_ro_board_api_level_for_vndk_version()) {
+-        return base::GetIntProperty(LEGACY_VNDK_VERSION_PROP, defaultVersion);
+-    }
+-
+-    int vndkVersion = base::GetIntProperty(BOARD_API_LEVEL_PROP, MAX_VENDOR_API_LEVEL);
+-
+-    if (vndkVersion == MAX_VENDOR_API_LEVEL) {
+-        // Couldn't find property
+-        return defaultVersion;
+-    }
+-
+-    if (vndkVersion < __ANDROID_API_V__) {
+-        // VNDK versions below V return the corresponding SDK version.
+-        return vndkVersion;
+-    }
+-
+-    // VNDK for Android V and above are of the format YYYYMM starting with 202404 and is bumped
+-    // up once a year. So V would be 202404 and the next one would be 202504.
+-    // This is the same assumption as that made in system/core/init/property_service.cpp.
+-    vndkVersion = (vndkVersion - FIRST_VNDK_VERSION) / 100;
+-    return __ANDROID_API_V__ + vndkVersion;
+-}
+-}  // anonymous namespace
+-
+ int getVNDKVersionFromProp(int defaultVersion) {
+-    if (!flags::use_system_api_for_vndk_version()) {
+-        return legacyGetVNDKVersionFromProp(defaultVersion);
+-    }
+-
+     int vendorApiLevel = AVendorSupport_getVendorApiLevel();
+     if (vendorApiLevel == 0) {
+         // Couldn't find vendor API level, return default
+-- 
+2.43.0
+

@@ -1,0 +1,37 @@
+From 53d2c2c587a9b132bb24d94d57cbb0a4ba542b5a Mon Sep 17 00:00:00 2001
+From: Jim Shargo <jshargo@google.com>
+Date: Mon, 18 Nov 2024 18:36:40 +0000
+Subject: [PATCH 294/436] bqhelper: Remove support for passing GL fences into
+ BQs
+
+These are going away since they're prone to cause deadlocks,
+overcomplicate the API, and have been superceded by normal fd-based
+fences (that can be derived from GL fences on most platforms).
+
+Bug: 339705065
+Flag: EXEMPT refactor
+Test: old tests
+Change-Id: I53a1aac877975dc7dd1be70533290141031bd091
+---
+ media/module/bqhelper/GraphicBufferSource.cpp | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/media/module/bqhelper/GraphicBufferSource.cpp b/media/module/bqhelper/GraphicBufferSource.cpp
+index 82ddbc0ff2..c9082f20ff 100644
+--- a/media/module/bqhelper/GraphicBufferSource.cpp
++++ b/media/module/bqhelper/GraphicBufferSource.cpp
+@@ -996,9 +996,8 @@ status_t GraphicBufferSource::acquireBuffer_l(VideoBuffer *ab) {
+                     // somehow need to propagate frame number to that queue
+                     if (buffer->isCached()) {
+                         --mNumOutstandingAcquires;
+-                        mConsumer->releaseBuffer(
+-                                buffer->getSlot(), frameNum, EGL_NO_DISPLAY, EGL_NO_SYNC_KHR,
+-                                buffer->getReleaseFence());
++                        mConsumer->releaseBuffer(buffer->getSlot(), frameNum,
++                                                 buffer->getReleaseFence());
+                     }
+                 },
+                 bi.mFence);
+-- 
+2.43.0
+

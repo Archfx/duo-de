@@ -1,0 +1,244 @@
+From 39bd2319b5f51ac3fa15329a082bf1f4be225d57 Mon Sep 17 00:00:00 2001
+From: Sham Rathod <shamrathod@google.com>
+Date: Thu, 3 Oct 2024 06:24:55 +0000
+Subject: [PATCH 060/436] Update initialization data to CodecPrivate format for
+ VP9
+
+The CSD set for VP9 codec in MPEG4Extractor is vpcCBox.
+But according to WebM documentation of VP9 the codec
+specific data should be in CodecPrivate format.
+
+Bug: 349992970
+Test: atest CtsMediaMuxerTestCases
+Change-Id: Icafc616a4596f8ed0815035879bb47ab916b9175
+---
+ media/module/extractors/Android.bp            |  5 ++
+ media/module/extractors/fuzzers/Android.bp    |  1 +
+ .../extractors/mkv/MatroskaExtractor.cpp      |  2 +-
+ .../module/extractors/mp4/MPEG4Extractor.cpp  | 27 +++++-
+ media/module/metadatautils/MetaDataUtils.cpp  | 84 ++++++++++++++-----
+ .../include/media/stagefright/MetaDataUtils.h |  5 +-
+ 6 files changed, 101 insertions(+), 23 deletions(-)
+
+diff --git a/media/module/extractors/Android.bp b/media/module/extractors/Android.bp
+index f654ecd37a..8f9fbab1f5 100644
+--- a/media/module/extractors/Android.bp
++++ b/media/module/extractors/Android.bp
+@@ -28,6 +28,10 @@ cc_defaults {
+         "liblog",
+     ],
+ 
++    static_libs: [
++        "libstagefright_metadatautils",
++    ],
++
+     // extractors are expected to run on Q(29)
+     min_sdk_version: "29",
+     apex_available: [
+@@ -56,6 +60,7 @@ cc_defaults {
+                 "libutils",
+                 "libmediandk_format",
+                 "libmedia_ndkformatpriv",
++                "libstagefright_metadatautils",
+             ],
+         },
+     },
+diff --git a/media/module/extractors/fuzzers/Android.bp b/media/module/extractors/fuzzers/Android.bp
+index 7a49d8e6b0..9ed768a47d 100644
+--- a/media/module/extractors/fuzzers/Android.bp
++++ b/media/module/extractors/fuzzers/Android.bp
+@@ -131,6 +131,7 @@ cc_fuzz {
+         "libstagefright_id3",
+         "libstagefright_esds",
+         "libmp4extractor",
++        "libstagefright_metadatautils",
+     ],
+ 
+     dictionary: "mp4_extractor_fuzzer.dict",
+diff --git a/media/module/extractors/mkv/MatroskaExtractor.cpp b/media/module/extractors/mkv/MatroskaExtractor.cpp
+index f326db1428..10ae07adf3 100644
+--- a/media/module/extractors/mkv/MatroskaExtractor.cpp
++++ b/media/module/extractors/mkv/MatroskaExtractor.cpp
+@@ -1787,7 +1787,7 @@ status_t MatroskaExtractor::synthesizeVP9(TrackInfo* trackInfo, size_t index) {
+         return ERROR_MALFORMED;
+     }
+ 
+-    if (!MakeVP9CodecSpecificData(trackInfo->mMeta, tmpData.get(), frame.len)) {
++    if (!MakeVP9CodecSpecificDataFromFirstFrame(trackInfo->mMeta, tmpData.get(), frame.len)) {
+         return ERROR_MALFORMED;
+     }
+ 
+diff --git a/media/module/extractors/mp4/MPEG4Extractor.cpp b/media/module/extractors/mp4/MPEG4Extractor.cpp
+index f247f8c920..12c0aaf17f 100644
+--- a/media/module/extractors/mp4/MPEG4Extractor.cpp
++++ b/media/module/extractors/mp4/MPEG4Extractor.cpp
+@@ -51,6 +51,7 @@
+ #include <media/stagefright/MediaBufferGroup.h>
+ #include <media/stagefright/MediaDefs.h>
+ #include <media/stagefright/MetaDataBase.h>
++#include <media/stagefright/MetaDataUtils.h>
+ #include <utils/String8.h>
+ 
+ #include <byteswap.h>
+@@ -2596,8 +2597,32 @@ status_t MPEG4Extractor::parseChunk(off64_t *offset, int depth) {
+             *offset += chunk_size;
+             break;
+         }
+-
+         case FOURCC("vpcC"):
++        {
++            if (mLastTrack == NULL) {
++                return ERROR_MALFORMED;
++            }
++
++            auto buffer = heapbuffer<uint8_t>(chunk_data_size);
++
++            if (buffer.get() == NULL) {
++                ALOGE("b/28471206");
++                return NO_MEMORY;
++            }
++
++            if (mDataSource->readAt(data_offset, buffer.get(), chunk_data_size) < chunk_data_size) {
++                return ERROR_IO;
++            }
++
++            if (!MakeVP9CodecPrivateFromVpcC(mLastTrack->meta, buffer.get(), chunk_data_size)) {
++                ALOGE("Failed to create VP9 CodecPrivate from vpcC.");
++                return ERROR_MALFORMED;
++            }
++
++            *offset += chunk_size;
++            break;
++        }
++
+         case FOURCC("av1C"):
+         {
+             auto buffer = heapbuffer<uint8_t>(chunk_data_size);
+diff --git a/media/module/metadatautils/MetaDataUtils.cpp b/media/module/metadatautils/MetaDataUtils.cpp
+index 0895bb510d..177438ac4f 100644
+--- a/media/module/metadatautils/MetaDataUtils.cpp
++++ b/media/module/metadatautils/MetaDataUtils.cpp
+@@ -134,10 +134,54 @@ static bool getVp9BitdepthChromaSubSampling(ABitReader &bits,
+     }
+     return true;
+ }
++
++/**
++ * Build VP9 Codec Feature Metadata (CodecPrivate) to set CSD for VP9 codec.
++ * For reference:
++ * https://www.webmproject.org/docs/container/#vp9-codec-feature-metadata-codecprivate.
++ *
++ * @param meta          A pointer to AMediaFormat object.
++ * @param profile       The profile value of the VP9 stream.
++ * @param level         The VP9 codec level. If the level is unknown, pass -1 to this parameter.
++ * @param bitDepth      The bit depth of the luma and color components of the VP9 stream.
++ * @param chromaSubsampling  The chroma subsampling of the VP9 stream. If chromaSubsampling is
++ *                           unknown, pass -1 to this parameter.
++ * @return true if CodecPrivate is set as CSD of AMediaFormat object.
++ *
++ */
++static bool MakeVP9CodecPrivate(AMediaFormat* meta, int32_t profile, int32_t level,
++                                int32_t bitDepth, int32_t chromaSubsampling) {
++    if (meta == nullptr) {
++        return false;
++    }
++
++    std::vector<uint8_t> codecPrivate;
++    // Construct CodecPrivate in WebM format (ID | Length | Data).
++    // Helper lambda to add a field to the codec private data
++    auto addField = [&codecPrivate](uint8_t id, uint8_t value) {
++        codecPrivate.push_back(id);
++        codecPrivate.push_back(0x01);  // Length is always 1
++        codecPrivate.push_back(value);
++    };
++
++    // Add fields
++    addField(0x01, static_cast<uint8_t>(profile));
++    if (level >= 0) {
++        addField(0x02, static_cast<uint8_t>(level));
++    }
++    addField(0x03, static_cast<uint8_t>(bitDepth));
++    if (chromaSubsampling >= 0) {
++        addField(0x04, static_cast<uint8_t>(chromaSubsampling));
++    }
++    // Set CSD in the meta format
++    AMediaFormat_setBuffer(meta, AMEDIAFORMAT_KEY_CSD_0, codecPrivate.data(), codecPrivate.size());
++    return true;
++}
++
+ // The param data contains the first frame data, starting with the uncompressed frame
+ // header. This uncompressed header (refer section 6.2 of the VP9 bitstream spec) is
+ // used to parse profile, bitdepth and subsampling.
+-bool MakeVP9CodecSpecificData(AMediaFormat* meta, const uint8_t* data, size_t size) {
++bool MakeVP9CodecSpecificDataFromFirstFrame(AMediaFormat* meta, const uint8_t* data, size_t size) {
+     if (meta == nullptr || data == nullptr || size == 0) {
+         return false;
+     }
+@@ -227,29 +271,29 @@ bool MakeVP9CodecSpecificData(AMediaFormat* meta, const uint8_t* data, size_t si
+     if (chromaSubsampling != -1) {
+         csdSize += 3;
+     }
++    // As level is not present in first frame build CodecPrivate without it.
++    return MakeVP9CodecPrivate(meta, profile, -1, bitDepth, chromaSubsampling);
++}
+ 
+-    // Create VP9 Codec Feature Metadata (CodecPrivate) that can be parsed
+-    // https://www.webmproject.org/docs/container/#vp9-codec-feature-metadata-codecprivate
+-    sp<ABuffer> csd = sp<ABuffer>::make(csdSize);
+-    uint8_t* csdData = csd->data();
+-
+-    *csdData++ = 0x01 /* FEATURE PROFILE */;
+-    *csdData++ = 0x01 /* length */;
+-    *csdData++ = profile;
+-
+-    *csdData++ = 0x03 /* FEATURE BITDEPTH */;
+-    *csdData++ = 0x01 /* length */;
+-    *csdData++ = bitDepth;
++bool MakeVP9CodecPrivateFromVpcC(AMediaFormat* meta, const uint8_t* csdData, size_t size) {
++    if (meta == nullptr || csdData == nullptr || size < 12) {
++        return false;
++    }
+ 
+-    // csdSize more than 6 means chroma subsampling data was found.
+-    if (csdSize > 6) {
+-        *csdData++ = 0x04 /* FEATURE SUBSAMPLING */;
+-        *csdData++ = 0x01 /* length */;
+-        *csdData++ = chromaSubsampling;
++    // Check the first 4 bytes (VersionAndFlags) if they match the required value.
++    if (csdData[0] != 0x01 || csdData[1] != 0x00 || csdData[2] != 0x00 || csdData[3] != 0x00) {
++        return false;
+     }
+ 
+-    AMediaFormat_setBuffer(meta, AMEDIAFORMAT_KEY_CSD_0, csd->data(), csd->size());
+-    return true;
++    // Create VP9 Codec Feature Metadata (CodecPrivate) that can be parsed.
++    // https://www.webmproject.org/docs/container/#vp9-codec-feature-metadata-codecprivate
++    const uint8_t* vpcCData = csdData + 4;  // Skip the first 4 bytes (VersionAndFlags)
++
++    int32_t profile = vpcCData[0];
++    int32_t level = vpcCData[1];
++    int32_t bitDepth = (vpcCData[2] >> 4) & 0x0F;           // Bit Depth (4 bits).
++    int32_t chromaSubsampling = (vpcCData[2] >> 1) & 0x07;  // Chroma Subsampling (3 bits).
++    return MakeVP9CodecPrivate(meta, profile, level, bitDepth, chromaSubsampling);
+ }
+ 
+ bool MakeAACCodecSpecificData(MetaDataBase &meta, const uint8_t *data, size_t size) {
+diff --git a/media/module/metadatautils/include/media/stagefright/MetaDataUtils.h b/media/module/metadatautils/include/media/stagefright/MetaDataUtils.h
+index 69cf21a577..9988544b24 100644
+--- a/media/module/metadatautils/include/media/stagefright/MetaDataUtils.h
++++ b/media/module/metadatautils/include/media/stagefright/MetaDataUtils.h
+@@ -38,7 +38,10 @@ bool MakeAACCodecSpecificData(AMediaFormat *meta, unsigned profile, unsigned sam
+ void parseVorbisComment(
+         AMediaFormat *fileMeta, const char *comment, size_t commentLength);
+ 
+-bool MakeVP9CodecSpecificData(AMediaFormat* meta, const uint8_t* data, size_t size);
++bool MakeVP9CodecSpecificData(AMediaFormat* meta, int32_t csdSize, int32_t profile, int32_t level,
++                              int32_t bitDepth, int32_t chromaSubsampling);
++bool MakeVP9CodecSpecificDataFromFirstFrame(AMediaFormat* meta, const uint8_t* data, size_t size);
++bool MakeVP9CodecPrivateFromVpcC(AMediaFormat* meta, const uint8_t* data, size_t size);
+ 
+ }  // namespace android
+ 
+-- 
+2.43.0
+

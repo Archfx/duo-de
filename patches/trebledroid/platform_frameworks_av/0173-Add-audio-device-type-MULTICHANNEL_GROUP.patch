@@ -1,0 +1,35 @@
+From 4c2a1c2e689b6311a40fa7b21bc88f75165932d5 Mon Sep 17 00:00:00 2001
+From: yucliu <yucliu@google.com>
+Date: Fri, 25 Oct 2024 15:10:31 -0700
+Subject: [PATCH 173/436] Add audio device type MULTICHANNEL_GROUP
+
+Add audio device type MULTICHANNEL_GROUP for wireless speaker group
+supporting multichannel content.
+
+Flag: android.media.audio.enable_multichannel_group_device
+Bug: 344031109
+Test: atest CtsMediaAudioTestCases
+Change-Id: I9a86bad61c350054fef883670c17509b07300ec8
+---
+ media/audioaidlconversion/AidlConversionCppNdk.cpp | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/media/audioaidlconversion/AidlConversionCppNdk.cpp b/media/audioaidlconversion/AidlConversionCppNdk.cpp
+index cdcce08c24..1b506e9480 100644
+--- a/media/audioaidlconversion/AidlConversionCppNdk.cpp
++++ b/media/audioaidlconversion/AidlConversionCppNdk.cpp
+@@ -480,6 +480,11 @@ const detail::AudioDevicePairs& getAudioDevicePairs() {
+                         AudioDeviceType::OUT_BROADCAST,
+                         GET_DEVICE_DESC_CONNECTION(BT_LE))
+             },
++            {
++                AUDIO_DEVICE_OUT_MULTICHANNEL_GROUP, make_AudioDeviceDescription(
++                        AudioDeviceType::OUT_MULTICHANNEL_GROUP,
++                        GET_DEVICE_DESC_CONNECTION(VIRTUAL))
++            },
+             // AUDIO_DEVICE_IN_AMBIENT and IN_COMMUNICATION are removed since they were deprecated.
+             {
+                 AUDIO_DEVICE_IN_BUILTIN_MIC, make_AudioDeviceDescription(
+-- 
+2.43.0
+

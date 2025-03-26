@@ -1,0 +1,189 @@
+From 2e9f12305ddd57457fc3e5a039f3606198fd3979 Mon Sep 17 00:00:00 2001
+From: "PODISHETTY KUMAR (xWF)" <podishettyk@google.com>
+Date: Fri, 27 Sep 2024 03:54:50 +0000
+Subject: [PATCH 039/436] Revert "Refactored
+ libcameraservice_depth_processor_fuzzer"
+
+This reverts commit 41c4eaf7e2b9710f8ebe08c13af66b16afb48cb5.
+
+Reason for revert: <Droidmonitor created revert due to b/369929601. Will be verifying through ABTD before submission.>
+
+Change-Id: I1c053d830c23056da10febda8f7369c5d217b5c3
+---
+ .../fuzzer/DepthProcessorFuzzer.cpp           | 137 ++++--------------
+ 1 file changed, 31 insertions(+), 106 deletions(-)
+
+diff --git a/services/camera/libcameraservice/fuzzer/DepthProcessorFuzzer.cpp b/services/camera/libcameraservice/fuzzer/DepthProcessorFuzzer.cpp
+index 0d445ebb0d..5c5e1775e9 100644
+--- a/services/camera/libcameraservice/fuzzer/DepthProcessorFuzzer.cpp
++++ b/services/camera/libcameraservice/fuzzer/DepthProcessorFuzzer.cpp
+@@ -23,13 +23,12 @@
+ using namespace android;
+ using namespace android::camera3;
+ 
++static const float kMinRatio = 0.1f;
++static const float kMaxRatio = 0.9f;
++
+ static const uint8_t kTotalDepthJpegBufferCount = 3;
+ static const uint8_t kIntrinsicCalibrationSize = 5;
+ static const uint8_t kLensDistortionSize = 5;
+-static const uint8_t kDqtSize = 5;
+-
+-static const uint16_t kMinDimension = 2;
+-static const uint16_t kMaxDimension = 1024;
+ 
+ static const DepthPhotoOrientation kDepthPhotoOrientations[] = {
+         DepthPhotoOrientation::DEPTH_ORIENTATION_0_DEGREES,
+@@ -46,97 +45,40 @@ void generateDepth16Buffer(std::vector<uint16_t>* depth16Buffer /*out*/, size_t
+     }
+ }
+ 
+-void fillRandomBufferData(std::vector<unsigned char>& buffer, size_t bytes,
+-                          FuzzedDataProvider& fdp) {
+-    while (bytes--) {
+-        buffer.push_back(fdp.ConsumeIntegral<uint8_t>());
+-    }
+-}
+-
+-void addMarkersInJpegBuffer(std::vector<uint8_t>& Buffer, size_t& height, size_t& width,
+-                            FuzzedDataProvider& fdp) {
+-    /* Add the SOI Marker */
+-    Buffer.push_back(0xFF);
+-    Buffer.push_back(0xD8);
+-
+-    /* Add the JFIF Header */
+-    const char header[] = {0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00,
+-                           0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00};
+-    Buffer.insert(Buffer.end(), header, header + sizeof(header));
+-
+-    /* Add the SOF Marker */
+-    Buffer.push_back(0xFF);
+-    Buffer.push_back(0xC0);
+-
+-    Buffer.push_back(0x00);  // Length high byte
+-    Buffer.push_back(0x11);  // Length low byte
+-
+-    Buffer.push_back(fdp.ConsumeIntegral<uint8_t>());  // Random precision
+-
+-    height = fdp.ConsumeIntegralInRange<uint16_t>(kMinDimension, kMaxDimension);  // Image height
+-    Buffer.push_back((height & 0xFF00) >> 8);
+-    Buffer.push_back(height & 0x00FF);
+-
+-    width = fdp.ConsumeIntegralInRange<uint16_t>(kMinDimension, kMaxDimension);  // Image width
+-    Buffer.push_back((width & 0xFF00) >> 8);
+-    Buffer.push_back(width & 0x00FF);
+-
+-    Buffer.push_back(0x03);  // Number of components (3 for Y, Cb, Cr)
+-
+-    /* Add DQT (Define Quantization Table) Marker */
+-    Buffer.push_back(0xFF);
+-    Buffer.push_back(0xDB);
+-
+-    Buffer.push_back(0x00);  // Length high byte
+-    Buffer.push_back(0x43);  // Length low byte
+-
+-    Buffer.push_back(0x00);  // Precision and table identifier
+-
+-    fillRandomBufferData(Buffer, kDqtSize, fdp);  // Random DQT data
+-
+-    /* Add the Component Data */
+-    unsigned char componentData[] = {0x01, 0x21, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01};
+-    Buffer.insert(Buffer.end(), componentData, componentData + sizeof(componentData));
+-
+-    /* Add the DHT (Define Huffman Table) Marker */
+-    Buffer.push_back(0xFF);
+-    Buffer.push_back(0xC4);
+-    Buffer.push_back(0x00);  // Length high byte
+-    Buffer.push_back(0x1F);  // Length low byte
+-
+-    Buffer.push_back(0x00);                 // Table class and identifier
+-    fillRandomBufferData(Buffer, 16, fdp);  // 16 codes for lengths
+-    fillRandomBufferData(Buffer, 12, fdp);  // Values
+-
+-    /* Add the SOS (Start of Scan) Marker */
+-    Buffer.push_back(0xFF);
+-    Buffer.push_back(0xDA);
+-    Buffer.push_back(0x00);  // Length high byte
+-    Buffer.push_back(0x0C);  // Length low byte
+-
+-    Buffer.push_back(0x03);  // Number of components (3 for Y, Cb, Cr)
+-    unsigned char sosComponentData[] = {0x01, 0x00, 0x02, 0x11, 0x03, 0x11};
+-    Buffer.insert(Buffer.end(), sosComponentData, sosComponentData + sizeof(sosComponentData));
+-
+-    Buffer.push_back(0x00);  // Spectral selection start
+-    Buffer.push_back(0x3F);  // Spectral selection end
+-    Buffer.push_back(0x00);  // Successive approximation
+-
+-    size_t remainingBytes = (256 * 1024) - Buffer.size() - 2;  // Subtract 2 for EOI marker
+-    fillRandomBufferData(Buffer, remainingBytes, fdp);
+-
+-    /* Add the EOI Marker */
+-    Buffer.push_back(0xFF);
+-    Buffer.push_back(0xD9);
+-}
+-
+ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
+     FuzzedDataProvider fdp(data, size);
+ 
+     DepthPhotoInputFrame inputFrame;
+ 
++    /**
++     * Consuming 80% of the data to set mMainJpegBuffer. This ensures that we
++     * don't completely exhaust data and use the rest 20% for fuzzing of APIs.
++     */
++    std::vector<uint8_t> buffer = fdp.ConsumeBytes<uint8_t>((size * 80) / 100);
++    inputFrame.mMainJpegBuffer = reinterpret_cast<const char*>(buffer.data());
++
++    /**
++     * Calculate height and width based on buffer size and a ratio within [0.1, 0.9].
++     * The ratio adjusts the dimensions while maintaining a relationship to the total buffer size.
++     */
++    const float ratio = fdp.ConsumeFloatingPointInRange<float>(kMinRatio, kMaxRatio);
++    const size_t height = std::sqrt(buffer.size()) * ratio;
++    const size_t width = std::sqrt(buffer.size()) / ratio;
++
++    inputFrame.mMainJpegHeight = height;
++    inputFrame.mMainJpegWidth = width;
++    inputFrame.mMainJpegSize = buffer.size();
++    // Worst case both depth and confidence maps have the same size as the main color image.
++    inputFrame.mMaxJpegSize = inputFrame.mMainJpegSize * kTotalDepthJpegBufferCount;
++
++    std::vector<uint16_t> depth16Buffer(height * width);
++    generateDepth16Buffer(&depth16Buffer, height * width, fdp);
++    inputFrame.mDepthMapBuffer = depth16Buffer.data();
++    inputFrame.mDepthMapHeight = height;
++    inputFrame.mDepthMapWidth = inputFrame.mDepthMapStride = width;
++
+     inputFrame.mIsLogical = fdp.ConsumeBool();
+-    inputFrame.mJpegQuality = fdp.ConsumeProbability<float>() * 100;
++
+     inputFrame.mOrientation = fdp.PickValueInArray<DepthPhotoOrientation>(kDepthPhotoOrientations);
+ 
+     if (fdp.ConsumeBool()) {
+@@ -153,23 +95,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
+         inputFrame.mIsLensDistortionValid = 1;
+     }
+ 
+-    std::vector<uint8_t> Buffer;
+-    size_t height, width;
+-    addMarkersInJpegBuffer(Buffer, height, width, fdp);
+-    inputFrame.mMainJpegBuffer = reinterpret_cast<const char*>(Buffer.data());
+-
+-    inputFrame.mMainJpegHeight = height;
+-    inputFrame.mMainJpegWidth = width;
+-    inputFrame.mMainJpegSize = Buffer.size();
+-    // Worst case both depth and confidence maps have the same size as the main color image.
+-    inputFrame.mMaxJpegSize = inputFrame.mMainJpegSize * kTotalDepthJpegBufferCount;
+-
+-    std::vector<uint16_t> depth16Buffer(height * width);
+-    generateDepth16Buffer(&depth16Buffer, height * width, fdp);
+-    inputFrame.mDepthMapBuffer = depth16Buffer.data();
+-    inputFrame.mDepthMapHeight = height;
+-    inputFrame.mDepthMapWidth = inputFrame.mDepthMapStride = width;
+-
+     std::vector<uint8_t> depthPhotoBuffer(inputFrame.mMaxJpegSize);
+     size_t actualDepthPhotoSize = 0;
+ 
+-- 
+2.43.0
+

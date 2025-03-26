@@ -1,0 +1,2284 @@
+From 1e865e66ba7964746cb9f50b624109102a47014d Mon Sep 17 00:00:00 2001
+From: Vlad Popa <pvlad@google.com>
+Date: Thu, 15 Aug 2024 19:11:42 -0700
+Subject: [PATCH 088/436] APM: forward mute state in APM to AF
+
+With ring_my_car we pass the mute state together with the actual index
+to AudioFlinger
+
+Flag: com.android.media.audio.ring_my_car
+Test: dumpsys + logs
+Bug: 319515324
+Change-Id: I7b219f9c4917b58a84fd51c0431098a77896887a
+---
+ media/libaudioclient/AudioSystem.cpp          | 19 +++--
+ media/libaudioclient/IAudioFlinger.cpp        | 21 +++--
+ .../media/GetOutputForAttrResponse.aidl       |  2 +
+ .../android/media/IAudioFlingerService.aidl   |  6 +-
+ .../android/media/IAudioPolicyService.aidl    |  4 +-
+ .../fuzzer/audioflinger_fuzzer.cpp            |  4 +-
+ .../include/media/AudioSystem.h               | 10 ++-
+ .../include/media/IAudioFlinger.h             | 15 ++--
+ services/audioflinger/AudioFlinger.cpp        | 26 +++---
+ services/audioflinger/AudioFlinger.h          |  4 +-
+ services/audioflinger/IAfThread.h             | 11 +--
+ services/audioflinger/IAfTrack.h              | 13 +--
+ services/audioflinger/MmapTracks.h            |  7 +-
+ services/audioflinger/PatchPanel.cpp          |  3 +-
+ services/audioflinger/PlaybackTracks.h        | 14 ++--
+ services/audioflinger/Threads.cpp             | 66 +++++++++++-----
+ services/audioflinger/Threads.h               | 18 +++--
+ services/audioflinger/Tracks.cpp              | 62 +++++++++++----
+ .../audioflinger/datapath/VolumeInterface.h   |  2 +-
+ .../datapath/VolumePortInterface.h            |  3 +
+ services/audiopolicy/AudioPolicyInterface.h   | 10 ++-
+ .../common/managerdefinitions/Android.bp      |  1 +
+ .../include/AudioOutputDescriptor.h           | 21 ++++-
+ .../include/IVolumeCurves.h                   |  2 +
+ .../src/AudioOutputDescriptor.cpp             | 79 +++++++++++--------
+ .../engine/common/include/VolumeCurve.h       |  7 ++
+ .../parameter-framework/plugin/Android.bp     |  3 +
+ .../audiopolicy/fuzzer/audiopolicy_fuzzer.cpp |  3 +-
+ .../managerdefault/AudioPolicyManager.cpp     | 68 ++++++++++------
+ .../managerdefault/AudioPolicyManager.h       | 19 +++--
+ .../service/AudioPolicyClientImpl.cpp         | 12 ++-
+ .../service/AudioPolicyInterfaceImpl.cpp      | 12 ++-
+ .../service/AudioPolicyService.cpp            | 16 ++--
+ .../audiopolicy/service/AudioPolicyService.h  | 35 ++++----
+ services/audiopolicy/tests/Android.bp         |  2 +-
+ .../audiopolicy/tests/AudioPolicyTestClient.h |  6 +-
+ .../tests/audiopolicymanager_tests.cpp        | 23 ++++--
+ 37 files changed, 411 insertions(+), 218 deletions(-)
+
+diff --git a/media/libaudioclient/AudioSystem.cpp b/media/libaudioclient/AudioSystem.cpp
+index ee4407421d..769475ce20 100644
+--- a/media/libaudioclient/AudioSystem.cpp
++++ b/media/libaudioclient/AudioSystem.cpp
+@@ -308,11 +308,11 @@ status_t AudioSystem::getMasterMute(bool* mute) {
+ }
+ 
+ status_t AudioSystem::setStreamVolume(audio_stream_type_t stream, float value,
+-                                      audio_io_handle_t output) {
++                                      bool muted, audio_io_handle_t output) {
+     if (uint32_t(stream) >= AUDIO_STREAM_CNT) return BAD_VALUE;
+     const sp<IAudioFlinger> af = get_audio_flinger();
+     if (af == 0) return PERMISSION_DENIED;
+-    af->setStreamVolume(stream, value, output);
++    af->setStreamVolume(stream, value, muted, output);
+     return NO_ERROR;
+ }
+ 
+@@ -325,14 +325,15 @@ status_t AudioSystem::setStreamMute(audio_stream_type_t stream, bool mute) {
+ }
+ 
+ status_t AudioSystem::setPortsVolume(
+-        const std::vector<audio_port_handle_t>& portIds, float volume, audio_io_handle_t output) {
++        const std::vector<audio_port_handle_t>& portIds, float volume, bool muted,
++        audio_io_handle_t output) {
+     const sp<IAudioFlinger> af = get_audio_flinger();
+     if (af == 0) return PERMISSION_DENIED;
+     std::vector<int32_t> portIdsAidl = VALUE_OR_RETURN_STATUS(
+             convertContainer<std::vector<int32_t>>(
+                     portIds, legacy2aidl_audio_port_handle_t_int32_t));
+     int32_t outputAidl = VALUE_OR_RETURN_STATUS(legacy2aidl_audio_io_handle_t_int32_t(output));
+-    af->setPortsVolume(portIdsAidl, volume, outputAidl);
++    af->setPortsVolume(portIdsAidl, volume, muted, outputAidl);
+     return NO_ERROR;
+ }
+ 
+@@ -1096,7 +1097,8 @@ status_t AudioSystem::getOutputForAttr(audio_attributes_t* attr,
+                                        std::vector<audio_io_handle_t>* secondaryOutputs,
+                                        bool *isSpatialized,
+                                        bool *isBitPerfect,
+-                                       float *volume) {
++                                       float *volume,
++                                       bool *muted) {
+     if (attr == nullptr) {
+         ALOGE("%s NULL audio attributes", __func__);
+         return BAD_VALUE;
+@@ -1163,6 +1165,7 @@ status_t AudioSystem::getOutputForAttr(audio_attributes_t* attr,
+     *attr = VALUE_OR_RETURN_STATUS(
+             aidl2legacy_AudioAttributes_audio_attributes_t(responseAidl.attr));
+     *volume = responseAidl.volume;
++    *muted = responseAidl.muted;
+ 
+     return OK;
+ }
+@@ -1326,6 +1329,7 @@ status_t AudioSystem::initStreamVolume(audio_stream_type_t stream,
+ 
+ status_t AudioSystem::setStreamVolumeIndex(audio_stream_type_t stream,
+                                            int index,
++                                           bool muted,
+                                            audio_devices_t device) {
+     const sp<IAudioPolicyService> aps = get_audio_policy_service();
+     if (aps == 0) return PERMISSION_DENIED;
+@@ -1336,7 +1340,7 @@ status_t AudioSystem::setStreamVolumeIndex(audio_stream_type_t stream,
+     AudioDeviceDescription deviceAidl = VALUE_OR_RETURN_STATUS(
+             legacy2aidl_audio_devices_t_AudioDeviceDescription(device));
+     return statusTFromBinderStatus(
+-            aps->setStreamVolumeIndex(streamAidl, deviceAidl, indexAidl));
++            aps->setStreamVolumeIndex(streamAidl, deviceAidl, indexAidl, muted));
+ }
+ 
+ status_t AudioSystem::getStreamVolumeIndex(audio_stream_type_t stream,
+@@ -1360,6 +1364,7 @@ status_t AudioSystem::getStreamVolumeIndex(audio_stream_type_t stream,
+ 
+ status_t AudioSystem::setVolumeIndexForAttributes(const audio_attributes_t& attr,
+                                                   int index,
++                                                  bool muted,
+                                                   audio_devices_t device) {
+     const sp<IAudioPolicyService> aps = get_audio_policy_service();
+     if (aps == 0) return PERMISSION_DENIED;
+@@ -1370,7 +1375,7 @@ status_t AudioSystem::setVolumeIndexForAttributes(const audio_attributes_t& attr
+     AudioDeviceDescription deviceAidl = VALUE_OR_RETURN_STATUS(
+             legacy2aidl_audio_devices_t_AudioDeviceDescription(device));
+     return statusTFromBinderStatus(
+-            aps->setVolumeIndexForAttributes(attrAidl, deviceAidl, indexAidl));
++            aps->setVolumeIndexForAttributes(attrAidl, deviceAidl, indexAidl, muted));
+ }
+ 
+ status_t AudioSystem::getVolumeIndexForAttributes(const audio_attributes_t& attr,
+diff --git a/media/libaudioclient/IAudioFlinger.cpp b/media/libaudioclient/IAudioFlinger.cpp
+index 9241973c10..168b47e119 100644
+--- a/media/libaudioclient/IAudioFlinger.cpp
++++ b/media/libaudioclient/IAudioFlinger.cpp
+@@ -337,11 +337,12 @@ status_t AudioFlingerClientAdapter::getMasterBalance(float* balance) const{
+ }
+ 
+ status_t AudioFlingerClientAdapter::setStreamVolume(audio_stream_type_t stream, float value,
+-                                                    audio_io_handle_t output) {
++                                                    bool muted, audio_io_handle_t output) {
+     AudioStreamType streamAidl = VALUE_OR_RETURN_STATUS(
+             legacy2aidl_audio_stream_type_t_AudioStreamType(stream));
+     int32_t outputAidl = VALUE_OR_RETURN_STATUS(legacy2aidl_audio_io_handle_t_int32_t(output));
+-    return statusTFromBinderStatus(mDelegate->setStreamVolume(streamAidl, value, outputAidl));
++    return statusTFromBinderStatus(
++            mDelegate->setStreamVolume(streamAidl, value, muted, outputAidl));
+ }
+ 
+ status_t AudioFlingerClientAdapter::setStreamMute(audio_stream_type_t stream, bool muted) {
+@@ -351,12 +352,14 @@ status_t AudioFlingerClientAdapter::setStreamMute(audio_stream_type_t stream, bo
+ }
+ 
+ status_t AudioFlingerClientAdapter::setPortsVolume(
+-        const std::vector<audio_port_handle_t>& portIds, float volume, audio_io_handle_t output) {
++        const std::vector<audio_port_handle_t> &portIds, float volume, bool muted,
++        audio_io_handle_t output) {
+     std::vector<int32_t> portIdsAidl = VALUE_OR_RETURN_STATUS(
+             convertContainer<std::vector<int32_t>>(
+                     portIds, legacy2aidl_audio_port_handle_t_int32_t));
+     int32_t outputAidl = VALUE_OR_RETURN_STATUS(legacy2aidl_audio_io_handle_t_int32_t(output));
+-    return statusTFromBinderStatus(mDelegate->setPortsVolume(portIdsAidl, volume, outputAidl));
++    return statusTFromBinderStatus(
++            mDelegate->setPortsVolume(portIdsAidl, volume, muted, outputAidl));
+ }
+ 
+ status_t AudioFlingerClientAdapter::setMode(audio_mode_t mode) {
+@@ -1007,12 +1010,13 @@ Status AudioFlingerServerAdapter::getMasterBalance(float* _aidl_return) {
+ }
+ 
+ Status AudioFlingerServerAdapter::setStreamVolume(AudioStreamType stream, float value,
+-                                                  int32_t output) {
++                                                  bool muted, int32_t output) {
+     audio_stream_type_t streamLegacy = VALUE_OR_RETURN_BINDER(
+             aidl2legacy_AudioStreamType_audio_stream_type_t(stream));
+     audio_io_handle_t outputLegacy = VALUE_OR_RETURN_BINDER(
+             aidl2legacy_int32_t_audio_io_handle_t(output));
+-    return Status::fromStatusT(mDelegate->setStreamVolume(streamLegacy, value, outputLegacy));
++    return Status::fromStatusT(
++            mDelegate->setStreamVolume(streamLegacy, value, muted, outputLegacy));
+ }
+ 
+ Status AudioFlingerServerAdapter::setStreamMute(AudioStreamType stream, bool muted) {
+@@ -1022,13 +1026,14 @@ Status AudioFlingerServerAdapter::setStreamMute(AudioStreamType stream, bool mut
+ }
+ 
+ Status AudioFlingerServerAdapter::setPortsVolume(
+-        const std::vector<int32_t>& portIds, float volume, int32_t output) {
++        const std::vector<int32_t>& portIds, float volume, bool muted, int32_t output) {
+     std::vector<audio_port_handle_t> portIdsLegacy = VALUE_OR_RETURN_BINDER(
+             convertContainer<std::vector<audio_port_handle_t>>(
+                     portIds, aidl2legacy_int32_t_audio_port_handle_t));
+     audio_io_handle_t outputLegacy = VALUE_OR_RETURN_BINDER(
+             aidl2legacy_int32_t_audio_io_handle_t(output));
+-    return Status::fromStatusT(mDelegate->setPortsVolume(portIdsLegacy, volume, outputLegacy));
++    return Status::fromStatusT(
++            mDelegate->setPortsVolume(portIdsLegacy, volume, muted, outputLegacy));
+ }
+ 
+ Status AudioFlingerServerAdapter::setMode(AudioMode mode) {
+diff --git a/media/libaudioclient/aidl/android/media/GetOutputForAttrResponse.aidl b/media/libaudioclient/aidl/android/media/GetOutputForAttrResponse.aidl
+index 4b26d5b761..d3975c094e 100644
+--- a/media/libaudioclient/aidl/android/media/GetOutputForAttrResponse.aidl
++++ b/media/libaudioclient/aidl/android/media/GetOutputForAttrResponse.aidl
+@@ -41,4 +41,6 @@ parcelable GetOutputForAttrResponse {
+     AudioAttributes attr;
+     /** initial port volume for the new audio track */
+     float volume;
++    /** initial port muted state for the new audio track */
++    boolean muted;
+ }
+diff --git a/media/libaudioclient/aidl/android/media/IAudioFlingerService.aidl b/media/libaudioclient/aidl/android/media/IAudioFlingerService.aidl
+index 1c825bc5b5..474ab11a3e 100644
+--- a/media/libaudioclient/aidl/android/media/IAudioFlingerService.aidl
++++ b/media/libaudioclient/aidl/android/media/IAudioFlingerService.aidl
+@@ -96,15 +96,17 @@ interface IAudioFlingerService {
+     /*
+      * Set stream type state. This will probably be used by
+      * the preference panel, mostly.
++     * This method is deprecated. Please use the setPortsVolume method instead.
+      */
+-    void setStreamVolume(AudioStreamType stream, float value, int /* audio_io_handle_t */ output);
++    void setStreamVolume(AudioStreamType stream, float value, boolean muted,
++            int /* audio_io_handle_t */ output);
+     void setStreamMute(AudioStreamType stream, boolean muted);
+ 
+     /*
+      * Set AudioTrack port ids volume attribute. This is the new way of controlling volume from
+      * AudioPolicyManager to AudioFlinger.
+      */
+-    void setPortsVolume(in int[] /* audio_port_handle_t[] */ portIds, float volume,
++    void setPortsVolume(in int[] /* audio_port_handle_t[] */ portIds, float volume, boolean muted,
+             int /* audio_io_handle_t */ output);
+ 
+     // set audio mode.
+diff --git a/media/libaudioclient/aidl/android/media/IAudioPolicyService.aidl b/media/libaudioclient/aidl/android/media/IAudioPolicyService.aidl
+index b4f879a021..40ab93843d 100644
+--- a/media/libaudioclient/aidl/android/media/IAudioPolicyService.aidl
++++ b/media/libaudioclient/aidl/android/media/IAudioPolicyService.aidl
+@@ -126,14 +126,14 @@ interface IAudioPolicyService {
+ 
+     void setStreamVolumeIndex(AudioStreamType stream,
+                               in AudioDeviceDescription device,
+-                              int index);
++                              int index, boolean muted);
+ 
+     int getStreamVolumeIndex(AudioStreamType stream,
+                              in AudioDeviceDescription device);
+ 
+     void setVolumeIndexForAttributes(in AudioAttributes attr,
+                                      in AudioDeviceDescription device,
+-                                     int index);
++                                     int index, boolean muted);
+ 
+     int getVolumeIndexForAttributes(in AudioAttributes attr,
+                                     in AudioDeviceDescription device);
+diff --git a/media/libaudioclient/fuzzer/audioflinger_fuzzer.cpp b/media/libaudioclient/fuzzer/audioflinger_fuzzer.cpp
+index 710a656f31..b0b7e03b46 100644
+--- a/media/libaudioclient/fuzzer/audioflinger_fuzzer.cpp
++++ b/media/libaudioclient/fuzzer/audioflinger_fuzzer.cpp
+@@ -511,11 +511,11 @@ void AudioFlingerFuzzer::invokeAudioSystem() {
+ 
+         stream = getValue(&mFdp, kStreamtypes);
+         AudioSystem::setStreamVolume(stream, mFdp.ConsumeFloatingPoint<float>(),
+-                                     mFdp.ConsumeIntegral<int32_t>());
++                                     mFdp.ConsumeBool(), mFdp.ConsumeIntegral<int32_t>());
+     } else {
+         std::vector <audio_port_handle_t> portsForVolumeChange{};
+         AudioSystem::setPortsVolume(portsForVolumeChange, mFdp.ConsumeFloatingPoint<float>(),
+-                                    mFdp.ConsumeIntegral<int32_t>());
++                                    mFdp.ConsumeBool(), mFdp.ConsumeIntegral<int32_t>());
+     }
+     audio_mode_t mode = getValue(&mFdp, kModes);
+     AudioSystem::setMode(mode);
+diff --git a/media/libaudioclient/include/media/AudioSystem.h b/media/libaudioclient/include/media/AudioSystem.h
+index 40e5673944..31e4f05f48 100644
+--- a/media/libaudioclient/include/media/AudioSystem.h
++++ b/media/libaudioclient/include/media/AudioSystem.h
+@@ -126,7 +126,7 @@ public:
+ 
+     // set stream volume on specified output
+     static status_t setStreamVolume(audio_stream_type_t stream, float value,
+-                                    audio_io_handle_t output);
++                                    bool muted, audio_io_handle_t output);
+ 
+     // mute/unmute stream
+     static status_t setStreamMute(audio_stream_type_t stream, bool mute);
+@@ -135,11 +135,12 @@ public:
+      * Set volume for given AudioTrack port ids on specified output
+      * @param portIds to consider
+      * @param volume to set
++     * @param muted to set
+      * @param output to consider
+      * @return NO_ERROR if successful
+      */
+     static status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds,
+-                                   float volume, audio_io_handle_t output);
++                                   float volume, bool muted, audio_io_handle_t output);
+ 
+     // set audio mode in audio hardware
+     static status_t setMode(audio_mode_t mode);
+@@ -345,7 +346,8 @@ public:
+                                      std::vector<audio_io_handle_t> *secondaryOutputs,
+                                      bool *isSpatialized,
+                                      bool *isBitPerfect,
+-                                     float *volume);
++                                     float *volume,
++                                     bool *muted);
+     static status_t startOutput(audio_port_handle_t portId);
+     static status_t stopOutput(audio_port_handle_t portId);
+     static void releaseOutput(audio_port_handle_t portId);
+@@ -391,6 +393,7 @@ public:
+                                      int indexMax);
+     static status_t setStreamVolumeIndex(audio_stream_type_t stream,
+                                          int index,
++                                         bool muted,
+                                          audio_devices_t device);
+     static status_t getStreamVolumeIndex(audio_stream_type_t stream,
+                                          int *index,
+@@ -398,6 +401,7 @@ public:
+ 
+     static status_t setVolumeIndexForAttributes(const audio_attributes_t &attr,
+                                                 int index,
++                                                bool muted,
+                                                 audio_devices_t device);
+     static status_t getVolumeIndexForAttributes(const audio_attributes_t &attr,
+                                                 int &index,
+diff --git a/media/libaudioclient/include/media/IAudioFlinger.h b/media/libaudioclient/include/media/IAudioFlinger.h
+index a5f3217226..21ecb096fd 100644
+--- a/media/libaudioclient/include/media/IAudioFlinger.h
++++ b/media/libaudioclient/include/media/IAudioFlinger.h
+@@ -226,18 +226,19 @@ public:
+      * the preference panel, mostly.
+      */
+     virtual     status_t    setStreamVolume(audio_stream_type_t stream, float value,
+-                                    audio_io_handle_t output) = 0;
++                                    bool muted, audio_io_handle_t output) = 0;
+     virtual     status_t    setStreamMute(audio_stream_type_t stream, bool muted) = 0;
+ 
+     /**
+      * Set volume for given AudioTrack port ids on specified output
+      * @param portIds to consider
+      * @param volume to set
++     * @param muted to set
+      * @param output to consider
+      * @return NO_ERROR if successful
+      */
+     virtual status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume,
+-            audio_io_handle_t output) = 0;
++            bool muted, audio_io_handle_t output) = 0;
+ 
+     // set audio mode
+     virtual     status_t    setMode(audio_mode_t mode) = 0;
+@@ -428,10 +429,10 @@ public:
+     status_t setMasterBalance(float balance) override;
+     status_t getMasterBalance(float* balance) const override;
+     status_t setStreamVolume(audio_stream_type_t stream, float value,
+-                             audio_io_handle_t output) override;
++                             bool muted, audio_io_handle_t output) override;
+     status_t setStreamMute(audio_stream_type_t stream, bool muted) override;
+     status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume,
+-            audio_io_handle_t output) override;
++            bool muted, audio_io_handle_t output) override;
+     status_t setMode(audio_mode_t mode) override;
+     status_t setMicMute(bool state) override;
+     bool getMicMute() const override;
+@@ -675,10 +676,10 @@ public:
+     Status setMasterBalance(float balance) override;
+     Status getMasterBalance(float* _aidl_return) override;
+     Status setStreamVolume(media::audio::common::AudioStreamType stream,
+-                           float value, int32_t output) override;
++                           float value, bool muted, int32_t output) override;
+     Status setStreamMute(media::audio::common::AudioStreamType stream, bool muted) override;
+-    Status setPortsVolume(const std::vector<int32_t>& portIds, float volume, int32_t output)
+-            override;
++    Status setPortsVolume(const std::vector<int32_t>& portIds, float volume, bool muted,
++                          int32_t output) override;
+     Status setMode(media::audio::common::AudioMode mode) override;
+     Status setMicMute(bool state) override;
+     Status getMicMute(bool* _aidl_return) override;
+diff --git a/services/audioflinger/AudioFlinger.cpp b/services/audioflinger/AudioFlinger.cpp
+index 0d5d61fcde..fada5b0d42 100644
+--- a/services/audioflinger/AudioFlinger.cpp
++++ b/services/audioflinger/AudioFlinger.cpp
+@@ -629,6 +629,7 @@ status_t AudioFlinger::openMmapStream(MmapStreamInterface::stream_direction_t di
+         bool isSpatialized;
+         bool isBitPerfect;
+         float volume;
++        bool muted;
+         ret = AudioSystem::getOutputForAttr(&localAttr, &io,
+                                             actualSessionId,
+                                             &streamType, adjAttributionSource,
+@@ -637,7 +638,8 @@ status_t AudioFlinger::openMmapStream(MmapStreamInterface::stream_direction_t di
+                                                     AUDIO_OUTPUT_FLAG_DIRECT),
+                                             deviceId, &portId, &secondaryOutputs, &isSpatialized,
+                                             &isBitPerfect,
+-                                            &volume);
++                                            &volume,
++                                            &muted);
+         if (ret != NO_ERROR) {
+             config->sample_rate = fullConfig.sample_rate;
+             config->channel_mask = fullConfig.channel_mask;
+@@ -1097,6 +1099,7 @@ status_t AudioFlinger::createTrack(const media::CreateTrackRequest& _input,
+     bool isSpatialized = false;
+     bool isBitPerfect = false;
+     float volume;
++    bool muted;
+ 
+     audio_io_handle_t effectThreadId = AUDIO_IO_HANDLE_NONE;
+     std::vector<int> effectIds;
+@@ -1157,7 +1160,7 @@ status_t AudioFlinger::createTrack(const media::CreateTrackRequest& _input,
+     lStatus = AudioSystem::getOutputForAttr(&localAttr, &output.outputId, sessionId, &streamType,
+                                             adjAttributionSource, &input.config, input.flags,
+                                             &output.selectedDeviceId, &portId, &secondaryOutputs,
+-                                            &isSpatialized, &isBitPerfect, &volume);
++                                            &isSpatialized, &isBitPerfect, &volume, &muted);
+ 
+     if (lStatus != NO_ERROR || output.outputId == AUDIO_IO_HANDLE_NONE) {
+         ALOGE("createTrack() getOutputForAttr() return error %d or invalid output handle", lStatus);
+@@ -1214,7 +1217,7 @@ status_t AudioFlinger::createTrack(const media::CreateTrackRequest& _input,
+         if (effectThread == nullptr) {
+             effectChain = getOrphanEffectChain_l(sessionId);
+         }
+-        ALOGV("createTrack() sessionId: %d volume: %f", sessionId, volume);
++        ALOGV("createTrack() sessionId: %d volume: %f muted %d", sessionId, volume, muted);
+ 
+         output.sampleRate = input.config.sample_rate;
+         output.frameCount = input.frameCount;
+@@ -1229,7 +1232,7 @@ status_t AudioFlinger::createTrack(const media::CreateTrackRequest& _input,
+                                       input.sharedBuffer, sessionId, &output.flags,
+                                       callingPid, adjAttributionSource, input.clientInfo.clientTid,
+                                       &lStatus, portId, input.audioTrackCallback, isSpatialized,
+-                                      isBitPerfect, &output.afTrackFlags, volume);
++                                      isBitPerfect, &output.afTrackFlags, volume, muted);
+         LOG_ALWAYS_FATAL_IF((lStatus == NO_ERROR) && (track == 0));
+         // we don't abort yet if lStatus != NO_ERROR; there is still work to be done regardless
+ 
+@@ -1653,7 +1656,7 @@ status_t AudioFlinger::checkStreamType(audio_stream_type_t stream)
+ }
+ 
+ status_t AudioFlinger::setStreamVolume(audio_stream_type_t stream, float value,
+-        audio_io_handle_t output)
++        bool muted, audio_io_handle_t output)
+ {
+     // check calling permissions
+     if (!settingsAllowed()) {
+@@ -1675,14 +1678,14 @@ status_t AudioFlinger::setStreamVolume(audio_stream_type_t stream, float value,
+     if (volumeInterface == NULL) {
+         return BAD_VALUE;
+     }
+-    volumeInterface->setStreamVolume(stream, value);
++    volumeInterface->setStreamVolume(stream, value, muted);
+ 
+     return NO_ERROR;
+ }
+ 
+ status_t AudioFlinger::setPortsVolume(
+-        const std::vector<audio_port_handle_t>& ports, float volume, audio_io_handle_t output)
+-{
++        const std::vector<audio_port_handle_t> &ports, float volume, bool muted,
++        audio_io_handle_t output) {
+     for (const auto& port : ports) {
+         if (port == AUDIO_PORT_HANDLE_NONE) {
+             return BAD_VALUE;
+@@ -1697,12 +1700,12 @@ status_t AudioFlinger::setPortsVolume(
+     audio_utils::lock_guard lock(mutex());
+     IAfPlaybackThread *thread = checkPlaybackThread_l(output);
+     if (thread != nullptr) {
+-        return thread->setPortsVolume(ports, volume);
++        return thread->setPortsVolume(ports, volume, muted);
+     }
+     const sp<IAfMmapThread> mmapThread = checkMmapThread_l(output);
+     if (mmapThread != nullptr && mmapThread->isOutput()) {
+         IAfMmapPlaybackThread *mmapPlaybackThread = mmapThread->asIAfMmapPlaybackThread().get();
+-        return mmapPlaybackThread->setPortsVolume(ports, volume);
++        return mmapPlaybackThread->setPortsVolume(ports, volume, muted);
+     }
+     return BAD_VALUE;
+ }
+@@ -4097,7 +4100,8 @@ void AudioFlinger::updateSecondaryOutputsForTrack_l(
+                                                        0ns /* timeout */,
+                                                        frameCountToBeReady,
+                                                        track->getSpeed(),
+-                                                       1.f /* volume */);
++                                                       1.f /* volume */,
++                                                       track->getPortMute() /* muted */);
+         status = patchTrack->initCheck();
+         if (status != NO_ERROR) {
+             ALOGE("Secondary output patchTrack init failed: %d", status);
+diff --git a/services/audioflinger/AudioFlinger.h b/services/audioflinger/AudioFlinger.h
+index ace74eee21..7274b59a85 100644
+--- a/services/audioflinger/AudioFlinger.h
++++ b/services/audioflinger/AudioFlinger.h
+@@ -93,12 +93,12 @@ private:
+     status_t getMasterBalance(float* balance) const final EXCLUDES_AudioFlinger_Mutex;
+ 
+     status_t setStreamVolume(audio_stream_type_t stream, float value,
+-            audio_io_handle_t output) final EXCLUDES_AudioFlinger_Mutex;
++            bool muted, audio_io_handle_t output) final EXCLUDES_AudioFlinger_Mutex;
+     status_t setStreamMute(audio_stream_type_t stream, bool muted) final
+             EXCLUDES_AudioFlinger_Mutex;
+ 
+     status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume,
+-            audio_io_handle_t output) final EXCLUDES_AudioFlinger_Mutex;
++                            bool muted, audio_io_handle_t output) final EXCLUDES_AudioFlinger_Mutex;
+ 
+     status_t setMode(audio_mode_t mode) final EXCLUDES_AudioFlinger_Mutex;
+ 
+diff --git a/services/audioflinger/IAfThread.h b/services/audioflinger/IAfThread.h
+index abb8f2f34c..a13819ce5b 100644
+--- a/services/audioflinger/IAfThread.h
++++ b/services/audioflinger/IAfThread.h
+@@ -481,7 +481,8 @@ public:
+             bool isSpatialized,
+             bool isBitPerfect,
+             audio_output_flags_t* afTrackFlags,
+-            float volume)
++            float volume,
++            bool muted)
+             REQUIRES(audio_utils::AudioFlinger_Mutex) = 0;
+ 
+     virtual status_t addTrack_l(const sp<IAfTrack>& track) REQUIRES(mutex()) = 0;
+@@ -558,8 +559,8 @@ public:
+     virtual void setTracksInternalMute(std::map<audio_port_handle_t, bool>* tracksInternalMute)
+             EXCLUDES_ThreadBase_Mutex = 0;
+ 
+-    virtual status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume)
+-            EXCLUDES_ThreadBase_Mutex = 0;
++    virtual status_t setPortsVolume(const std::vector<audio_port_handle_t> &portIds, float volume,
++                                    bool muted) EXCLUDES_ThreadBase_Mutex = 0;
+ };
+ 
+ class IAfDirectOutputThread : public virtual IAfPlaybackThread {
+@@ -700,8 +701,8 @@ public:
+ 
+     virtual AudioStreamOut* clearOutput() EXCLUDES_ThreadBase_Mutex = 0;
+ 
+-    virtual status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume)
+-            EXCLUDES_ThreadBase_Mutex = 0;
++    virtual status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume,
++                                    bool muted) EXCLUDES_ThreadBase_Mutex = 0;
+ };
+ 
+ class IAfMmapCaptureThread : public virtual IAfMmapThread {
+diff --git a/services/audioflinger/IAfTrack.h b/services/audioflinger/IAfTrack.h
+index 2049adc946..1b10f81739 100644
+--- a/services/audioflinger/IAfTrack.h
++++ b/services/audioflinger/IAfTrack.h
+@@ -291,14 +291,15 @@ public:
+             float speed = 1.0f,
+             bool isSpatialized = false,
+             bool isBitPerfect = false,
+-            float volume = 0.0f);
++            float volume = 0.0f,
++            bool muted = false);
+ 
+     static constexpr std::string_view getLogHeader() {
+         using namespace std::literals;
+         return "Type     Id Active Client(pid/uid) Session Port Id S  Flags "
+                         "  Format Chn mask  SRate "
+                         "ST Usg CT "
+-                        " G db  L dB  R dB  VS dB  PortVol dB "
++                        " G db  L dB  R dB  VS dB  PortVol dB  PortMuted"
+                         "  Server FrmCnt  FrmRdy F Underruns  Flushed BitPerfect InternalMute"
+                         "   Latency\n"sv;
+     }
+@@ -476,12 +477,13 @@ public:
+             const android::content::AttributionSourceState& attributionSource,
+             pid_t creatorPid,
+             audio_port_handle_t portId = AUDIO_PORT_HANDLE_NONE,
+-            float volume = 0.0f);
++            float volume = 0.0f,
++            bool muted = false);
+ 
+     static constexpr std::string_view getLogHeader() {
+         using namespace std::literals;
+         return "Client(pid/uid) Session Port Id"
+-                "   Format Chn mask  SRate Flags Usg/Src PortVol dB\n"sv;
++                "   Format Chn mask  SRate Flags Usg/Src PortVol dB PortMuted\n"sv;
+     };
+ 
+     // protected by MMapThread::mLock
+@@ -610,7 +612,8 @@ public:
+                                              *  the lowest possible latency
+                                              *  even if it might glitch. */
+             float speed = 1.0f,
+-            float volume = 1.0f);
++            float volume = 1.0f,
++            bool muted = false);
+ };
+ 
+ class IAfPatchRecord : public virtual IAfRecordTrack, public virtual IAfPatchTrackBase {
+diff --git a/services/audioflinger/MmapTracks.h b/services/audioflinger/MmapTracks.h
+index 442dd8092f..30bbd5d994 100644
+--- a/services/audioflinger/MmapTracks.h
++++ b/services/audioflinger/MmapTracks.h
+@@ -36,7 +36,8 @@ public:
+                             const android::content::AttributionSourceState& attributionSource,
+                             pid_t creatorPid,
+                             audio_port_handle_t portId = AUDIO_PORT_HANDLE_NONE,
+-                            float volume = 0.0f);
++                            float volume = 0.0f,
++                            bool muted = false);
+     ~MmapTrack() override;
+ 
+     status_t initCheck() const final;
+@@ -71,7 +72,11 @@ public:
+     void setPortVolume(float volume) override {
+         mVolume = volume;
+     }
++    void setPortMute(bool muted) override {
++        mMuteState.muteFromPortVolume = muted;
++    }
+     float getPortVolume() const override { return mVolume; }
++    bool getPortMute() const override { return mMuteState.muteFromPortVolume; }
+ 
+ private:
+     DISALLOW_COPY_AND_ASSIGN(MmapTrack);
+diff --git a/services/audioflinger/PatchPanel.cpp b/services/audioflinger/PatchPanel.cpp
+index d0b96de975..be59299aef 100644
+--- a/services/audioflinger/PatchPanel.cpp
++++ b/services/audioflinger/PatchPanel.cpp
+@@ -650,7 +650,8 @@ status_t PatchPanel::Patch::createConnections_l(const sp<IAfPatchPanel>& panel)
+                                            {} /*timeout*/,
+                                            frameCountToBeReady,
+                                            1.0f /*speed*/,
+-                                           1.0f /*volume*/);
++                                           1.0f /*volume*/,
++                                           false /*muted*/);
+     status = mPlayback.checkTrack(tempPatchTrack.get());
+     if (status != NO_ERROR) {
+         return status;
+diff --git a/services/audioflinger/PlaybackTracks.h b/services/audioflinger/PlaybackTracks.h
+index 84758a49da..70bab6a167 100644
+--- a/services/audioflinger/PlaybackTracks.h
++++ b/services/audioflinger/PlaybackTracks.h
+@@ -97,7 +97,8 @@ public:
+                                 float speed = 1.0f,
+                                 bool isSpatialized = false,
+                                 bool isBitPerfect = false,
+-                                float volume = 0.0f);
++                                float volume = 0.0f,
++                                bool muted = false);
+     ~Track() override;
+     status_t initCheck() const final;
+     void appendDumpHeader(String8& result) const final;
+@@ -226,7 +227,9 @@ public:
+ 
+     // VolumePortInterface implementation
+     void setPortVolume(float volume) override;
++    void setPortMute(bool muted) override;
+     float getPortVolume() const override { return mVolume; }
++    bool getPortMute() const override { return mMuteState.load().muteFromPortVolume; }
+ 
+ protected:
+ 
+@@ -410,9 +413,9 @@ private:
+     // TODO: replace PersistableBundle with own struct
+     // access these two variables only when holding player thread lock.
+     std::unique_ptr<os::PersistableBundle> mMuteEventExtras;
+-    mute_state_t        mMuteState;
+-    bool                mInternalMute = false;
+-    std::atomic<float> mVolume = 0.0f;
++    std::atomic<mute_state_t> mMuteState;
++    bool                      mInternalMute = false;
++    std::atomic<float>        mVolume = 0.0f;
+ };  // end of Track
+ 
+ 
+@@ -510,7 +513,8 @@ public:
+                                                                     *  the lowest possible latency
+                                                                     *  even if it might glitch. */
+                                    float speed = 1.0f,
+-                                   float volume = 1.0f);
++                                   float volume = 1.0f,
++                                   bool muted = false);
+     ~PatchTrack() override;
+ 
+     size_t framesReady() const final;
+diff --git a/services/audioflinger/Threads.cpp b/services/audioflinger/Threads.cpp
+index ae102fc178..1c0b749f10 100644
+--- a/services/audioflinger/Threads.cpp
++++ b/services/audioflinger/Threads.cpp
+@@ -2405,7 +2405,8 @@ sp<IAfTrack> PlaybackThread::createTrack_l(
+         bool isSpatialized,
+         bool isBitPerfect,
+         audio_output_flags_t *afTrackFlags,
+-        float volume)
++        float volume,
++        bool muted)
+ {
+     size_t frameCount = *pFrameCount;
+     size_t notificationFrameCount = *pNotificationFrameCount;
+@@ -2734,7 +2735,7 @@ sp<IAfTrack> PlaybackThread::createTrack_l(
+                           nullptr /* buffer */, (size_t)0 /* bufferSize */, sharedBuffer,
+                           sessionId, creatorPid, attributionSource, trackFlags,
+                           IAfTrackBase::TYPE_DEFAULT, portId, SIZE_MAX /*frameCountToBeReady*/,
+-                          speed, isSpatialized, isBitPerfect, volume);
++                          speed, isSpatialized, isBitPerfect, volume, muted);
+ 
+         lStatus = track != 0 ? track->initCheck() : (status_t) NO_MEMORY;
+         if (lStatus != NO_ERROR) {
+@@ -2842,10 +2843,14 @@ void PlaybackThread::setMasterMute(bool muted)
+     }
+ }
+ 
+-void PlaybackThread::setStreamVolume(audio_stream_type_t stream, float value)
++void PlaybackThread::setStreamVolume(audio_stream_type_t stream, float value, bool muted)
+ {
++    ALOGV("%s: stream %d value %f muted %d", __func__, stream, value, muted);
+     audio_utils::lock_guard _l(mutex());
+     mStreamTypes[stream].volume = value;
++    if (com_android_media_audio_ring_my_car()) {
++        mStreamTypes[stream].mute = muted;
++    }
+     broadcast_l();
+ }
+ 
+@@ -2863,13 +2868,14 @@ float PlaybackThread::streamVolume(audio_stream_type_t stream) const
+ }
+ 
+ status_t PlaybackThread::setPortsVolume(
+-        const std::vector<audio_port_handle_t>& portIds, float volume) {
++        const std::vector<audio_port_handle_t>& portIds, float volume, bool muted) {
+     audio_utils::lock_guard _l(mutex());
+     for (const auto& portId : portIds) {
+         for (size_t i = 0; i < mTracks.size(); i++) {
+             sp<IAfTrack> track = mTracks[i].get();
+             if (portId == track->portId()) {
+                 track->setPortVolume(volume);
++                track->setPortMute(muted);
+                 break;
+             }
+         }
+@@ -5859,7 +5865,7 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
+                         volume = masterVolume * mStreamTypes[track->streamType()].volume;
+                     }
+                 } else {
+-                    if (track->isPlaybackRestricted()) {
++                    if (track->isPlaybackRestricted() || track->getPortMute()) {
+                         volume = 0.f;
+                     } else {
+                         volume = masterVolume * track->getPortVolume();
+@@ -5883,7 +5889,8 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
+                                            mStreamTypes[track->streamType()].mute,
+                                            track->isPlaybackRestricted(),
+                                            vlf == 0.f && vrf == 0.f,
+-                                           vh == 0.f});
++                                           vh == 0.f,
++                                           /*muteFromPortVolume=*/false});
+                 } else {
+                     track->processMuteEvent_l(mAfThreadCallback->getOrCreateAudioManager(),
+                             /*muteState=*/{masterVolume == 0.f,
+@@ -5891,7 +5898,8 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
+                                            /* muteFromStreamMuted= */ false,
+                                            track->isPlaybackRestricted(),
+                                            vlf == 0.f && vrf == 0.f,
+-                                           vh == 0.f});
++                                           vh == 0.f,
++                                           track->getPortMute()});
+                 }
+                 vlf *= volume;
+                 vrf *= volume;
+@@ -6055,7 +6063,7 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
+                 }
+             } else {
+                 v = masterVolume * track->getPortVolume();
+-                if (track->isPlaybackRestricted()) {
++                if (track->isPlaybackRestricted() || track->getPortMute()) {
+                     v = 0;
+                 }
+             }
+@@ -6085,7 +6093,8 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
+                                            mStreamTypes[track->streamType()].mute,
+                                            track->isPlaybackRestricted(),
+                                            vlf == 0.f && vrf == 0.f,
+-                                           vh == 0.f});
++                                           vh == 0.f,
++                                           /*muteFromPortVolume=*/false});
+                 } else {
+                     track->processMuteEvent_l(mAfThreadCallback->getOrCreateAudioManager(),
+                             /*muteState=*/{masterVolume == 0.f,
+@@ -6093,7 +6102,8 @@ PlaybackThread::mixer_state MixerThread::prepareTracks_l(
+                                            /* muteFromStreamMuted= */ false,
+                                            track->isPlaybackRestricted(),
+                                            vlf == 0.f && vrf == 0.f,
+-                                           vh == 0.f});
++                                           vh == 0.f,
++                                           track->getPortMute()});
+                 }
+                 // now apply the master volume and stream type volume and shaper volume
+                 vlf *= v * vh;
+@@ -6851,7 +6861,8 @@ void DirectOutputThread::processVolume_l(IAfTrack* track, bool lastTrack)
+                                mStreamTypes[track->streamType()].mute,
+                                track->isPlaybackRestricted(),
+                                clientVolumeMute,
+-                               shaperVolume == 0.f});
++                               shaperVolume == 0.f,
++                               /*muteFromPortVolume=*/false});
+     } else {
+         if (mMasterMute || track->isPlaybackRestricted()) {
+             left = right = 0;
+@@ -6879,7 +6890,8 @@ void DirectOutputThread::processVolume_l(IAfTrack* track, bool lastTrack)
+                                /* muteFromStreamMuted= */ false,
+                                track->isPlaybackRestricted(),
+                                clientVolumeMute,
+-                               shaperVolume == 0.f});
++                               shaperVolume == 0.f,
++                               track->getPortMute()});
+     }
+ 
+     if (lastTrack) {
+@@ -7981,8 +7993,9 @@ void DuplicatingThread::addOutputTrack(IAfPlaybackThread* thread)
+         return;
+     }
+     if (!audioserver_flags::portid_volume_management()) {
+-        thread->setStreamVolume(AUDIO_STREAM_PATCH, 1.0f);
++        thread->setStreamVolume(AUDIO_STREAM_PATCH, /*volume=*/1.0f, /*muted=*/false);
+     }
++
+     mOutputTracks.add(outputTrack);
+     ALOGV("addOutputTrack() track %p, on thread %p", outputTrack.get(), thread);
+     updateWaitTime_l();
+@@ -10486,6 +10499,7 @@ status_t MmapThread::start(const AudioClient& client,
+     const auto localSessionId = mSessionId;
+     auto localAttr = mAttr;
+     float volume = 0.0f;
++    bool muted = false;
+     if (isOutput()) {
+         audio_config_t config = AUDIO_CONFIG_INITIALIZER;
+         config.sample_rate = mSampleRate;
+@@ -10510,7 +10524,8 @@ status_t MmapThread::start(const AudioClient& client,
+                                             &secondaryOutputs,
+                                             &isSpatialized,
+                                             &isBitPerfect,
+-                                            &volume);
++                                            &volume,
++                                            &muted);
+         mutex().lock();
+         mAttr = localAttr;
+         ALOGD_IF(!secondaryOutputs.empty(),
+@@ -10580,7 +10595,7 @@ status_t MmapThread::start(const AudioClient& client,
+                                         mChannelMask, mSessionId, isOutput(),
+                                         client.attributionSource,
+                                         IPCThreadState::self()->getCallingPid(), portId,
+-                                        volume);
++                                        volume, muted);
+     if (!isOutput()) {
+         track->setSilenced_l(isClientSilenced_l(portId));
+     }
+@@ -11238,10 +11253,14 @@ void MmapPlaybackThread::setMasterMute(bool muted)
+     }
+ }
+ 
+-void MmapPlaybackThread::setStreamVolume(audio_stream_type_t stream, float value)
++void MmapPlaybackThread::setStreamVolume(audio_stream_type_t stream, float value, bool muted)
+ {
++    ALOGV("%s: stream %d value %f muted %d", __func__, stream, value, muted);
+     audio_utils::lock_guard _l(mutex());
+     mStreamTypes[stream].volume = value;
++    if (com_android_media_audio_ring_my_car()) {
++        mStreamTypes[stream].mute = muted;
++    }
+     if (stream == mStreamType) {
+         broadcast_l();
+     }
+@@ -11263,12 +11282,13 @@ void MmapPlaybackThread::setStreamMute(audio_stream_type_t stream, bool muted)
+ }
+ 
+ status_t MmapPlaybackThread::setPortsVolume(
+-        const std::vector<audio_port_handle_t>& portIds, float volume) {
++        const std::vector<audio_port_handle_t>& portIds, float volume, bool muted) {
+     audio_utils::lock_guard _l(mutex());
+     for (const auto& portId : portIds) {
+         for (const sp<IAfMmapTrack>& track : mActiveTracks) {
+             if (portId == track->portId()) {
+                 track->setPortVolume(volume);
++                track->setPortMute(muted);
+                 break;
+             }
+         }
+@@ -11326,7 +11346,11 @@ NO_THREAD_SAFETY_ANALYSIS // access of track->processMuteEvent_l
+             // will be broadcasted to all tracks. Thus, take arbitrarily first track volume.
+             size_t numtracks = mActiveTracks.size();
+             if (numtracks) {
+-                volume = mMasterVolume * mActiveTracks[0]->getPortVolume();
++                if (mActiveTracks[0]->getPortMute()) {
++                    volume = 0;
++                } else {
++                    volume = mMasterVolume * mActiveTracks[0]->getPortVolume();
++                }
+             }
+         }
+     }
+@@ -11370,7 +11394,8 @@ NO_THREAD_SAFETY_ANALYSIS // access of track->processMuteEvent_l
+                         // TODO(b/241533526): adjust logic to include mute from AppOps
+                         false /*muteFromPlaybackRestricted*/,
+                         false /*muteFromClientVolume*/,
+-                        false /*muteFromVolumeShaper*/});
++                        false /*muteFromVolumeShaper*/,
++                        false /*muteFromPortVolume*/});
+             } else {
+                 track->processMuteEvent_l(mAfThreadCallback->getOrCreateAudioManager(),
+                     /*muteState=*/{mMasterMute,
+@@ -11379,7 +11404,8 @@ NO_THREAD_SAFETY_ANALYSIS // access of track->processMuteEvent_l
+                                    // TODO(b/241533526): adjust logic to include mute from AppOps
+                                    false /*muteFromPlaybackRestricted*/,
+                                    false /*muteFromClientVolume*/,
+-                                   false /*muteFromVolumeShaper*/});
++                                   false /*muteFromVolumeShaper*/,
++                                   track->getPortMute()});
+                 }
+         }
+     }
+diff --git a/services/audioflinger/Threads.h b/services/audioflinger/Threads.h
+index a13340d132..0c5a2c3bbd 100644
+--- a/services/audioflinger/Threads.h
++++ b/services/audioflinger/Threads.h
+@@ -1020,11 +1020,12 @@ public:
+     void setMasterVolume(float value) final;
+     void setMasterBalance(float balance) override EXCLUDES_ThreadBase_Mutex;
+     void setMasterMute(bool muted) final;
+-    void setStreamVolume(audio_stream_type_t stream, float value) final EXCLUDES_ThreadBase_Mutex;
++    void setStreamVolume(audio_stream_type_t stream, float value, bool muted) final
++            EXCLUDES_ThreadBase_Mutex;
+     void setStreamMute(audio_stream_type_t stream, bool muted) final EXCLUDES_ThreadBase_Mutex;
+     float streamVolume(audio_stream_type_t stream) const final EXCLUDES_ThreadBase_Mutex;
+-    status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume)
+-            final EXCLUDES_ThreadBase_Mutex;
++    status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume,
++                            bool muted) final EXCLUDES_ThreadBase_Mutex;
+ 
+     void setVolumeForOutput_l(float left, float right) const final;
+ 
+@@ -1051,7 +1052,8 @@ public:
+                                 bool isSpatialized,
+                                 bool isBitPerfect,
+                                 audio_output_flags_t* afTrackFlags,
+-                                float volume) final
++                                float volume,
++                                bool muted) final
+             REQUIRES(audio_utils::AudioFlinger_Mutex);
+ 
+     bool isTrackActive(const sp<IAfTrack>& track) const final {
+@@ -2405,11 +2407,13 @@ public:
+     // Needs implementation?
+     void setMasterBalance(float /* value */) final EXCLUDES_ThreadBase_Mutex {}
+     void setMasterMute(bool muted) final EXCLUDES_ThreadBase_Mutex;
+-    void setStreamVolume(audio_stream_type_t stream, float value) final EXCLUDES_ThreadBase_Mutex;
++
++    void setStreamVolume(audio_stream_type_t stream, float value, bool muted) final
++            EXCLUDES_ThreadBase_Mutex;
+     void setStreamMute(audio_stream_type_t stream, bool muted) final EXCLUDES_ThreadBase_Mutex;
+     float streamVolume(audio_stream_type_t stream) const final EXCLUDES_ThreadBase_Mutex;
+-    status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume)
+-            final EXCLUDES_ThreadBase_Mutex;
++    status_t setPortsVolume(const std::vector<audio_port_handle_t>& portIds, float volume,
++                            bool muted) final EXCLUDES_ThreadBase_Mutex;
+ 
+     void setMasterMute_l(bool muted) REQUIRES(mutex()) { mMasterMute = muted; }
+ 
+diff --git a/services/audioflinger/Tracks.cpp b/services/audioflinger/Tracks.cpp
+index b08b0b7c25..980ef2293b 100644
+--- a/services/audioflinger/Tracks.cpp
++++ b/services/audioflinger/Tracks.cpp
+@@ -728,7 +728,8 @@ sp<IAfTrack> IAfTrack::create(
+         float speed,
+         bool isSpatialized,
+         bool isBitPerfect,
+-        float volume) {
++        float volume,
++        bool muted) {
+     return sp<Track>::make(thread,
+             client,
+             streamType,
+@@ -750,7 +751,8 @@ sp<IAfTrack> IAfTrack::create(
+             speed,
+             isSpatialized,
+             isBitPerfect,
+-            volume);
++            volume,
++            muted);
+ }
+ 
+ // Track constructor must be called with AudioFlinger::mLock and ThreadBase::mLock held
+@@ -776,7 +778,8 @@ Track::Track(
+             float speed,
+             bool isSpatialized,
+             bool isBitPerfect,
+-            float volume)
++            float volume,
++            bool muted)
+     :   TrackBase(thread, client, attr, sampleRate, format, channelMask, frameCount,
+                   // TODO: Using unsecurePointer() has some associated security pitfalls
+                   //       (see declaration for details).
+@@ -860,11 +863,13 @@ Track::Track(
+     }
+ 
+     populateUsageAndContentTypeFromStreamType();
++    setPortMute(muted);
+ 
+     // Audio patch and call assistant volume are always max
+     if (mAttr.usage == AUDIO_USAGE_CALL_ASSISTANT
+             || mAttr.usage == AUDIO_USAGE_VIRTUAL_SOURCE) {
+         mVolume = 1.0f;
++        setPortMute(false);
+     }
+ 
+     mServerLatencySupported = checkServerLatencySupported(format, flags);
+@@ -1084,7 +1089,7 @@ void Track::appendDump(String8& result, bool active) const
+     result.appendFormat("%7s %7u/%7u %7u %7u %2s 0x%03X "
+                         "%08X %08X %6u "
+                         "%2u %3x %2x "
+-                        "%5.2g %5.2g %5.2g %5.2g%c %11.2g "
++                        "%5.2g %5.2g %5.2g %5.2g%c %11.2g %12s"
+                         "%08X %6zu%c %6zu %c %9u%c %7u %10s %12s",
+             active ? "yes" : "no",
+             mClient ? mClient->pid() : getpid() ,
+@@ -1108,6 +1113,7 @@ void Track::appendDump(String8& result, bool active) const
+             20.0 * log10(vsVolume.first), // VolumeShaper(s) total volume
+             vsVolume.second ? 'A' : ' ',  // if any VolumeShapers active
+             20.0 * log10(mVolume),
++            getPortMute() ? "true" : "false",
+ 
+             mCblk->mServer,
+             bufferSizeInFrames,
+@@ -1614,8 +1620,25 @@ void Track::setPortVolume(float volume) {
+     if (mType != TYPE_PATCH) {
+         // Do not recursively propagate a PatchTrack setPortVolume to
+         // downstream PatchTracks.
+-        forEachTeePatchTrack_l([volume](const auto& patchTrack) {
+-                patchTrack->setPortVolume(volume); });
++        forEachTeePatchTrack_l([volume](const auto &patchTrack) {
++            patchTrack->setPortVolume(volume);
++        });
++    }
++}
++
++void Track::setPortMute(bool muted) {
++    mute_state_t newMuteState = mMuteState.load();
++    if (newMuteState.muteFromPortVolume == muted) {
++        return;
++    }
++    newMuteState.muteFromPortVolume = muted;
++    mMuteState.store(newMuteState);
++    if (mType != TYPE_PATCH) {
++        // Do not recursively propagate a PatchTrack setPortVolume to
++        // downstream PatchTracks.
++        forEachTeePatchTrack_l([muted](const auto &patchTrack) {
++            patchTrack->setPortMute(muted);
++        });
+     }
+ }
+ 
+@@ -1720,8 +1743,8 @@ void Track::processMuteEvent_l(const sp<
+     }
+ 
+     if (result == OK) {
+-        ALOGI("%s(%d): processed mute state for port ID %d from %d to %d", __func__, id(), mPortId,
+-                static_cast<int>(mMuteState), static_cast<int>(muteState));
++        ALOGI("%s(%d): processed mute state for port ID %d from %#x to %#x", __func__, id(),
++              mPortId, static_cast<int>(mMuteState.load()), static_cast<int>(muteState));
+         mMuteState = muteState;
+     } else {
+         ALOGW("%s(%d): cannot process mute state for port ID %d, status error %d", __func__, id(),
+@@ -2498,7 +2521,8 @@ sp<IAfPatchTrack> IAfPatchTrack::create(
+                                          *  the lowest possible latency
+                                          *  even if it might glitch. */
+         float speed,
+-        float volume)
++        float volume,
++        bool muted)
+ {
+     return sp<PatchTrack>::make(
+             playbackThread,
+@@ -2513,7 +2537,8 @@ sp<IAfPatchTrack> IAfPatchTrack::create(
+             timeout,
+             frameCountToBeReady,
+             speed,
+-            volume);
++            volume,
++            muted);
+ }
+ 
+ PatchTrack::PatchTrack(IAfPlaybackThread* playbackThread,
+@@ -2528,14 +2553,15 @@ PatchTrack::PatchTrack(IAfPlaybackThread* playbackThread,
+                                                      const Timeout& timeout,
+                                                      size_t frameCountToBeReady,
+                                                      float speed,
+-                                                     float volume)
++                                                     float volume,
++                                                     bool muted)
+     :   Track(playbackThread, NULL, streamType,
+               AUDIO_ATTRIBUTES_INITIALIZER,
+               sampleRate, format, channelMask, frameCount,
+               buffer, bufferSize, nullptr /* sharedBuffer */,
+               AUDIO_SESSION_NONE, getpid(), audioServerAttributionSource(getpid()), flags,
+               TYPE_PATCH, AUDIO_PORT_HANDLE_NONE, frameCountToBeReady, speed,
+-              false /*isSpatialized*/, false /*isBitPerfect*/, volume),
++              false /*isSpatialized*/, false /*isBitPerfect*/, volume, muted),
+         PatchTrackBase(mCblk ? new AudioTrackClientProxy(mCblk, mBuffer, frameCount, mFrameSize,
+                         true /*clientInServer*/) : nullptr,
+                        playbackThread, timeout)
+@@ -3519,7 +3545,8 @@ sp<IAfMmapTrack> IAfMmapTrack::create(IAfThreadBase* thread,
+           const android::content::AttributionSourceState& attributionSource,
+           pid_t creatorPid,
+           audio_port_handle_t portId,
+-          float volume)
++          float volume,
++          bool muted)
+ {
+     return sp<MmapTrack>::make(
+             thread,
+@@ -3532,7 +3559,8 @@ sp<IAfMmapTrack> IAfMmapTrack::create(IAfThreadBase* thread,
+             attributionSource,
+             creatorPid,
+             portId,
+-            volume);
++            volume,
++            muted);
+ }
+ 
+ MmapTrack::MmapTrack(IAfThreadBase* thread,
+@@ -3545,7 +3573,8 @@ MmapTrack::MmapTrack(IAfThreadBase* thread,
+         const AttributionSourceState& attributionSource,
+         pid_t creatorPid,
+         audio_port_handle_t portId,
+-        float volume)
++        float volume,
++        bool muted)
+     :   TrackBase(thread, NULL, attr, sampleRate, format,
+                   channelMask, (size_t)0 /* frameCount */,
+                   nullptr /* buffer */, (size_t)0 /* bufferSize */,
+@@ -3559,12 +3588,14 @@ MmapTrack::MmapTrack(IAfThreadBase* thread,
+         mUid(VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid))),
+             mSilenced(false), mSilencedNotified(false), mVolume(volume)
+ {
++    mMuteState.muteFromPortVolume = muted;
+     // Once this item is logged by the server, the client can add properties.
+     mTrackMetrics.logConstructor(creatorPid, uid(), id());
+     if (isOut && (attr.usage == AUDIO_USAGE_CALL_ASSISTANT
+             || attr.usage == AUDIO_USAGE_VIRTUAL_SOURCE)) {
+         // Audio patch and call assistant volume are always max
+         mVolume = 1.0f;
++        mMuteState.muteFromPortVolume = false;
+     }
+ }
+ 
+@@ -3662,6 +3693,7 @@ void MmapTrack::appendDump(String8& result, bool active __unused) const
+     if (isOut()) {
+         result.appendFormat("%4x %2x", mAttr.usage, mAttr.content_type);
+         result.appendFormat("%11.2g", 20.0 * log10(mVolume));
++        result.appendFormat("%12s", mMuteState.muteFromPortVolume ? "true" : "false");
+     } else {
+         result.appendFormat("%7x", mAttr.source);
+     }
+diff --git a/services/audioflinger/datapath/VolumeInterface.h b/services/audioflinger/datapath/VolumeInterface.h
+index 1564fe107f..02b6ade64e 100644
+--- a/services/audioflinger/datapath/VolumeInterface.h
++++ b/services/audioflinger/datapath/VolumeInterface.h
+@@ -25,7 +25,7 @@ public:
+     virtual void setMasterVolume(float value) = 0;
+     virtual void setMasterBalance(float balance) = 0;
+     virtual void setMasterMute(bool muted) = 0;
+-    virtual void setStreamVolume(audio_stream_type_t stream, float value) = 0;
++    virtual void setStreamVolume(audio_stream_type_t stream, float value, bool muted) = 0;
+     virtual void setStreamMute(audio_stream_type_t stream, bool muted) = 0;
+     // TODO(b/290699744) add "get" prefix for getter below.
+     virtual float streamVolume(audio_stream_type_t stream) const = 0;
+diff --git a/services/audioflinger/datapath/VolumePortInterface.h b/services/audioflinger/datapath/VolumePortInterface.h
+index fb1c463ab5..fe3b782cf3 100644
+--- a/services/audioflinger/datapath/VolumePortInterface.h
++++ b/services/audioflinger/datapath/VolumePortInterface.h
+@@ -23,7 +23,10 @@ namespace android {
+ class VolumePortInterface : public virtual RefBase {
+ public:
+     virtual void setPortVolume(float volume) = 0;
++    virtual void setPortMute(bool mute) = 0;
+     virtual float getPortVolume() const = 0;
++    /** Returns the muted state defined by the volume group which is playing on this port. */
++    virtual bool getPortMute() const = 0;
+ };
+ 
+ }  // namespace android
+diff --git a/services/audiopolicy/AudioPolicyInterface.h b/services/audiopolicy/AudioPolicyInterface.h
+index edcb805fed..3539f00a3b 100644
+--- a/services/audiopolicy/AudioPolicyInterface.h
++++ b/services/audiopolicy/AudioPolicyInterface.h
+@@ -148,7 +148,8 @@ public:
+                                       output_type_t *outputType,
+                                       bool *isSpatialized,
+                                       bool *isBitPerfect,
+-                                      float *volume) = 0;
++                                      float *volume,
++                                      bool *muted) = 0;
+     // indicates to the audio policy manager that the output starts being used by corresponding
+     // stream.
+     virtual status_t startOutput(audio_port_handle_t portId) = 0;
+@@ -197,6 +198,7 @@ public:
+     // setting volume for all devices
+     virtual status_t setStreamVolumeIndex(audio_stream_type_t stream,
+                                           int index,
++                                          bool muted,
+                                           audio_devices_t device) = 0;
+ 
+     // retrieve current volume index for the specified stream and the
+@@ -208,6 +210,7 @@ public:
+ 
+     virtual status_t setVolumeIndexForAttributes(const audio_attributes_t &attr,
+                                                  int index,
++                                                 bool muted,
+                                                  audio_devices_t device) = 0;
+     virtual status_t getVolumeIndexForAttributes(const audio_attributes_t &attr,
+                                                  int &index,
+@@ -514,7 +517,7 @@ public:
+     // set a stream volume for a particular output. For the same user setting, a given stream type
+     // can have different volumes
+     // for each output (destination device) it is attached to.
+-    virtual status_t setStreamVolume(audio_stream_type_t stream, float volume,
++    virtual status_t setStreamVolume(audio_stream_type_t stream, float volume, bool muted,
+                                      audio_io_handle_t output, int delayMs = 0) = 0;
+     /**
+      * Set volume for given AudioTrack port ids for a particular output.
+@@ -522,12 +525,13 @@ public:
+      * can have different volumes for each output (destination device) it is attached to.
+      * @param ports to consider
+      * @param volume to apply
++     * @param muted to apply
+      * @param output to consider
+      * @param delayMs to use
+      * @return NO_ERROR if successful
+      */
+     virtual status_t setPortsVolume(const std::vector<audio_port_handle_t>& ports, float volume,
+-            audio_io_handle_t output, int delayMs = 0) = 0;
++            bool muted, audio_io_handle_t output, int delayMs = 0) = 0;
+ 
+     // function enabling to send proprietary informations directly from audio policy manager to
+     // audio hardware interface.
+diff --git a/services/audiopolicy/common/managerdefinitions/Android.bp b/services/audiopolicy/common/managerdefinitions/Android.bp
+index 4dedcd6486..0e1d090791 100644
+--- a/services/audiopolicy/common/managerdefinitions/Android.bp
++++ b/services/audiopolicy/common/managerdefinitions/Android.bp
+@@ -39,6 +39,7 @@ cc_library {
+         "android.media.audiopolicy-aconfig-cc",
+         "audioclient-types-aidl-cpp",
+         "audiopolicy-types-aidl-cpp",
++        "com.android.media.audio-aconfig-cc",
+         "com.android.media.audioserver-aconfig-cc",
+         "libaconfig_storage_read_api_cc",
+         "libaudioclient_aidl_conversion",
+diff --git a/services/audiopolicy/common/managerdefinitions/include/AudioOutputDescriptor.h b/services/audiopolicy/common/managerdefinitions/include/AudioOutputDescriptor.h
+index 835fad29bf..9bceee7a7f 100644
+--- a/services/audiopolicy/common/managerdefinitions/include/AudioOutputDescriptor.h
++++ b/services/audiopolicy/common/managerdefinitions/include/AudioOutputDescriptor.h
+@@ -89,7 +89,9 @@ private:
+ class VolumeActivity : public ActivityTracking
+ {
+ public:
+-    bool isMuted() const { return mMuteCount > 0; }
++    bool isMutedInternally() const { return mMuteCount > 0; }
++    bool isMutedByGroup() const { return mMutedByGroup > 0; }
++    void setMutedByGroup(bool mutedByGroup) { mMutedByGroup = mutedByGroup; }
+     int getMuteCount() const { return mMuteCount; }
+     int incMuteCount() { return ++mMuteCount; }
+     int decMuteCount() { return mMuteCount > 0 ? --mMuteCount : -1; }
+@@ -107,6 +109,7 @@ public:
+ 
+ private:
+     int mMuteCount = 0; /**< mute request counter */
++    bool mMutedByGroup = false; /**< mute from AudioService, does not add to counter */
+     float mCurVolumeDb = NAN; /**< current volume in dB. */
+     bool mIsVoice = false; /** true if this volume source is used for voice call volume */
+ };
+@@ -209,16 +212,25 @@ public:
+         return mVolumeActivities.find(vs) != std::end(mVolumeActivities)?
+                     mVolumeActivities.at(vs).getActivityCount() : 0;
+     }
+-    bool isMuted(VolumeSource vs) const
++    bool isMutedInternally(VolumeSource vs) const
+     {
+         return mVolumeActivities.find(vs) != std::end(mVolumeActivities)?
+-                    mVolumeActivities.at(vs).isMuted() : false;
++                    mVolumeActivities.at(vs).isMutedInternally() : false;
+     }
+     int getMuteCount(VolumeSource vs) const
+     {
+         return mVolumeActivities.find(vs) != std::end(mVolumeActivities)?
+                     mVolumeActivities.at(vs).getMuteCount() : 0;
+     }
++    bool isMutedByGroup(VolumeSource vs)
++    {
++        return mVolumeActivities.find(vs) != std::end(mVolumeActivities)?
++               mVolumeActivities.at(vs).isMutedByGroup() : false;
++    }
++    bool hasVolumeSource(VolumeSource vs)
++    {
++        return mVolumeActivities.find(vs) != std::end(mVolumeActivities);
++    }
+     int incMuteCount(VolumeSource vs)
+     {
+         return mVolumeActivities[vs].incMuteCount();
+@@ -227,10 +239,11 @@ public:
+     {
+         return mVolumeActivities[vs].decMuteCount();
+     }
+-    void setCurVolume(VolumeSource vs, float volumeDb, bool isVoiceVolSrc)
++    void setCurVolume(VolumeSource vs, float volumeDb, bool mutedByGroup, bool isVoiceVolSrc)
+     {
+         // Even if not activity for this source registered, need to create anyway
+         mVolumeActivities[vs].setVolume(volumeDb);
++        mVolumeActivities[vs].setMutedByGroup(mutedByGroup);
+         mVolumeActivities[vs].setIsVoice(isVoiceVolSrc);
+     }
+     float getCurVolume(VolumeSource vs) const
+diff --git a/services/audiopolicy/common/managerdefinitions/include/IVolumeCurves.h b/services/audiopolicy/common/managerdefinitions/include/IVolumeCurves.h
+index fd8b81a5c4..ebfc59790b 100644
+--- a/services/audiopolicy/common/managerdefinitions/include/IVolumeCurves.h
++++ b/services/audiopolicy/common/managerdefinitions/include/IVolumeCurves.h
+@@ -41,6 +41,8 @@ public:
+     virtual status_t initVolume(int indexMin, int indexMax) = 0;
+     virtual std::vector<audio_attributes_t> getAttributes() const = 0;
+     virtual std::vector<audio_stream_type_t> getStreamTypes() const = 0;
++    virtual void setIsMuted(bool isMuted) = 0;
++    virtual bool isMuted() const = 0;
+     virtual void dump(String8 *dst, int spaces = 0, bool curvePoints = false) const = 0;
+ };
+ 
+diff --git a/services/audiopolicy/common/managerdefinitions/src/AudioOutputDescriptor.cpp b/services/audiopolicy/common/managerdefinitions/src/AudioOutputDescriptor.cpp
+index 2c41de4a55..c417462ed5 100644
+--- a/services/audiopolicy/common/managerdefinitions/src/AudioOutputDescriptor.cpp
++++ b/services/audiopolicy/common/managerdefinitions/src/AudioOutputDescriptor.cpp
+@@ -22,6 +22,7 @@
+ #include <AudioPolicyInterface.h>
+ #include "AudioOutputDescriptor.h"
+ #include "AudioPolicyMix.h"
++#include <com_android_media_audio.h>
+ #include "IOProfile.h"
+ #include "Volume.h"
+ #include "HwModule.h"
+@@ -161,7 +162,7 @@ bool AudioOutputDescriptor::isFixedVolume(const DeviceTypeSet& deviceTypes __unu
+     return false;
+ }
+ 
+-bool AudioOutputDescriptor::setVolume(float volumeDb, bool /*muted*/,
++bool AudioOutputDescriptor::setVolume(float volumeDb, bool mutedByGroup,
+                                       VolumeSource volumeSource,
+                                       const StreamTypeVector &/*streams*/,
+                                       const DeviceTypeSet& deviceTypes,
+@@ -169,7 +170,6 @@ bool AudioOutputDescriptor::setVolume(float volumeDb, bool /*muted*/,
+                                       bool force,
+                                       bool isVoiceVolSrc)
+ {
+-
+     if (!supportedDevices().containsDeviceAmongTypes(deviceTypes)) {
+         ALOGV("%s output ID %d unsupported device %s",
+                 __func__, getId(), toString(deviceTypes).c_str());
+@@ -177,10 +177,14 @@ bool AudioOutputDescriptor::setVolume(float volumeDb, bool /*muted*/,
+     }
+     // We actually change the volume if:
+     // - the float value returned by computeVolume() changed
++    // - the muted state changed
+     // - the force flag is set
+-    if (volumeDb != getCurVolume(volumeSource) || force) {
+-        ALOGV("%s for volumeSrc %d, volume %f, delay %d", __func__, volumeSource, volumeDb, delayMs);
+-        setCurVolume(volumeSource, volumeDb, isVoiceVolSrc);
++    const bool mutedChanged =
++            com_android_media_audio_ring_my_car() && (isMutedByGroup(volumeSource) != mutedByGroup);
++    if (volumeDb != getCurVolume(volumeSource) || mutedChanged  || force) {
++        ALOGV("%s for volumeSrc %d, volume %f, mutedByGroup %d,  delay %d", __func__, volumeSource,
++              volumeDb, mutedByGroup, delayMs);
++        setCurVolume(volumeSource, volumeDb, mutedByGroup, isVoiceVolSrc);
+         return true;
+     }
+     return false;
+@@ -497,7 +501,7 @@ void SwAudioOutputDescriptor::toAudioPort(struct audio_port_v7 *port) const
+ }
+ 
+ void SwAudioOutputDescriptor::setSwMute(
+-        bool muted, VolumeSource vs, const StreamTypeVector &streamTypes,
++        bool mutedByGroup, VolumeSource vs, const StreamTypeVector &streamTypes,
+         const DeviceTypeSet& deviceTypes, uint32_t delayMs) {
+     // volume source active and more than one volume source is active, otherwise, no-op or let
+     // setVolume controlling SW and/or HW Gains
+@@ -506,11 +510,11 @@ void SwAudioOutputDescriptor::setSwMute(
+             for (const auto& devicePort : devices()) {
+                 if (isSingleDeviceType(deviceTypes, devicePort->type()) &&
+                     devicePort->hasGainController(true /*canUseForVolume*/)) {
+-                    float volumeAmpl = muted ? 0.0f : Volume::DbToAmpl(0);
+                     ALOGV("%s: output: %d, vs: %d, muted: %d, active vs count: %zu", __func__,
+-                          mIoHandle, vs, muted, getActiveVolumeSources().size());
++                          mIoHandle, vs, mutedByGroup, getActiveVolumeSources().size());
+                     for (const auto &stream : streamTypes) {
+-                        mClientInterface->setStreamVolume(stream, volumeAmpl, mIoHandle, delayMs);
++                        mClientInterface->setStreamVolume(stream, Volume::DbToAmpl(0), mutedByGroup,
++                                                          mIoHandle, delayMs);
+                     }
+                     return;
+                 }
+@@ -521,11 +525,12 @@ void SwAudioOutputDescriptor::setSwMute(
+             for (const auto &devicePort: devices()) {
+                 if (isSingleDeviceType(deviceTypes, devicePort->type()) &&
+                     devicePort->hasGainController(true /*canUseForVolume*/)) {
+-                    float volumeAmpl = muted ? 0.0f : Volume::DbToAmpl(0);
++                    float volumeAmpl = Volume::DbToAmpl(0);
+                     ALOGV("%s: output: %d, vs: %d, muted: %d, active vs count: %zu", __func__,
+-                          mIoHandle, vs, muted, getActiveVolumeSources().size());
++                          mIoHandle, vs, mutedByGroup, getActiveVolumeSources().size());
+                     mClientInterface->setPortsVolume(
+-                            getPortsForVolumeSource(vs), volumeAmpl, mIoHandle, delayMs);
++                            getPortsForVolumeSource(vs), Volume::DbToAmpl(0), mutedByGroup,
++                            mIoHandle, delayMs);
+                     return;
+                 }
+             }
+@@ -533,7 +538,7 @@ void SwAudioOutputDescriptor::setSwMute(
+     }
+ }
+ 
+-bool SwAudioOutputDescriptor::setVolume(float volumeDb, bool muted,
++bool SwAudioOutputDescriptor::setVolume(float volumeDb, bool mutedByGroup,
+                                         VolumeSource vs, const StreamTypeVector &streamTypes,
+                                         const DeviceTypeSet& deviceTypes,
+                                         uint32_t delayMs,
+@@ -542,18 +547,22 @@ bool SwAudioOutputDescriptor::setVolume(float volumeDb, bool muted,
+ {
+     StreamTypeVector streams = streamTypes;
+     if (!AudioOutputDescriptor::setVolume(
+-            volumeDb, muted, vs, streamTypes, deviceTypes, delayMs, force, isVoiceVolSrc)) {
++            volumeDb, mutedByGroup, vs, streamTypes, deviceTypes, delayMs, force, isVoiceVolSrc)) {
+         if (hasStream(streamTypes, AUDIO_STREAM_BLUETOOTH_SCO)) {
+             VolumeSource callVolSrc = getVoiceSource();
+-            if (callVolSrc != VOLUME_SOURCE_NONE && volumeDb != getCurVolume(callVolSrc)) {
+-                setCurVolume(callVolSrc, volumeDb, true);
++            const bool mutedChanged =
++                    com_android_media_audio_ring_my_car() && hasVolumeSource(callVolSrc) &&
++                    (isMutedByGroup(callVolSrc) != mutedByGroup);
++            if (callVolSrc != VOLUME_SOURCE_NONE &&
++                (volumeDb != getCurVolume(callVolSrc) || mutedChanged)) {
++                setCurVolume(callVolSrc, volumeDb, mutedByGroup, true);
+                 float volumeAmpl = Volume::DbToAmpl(volumeDb);
+                 if (audioserver_flags::portid_volume_management()) {
+                     mClientInterface->setPortsVolume(getPortsForVolumeSource(callVolSrc),
+-                            volumeAmpl, mIoHandle, delayMs);
++                            volumeAmpl, mutedByGroup, mIoHandle, delayMs);
+                 } else {
+                     mClientInterface->setStreamVolume(AUDIO_STREAM_VOICE_CALL,
+-                            volumeAmpl, mIoHandle, delayMs);
++                            volumeAmpl, mutedByGroup, mIoHandle, delayMs);
+                 }
+             }
+         }
+@@ -580,18 +589,19 @@ bool SwAudioOutputDescriptor::setVolume(float volumeDb, bool muted,
+                 // Allows to mute SW Gain on AudioFlinger only for volume group with explicit
+                 // stream(s)
+                 if (!streamTypes.empty() || (getActiveVolumeSources().size() == 1)) {
+-                    const bool canMute = muted && (volumeDb != 0.0f) && !streamTypes.empty();
+-                    float volumeAmpl = canMute ? 0.0f : Volume::DbToAmpl(0);
++                    const bool canMute = mutedByGroup && !streamTypes.empty();
++                    const float volumeAmpl = Volume::DbToAmpl(0);
+                     for (const auto &stream: streams) {
+-                        mClientInterface->setStreamVolume(stream, volumeAmpl, mIoHandle, delayMs);
++                        mClientInterface->setStreamVolume(stream, volumeAmpl, canMute, mIoHandle,
++                                                          delayMs);
+                     }
+                 }
+             } else {
+-                float volumeAmpl = (muted && volumeDb != 0.0f) ? 0.0f : Volume::DbToAmpl(0);
++                float volumeAmpl = Volume::DbToAmpl(0);
+                 ALOGV("%s: output: %d, vs: %d, active vs count: %zu", __func__,
+                       mIoHandle, vs, getActiveVolumeSources().size());
+                 mClientInterface->setPortsVolume(
+-                        getPortsForVolumeSource(vs), volumeAmpl, mIoHandle, delayMs);
++                        getPortsForVolumeSource(vs), volumeAmpl, mutedByGroup, mIoHandle, delayMs);
+             }
+             AudioGains gains = devicePort->getGains();
+             int gainMinValueInMb = gains[0]->getMinValueInMb();
+@@ -615,26 +625,27 @@ bool SwAudioOutputDescriptor::setVolume(float volumeDb, bool muted,
+         if (audioserver_flags::portid_volume_management()) {
+             if (callVolSrc != VOLUME_SOURCE_NONE) {
+                 mClientInterface->setPortsVolume(getPortsForVolumeSource(callVolSrc), volumeAmpl,
+-                        mIoHandle, delayMs);
++                                                 mutedByGroup, mIoHandle, delayMs);
+             }
+         } else {
+-            mClientInterface->setStreamVolume(AUDIO_STREAM_VOICE_CALL, volumeAmpl, mIoHandle,
+-                    delayMs);
++            mClientInterface->setStreamVolume(AUDIO_STREAM_VOICE_CALL, volumeAmpl, mutedByGroup,
++                                              mIoHandle, delayMs);
+         }
+         if (callVolSrc != VOLUME_SOURCE_NONE) {
+-            setCurVolume(callVolSrc, getCurVolume(vs), true);
++            setCurVolume(callVolSrc, getCurVolume(vs), mutedByGroup, true);
+         }
+     }
+     if (audioserver_flags::portid_volume_management()) {
+-        ALOGV("%s output %d for volumeSource %d, volume %f, delay %d active=%d", __func__,
+-              mIoHandle, vs, volumeDb, delayMs, isActive(vs));
+-        mClientInterface->setPortsVolume(getPortsForVolumeSource(vs), volumeAmpl, mIoHandle,
+-                                         delayMs);
++        ALOGV("%s output %d for volumeSource %d, volume %f, mutedByGroup %d, delay %d active=%d",
++              __func__, mIoHandle, vs, volumeDb, mutedByGroup, delayMs, isActive(vs));
++        mClientInterface->setPortsVolume(getPortsForVolumeSource(vs), volumeAmpl, mutedByGroup,
++                                         mIoHandle, delayMs);
+     } else {
+         for (const auto &stream : streams) {
+-            ALOGV("%s output %d for volumeSource %d, volume %f, delay %d stream=%s", __func__,
+-                  mIoHandle, vs, volumeDb, delayMs, toString(stream).c_str());
+-            mClientInterface->setStreamVolume(stream, volumeAmpl, mIoHandle, delayMs);
++            ALOGV("%s output %d for volumeSource %d, volume %f, mutedByGroup %d delay %d stream=%s",
++                  __func__, mIoHandle, vs, volumeDb, mutedByGroup, delayMs,
++                  toString(stream).c_str());
++            mClientInterface->setStreamVolume(stream, volumeAmpl, mutedByGroup, mIoHandle, delayMs);
+         }
+     }
+     return true;
+diff --git a/services/audiopolicy/engine/common/include/VolumeCurve.h b/services/audiopolicy/engine/common/include/VolumeCurve.h
+index 2e75ff13db..e5f7a41121 100644
+--- a/services/audiopolicy/engine/common/include/VolumeCurve.h
++++ b/services/audiopolicy/engine/common/include/VolumeCurve.h
+@@ -179,6 +179,12 @@ public:
+     }
+     StreamTypeVector getStreamTypes() const override { return mStreams; }
+ 
++    void setIsMuted(bool isMuted)
++    {
++        mIsMuted = isMuted;
++    }
++    bool isMuted() const { return mIsMuted; }
++
+     void dump(String8 *dst, int spaces = 0, bool curvePoints = false) const override;
+ 
+ private:
+@@ -187,6 +193,7 @@ private:
+     int mIndexMin; /**< min volume index. */
+     int mIndexMax; /**< max volume index. */
+     const bool mCanBeMuted = true; /**< true is the stream can be muted. */
++    bool mIsMuted = false; /**< true if the stream is currently muted. */
+ 
+     AttributesVector mAttributes;
+     StreamTypeVector mStreams; /**< Keep it for legacy. */
+diff --git a/services/audiopolicy/engineconfigurable/parameter-framework/plugin/Android.bp b/services/audiopolicy/engineconfigurable/parameter-framework/plugin/Android.bp
+index c9a77a4380..27a290f7cb 100644
+--- a/services/audiopolicy/engineconfigurable/parameter-framework/plugin/Android.bp
++++ b/services/audiopolicy/engineconfigurable/parameter-framework/plugin/Android.bp
+@@ -45,4 +45,7 @@ cc_library_shared {
+         "libparameter",
+         "libutils",
+     ],
++    defaults: [
++        "aconfig_lib_cc_shared_link.defaults",
++    ],
+ }
+diff --git a/services/audiopolicy/fuzzer/audiopolicy_fuzzer.cpp b/services/audiopolicy/fuzzer/audiopolicy_fuzzer.cpp
+index fd40c0405e..a5f37b00f4 100644
+--- a/services/audiopolicy/fuzzer/audiopolicy_fuzzer.cpp
++++ b/services/audiopolicy/fuzzer/audiopolicy_fuzzer.cpp
+@@ -266,6 +266,7 @@ bool AudioPolicyManagerFuzzer::getOutputForAttr(
+     bool isSpatialized;
+     bool isBitPerfect;
+     float volume;
++    bool muted;
+ 
+     // TODO b/182392769: use attribution source util
+     AttributionSourceState attributionSource;
+@@ -273,7 +274,7 @@ bool AudioPolicyManagerFuzzer::getOutputForAttr(
+     attributionSource.token = sp<BBinder>::make();
+     if (mManager->getOutputForAttr(&attr, output, AUDIO_SESSION_NONE, &stream, attributionSource,
+             &config, &flags, selectedDeviceId, portId, {}, &outputType, &isSpatialized,
+-            &isBitPerfect, &volume) != OK) {
++            &isBitPerfect, &volume, &muted) != OK) {
+         return false;
+     }
+     if (*output == AUDIO_IO_HANDLE_NONE || *portId == AUDIO_PORT_HANDLE_NONE) {
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index c1c4a28f4f..3633732d9d 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -1512,7 +1512,8 @@ status_t AudioPolicyManager::getOutputForAttr(const audio_attributes_t *attr,
+                                               output_type_t *outputType,
+                                               bool *isSpatialized,
+                                               bool *isBitPerfect,
+-                                              float *volume)
++                                              float *volume,
++                                              bool *muted)
+ {
+     // The supplied portId must be AUDIO_PORT_HANDLE_NONE
+     if (*portId != AUDIO_PORT_HANDLE_NONE) {
+@@ -1569,6 +1570,7 @@ status_t AudioPolicyManager::getOutputForAttr(const audio_attributes_t *attr,
+     outputDesc->addClient(clientDesc);
+ 
+     *volume = Volume::DbToAmpl(outputDesc->getCurVolume(toVolumeSource(resultAttr)));
++    *muted = outputDesc->isMutedByGroup(toVolumeSource(resultAttr));
+ 
+     ALOGV("%s() returns output %d requestedPortId %d selectedDeviceId %d for port ID %d", __func__,
+           *output, requestedPortId, *selectedDeviceId, *portId);
+@@ -2617,8 +2619,7 @@ status_t AudioPolicyManager::startSource(const sp<SwAudioOutputDescriptor>& outp
+         auto &curves = getVolumeCurves(client->attributes());
+         if (NO_ERROR != checkAndSetVolume(curves, client->volumeSource(),
+                           curves.getVolumeIndex(outputDesc->devices().types()),
+-                          outputDesc,
+-                          outputDesc->devices().types(), 0 /*delay*/,
++                          outputDesc, outputDesc->devices().types(), 0 /*delay*/,
+                           outputDesc->useHwGain() /*force*/)) {
+             // request AudioService to reinitialize the volume curves asynchronously
+             ALOGE("checkAndSetVolume failed, requesting volume range init");
+@@ -3591,6 +3592,7 @@ void AudioPolicyManager::initStreamVolume(audio_stream_type_t stream, int indexM
+ 
+ status_t AudioPolicyManager::setStreamVolumeIndex(audio_stream_type_t stream,
+                                                   int index,
++                                                  bool muted,
+                                                   audio_devices_t device)
+ {
+     auto attributes = mEngine->getAttributesForStreamType(stream);
+@@ -3600,7 +3602,7 @@ status_t AudioPolicyManager::setStreamVolumeIndex(audio_stream_type_t stream,
+     }
+     ALOGV("%s: stream %s attributes=%s, index %d , device 0x%X", __func__,
+           toString(stream).c_str(), toString(attributes).c_str(), index, device);
+-    return setVolumeIndexForAttributes(attributes, index, device);
++    return setVolumeIndexForAttributes(attributes, index, muted, device);
+ }
+ 
+ status_t AudioPolicyManager::getStreamVolumeIndex(audio_stream_type_t stream,
+@@ -3619,6 +3621,7 @@ status_t AudioPolicyManager::getStreamVolumeIndex(audio_stream_type_t stream,
+ 
+ status_t AudioPolicyManager::setVolumeIndexForAttributes(const audio_attributes_t &attributes,
+                                                          int index,
++                                                         bool muted,
+                                                          audio_devices_t device)
+ {
+     // Get Volume group matching the Audio Attributes
+@@ -3638,7 +3641,8 @@ status_t AudioPolicyManager::setVolumeIndexForAttributes(const audio_attributes_
+             toVolumeSource(AUDIO_STREAM_VOICE_CALL, false) : vs;
+     product_strategy_t strategy = mEngine->getProductStrategyForAttributes(attributes);
+ 
+-    status = setVolumeCurveIndex(index, device, curves);
++
++    status = setVolumeCurveIndex(index, muted, device, curves);
+     if (status != NO_ERROR) {
+         ALOGE("%s failed to set curve index for group %d device 0x%X", __func__, group, device);
+         return status;
+@@ -3700,8 +3704,9 @@ status_t AudioPolicyManager::setVolumeIndexForAttributes(const audio_attributes_
+         // HW Gain management, do not change the volume
+         if (desc->useHwGain()) {
+             applyVolume = false;
++            bool swMute = com_android_media_audio_ring_my_car() ? curves.isMuted() : (index == 0);
+             // If the volume source is active with higher priority source, ensure at least Sw Muted
+-            desc->setSwMute((index == 0), vs, curves.getStreamTypes(), curDevices, 0 /*delayMs*/);
++            desc->setSwMute(swMute, vs, curves.getStreamTypes(), curDevices, 0 /*delayMs*/);
+             for (const auto &productStrategy : mEngine->getOrderedProductStrategies()) {
+                 auto activeClients = desc->clientsList(true /*activeOnly*/, productStrategy,
+                                                        false /*preferredDevice*/);
+@@ -3739,8 +3744,7 @@ status_t AudioPolicyManager::setVolumeIndexForAttributes(const audio_attributes_
+         //FIXME: workaround for truncated touch sounds
+         // delayed volume change for system stream to be removed when the problem is
+         // handled by system UI
+-        status_t volStatus = checkAndSetVolume(
+-                    curves, vs, index, desc, curDevices,
++        status_t volStatus = checkAndSetVolume(curves, vs, index, desc, curDevices,
+                     ((vs == toVolumeSource(AUDIO_STREAM_SYSTEM, false))?
+                          TOUCH_SOUND_FIXED_DELAY_MS : 0));
+         if (volStatus != NO_ERROR) {
+@@ -3769,6 +3773,7 @@ status_t AudioPolicyManager::setVolumeIndexForAttributes(const audio_attributes_
+ }
+ 
+ status_t AudioPolicyManager::setVolumeCurveIndex(int index,
++                                                 bool muted,
+                                                  audio_devices_t device,
+                                                  IVolumeCurves &volumeCurves)
+ {
+@@ -3788,8 +3793,9 @@ status_t AudioPolicyManager::setVolumeCurveIndex(int index,
+     // Force max volume if stream cannot be muted
+     if (!volumeCurves.canBeMuted()) index = volumeCurves.getVolumeIndexMax();
+ 
+-    ALOGV("%s device %08x, index %d", __FUNCTION__ , device, index);
++    ALOGV("%s device %08x, index %d, muted %d", __FUNCTION__ , device, index, muted);
+     volumeCurves.addCurrentVolumeIndex(device, index);
++    volumeCurves.setIsMuted(muted);
+     return NO_ERROR;
+ }
+ 
+@@ -7898,7 +7904,8 @@ uint32_t AudioPolicyManager::setBeaconMute(bool mute) {
+         }
+         for (size_t i = 0; i < mOutputs.size(); i++) {
+             sp<SwAudioOutputDescriptor> desc = mOutputs.valueAt(i);
+-            setVolumeSourceMute(ttsVolumeSource, mute/*on*/, desc, 0 /*delay*/, DeviceTypeSet());
++            setVolumeSourceMutedInternally(ttsVolumeSource, mute/*on*/, desc, 0 /*delay*/,
++                                           DeviceTypeSet());
+             const uint32_t latency = desc->latency() * 2;
+             if (desc->isActive(latency * 2) && latency > maxLatency) {
+                 maxLatency = latency;
+@@ -7992,9 +7999,10 @@ uint32_t AudioPolicyManager::checkDeviceMuteStrategies(const sp<AudioOutputDescr
+         for (const auto &activeVs : outputDesc->getActiveVolumeSources()) {
+             // make sure that we do not start the temporary mute period too early in case of
+             // delayed device change
+-            setVolumeSourceMute(activeVs, true, outputDesc, delayMs);
+-            setVolumeSourceMute(activeVs, false, outputDesc, delayMs + tempMuteDurationMs,
+-                                devices.types());
++            setVolumeSourceMutedInternally(activeVs, true, outputDesc, delayMs);
++            setVolumeSourceMutedInternally(activeVs, false, outputDesc,
++                                           delayMs + tempMuteDurationMs,
++                                           devices.types());
+         }
+     }
+ 
+@@ -8507,7 +8515,7 @@ status_t AudioPolicyManager::checkAndSetVolume(IVolumeCurves &curves,
+     static std::set<IVolumeCurves*> invalidCurvesReported;
+ 
+     // do not change actual attributes volume if the attributes is muted
+-    if (outputDesc->isMuted(volumeSource)) {
++    if (!com_android_media_audio_ring_my_car() && outputDesc->isMutedInternally(volumeSource)) {
+         ALOGVV("%s: volume source %d muted count %d active=%d", __func__, volumeSource,
+                outputDesc->getMuteCount(volumeSource), outputDesc->isActive(volumeSource));
+         return NO_ERROR;
+@@ -8549,7 +8557,13 @@ status_t AudioPolicyManager::checkAndSetVolume(IVolumeCurves &curves,
+                     || isSingleDeviceType(deviceTypes, audio_is_ble_out_device)))) {
+         volumeDb = 0.0f;
+     }
+-    const bool muted = (index == 0) && (volumeDb != 0.0f);
++
++    bool muted;
++    if (!com_android_media_audio_ring_my_car()) {
++        muted = (index == 0) && (volumeDb != 0.0f);
++    } else {
++        muted = curves.isMuted();
++    }
+     outputDesc->setVolume(volumeDb, muted, volumeSource, curves.getStreamTypes(),
+             deviceTypes, delayMs, force, isVoiceVolSrc);
+ 
+@@ -8564,6 +8578,11 @@ status_t AudioPolicyManager::checkAndSetVolume(IVolumeCurves &curves,
+ void AudioPolicyManager::setVoiceVolume(
+         int index, IVolumeCurves &curves, bool voiceVolumeManagedByHost, int delayMs) {
+     float voiceVolume;
++
++    if (com_android_media_audio_ring_my_car() && curves.isMuted()) {
++        index = 0;
++    }
++
+     // Force voice volume to max or mute for Bluetooth SCO/BLE as other attenuations are managed
+     // by the headset
+     if (voiceVolumeManagedByHost) {
+@@ -8617,8 +8636,7 @@ void AudioPolicyManager::applyStreamVolumes(const sp<AudioOutputDescriptor>& out
+     ALOGVV("applyStreamVolumes() for device %s", dumpDeviceTypes(deviceTypes).c_str());
+     for (const auto &volumeGroup : mEngine->getVolumeGroups()) {
+         auto &curves = getVolumeCurves(toVolumeSource(volumeGroup));
+-        checkAndSetVolume(curves, toVolumeSource(volumeGroup),
+-                          curves.getVolumeIndex(deviceTypes),
++        checkAndSetVolume(curves, toVolumeSource(volumeGroup), curves.getVolumeIndex(deviceTypes),
+                           outputDesc, deviceTypes, delayMs, force);
+     }
+ }
+@@ -8641,23 +8659,23 @@ void AudioPolicyManager::setStrategyMute(product_strategy_t strategy,
+         }
+     }
+     for (auto source : sourcesToMute) {
+-        setVolumeSourceMute(source, on, outputDesc, delayMs, deviceTypes);
++        setVolumeSourceMutedInternally(source, on, outputDesc, delayMs, deviceTypes);
+     }
+ 
+ }
+ 
+-void AudioPolicyManager::setVolumeSourceMute(VolumeSource volumeSource,
+-                                             bool on,
+-                                             const sp<AudioOutputDescriptor>& outputDesc,
+-                                             int delayMs,
+-                                             DeviceTypeSet deviceTypes)
++void AudioPolicyManager::setVolumeSourceMutedInternally(VolumeSource volumeSource,
++                                                        bool on,
++                                                        const sp<AudioOutputDescriptor>& outputDesc,
++                                                        int delayMs,
++                                                        DeviceTypeSet deviceTypes)
+ {
+     if (deviceTypes.empty()) {
+         deviceTypes = outputDesc->devices().types();
+     }
+     auto &curves = getVolumeCurves(volumeSource);
+     if (on) {
+-        if (!outputDesc->isMuted(volumeSource)) {
++        if (!outputDesc->isMutedInternally(volumeSource)) {
+             if (curves.canBeMuted() &&
+                     (volumeSource != toVolumeSource(AUDIO_STREAM_ENFORCED_AUDIBLE, false) ||
+                      (mEngine->getForceUse(AUDIO_POLICY_FORCE_FOR_SYSTEM) ==
+@@ -8669,7 +8687,7 @@ void AudioPolicyManager::setVolumeSourceMute(VolumeSource volumeSource,
+         // ignored
+         outputDesc->incMuteCount(volumeSource);
+     } else {
+-        if (!outputDesc->isMuted(volumeSource)) {
++        if (!outputDesc->isMutedInternally(volumeSource)) {
+             ALOGV("%s unmuting non muted attributes!", __func__);
+             return;
+         }
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.h b/services/audiopolicy/managerdefault/AudioPolicyManager.h
+index 9ad2ea50bb..20f7b129f9 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.h
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.h
+@@ -129,7 +129,8 @@ public:
+                                   output_type_t *outputType,
+                                   bool *isSpatialized,
+                                   bool *isBitPerfect,
+-                                  float *volume) override;
++                                  float *volume,
++                                  bool *muted) override;
+         virtual status_t startOutput(audio_port_handle_t portId);
+         virtual status_t stopOutput(audio_port_handle_t portId);
+         virtual bool releaseOutput(audio_port_handle_t portId);
+@@ -169,6 +170,7 @@ public:
+         virtual void initStreamVolume(audio_stream_type_t stream, int indexMin, int indexMax);
+         virtual status_t setStreamVolumeIndex(audio_stream_type_t stream,
+                                               int index,
++                                              bool muted,
+                                               audio_devices_t device);
+         virtual status_t getStreamVolumeIndex(audio_stream_type_t stream,
+                                               int *index,
+@@ -176,6 +178,7 @@ public:
+ 
+         virtual status_t setVolumeIndexForAttributes(const audio_attributes_t &attr,
+                                                      int index,
++                                                     bool muted,
+                                                      audio_devices_t device);
+         virtual status_t getVolumeIndexForAttributes(const audio_attributes_t &attr,
+                                                      int &index,
+@@ -185,6 +188,7 @@ public:
+         virtual status_t getMinVolumeIndexForAttributes(const audio_attributes_t &attr, int &index);
+ 
+         status_t setVolumeCurveIndex(int index,
++                                     bool muted,
+                                      audio_devices_t device,
+                                      IVolumeCurves &volumeCurves);
+ 
+@@ -650,7 +654,8 @@ protected:
+                              DeviceTypeSet deviceTypes = DeviceTypeSet());
+ 
+         /**
+-         * @brief setVolumeSourceMute Mute or unmute the volume source on the specified output
++         * @brief setVolumeSourceMutedInternally Mute or unmute the volume source on the specified
++         * output
+          * @param volumeSource to be muted/unmute (may host legacy streams or by extension set of
+          * audio attributes)
+          * @param on true to mute, false to umute
+@@ -658,11 +663,11 @@ protected:
+          * @param delayMs
+          * @param device
+          */
+-        void setVolumeSourceMute(VolumeSource volumeSource,
+-                                 bool on,
+-                                 const sp<AudioOutputDescriptor>& outputDesc,
+-                                 int delayMs = 0,
+-                                 DeviceTypeSet deviceTypes = DeviceTypeSet());
++        void setVolumeSourceMutedInternally(VolumeSource volumeSource,
++                                            bool on,
++                                            const sp<AudioOutputDescriptor>& outputDesc,
++                                            int delayMs = 0,
++                                            DeviceTypeSet deviceTypes = DeviceTypeSet());
+ 
+         audio_mode_t getPhoneState();
+ 
+diff --git a/services/audiopolicy/service/AudioPolicyClientImpl.cpp b/services/audiopolicy/service/AudioPolicyClientImpl.cpp
+index 363dfa7ef0..3ed247bb72 100644
+--- a/services/audiopolicy/service/AudioPolicyClientImpl.cpp
++++ b/services/audiopolicy/service/AudioPolicyClientImpl.cpp
+@@ -186,21 +186,19 @@ status_t AudioPolicyService::AudioPolicyClient::closeInput(audio_io_handle_t inp
+ }
+ 
+ status_t AudioPolicyService::AudioPolicyClient::setStreamVolume(audio_stream_type_t stream,
+-                     float volume, audio_io_handle_t output,
+-                     int delay_ms)
++                     float volume, bool muted, audio_io_handle_t output, int delay_ms)
+ {
+-    return mAudioPolicyService->setStreamVolume(stream, volume, output,
+-                                               delay_ms);
++    return mAudioPolicyService->setStreamVolume(stream, volume, muted, output, delay_ms);
+ }
+ 
+ status_t AudioPolicyService::AudioPolicyClient::setPortsVolume(
+-        const std::vector<audio_port_handle_t> &ports, float volume, audio_io_handle_t output,
+-        int delayMs)
++        const std::vector<audio_port_handle_t> &ports, float volume, bool muted,
++        audio_io_handle_t output, int delayMs)
+ {
+     if (ports.empty()) {
+         return NO_ERROR;
+     }
+-    return mAudioPolicyService->setPortsVolume(ports, volume, output, delayMs);
++    return mAudioPolicyService->setPortsVolume(ports, volume, muted, output, delayMs);
+ }
+ 
+ void AudioPolicyService::AudioPolicyClient::setParameters(audio_io_handle_t io_handle,
+diff --git a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+index 24ab6a1c6e..84b6c537e0 100644
+--- a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
++++ b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+@@ -430,6 +430,7 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
+     bool isSpatialized = false;
+     bool isBitPerfect = false;
+     float volume;
++    bool muted;
+     status_t result = mAudioPolicyManager->getOutputForAttr(&attr, &output, session,
+                                                             &stream,
+                                                             attributionSource,
+@@ -439,7 +440,8 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
+                                                             &outputType,
+                                                             &isSpatialized,
+                                                             &isBitPerfect,
+-                                                            &volume);
++                                                            &volume,
++                                                            &muted);
+ 
+     // FIXME: Introduce a way to check for the the telephony device before opening the output
+     if (result == NO_ERROR) {
+@@ -504,6 +506,7 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
+         _aidl_return->attr = VALUE_OR_RETURN_BINDER_STATUS(
+                 legacy2aidl_audio_attributes_t_AudioAttributes(attr));
+         _aidl_return->volume = volume;
++        _aidl_return->muted = muted;
+     } else {
+         _aidl_return->configBase.format = VALUE_OR_RETURN_BINDER_STATUS(
+                 legacy2aidl_audio_format_t_AudioFormatDescription(config.format));
+@@ -1170,7 +1173,7 @@ Status AudioPolicyService::initStreamVolume(AudioStreamType streamAidl,
+ 
+ Status AudioPolicyService::setStreamVolumeIndex(AudioStreamType streamAidl,
+                                                 const AudioDeviceDescription& deviceAidl,
+-                                                int32_t indexAidl) {
++                                                int32_t indexAidl, bool muted) {
+     audio_stream_type_t stream = VALUE_OR_RETURN_BINDER_STATUS(
+             aidl2legacy_AudioStreamType_audio_stream_type_t(streamAidl));
+     int index = VALUE_OR_RETURN_BINDER_STATUS(convertIntegral<int>(indexAidl));
+@@ -1192,6 +1195,7 @@ Status AudioPolicyService::setStreamVolumeIndex(AudioStreamType streamAidl,
+     AutoCallerClear acc;
+     return binderStatusFromStatusT(mAudioPolicyManager->setStreamVolumeIndex(stream,
+                                                                              index,
++                                                                             muted,
+                                                                              device));
+ }
+ 
+@@ -1220,7 +1224,7 @@ Status AudioPolicyService::getStreamVolumeIndex(AudioStreamType streamAidl,
+ 
+ Status AudioPolicyService::setVolumeIndexForAttributes(
+         const media::audio::common::AudioAttributes& attrAidl,
+-        const AudioDeviceDescription& deviceAidl, int32_t indexAidl) {
++        const AudioDeviceDescription& deviceAidl, int32_t indexAidl, bool muted) {
+     audio_attributes_t attributes = VALUE_OR_RETURN_BINDER_STATUS(
+             aidl2legacy_AudioAttributes_audio_attributes_t(attrAidl));
+     int index = VALUE_OR_RETURN_BINDER_STATUS(convertIntegral<int>(indexAidl));
+@@ -1240,7 +1244,7 @@ Status AudioPolicyService::setVolumeIndexForAttributes(
+     audio_utils::lock_guard _l(mMutex);
+     AutoCallerClear acc;
+     return binderStatusFromStatusT(
+-            mAudioPolicyManager->setVolumeIndexForAttributes(attributes, index, device));
++            mAudioPolicyManager->setVolumeIndexForAttributes(attributes, index, muted, device));
+ }
+ 
+ Status AudioPolicyService::getVolumeIndexForAttributes(
+diff --git a/services/audiopolicy/service/AudioPolicyService.cpp b/services/audiopolicy/service/AudioPolicyService.cpp
+index 7b7275ea99..697924d6b2 100644
+--- a/services/audiopolicy/service/AudioPolicyService.cpp
++++ b/services/audiopolicy/service/AudioPolicyService.cpp
+@@ -1817,6 +1817,7 @@ bool AudioPolicyService::AudioCommandThread::threadLoop()
+                     ul.unlock();
+                     command->mStatus = AudioSystem::setStreamVolume(data->mStream,
+                                                                     data->mVolume,
++                                                                    data->mIsMuted,
+                                                                     data->mIO);
+                     ul.lock();
+                     }break;
+@@ -1827,6 +1828,7 @@ bool AudioPolicyService::AudioCommandThread::threadLoop()
+                     ul.unlock();
+                     command->mStatus = AudioSystem::setPortsVolume(data->mPorts,
+                                                                    data->mVolume,
++                                                                   data->mMuted,
+                                                                    data->mIO);
+                     ul.lock();
+                     } break;
+@@ -2147,6 +2149,7 @@ NO_THREAD_SAFETY_ANALYSIS  // trylock
+ 
+ status_t AudioPolicyService::AudioCommandThread::volumeCommand(audio_stream_type_t stream,
+                                                                float volume,
++                                                               bool muted,
+                                                                audio_io_handle_t output,
+                                                                int delayMs)
+ {
+@@ -2155,6 +2158,7 @@ status_t AudioPolicyService::AudioCommandThread::volumeCommand(audio_stream_type
+     sp<VolumeData> data = new VolumeData();
+     data->mStream = stream;
+     data->mVolume = volume;
++    data->mIsMuted = muted;
+     data->mIO = output;
+     command->mParam = data;
+     command->mWaitStatus = true;
+@@ -2164,14 +2168,15 @@ status_t AudioPolicyService::AudioCommandThread::volumeCommand(audio_stream_type
+ }
+ 
+ status_t AudioPolicyService::AudioCommandThread::volumePortsCommand(
+-        const std::vector<audio_port_handle_t> &ports, float volume, audio_io_handle_t output,
+-        int delayMs)
++        const std::vector<audio_port_handle_t> &ports, float volume, bool muted,
++        audio_io_handle_t output, int delayMs)
+ {
+     sp<AudioCommand> command = new AudioCommand();
+     command->mCommand = SET_PORTS_VOLUME;
+     sp<VolumePortsData> data = new VolumePortsData();
+     data->mPorts = ports;
+     data->mVolume = volume;
++    data->mMuted = muted;
+     data->mIO = output;
+     command->mParam = data;
+     command->mWaitStatus = true;
+@@ -2675,17 +2680,18 @@ void AudioPolicyService::setParameters(audio_io_handle_t ioHandle,
+ 
+ int AudioPolicyService::setStreamVolume(audio_stream_type_t stream,
+                                         float volume,
++                                        bool muted,
+                                         audio_io_handle_t output,
+                                         int delayMs)
+ {
+-    return (int)mAudioCommandThread->volumeCommand(stream, volume,
++    return (int)mAudioCommandThread->volumeCommand(stream, volume, muted,
+                                                    output, delayMs);
+ }
+ 
+ int AudioPolicyService::setPortsVolume(const std::vector<audio_port_handle_t> &ports, float volume,
+-                                       audio_io_handle_t output, int delayMs)
++                                       bool muted, audio_io_handle_t output, int delayMs)
+ {
+-    return (int)mAudioCommandThread->volumePortsCommand(ports, volume, output, delayMs);
++    return (int)mAudioCommandThread->volumePortsCommand(ports, volume, muted, output, delayMs);
+ }
+ 
+ int AudioPolicyService::setVoiceVolume(float volume, int delayMs)
+diff --git a/services/audiopolicy/service/AudioPolicyService.h b/services/audiopolicy/service/AudioPolicyService.h
+index c47b5e92d9..2ce82c09ab 100644
+--- a/services/audiopolicy/service/AudioPolicyService.h
++++ b/services/audiopolicy/service/AudioPolicyService.h
+@@ -136,13 +136,13 @@ public:
+                                     int32_t indexMax) override;
+     binder::Status setStreamVolumeIndex(AudioStreamType stream,
+                                         const AudioDeviceDescription& device,
+-                                        int32_t index) override;
++                                        int32_t index, bool muted) override;
+     binder::Status getStreamVolumeIndex(AudioStreamType stream,
+                                         const AudioDeviceDescription& device,
+                                         int32_t* _aidl_return) override;
+     binder::Status setVolumeIndexForAttributes(const media::audio::common::AudioAttributes& attr,
+                                                const AudioDeviceDescription& device,
+-                                               int32_t index) override;
++                                               int32_t index, bool muted) override;
+     binder::Status getVolumeIndexForAttributes(const media::audio::common::AudioAttributes& attr,
+                                                const AudioDeviceDescription& device,
+                                                int32_t* _aidl_return) override;
+@@ -353,6 +353,7 @@ public:
+ 
+     virtual status_t setStreamVolume(audio_stream_type_t stream,
+                                      float volume,
++                                     bool muted,
+                                      audio_io_handle_t output,
+                                      int delayMs = 0);
+ 
+@@ -364,12 +365,13 @@ public:
+      *
+      * @param ports to consider
+      * @param volume to set
++     * @param muted to set
+      * @param output to consider
+      * @param delayMs to use
+      * @return NO_ERROR if successful
+      */
+     virtual status_t setPortsVolume(const std::vector<audio_port_handle_t> &ports, float volume,
+-            audio_io_handle_t output, int delayMs = 0);
++            bool muted, audio_io_handle_t output, int delayMs = 0);
+     virtual status_t setVoiceVolume(float volume, int delayMs = 0);
+ 
+     void doOnNewAudioModulesAvailable();
+@@ -625,10 +627,10 @@ private:
+         virtual     bool        threadLoop();
+ 
+                     void        exit();
+-                    status_t    volumeCommand(audio_stream_type_t stream, float volume,
++                    status_t    volumeCommand(audio_stream_type_t stream, float volume, bool muted,
+                                             audio_io_handle_t output, int delayMs = 0);
+                     status_t    volumePortsCommand(const std::vector<audio_port_handle_t> &ports,
+-                            float volume, audio_io_handle_t output, int delayMs = 0);
++                            float volume, bool muted, audio_io_handle_t output, int delayMs = 0);
+                     status_t    parametersCommand(audio_io_handle_t ioHandle,
+                                             const char *keyValuePairs, int delayMs = 0);
+                     status_t    voiceVolumeCommand(float volume, int delayMs = 0);
+@@ -700,6 +702,7 @@ private:
+         public:
+             audio_stream_type_t mStream;
+             float mVolume;
++            bool mIsMuted;
+             audio_io_handle_t mIO;
+         };
+ 
+@@ -707,13 +710,15 @@ private:
+         public:
+             std::vector<audio_port_handle_t> mPorts;
+             float mVolume;
++            bool mMuted;
+             audio_io_handle_t mIO;
+             std::string dumpPorts() {
+-                return std::string("volume ") + std::to_string(mVolume) + " on IO " +
+-                        std::to_string(mIO) + " and ports " +
+-                        std::accumulate(std::begin(mPorts), std::end(mPorts), std::string{},
+-                                       [] (const std::string& ls, int rs) {
+-                                return ls + std::to_string(rs) + " "; });
++                return std::string("volume ") + std::to_string(mVolume) + std::string("muted ") +
++                       std::to_string(mMuted) + " on IO " + std::to_string(mIO) + " and ports " +
++                       std::accumulate(std::begin(mPorts), std::end(mPorts), std::string{},
++                                       [](const std::string &ls, int rs) {
++                                           return ls + std::to_string(rs) + " ";
++                                       });
+             }
+         };
+ 
+@@ -854,9 +859,10 @@ private:
+         // misc control functions
+         //
+ 
+-        // set a stream volume for a particular output. For the same user setting, a given stream type can have different volumes
+-        // for each output (destination device) it is attached to.
+-        virtual status_t setStreamVolume(audio_stream_type_t stream, float volume, audio_io_handle_t output, int delayMs = 0);
++        // set a stream volume for a particular output. For the same user setting, a given stream
++        // type can have different volumes for each output (destination device) it is attached to.
++        virtual status_t setStreamVolume(audio_stream_type_t stream, float volume, bool muted,
++                audio_io_handle_t output, int delayMs = 0);
+         /**
+          * Set a volume on port(s) for a particular output. For the same user setting, a volume
+          * group (and associated given port of the client's track) can have different volumes for
+@@ -864,12 +870,13 @@ private:
+          *
+          * @param ports to consider
+          * @param volume to set
++         * @param muted to set
+          * @param output to consider
+          * @param delayMs to use
+          * @return NO_ERROR if successful
+          */
+         status_t setPortsVolume(const std::vector<audio_port_handle_t> &ports, float volume,
+-                audio_io_handle_t output, int delayMs = 0) override;
++                bool muted, audio_io_handle_t output, int delayMs = 0) override;
+ 
+         // function enabling to send proprietary informations directly from audio policy manager to audio hardware interface.
+         virtual void setParameters(audio_io_handle_t ioHandle, const String8& keyValuePairs, int delayMs = 0);
+diff --git a/services/audiopolicy/tests/Android.bp b/services/audiopolicy/tests/Android.bp
+index 154b063cf5..182dc618c9 100644
+--- a/services/audiopolicy/tests/Android.bp
++++ b/services/audiopolicy/tests/Android.bp
+@@ -29,7 +29,6 @@ cc_test {
+         "libbase",
+         "libbinder",
+         "libcutils",
+-        "libcutils",
+         "libhidlbase",
+         "liblog",
+         "libmedia_helper",
+@@ -41,6 +40,7 @@ cc_test {
+     static_libs: [
+         "android.media.audiopolicy-aconfig-cc",
+         "audioclient-types-aidl-cpp",
++        "com.android.media.audio-aconfig-cc",
+         "com.android.media.audioserver-aconfig-cc",
+         "libaudiopolicycomponents",
+         "libflagtest",
+diff --git a/services/audiopolicy/tests/AudioPolicyTestClient.h b/services/audiopolicy/tests/AudioPolicyTestClient.h
+index 9ddfd6c7a5..5290da2752 100644
+--- a/services/audiopolicy/tests/AudioPolicyTestClient.h
++++ b/services/audiopolicy/tests/AudioPolicyTestClient.h
+@@ -56,11 +56,13 @@ public:
+     status_t closeInput(audio_io_handle_t /*input*/) override { return NO_INIT; }
+     status_t setStreamVolume(audio_stream_type_t /*stream*/,
+                              float /*volume*/,
++                             bool /*muted*/,
+                              audio_io_handle_t /*output*/,
+                              int /*delayMs*/) override { return NO_INIT; }
+ 
+-    status_t setPortsVolume(const std::vector<audio_port_handle_t>& /*ports*/, float /*volume*/,
+-            audio_io_handle_t /*output*/, int /*delayMs*/) override { return NO_INIT; }
++    status_t setPortsVolume(const std::vector<audio_port_handle_t> & /*ports*/, float /*volume*/,
++                            bool /*muted*/, audio_io_handle_t /*output*/,
++                            int /*delayMs*/) override { return NO_INIT; }
+ 
+     void setParameters(audio_io_handle_t /*ioHandle*/,
+                        const String8& /*keyValuePairs*/,
+diff --git a/services/audiopolicy/tests/audiopolicymanager_tests.cpp b/services/audiopolicy/tests/audiopolicymanager_tests.cpp
+index 39f9b8ad6a..d83a2775ee 100644
+--- a/services/audiopolicy/tests/audiopolicymanager_tests.cpp
++++ b/services/audiopolicy/tests/audiopolicymanager_tests.cpp
+@@ -310,11 +310,13 @@ void AudioPolicyManagerTest::getOutputForAttr(
+     bool isSpatialized;
+     bool isBitPerfectInternal;
+     float volume;
++    bool muted;
+     AttributionSourceState attributionSource = createAttributionSourceState(uid);
+     ASSERT_EQ(OK, mManager->getOutputForAttr(
+                     &attr, output, session, &stream, attributionSource, &config, &flags,
+                     selectedDeviceId, portId, {}, &outputType, &isSpatialized,
+-                    isBitPerfect == nullptr ? &isBitPerfectInternal : isBitPerfect, &volume));
++                    isBitPerfect == nullptr ? &isBitPerfectInternal : isBitPerfect, &volume,
++                    &muted));
+     ASSERT_NE(AUDIO_PORT_HANDLE_NONE, *portId);
+     ASSERT_NE(AUDIO_IO_HANDLE_NONE, *output);
+ }
+@@ -2107,6 +2109,7 @@ class AudioPolicyManagerTestMMapPlaybackRerouting
+     bool mIsSpatialized;
+     bool mIsBitPerfect;
+     float mVolume;
++    bool mMuted;
+ };
+ 
+ TEST_P(AudioPolicyManagerTestMMapPlaybackRerouting, MmapPlaybackStreamMatchingLoopbackDapMixFails) {
+@@ -2125,7 +2128,8 @@ TEST_P(AudioPolicyManagerTestMMapPlaybackRerouting, MmapPlaybackStreamMatchingLo
+               mManager->getOutputForAttr(&attr, &mOutput, AUDIO_SESSION_NONE, &mStream,
+                                          createAttributionSourceState(testUid), &audioConfig,
+                                          &outputFlags, &mSelectedDeviceId, &mPortId, {},
+-                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume));
++                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume,
++                                         &mMuted));
+ }
+ 
+ TEST_P(AudioPolicyManagerTestMMapPlaybackRerouting,
+@@ -2144,7 +2148,8 @@ TEST_P(AudioPolicyManagerTestMMapPlaybackRerouting,
+               mManager->getOutputForAttr(&attr, &mOutput, AUDIO_SESSION_NONE, &mStream,
+                                          createAttributionSourceState(testUid), &audioConfig,
+                                          &outputFlags, &mSelectedDeviceId, &mPortId, {},
+-                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume));
++                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume,
++                                         &mMuted));
+ }
+ 
+ TEST_F(AudioPolicyManagerTestMMapPlaybackRerouting,
+@@ -2175,7 +2180,8 @@ TEST_F(AudioPolicyManagerTestMMapPlaybackRerouting,
+               mManager->getOutputForAttr(&attr, &mOutput, AUDIO_SESSION_NONE, &mStream,
+                                          createAttributionSourceState(testUid), &audioConfig,
+                                          &outputFlags, &mSelectedDeviceId, &mPortId, {},
+-                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume));
++                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume,
++                                         &mMuted));
+     ASSERT_EQ(usbDevicePort.id, mSelectedDeviceId);
+     auto outputDesc = mManager->getOutputs().valueFor(mOutput);
+     ASSERT_NE(nullptr, outputDesc);
+@@ -2191,7 +2197,8 @@ TEST_F(AudioPolicyManagerTestMMapPlaybackRerouting,
+               mManager->getOutputForAttr(&attr, &mOutput, AUDIO_SESSION_NONE, &mStream,
+                                          createAttributionSourceState(testUid), &audioConfig,
+                                          &outputFlags, &mSelectedDeviceId, &mPortId, {},
+-                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume));
++                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume,
++                                         &mMuted));
+     ASSERT_EQ(usbDevicePort.id, mSelectedDeviceId);
+     outputDesc = mManager->getOutputs().valueFor(mOutput);
+     ASSERT_NE(nullptr, outputDesc);
+@@ -2220,7 +2227,8 @@ TEST_F(AudioPolicyManagerTestMMapPlaybackRerouting,
+               mManager->getOutputForAttr(&attr, &mOutput, AUDIO_SESSION_NONE, &mStream,
+                                          createAttributionSourceState(testUid), &audioConfig,
+                                          &outputFlags, &mSelectedDeviceId, &mPortId, {},
+-                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume));
++                                         &mOutputType, &mIsSpatialized, &mIsBitPerfect, &mVolume,
++                                         &mMuted));
+ }
+ 
+ INSTANTIATE_TEST_SUITE_P(
+@@ -3978,11 +3986,12 @@ void AudioPolicyManagerTestBitPerfectBase::getBitPerfectOutput(status_t expected
+     bool isSpatialized;
+     bool isBitPerfect;
+     float volume;
++    bool muted;
+     EXPECT_EQ(expected,
+               mManager->getOutputForAttr(&sMediaAttr, &mBitPerfectOutput, AUDIO_SESSION_NONE,
+                                          &stream, attributionSource, &config, &flags,
+                                          &mSelectedDeviceId, &mBitPerfectPortId, {}, &outputType,
+-                                         &isSpatialized, &isBitPerfect, &volume));
++                                         &isSpatialized, &isBitPerfect, &volume, &muted));
+ }
+ 
+ class AudioPolicyManagerTestBitPerfect : public AudioPolicyManagerTestBitPerfectBase {
+-- 
+2.43.0
+

@@ -1,0 +1,32 @@
+From e78085defc83293e45ee0c46e158e8b7f86f9a18 Mon Sep 17 00:00:00 2001
+From: Andy Hung <hunga@google.com>
+Date: Mon, 28 Oct 2024 18:03:23 -0700
+Subject: [PATCH 162/436] Fix MonotonicFrameCounter warning log
+
+Flag: EXEMPT Bugfix
+Test: compiles
+Bug: 376142634
+Change-Id: Ib99cc61be61e506bf40c015218f22e0a9f43ec3d
+---
+ services/audioflinger/timing/MonotonicFrameCounter.cpp | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/services/audioflinger/timing/MonotonicFrameCounter.cpp b/services/audioflinger/timing/MonotonicFrameCounter.cpp
+index 286f54945b..175e2f569d 100644
+--- a/services/audioflinger/timing/MonotonicFrameCounter.cpp
++++ b/services/audioflinger/timing/MonotonicFrameCounter.cpp
+@@ -26,9 +26,9 @@ int64_t MonotonicFrameCounter::updateAndGetMonotonicFrameCount(
+         int64_t newFrameCount, int64_t newTime) {
+     if (newFrameCount < 0 || newTime < 0) {
+         const auto result = getLastReportedFrameCount();
+-        ALOGW("%s: invalid (frame, time) pair newFrameCount:%lld newFrameCount:%lld,"
++        ALOGW("%s: invalid (frame, time) pair newFrameCount:%lld newTime:%lld,"
+                 " using %lld as frameCount",
+-                __func__, (long long) newFrameCount, (long long)newFrameCount,
++                __func__, (long long)newFrameCount, (long long)newTime,
+                 (long long)result);
+         return result;
+     }
+-- 
+2.43.0
+

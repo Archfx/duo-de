@@ -1,0 +1,86 @@
+From 559e9765c5352686c9b3954a3c930f614c338196 Mon Sep 17 00:00:00 2001
+From: Mikhail Naganov <mnaganov@google.com>
+Date: Tue, 22 Oct 2024 17:17:52 -0700
+Subject: [PATCH 125/436] Remove framework support for audio HIDL HAL V5
+
+This HAL version has been deprecated in Android V.
+
+Bug: 308446058
+Test: m
+Change-Id: Ic6ff4258d91aa0ce4e19080432b66b0dbfd173b4
+---
+ media/libaudiohal/Android.bp      |  1 -
+ media/libaudiohal/FactoryHal.cpp  |  3 +--
+ media/libaudiohal/impl/Android.bp | 26 --------------------------
+ 3 files changed, 1 insertion(+), 29 deletions(-)
+
+diff --git a/media/libaudiohal/Android.bp b/media/libaudiohal/Android.bp
+index 75e2c11aba..74a64bf6d0 100644
+--- a/media/libaudiohal/Android.bp
++++ b/media/libaudiohal/Android.bp
+@@ -23,7 +23,6 @@ cc_library_shared {
+     ],
+ 
+     required: [
+-        "libaudiohal@5.0",
+         "libaudiohal@6.0",
+         "libaudiohal@7.0",
+         "libaudiohal@7.1",
+diff --git a/media/libaudiohal/FactoryHal.cpp b/media/libaudiohal/FactoryHal.cpp
+index 15cb297b5c..2c30693a61 100644
+--- a/media/libaudiohal/FactoryHal.cpp
++++ b/media/libaudiohal/FactoryHal.cpp
+@@ -50,12 +50,11 @@ using InterfaceName = std::pair<std::string, std::string>;
+  * This list need to keep sync with AudioHalVersionInfo.VERSIONS in
+  * media/java/android/media/AudioHalVersionInfo.java.
+  */
+-static const std::array<AudioHalVersionInfo, 5> sAudioHALVersions = {
++static const std::array<AudioHalVersionInfo, 4> sAudioHALVersions = {
+     AudioHalVersionInfo(AudioHalVersionInfo::Type::AIDL, 1, 0),
+     AudioHalVersionInfo(AudioHalVersionInfo::Type::HIDL, 7, 1),
+     AudioHalVersionInfo(AudioHalVersionInfo::Type::HIDL, 7, 0),
+     AudioHalVersionInfo(AudioHalVersionInfo::Type::HIDL, 6, 0),
+-    AudioHalVersionInfo(AudioHalVersionInfo::Type::HIDL, 5, 0),
+ };
+ 
+ static const std::map<AudioHalVersionInfo::Type, InterfaceName> sDevicesHALInterfaces = {
+diff --git a/media/libaudiohal/impl/Android.bp b/media/libaudiohal/impl/Android.bp
+index 1a6b949508..f5dec561c6 100644
+--- a/media/libaudiohal/impl/Android.bp
++++ b/media/libaudiohal/impl/Android.bp
+@@ -82,32 +82,6 @@ cc_defaults {
+     ],
+ }
+ 
+-cc_library_shared {
+-    name: "libaudiohal@5.0",
+-    defaults: [
+-        "libaudiohal_default",
+-        "libaudiohal_hidl_default",
+-    ],
+-    srcs: [
+-        ":audio_core_hal_client_sources",
+-        ":audio_effect_hidl_hal_client_sources",
+-        "EffectsFactoryHalEntry.cpp",
+-    ],
+-    shared_libs: [
+-        "android.hardware.audio.common@5.0",
+-        "android.hardware.audio.common@5.0-util",
+-        "android.hardware.audio.effect@5.0",
+-        "android.hardware.audio.effect@5.0-util",
+-        "android.hardware.audio@5.0",
+-        "android.hardware.audio@5.0-util",
+-    ],
+-    cflags: [
+-        "-DMAJOR_VERSION=5",
+-        "-DMINOR_VERSION=0",
+-        "-include common/all-versions/VersionMacro.h",
+-    ],
+-}
+-
+ cc_library_shared {
+     name: "libaudiohal@6.0",
+     defaults: [
+-- 
+2.43.0
+

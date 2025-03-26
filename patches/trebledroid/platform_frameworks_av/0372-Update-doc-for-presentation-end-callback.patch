@@ -1,0 +1,35 @@
+From 8a770c2173875d435edb6a7cf9078266ea48cc79 Mon Sep 17 00:00:00 2001
+From: jiabin <jiabin@google.com>
+Date: Mon, 2 Dec 2024 21:30:02 +0000
+Subject: [PATCH 372/436] Update doc for presentation end callback.
+
+Bug: 381269808
+Test: TH
+Flag: DOCS_ONLY
+Change-Id: Ib1fbfff6f1b4793df52e21384b0031601959f6b0
+---
+ media/libaaudio/include/aaudio/AAudio.h | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/media/libaaudio/include/aaudio/AAudio.h b/media/libaaudio/include/aaudio/AAudio.h
+index e72685c999..ddafd5772f 100644
+--- a/media/libaaudio/include/aaudio/AAudio.h
++++ b/media/libaaudio/include/aaudio/AAudio.h
+@@ -1721,9 +1721,13 @@ typedef void (*AAudioStream_presentationEndCallback)(AAudioStream* _Nonnull stre
+  * audio hardware) have been played.
+  *
+  * The presentation end callback must be used together with the data callback.
+- * The presentation edn callback won't be called if the stream is closed before all the data
++ * The presentation end callback won't be called if the stream is closed before all the data
+  * is played.
+  *
++ * The callback function will be called from the same thread as the data callback thread,
++ * which is a real-time thread owned by audio framework.
++ * The callback function will not be called after AAudioStream_close() is called.
++ *
+  * Available since API level 36.
+  *
+  * @param builder reference provided by AAudio_createStreamBuilder()
+-- 
+2.43.0
+

@@ -1,0 +1,104 @@
+From b984183e94401677ef82ad5b95489cc441e27431 Mon Sep 17 00:00:00 2001
+From: Dean Wheatley <dwhea@dolby.com>
+Date: Tue, 1 Oct 2024 14:56:29 +1000
+Subject: [PATCH 044/436] Support remote submix for 44.1kHz
+
+E-AC3-JOC in IEC61937 via remote submix requires 192kHz sample rate.
+As a precursor patch, add non default (i.e. 44.1kHz) remote submix
+support.
+
+Bug: 311830316
+Test: atest audiorouting_tests audiopolicy_tests VirtualAudioTest
+Change-Id: Ia711e0c6de63aaeb117b5eeb84224b245792bafe
+---
+ .../tests/audiorouting_tests.cpp              | 24 ++++++++++++++++---
+ .../managerdefault/AudioPolicyManager.cpp     | 16 +++++++++++--
+ 2 files changed, 35 insertions(+), 5 deletions(-)
+
+diff --git a/media/libaudioclient/tests/audiorouting_tests.cpp b/media/libaudioclient/tests/audiorouting_tests.cpp
+index 8151d39fbe..a3ab9d2e7d 100644
+--- a/media/libaudioclient/tests/audiorouting_tests.cpp
++++ b/media/libaudioclient/tests/audiorouting_tests.cpp
+@@ -86,7 +86,18 @@ TEST(AudioTrackTest, TestPerformanceMode) {
+     }
+ }
+ 
+-TEST(AudioTrackTest, DefaultRoutingTest) {
++class AudioTrackTest
++        : public ::testing::TestWithParam<int> {
++
++public:
++    AudioTrackTest()
++            : mSampleRate(GetParam()){};
++
++    const uint32_t mSampleRate;
++
++};
++
++TEST_P(AudioTrackTest, DefaultRoutingTest) {
+     audio_port_v7 port;
+     if (OK != getPortByAttributes(AUDIO_PORT_ROLE_SOURCE, AUDIO_PORT_TYPE_DEVICE,
+                                   AUDIO_DEVICE_IN_REMOTE_SUBMIX, "0", port)) {
+@@ -95,7 +106,8 @@ TEST(AudioTrackTest, DefaultRoutingTest) {
+ 
+     // create record instance
+     sp<AudioCapture> capture = sp<AudioCapture>::make(
+-            AUDIO_SOURCE_REMOTE_SUBMIX, 48000, AUDIO_FORMAT_PCM_16_BIT, AUDIO_CHANNEL_IN_STEREO);
++            AUDIO_SOURCE_REMOTE_SUBMIX, mSampleRate, AUDIO_FORMAT_PCM_16_BIT,
++            AUDIO_CHANNEL_IN_STEREO);
+     ASSERT_NE(nullptr, capture);
+     ASSERT_EQ(OK, capture->create()) << "record creation failed";
+     sp<OnAudioDeviceUpdateNotifier> cbCapture = sp<OnAudioDeviceUpdateNotifier>::make();
+@@ -103,7 +115,7 @@ TEST(AudioTrackTest, DefaultRoutingTest) {
+ 
+     // create playback instance
+     sp<AudioPlayback> playback = sp<AudioPlayback>::make(
+-            48000 /* sampleRate */, AUDIO_FORMAT_PCM_16_BIT, AUDIO_CHANNEL_OUT_STEREO,
++            mSampleRate, AUDIO_FORMAT_PCM_16_BIT, AUDIO_CHANNEL_OUT_STEREO,
+             AUDIO_OUTPUT_FLAG_NONE, AUDIO_SESSION_NONE);
+     ASSERT_NE(nullptr, playback);
+     ASSERT_EQ(OK, playback->loadResource("/data/local/tmp/bbb_2ch_24kHz_s16le.raw"))
+@@ -133,6 +145,12 @@ TEST(AudioTrackTest, DefaultRoutingTest) {
+     playback->stop();
+ }
+ 
++INSTANTIATE_TEST_SUITE_P(
++        AudioTrackParameterizedTest,
++        AudioTrackTest,
++        ::testing::Values(44100, 48000)
++);
++
+ class AudioRoutingTest : public ::testing::Test {
+   public:
+     void SetUp() override {
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index 2ff2907d9d..b89916d214 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -7982,9 +7982,21 @@ status_t AudioPolicyManager::setInputDevice(audio_io_handle_t input,
+                         if (result.source == AUDIO_SOURCE_HOTWORD && !inputDesc->isSoundTrigger()) {
+                             result.source = AUDIO_SOURCE_VOICE_RECOGNITION;
+                         }
+-                        return result; }).
++                        return result; });
+             //only one input device for now
+-                    addSource(device);
++            if (audio_is_remote_submix_device(device->type())) {
++                // remote submix HAL does not support audio conversion, need source device
++                // audio config to match the sink input descriptor audio config, otherwise AIDL
++                // HAL patching will fail
++                audio_port_config srcDevicePortConfig = {};
++                device->toAudioPortConfig(&srcDevicePortConfig, nullptr);
++                srcDevicePortConfig.sample_rate = inputDesc->getSamplingRate();
++                srcDevicePortConfig.channel_mask = inputDesc->getChannelMask();
++                srcDevicePortConfig.format = inputDesc->getFormat();
++                patchBuilder.addSource(srcDevicePortConfig);
++            } else {
++                patchBuilder.addSource(device);
++            }
+             status = installPatch(__func__, patchHandle, inputDesc.get(), patchBuilder.patch(), 0);
+         }
+     }
+-- 
+2.43.0
+

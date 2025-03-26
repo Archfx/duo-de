@@ -1,0 +1,64 @@
+From 9003fd9671cad68b183df5c75a1aa97f8f81102c Mon Sep 17 00:00:00 2001
+From: Pierre-Hugues Husson <phh@phh.me>
+Date: Wed, 7 Feb 2024 05:06:32 -0500
+Subject: [PATCH 434/436] Include Samsung AIDL camera ids
+
+---
+ services/camera/libcameraservice/Android.bp   |  1 +
+ .../common/aidl/AidlProviderInfo.cpp          | 21 +++++++++++++++++++
+ 2 files changed, 22 insertions(+)
+
+diff --git a/services/camera/libcameraservice/Android.bp b/services/camera/libcameraservice/Android.bp
+index 09fe3fe924..ecd54db749 100644
+--- a/services/camera/libcameraservice/Android.bp
++++ b/services/camera/libcameraservice/Android.bp
+@@ -117,6 +117,7 @@ cc_defaults {
+         "android.hardware.camera.provider-V3-ndk",
+         "vendor.samsung.hardware.camera.provider@3.0",
+         "vendor.samsung.hardware.camera.provider@4.0",
++        "vendor.samsung.hardware.camera.provider-V1-ndk",
+         "libaidlcommonsupport",
+         "libbinderthreadstateutils",
+         "libcameraservice_device_independent",
+diff --git a/services/camera/libcameraservice/common/aidl/AidlProviderInfo.cpp b/services/camera/libcameraservice/common/aidl/AidlProviderInfo.cpp
+index 88998c674d..9f8fd37e1d 100644
+--- a/services/camera/libcameraservice/common/aidl/AidlProviderInfo.cpp
++++ b/services/camera/libcameraservice/common/aidl/AidlProviderInfo.cpp
+@@ -34,6 +34,8 @@
+ #include <utils/SessionConfigurationUtils.h>
+ #include <utils/Trace.h>
+ 
++#include <aidl/vendor/samsung/hardware/camera/provider/ISehCameraProvider.h>
++
+ namespace {
+ const bool kEnableLazyHal(property_get_bool("ro.camera.enableLazyHal", false));
+ } // anonymous namespace
+@@ -173,6 +175,25 @@ status_t AidlProviderInfo::initializeAidlProvider(
+         return mapToStatusT(status);
+     }
+ 
++    if(true) {
++        AIBinder *ext;
++        auto spaibinder = interface->asBinder();
++
++        status_t ret = AIBinder_getExtension(spaibinder.get(), &ext);
++        ALOGE("Grabbing CameraProvider extension got %d", ret);
++        if (ret == android::OK) {
++            using aidl::vendor::samsung::hardware::camera::provider::ISehCameraProvider;
++            std::shared_ptr<ISehCameraProvider> provider = ISehCameraProvider::fromBinder(ndk::SpAIBinder(ext));
++            ALOGE("Trying to get ISehCameraProvider...");
++            if (provider != nullptr) {
++                ALOGE("Got it!");
++                if(property_get_bool("persist.sys.phh.samsung.camera_ids", false)) {
++                    provider->getCameraIdListAll(&retDevices);
++                }
++            }
++        }
++    }
++
+     for (auto& name : retDevices) {
+         uint16_t major, minor;
+         std::string type, id;
+-- 
+2.43.0
+

@@ -1,0 +1,130 @@
+From 2880135814165db2346043d5c9f6bc584446569b Mon Sep 17 00:00:00 2001
+From: Jayant Chowdhary <jchowdhary@google.com>
+Date: Thu, 17 Oct 2024 02:56:40 +0000
+Subject: [PATCH 123/436] camera: Clarify hot pixel map coordinate system when
+ sensor pixel mode is MAXIMUM_RESOLUTION
+
+Bug: 373252717
+
+Test: m -j ds-docs-java
+
+Flag: EXEMPT Docs only
+
+Change-Id: I37d406f834aa0030c4276bc80fa320822a28e8a6
+Signed-off-by: Jayant Chowdhary <jchowdhary@google.com>
+---
+ .../include/camera/NdkCameraMetadataTags.h    | 32 ++++++++++++-------
+ 1 file changed, 21 insertions(+), 11 deletions(-)
+
+diff --git a/camera/ndk/include/camera/NdkCameraMetadataTags.h b/camera/ndk/include/camera/NdkCameraMetadataTags.h
+index 7fb2d05c2c..acc3c7c1a1 100644
+--- a/camera/ndk/include/camera/NdkCameraMetadataTags.h
++++ b/camera/ndk/include/camera/NdkCameraMetadataTags.h
+@@ -573,7 +573,7 @@ typedef enum acamera_metadata_tag {
+      * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraMetadata.html#REQUEST_AVAILABLE_CAPABILITIES_ULTRA_HIGH_RESOLUTION_SENSOR">CameraMetadata#REQUEST_AVAILABLE_CAPABILITIES_ULTRA_HIGH_RESOLUTION_SENSOR</a>
+      * capability or devices where
+      * <a href="https://developer.android.com/reference/CameraCharacteristics.html#getAvailableCaptureRequestKeys">CameraCharacteristics#getAvailableCaptureRequestKeys</a>
+-     * lists <a href="https://developer.android.com/reference/CaptureRequest.html#SENSOR_PIXEL_MODE">ACAMERA_SENSOR_PIXEL_MODE</a>
++     * lists ACAMERA_SENSOR_PIXEL_MODE,
+      * ACAMERA_SENSOR_INFO_ACTIVE_ARRAY_SIZE_MAXIMUM_RESOLUTION /
+      * ACAMERA_SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE_MAXIMUM_RESOLUTION must be used as the
+      * coordinate system for requests where ACAMERA_SENSOR_PIXEL_MODE is set to
+@@ -802,7 +802,7 @@ typedef enum acamera_metadata_tag {
+      * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraMetadata.html#REQUEST_AVAILABLE_CAPABILITIES_ULTRA_HIGH_RESOLUTION_SENSOR">CameraMetadata#REQUEST_AVAILABLE_CAPABILITIES_ULTRA_HIGH_RESOLUTION_SENSOR</a>
+      * capability or devices where
+      * <a href="https://developer.android.com/reference/CameraCharacteristics.html#getAvailableCaptureRequestKeys">CameraCharacteristics#getAvailableCaptureRequestKeys</a>
+-     * lists <a href="https://developer.android.com/reference/CaptureRequest.html#SENSOR_PIXEL_MODE">ACAMERA_SENSOR_PIXEL_MODE</a>,
++     * lists ACAMERA_SENSOR_PIXEL_MODE,
+      * ACAMERA_SENSOR_INFO_ACTIVE_ARRAY_SIZE_MAXIMUM_RESOLUTION /
+      * ACAMERA_SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE_MAXIMUM_RESOLUTION must be used as the
+      * coordinate system for requests where ACAMERA_SENSOR_PIXEL_MODE is set to
+@@ -1008,7 +1008,7 @@ typedef enum acamera_metadata_tag {
+      * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraMetadata.html#REQUEST_AVAILABLE_CAPABILITIES_ULTRA_HIGH_RESOLUTION_SENSOR">CameraMetadata#REQUEST_AVAILABLE_CAPABILITIES_ULTRA_HIGH_RESOLUTION_SENSOR</a>
+      * capability or devices where
+      * <a href="https://developer.android.com/reference/CameraCharacteristics.html#getAvailableCaptureRequestKeys">CameraCharacteristics#getAvailableCaptureRequestKeys</a>
+-     * lists <a href="https://developer.android.com/reference/CaptureRequest.html#SENSOR_PIXEL_MODE">ACAMERA_SENSOR_PIXEL_MODE</a>,
++     * lists ACAMERA_SENSOR_PIXEL_MODE,
+      * ACAMERA_SENSOR_INFO_ACTIVE_ARRAY_SIZE_MAXIMUM_RESOLUTION /
+      * ACAMERA_SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE_MAXIMUM_RESOLUTION must be used as the
+      * coordinate system for requests where ACAMERA_SENSOR_PIXEL_MODE is set to
+@@ -4052,8 +4052,8 @@ typedef enum acamera_metadata_tag {
+      * <p>For camera devices with the
+      * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraMetadata.html#REQUEST_AVAILABLE_CAPABILITIES_ULTRA_HIGH_RESOLUTION_SENSOR">CameraMetadata#REQUEST_AVAILABLE_CAPABILITIES_ULTRA_HIGH_RESOLUTION_SENSOR</a>
+      * capability or devices where <a href="https://developer.android.com/reference/CameraCharacteristics.html#getAvailableCaptureRequestKeys">CameraCharacteristics#getAvailableCaptureRequestKeys</a>
+-     * lists <a href="https://developer.android.com/reference/CaptureRequest.html#SENSOR_PIXEL_MODE">ACAMERA_SENSOR_PIXEL_MODE</a></p>
+-     * <p>ACAMERA_SENSOR_INFO_ACTIVE_ARRAY_SIZE_MAXIMUM_RESOLUTION /
++     * lists ACAMERA_SENSOR_PIXEL_MODE,
++     * ACAMERA_SENSOR_INFO_ACTIVE_ARRAY_SIZE_MAXIMUM_RESOLUTION /
+      * ACAMERA_SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE_MAXIMUM_RESOLUTION must be used as the
+      * coordinate system for requests where ACAMERA_SENSOR_PIXEL_MODE is set to
+      * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraMetadata.html#SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION">CameraMetadata#SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION</a>.</p>
+@@ -5999,7 +5999,7 @@ typedef enum acamera_metadata_tag {
+      * This key will only be present for devices which advertise the
+      * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraMetadata.html#REQUEST_AVAILABLE_CAPABILITIES_ULTRA_HIGH_RESOLUTION_SENSOR">CameraMetadata#REQUEST_AVAILABLE_CAPABILITIES_ULTRA_HIGH_RESOLUTION_SENSOR</a>
+      * capability or devices where <a href="https://developer.android.com/reference/CameraCharacteristics.html#getAvailableCaptureRequestKeys">CameraCharacteristics#getAvailableCaptureRequestKeys</a>
+-     * lists <a href="https://developer.android.com/reference/CaptureRequest.html#SENSOR_PIXEL_MODE">ACAMERA_SENSOR_PIXEL_MODE</a></p>
++     * lists ACAMERA_SENSOR_PIXEL_MODE.</p>
+      * <p>The data representation is <code>int[4]</code>, which maps to <code>(left, top, width, height)</code>.</p>
+      *
+      * @see ACAMERA_SENSOR_INFO_ACTIVE_ARRAY_SIZE
+@@ -6032,7 +6032,7 @@ typedef enum acamera_metadata_tag {
+      * This key will only be present for devices which advertise the
+      * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraMetadata.html#REQUEST_AVAILABLE_CAPABILITIES_ULTRA_HIGH_RESOLUTION_SENSOR">CameraMetadata#REQUEST_AVAILABLE_CAPABILITIES_ULTRA_HIGH_RESOLUTION_SENSOR</a>
+      * capability or devices where <a href="https://developer.android.com/reference/CameraCharacteristics.html#getAvailableCaptureRequestKeys">CameraCharacteristics#getAvailableCaptureRequestKeys</a>
+-     * lists <a href="https://developer.android.com/reference/CaptureRequest.html#SENSOR_PIXEL_MODE">ACAMERA_SENSOR_PIXEL_MODE</a></p>
++     * lists ACAMERA_SENSOR_PIXEL_MODE.</p>
+      *
+      * @see ACAMERA_SENSOR_INFO_PHYSICAL_SIZE
+      * @see ACAMERA_SENSOR_PIXEL_MODE
+@@ -6061,7 +6061,7 @@ typedef enum acamera_metadata_tag {
+      * This key will only be present for devices which advertise the
+      * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraMetadata.html#REQUEST_AVAILABLE_CAPABILITIES_ULTRA_HIGH_RESOLUTION_SENSOR">CameraMetadata#REQUEST_AVAILABLE_CAPABILITIES_ULTRA_HIGH_RESOLUTION_SENSOR</a>
+      * capability or devices where <a href="https://developer.android.com/reference/CameraCharacteristics.html#getAvailableCaptureRequestKeys">CameraCharacteristics#getAvailableCaptureRequestKeys</a>
+-     * lists <a href="https://developer.android.com/reference/CaptureRequest.html#SENSOR_PIXEL_MODE">ACAMERA_SENSOR_PIXEL_MODE</a></p>
++     * lists ACAMERA_SENSOR_PIXEL_MODE.</p>
+      * <p>The data representation is <code>int[4]</code>, which maps to <code>(left, top, width, height)</code>.</p>
+      *
+      * @see ACAMERA_SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE
+@@ -6100,7 +6100,7 @@ typedef enum acamera_metadata_tag {
+      * <ul>
+      * <li>This key will be present if
+      *   <a href="https://developer.android.com/reference/CameraCharacteristics.html#getAvailableCaptureRequestKeys">CameraCharacteristics#getAvailableCaptureRequestKeys</a>
+-     *   lists <a href="https://developer.android.com/reference/CaptureRequest.html#SENSOR_PIXEL_MODE">ACAMERA_SENSOR_PIXEL_MODE</a>, since RAW
++     *   lists ACAMERA_SENSOR_PIXEL_MODE, since RAW
+      *   images may not necessarily have a regular bayer pattern when
+      *   <a href="https://developer.android.com/reference/CaptureRequest.html#SENSOR_PIXEL_MODE">ACAMERA_SENSOR_PIXEL_MODE</a> is set to
+      *   <a href="https://developer.android.com/reference/android/hardware/camera2/CameraMetadata.html#SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION">CameraMetadata#SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION</a>.</li>
+@@ -6470,9 +6470,19 @@ typedef enum acamera_metadata_tag {
+      * height dimensions are given in ACAMERA_SENSOR_INFO_PIXEL_ARRAY_SIZE.
+      * This may include hot pixels that lie outside of the active array
+      * bounds given by ACAMERA_SENSOR_INFO_ACTIVE_ARRAY_SIZE.</p>
++     * <p>For camera devices with the
++     * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraMetadata.html#REQUEST_AVAILABLE_CAPABILITIES_ULTRA_HIGH_RESOLUTION_SENSOR">CameraMetadata#REQUEST_AVAILABLE_CAPABILITIES_ULTRA_HIGH_RESOLUTION_SENSOR</a>
++     * capability or devices where
++     * <a href="https://developer.android.com/reference/CameraCharacteristics.html#getAvailableCaptureRequestKeys">CameraCharacteristics#getAvailableCaptureRequestKeys</a>
++     * lists ACAMERA_SENSOR_PIXEL_MODE,
++     * ACAMERA_SENSOR_INFO_PIXEL_ARRAY_SIZE_MAXIMUM_RESOLUTION will be used as the
++     * pixel array size if the corresponding request sets ACAMERA_SENSOR_PIXEL_MODE to
++     * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraMetadata.html#SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION">CameraMetadata#SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION</a>.</p>
+      *
+      * @see ACAMERA_SENSOR_INFO_ACTIVE_ARRAY_SIZE
+      * @see ACAMERA_SENSOR_INFO_PIXEL_ARRAY_SIZE
++     * @see ACAMERA_SENSOR_INFO_PIXEL_ARRAY_SIZE_MAXIMUM_RESOLUTION
++     * @see ACAMERA_SENSOR_PIXEL_MODE
+      */
+     ACAMERA_STATISTICS_HOT_PIXEL_MAP =                          // int32[2*n]
+             ACAMERA_STATISTICS_START + 15,
+@@ -7622,8 +7632,8 @@ typedef enum acamera_metadata_tag {
+      * <p>For camera devices with the
+      * <a href="https://developer.android.com/reference/android/hardware/camera2/CameraMetadata.html#REQUEST_AVAILABLE_CAPABILITIES_ULTRA_HIGH_RESOLUTION_SENSOR">CameraMetadata#REQUEST_AVAILABLE_CAPABILITIES_ULTRA_HIGH_RESOLUTION_SENSOR</a>
+      * capability or devices where <a href="https://developer.android.com/reference/CameraCharacteristics.html#getAvailableCaptureRequestKeys">CameraCharacteristics#getAvailableCaptureRequestKeys</a>
+-     * lists <a href="https://developer.android.com/reference/CaptureRequest.html#SENSOR_PIXEL_MODE">ACAMERA_SENSOR_PIXEL_MODE</a>
+-     * , the current active physical device
++     * lists ACAMERA_SENSOR_PIXEL_MODE,
++     * the current active physical device
+      * ACAMERA_SENSOR_INFO_ACTIVE_ARRAY_SIZE_MAXIMUM_RESOLUTION /
+      * ACAMERA_SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE_MAXIMUM_RESOLUTION must be used as the
+      * coordinate system for requests where ACAMERA_SENSOR_PIXEL_MODE is set to
+-- 
+2.43.0
+

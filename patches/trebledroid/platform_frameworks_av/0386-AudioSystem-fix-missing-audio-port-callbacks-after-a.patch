@@ -1,0 +1,34 @@
+From 30adca5de96515861d1e38447a3993daa6b250bb Mon Sep 17 00:00:00 2001
+From: Eric Laurent <elaurent@google.com>
+Date: Wed, 4 Dec 2024 14:49:49 +0000
+Subject: [PATCH 386/436] AudioSystem: fix missing audio port callbacks after
+ audioserver restart
+
+Commit ce3d1106 dropped the enablement of audio port and volume group
+callbacks after registering the audio policy client when reconnecting
+audiosystem to a new instance of audio policy service.
+
+Bug: 378032953
+Test: make
+Flag: EXEMPT bug fix
+Change-Id: Ia20bbe206b6073c37b4ba07faf3b906abd52b549
+---
+ media/libaudioclient/AudioSystem.cpp | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/media/libaudioclient/AudioSystem.cpp b/media/libaudioclient/AudioSystem.cpp
+index dcfef4584f..d511dc2c69 100644
+--- a/media/libaudioclient/AudioSystem.cpp
++++ b/media/libaudioclient/AudioSystem.cpp
+@@ -985,6 +985,8 @@ public:
+         // TODO(b/375280520) consider registerClient() within mMutex lock.
+         const int64_t token = IPCThreadState::self()->clearCallingIdentity();
+         aps->registerClient(client);
++        aps->setAudioPortCallbacksEnabled(client->isAudioPortCbEnabled());
++        aps->setAudioVolumeGroupCallbacksEnabled(client->isAudioVolumeGroupCbEnabled());
+         IPCThreadState::self()->restoreCallingIdentity(token);
+     }
+ 
+-- 
+2.43.0
+

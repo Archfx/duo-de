@@ -1,0 +1,418 @@
+From dcfd592001563f328d908a10595486bc74221fe0 Mon Sep 17 00:00:00 2001
+From: Atneya Nair <atneya@google.com>
+Date: Tue, 26 Nov 2024 16:05:02 -0800
+Subject: [PATCH 354/436] Pull AttrSourceIter into lib
+
+Allows for re-use. Add const iterator as well.
+
+Bug: 355498020
+Flag: EXEMPT mechanical refactoring
+Test: atest libaudiopermission_tests
+Change-Id: If28e8d2742bcb05a63e2e6fc78051a6beea1f9d9
+---
+ media/libaudiopermission/Android.bp           |   7 +-
+ .../include/media/AttrSourceIter.h            | 108 ++++++++++++++++++
+ .../tests/AttrSourceIterTests.cpp             |  94 +++++++++++++++
+ .../audiopolicy/service/AudioRecordClient.cpp |  80 +++++--------
+ .../audiopolicy/service/AudioRecordClient.h   |   4 +-
+ 5 files changed, 235 insertions(+), 58 deletions(-)
+ create mode 100644 media/libaudiopermission/include/media/AttrSourceIter.h
+ create mode 100644 media/libaudiopermission/tests/AttrSourceIterTests.cpp
+
+diff --git a/media/libaudiopermission/Android.bp b/media/libaudiopermission/Android.bp
+index 7275fd7fcc..161e5a7c47 100644
+--- a/media/libaudiopermission/Android.bp
++++ b/media/libaudiopermission/Android.bp
+@@ -83,7 +83,7 @@ cc_library {
+ }
+ 
+ cc_test {
+-    name: "libaudiopermission_test",
++    name: "libaudiopermission_tests",
+     host_supported: true,
+     defaults: [
+         "libmediautils_tests_config",
+@@ -100,10 +100,7 @@ cc_test {
+         "liblog",
+         "libutils",
+     ],
+-    srcs: [
+-        "tests/NativePermissionControllerTest.cpp",
+-        "tests/ValidatedAttributionSourceStateTest.cpp",
+-    ],
++    srcs: ["tests/*.cpp"],
+     test_options: {
+         unit_test: true,
+     },
+diff --git a/media/libaudiopermission/include/media/AttrSourceIter.h b/media/libaudiopermission/include/media/AttrSourceIter.h
+new file mode 100644
+index 0000000000..609d218546
+--- /dev/null
++++ b/media/libaudiopermission/include/media/AttrSourceIter.h
+@@ -0,0 +1,108 @@
++/*
++ * Copyright (C) 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++#pragma once
++
++#include <android/content/AttributionSourceState.h>
++
++#include <iterator>
++
++// AttributionSourceState are essentially an intrusive linked list, where the next field carries
++// the pointer to the next element. These iterator helpers allow for convenient iteration over the
++// entire attribution chain. Usage:
++//   std::for_each(AttrSourceIter::begin(mAttributionSourceState), AttrSourceIter::end(), ...)
++namespace android::media::permission::AttrSourceIter {
++
++class ConstIter {
++  public:
++    using iterator_category = std::forward_iterator_tag;
++    using difference_type = std::ptrdiff_t;
++    using value_type = ::android::content::AttributionSourceState;
++    using pointer = const value_type*;
++    using reference = const value_type&;
++
++    ConstIter(const ::android::content::AttributionSourceState* attr) : mAttr(attr) {}
++
++    reference operator*() const { return *mAttr; }
++    pointer operator->() const { return mAttr; }
++
++    ConstIter& operator++() {
++        mAttr = !mAttr->next.empty() ? mAttr->next.data() : nullptr;
++        return *this;
++    }
++    ConstIter operator++(int) {
++        ConstIter tmp = *this;
++        ++(*this);
++        return tmp;
++    }
++
++    friend bool operator==(const ConstIter& a, const ConstIter& b) = default;
++
++    static ConstIter end() { return ConstIter(nullptr); }
++
++  private:
++    const ::android::content::AttributionSourceState* mAttr;
++};
++
++/**
++ * Non-const iterator. Note, AttributionSourceState is conceptually a linked list on the next field.
++ * Be very careful if `next` is modified over iteration, as it can go wrong easily.
++ */
++class Iter {
++  public:
++    using iterator_category = std::forward_iterator_tag;
++    using difference_type = std::ptrdiff_t;
++    using value_type = ::android::content::AttributionSourceState;
++    using pointer = value_type*;
++    using reference = value_type&;
++
++    Iter(::android::content::AttributionSourceState* attr) : mAttr(attr) {}
++
++    reference operator*() const { return *mAttr; }
++    pointer operator->() const { return mAttr; }
++
++    Iter& operator++() {
++        mAttr = !mAttr->next.empty() ? mAttr->next.data() : nullptr;
++        return *this;
++    }
++    Iter operator++(int) {
++        Iter tmp = *this;
++        ++(*this);
++        return tmp;
++    }
++
++    friend bool operator==(const Iter& a, const Iter& b) = default;
++
++    operator ConstIter() const { return ConstIter(mAttr); }
++
++    static Iter end() { return Iter(nullptr); }
++
++  private:
++    ::android::content::AttributionSourceState* mAttr;
++};
++
++inline Iter begin(::android::content::AttributionSourceState& a) {
++    return Iter(&a);
++}
++inline Iter end() {
++    return Iter::end();
++}
++inline ConstIter cbegin(const ::android::content::AttributionSourceState& a) {
++    return ConstIter(&a);
++}
++inline ConstIter cend() {
++    return ConstIter::end();
++}
++}  // namespace com::android::media::permission::AttrSourceIter
+diff --git a/media/libaudiopermission/tests/AttrSourceIterTests.cpp b/media/libaudiopermission/tests/AttrSourceIterTests.cpp
+new file mode 100644
+index 0000000000..57d326d6d9
+--- /dev/null
++++ b/media/libaudiopermission/tests/AttrSourceIterTests.cpp
+@@ -0,0 +1,94 @@
++/*
++ * Copyright (C) 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include <android/content/AttributionSourceState.h>
++#include <media/AttrSourceIter.h>
++
++#include <gmock/gmock.h>
++#include <gtest/gtest.h>
++
++#include <algorithm>
++
++using ::android::content::AttributionSourceState;
++using ::android::media::permission::AttrSourceIter::begin;
++using ::android::media::permission::AttrSourceIter::cbegin;
++using ::android::media::permission::AttrSourceIter::cend;
++using ::android::media::permission::AttrSourceIter::end;
++
++using ::android::media::permission::AttrSourceIter::ConstIter;
++
++using ::testing::ContainerEq;
++using ::testing::ElementsAreArray;
++using ::testing::Eq;
++using ::testing::Return;
++
++class AttrSourceIterTest : public ::testing::Test {
++  public:
++    AttrSourceIterTest() {
++        mAttr.pid = 1;
++        mAttr.uid = 1;
++        AttributionSourceState next;
++        next.pid = 2;
++        next.uid = 2;
++        AttributionSourceState nextnext;
++        nextnext.pid = 3;
++        nextnext.uid = 3;
++        next.next = {nextnext};
++        mAttr.next = {next};
++    }
++
++  protected:
++    AttributionSourceState mAttr;
++};
++
++TEST_F(AttrSourceIterTest, constIter) {
++    const AttributionSourceState& ref = mAttr;
++    std::vector<int> mPids;
++    std::transform(cbegin(ref), cend(), std::back_inserter(mPids),
++                   [](const auto& x) { return x.pid; });
++    EXPECT_THAT(mPids, ElementsAreArray({1, 2, 3}));
++}
++
++TEST_F(AttrSourceIterTest, nonConstIter) {
++    AttributionSourceState expected;
++    {
++        expected.pid = 2;
++        expected.uid = 1;
++        AttributionSourceState expectedNext;
++        expectedNext.pid = 4;
++        expectedNext.uid = 2;
++        AttributionSourceState expectedNextNext;
++        expectedNextNext.pid = 6;
++        expectedNextNext.uid = 3;
++        expectedNext.next = {expectedNextNext};
++        expected.next = {expectedNext};
++    }
++    std::for_each(begin(mAttr), end(), [](auto& x) { x.pid = x.pid * 2; });
++
++    EXPECT_THAT(mAttr, Eq(expected));
++}
++
++TEST_F(AttrSourceIterTest, nonConstIterReferenceEquals) {
++    const AttributionSourceState& ref = mAttr;
++    std::vector<const AttributionSourceState*> attrs;
++    std::transform(cbegin(ref), cend(), std::back_inserter(attrs),
++                   [](const auto& x) { return &x; });
++    std::for_each(begin(mAttr), end(), [](auto& x) { x.pid = x.pid * 2; });
++    std::vector<const AttributionSourceState*> attrsAfter;
++    std::transform(cbegin(ref), cend(), std::back_inserter(attrsAfter),
++                   [](const auto& x) { return &x; });
++    EXPECT_THAT(attrs, ContainerEq(attrsAfter));
++}
+diff --git a/services/audiopolicy/service/AudioRecordClient.cpp b/services/audiopolicy/service/AudioRecordClient.cpp
+index 01e557cae9..79a745863f 100644
+--- a/services/audiopolicy/service/AudioRecordClient.cpp
++++ b/services/audiopolicy/service/AudioRecordClient.cpp
+@@ -21,6 +21,7 @@
+ #include "binder/AppOpsManager.h"
+ #include "mediautils/ServiceUtilities.h"
+ #include <android_media_audiopolicy.h>
++#include <media/AttrSourceIter.h>
+ 
+ #include <algorithm>
+ 
+@@ -58,39 +59,6 @@ int getTargetSdkForPackageName(std::string_view packageName) {
+ bool doesPackageTargetAtLeastU(std::string_view packageName) {
+     return getTargetSdkForPackageName(packageName) >= __ANDROID_API_U__;
+ }
+-
+-class AttrSourceItr {
+-  public:
+-    using iterator_category = std::forward_iterator_tag;
+-    using difference_type = std::ptrdiff_t;
+-    using value_type = AttributionSourceState;
+-    using pointer = value_type*;
+-    using reference = value_type&;
+-
+-    AttrSourceItr() : mAttr(nullptr) {}
+-
+-    AttrSourceItr(AttributionSourceState& attr) : mAttr(&attr) {}
+-
+-    reference operator*() const { return *mAttr; }
+-    pointer operator->() const { return mAttr; }
+-
+-    AttrSourceItr& operator++() {
+-        mAttr = !mAttr->next.empty() ? mAttr->next.data() : nullptr;
+-        return *this;
+-    }
+-
+-    AttrSourceItr operator++(int) {
+-        AttrSourceItr tmp = *this;
+-        ++(*this);
+-        return tmp;
+-    }
+-
+-    friend bool operator==(const AttrSourceItr& a, const AttrSourceItr& b) = default;
+-
+-    static AttrSourceItr end() { return AttrSourceItr{}; }
+-private:
+-    AttributionSourceState * mAttr;
+-};
+ } // anonymous
+ 
+ // static
+@@ -124,27 +92,32 @@ OpRecordAudioMonitor::createIfNeeded(
+                                     commandThread);
+ }
+ 
++// The vdi is carried in the attribution source for appops perm checks.
++// Overwrite the entire chain with the vdi associated with the mix this client is attached to
++// This ensures the checkOps triggered by the listener are correct.
++// Note: we still only register for events by package name, so we assume that we get events
++// independent of vdi.
++static AttributionSourceState& overwriteVdi(AttributionSourceState& chain, int vdi) {
++    using permission::AttrSourceIter::begin;
++    using permission::AttrSourceIter::end;
++    if (vdi != 0 /* default vdi */) {
++        std::for_each(begin(chain), end(), [vdi](auto& attr) { attr.deviceId = vdi; });
++    }
++    return chain;
++}
++
+ OpRecordAudioMonitor::OpRecordAudioMonitor(
+-        const AttributionSourceState &attributionSource,
++        AttributionSourceState attributionSource,
+         const uint32_t virtualDeviceId, const audio_attributes_t &attr,
+         int32_t appOp,
+         bool shouldMonitorRecord,
+         wp<AudioPolicyService::AudioCommandThread> commandThread) :
+-        mHasOp(true), mAttributionSource(attributionSource),
+-        mVirtualDeviceId(virtualDeviceId), mAttr(attr), mAppOp(appOp),
++        mHasOp(true),
++        mAttributionSource(overwriteVdi(attributionSource, virtualDeviceId)),
++        mVirtualDeviceId(virtualDeviceId), mAttr(attr),
++        mAppOp(appOp),
+         mShouldMonitorRecord(shouldMonitorRecord),
+-        mCommandThread(commandThread) {
+-    // The vdi is carried in the attribution source for appops perm checks.
+-    // Overwrite the entire chain with the vdi associated with the mix this client is attached to
+-    // This ensures the checkOps triggered by the listener are correct.
+-    // Note: we still only register for events by package name, so we assume that we get events
+-    // independent of vdi.
+-    if (mVirtualDeviceId != 0 /* default vdi */) {
+-        // TODO (atneya@) lift for const
+-        std::for_each(AttrSourceItr{mAttributionSource}, AttrSourceItr::end(),
+-                      [&](auto& attr) { attr.deviceId = mVirtualDeviceId; });
+-    }
+-}
++        mCommandThread(commandThread) {}
+ 
+ OpRecordAudioMonitor::~OpRecordAudioMonitor()
+ {
+@@ -156,6 +129,9 @@ OpRecordAudioMonitor::~OpRecordAudioMonitor()
+ 
+ void OpRecordAudioMonitor::onFirstRef()
+ {
++    using permission::AttrSourceIter::cbegin;
++    using permission::AttrSourceIter::cend;
++
+     checkOp();
+     mOpCallback = new RecordAudioOpCallback(this);
+     ALOGV("start watching op %d for %s", mAppOp, mAttributionSource.toString().c_str());
+@@ -165,7 +141,7 @@ void OpRecordAudioMonitor::onFirstRef()
+                         : 0;
+ 
+     const auto reg = [&](int32_t op) {
+-        std::for_each(AttrSourceItr{mAttributionSource}, AttrSourceItr::end(),
++        std::for_each(cbegin(mAttributionSource), cend(),
+                       [&](const auto& attr) {
+                           mAppOpsManager.startWatchingMode(
+                                   op,
+@@ -191,9 +167,11 @@ bool OpRecordAudioMonitor::hasOp() const {
+ // - not called from constructor,
+ // - not called from RecordAudioOpCallback because the callback is not installed in this case
+ void OpRecordAudioMonitor::checkOp(bool updateUidStates) {
++    using permission::AttrSourceIter::cbegin;
++    using permission::AttrSourceIter::cend;
++
+     const auto check = [&](int32_t op) -> bool {
+-        return std::all_of(
+-                AttrSourceItr{mAttributionSource}, AttrSourceItr::end(), [&](const auto& x) {
++        return std::all_of(cbegin(mAttributionSource), cend(), [&](const auto& x) {
+                     return mAppOpsManager.checkOp(op, x.uid,
+                                                   VALUE_OR_FATAL(aidl2legacy_string_view_String16(
+                                                           x.packageName.value_or("")))) ==
+diff --git a/services/audiopolicy/service/AudioRecordClient.h b/services/audiopolicy/service/AudioRecordClient.h
+index 3553f1d8f5..6037a8d867 100644
+--- a/services/audiopolicy/service/AudioRecordClient.h
++++ b/services/audiopolicy/service/AudioRecordClient.h
+@@ -43,7 +43,7 @@ public:
+             wp<AudioPolicyService::AudioCommandThread> commandThread);
+ 
+ private:
+-    OpRecordAudioMonitor(const AttributionSourceState &attributionSource,
++    OpRecordAudioMonitor(AttributionSourceState attributionSource,
+                          uint32_t virtualDeviceId,
+                          const audio_attributes_t &attr,
+                          int32_t appOp,
+@@ -71,7 +71,7 @@ private:
+     void checkOp(bool updateUidStates = false);
+ 
+     std::atomic_bool mHasOp;
+-    AttributionSourceState mAttributionSource;
++    const AttributionSourceState mAttributionSource;
+     const uint32_t mVirtualDeviceId;
+     const audio_attributes_t mAttr;
+     const int32_t mAppOp;
+-- 
+2.43.0
+

@@ -1,0 +1,33 @@
+From e79e1f00782a714473aed0cbdeb917a5671e8653 Mon Sep 17 00:00:00 2001
+From: Eric Laurent <elaurent@google.com>
+Date: Wed, 23 Oct 2024 18:16:36 +0000
+Subject: [PATCH 134/436] make audio_framework aconfig visible to core/res for
+ permission flagging
+
+Bug: 374751406
+Test: make
+Flag: EXEMPT flag definition
+Change-Id: I7fe02ed13ce6bedd387d858c2362aa06c5388d7a
+---
+ media/audio/aconfig/Android.bp | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/media/audio/aconfig/Android.bp b/media/audio/aconfig/Android.bp
+index 47418cf61e..2da6758fca 100644
+--- a/media/audio/aconfig/Android.bp
++++ b/media/audio/aconfig/Android.bp
+@@ -116,7 +116,10 @@ aconfig_declarations {
+     package: "android.media.audio",
+     container: "system",
+     srcs: ["audio_framework.aconfig"],
+-    visibility: ["//frameworks/base/api"],
++    visibility: [
++        "//frameworks/base/api",
++        "//frameworks/base/core/res",
++    ],
+ }
+ 
+ aconfig_declarations {
+-- 
+2.43.0
+

@@ -1,0 +1,306 @@
+From e42b6481ddfc32105132357710190558d207f473 Mon Sep 17 00:00:00 2001
+From: Andy Hung <hunga@google.com>
+Date: Wed, 16 Oct 2024 19:16:50 -0700
+Subject: [PATCH 121/436] Fix MediaPlayer raw pointer usage
+
+This causes lifetime problems.
+
+Flag: EXEMPT bugfix
+Test: atest MediaPlayerTest
+Bug: 351695164
+Change-Id: I1f3dae49b4d612e6effafbbfd70ccc0c82f90642
+---
+ cmds/stagefright/AudioPlayer.cpp              | 13 +++++---
+ cmds/stagefright/AudioPlayer.h                |  7 ++--
+ .../MediaPlayerService.cpp                    | 18 +++++-----
+ .../MediaPlayerService.h                      |  8 ++---
+ .../include/MediaPlayerInterface.h            | 33 +++++++++++++++++--
+ .../nuplayer/NuPlayerRenderer.cpp             |  9 +++--
+ .../include/nuplayer/NuPlayerRenderer.h       |  4 +--
+ 7 files changed, 63 insertions(+), 29 deletions(-)
+
+diff --git a/cmds/stagefright/AudioPlayer.cpp b/cmds/stagefright/AudioPlayer.cpp
+index 6cddf47504..54885ef1b0 100644
+--- a/cmds/stagefright/AudioPlayer.cpp
++++ b/cmds/stagefright/AudioPlayer.cpp
+@@ -101,6 +101,10 @@ status_t AudioPlayer::start(bool sourceAlreadyStarted) {
+ 
+     CHECK(mFirstBuffer == NULL);
+ 
++    if (!mAudioPlayerWrapper) {
++        mAudioPlayerWrapper = sp<MediaPlayerBase::WeakWrapper<AudioPlayer>>::make(this);
++    }
++
+     MediaSource::ReadOptions options;
+     if (mSeeking) {
+         options.setSeekTo(mSeekTimeUs);
+@@ -203,7 +207,7 @@ status_t AudioPlayer::start(bool sourceAlreadyStarted) {
+                 mSampleRate, numChannels, channelMask, audioFormat,
+                 DEFAULT_AUDIOSINK_BUFFERCOUNT,
+                 &AudioPlayer::AudioSinkCallback,
+-                this,
++                mAudioPlayerWrapper,
+                 (audio_output_flags_t)flags,
+                 useOffload() ? &offloadInfo : NULL);
+ 
+@@ -430,10 +434,11 @@ status_t AudioPlayer::getPlaybackRate(AudioPlaybackRate *rate /* nonnull */) {
+ 
+ // static
+ size_t AudioPlayer::AudioSinkCallback(
+-        MediaPlayerBase::AudioSink * /* audioSink */,
+-        void *buffer, size_t size, void *cookie,
++        const sp<MediaPlayerBase::AudioSink>& /* audioSink */,
++        void *buffer, size_t size, const wp<RefBase>& cookie,
+         MediaPlayerBase::AudioSink::cb_event_t event) {
+-    AudioPlayer *me = (AudioPlayer *)cookie;
++    const auto me = MediaPlayerBase::WeakWrapper<AudioPlayer>::promoteFromRefBase(cookie);
++    if (!me) return 0;
+ 
+     switch(event) {
+     case MediaPlayerBase::AudioSink::CB_EVENT_FILL_BUFFER:
+diff --git a/cmds/stagefright/AudioPlayer.h b/cmds/stagefright/AudioPlayer.h
+index 608f54bb36..877ac1371b 100644
+--- a/cmds/stagefright/AudioPlayer.h
++++ b/cmds/stagefright/AudioPlayer.h
+@@ -29,7 +29,7 @@ namespace android {
+ 
+ struct AwesomePlayer;
+ 
+-class AudioPlayer : AudioTrack::IAudioTrackCallback {
++class AudioPlayer : public AudioTrack::IAudioTrackCallback {
+ public:
+     enum {
+         REACHED_EOS,
+@@ -97,14 +97,15 @@ private:
+     MediaBufferBase *mFirstBuffer;
+ 
+     sp<MediaPlayerBase::AudioSink> mAudioSink;
++    sp<MediaPlayerBase::WeakWrapper<AudioPlayer>> mAudioPlayerWrapper;
+ 
+     bool mPlaying;
+     int64_t mStartPosUs;
+     const uint32_t mCreateFlags;
+ 
+     static size_t AudioSinkCallback(
+-            MediaPlayerBase::AudioSink *audioSink,
+-            void *data, size_t size, void *me,
++            const sp<MediaPlayerBase::AudioSink>& audioSink,
++            void *data, size_t size, const wp<RefBase>& me,
+             MediaPlayerBase::AudioSink::cb_event_t event);
+ 
+     size_t fillBuffer(void *data, size_t size);
+diff --git a/media/libmediaplayerservice/MediaPlayerService.cpp b/media/libmediaplayerservice/MediaPlayerService.cpp
+index 761137e240..b267c08f0f 100644
+--- a/media/libmediaplayerservice/MediaPlayerService.cpp
++++ b/media/libmediaplayerservice/MediaPlayerService.cpp
+@@ -1816,8 +1816,6 @@ MediaPlayerService::AudioOutput::AudioOutput(audio_session_t sessionId,
+         const sp<AudioSystem::AudioDeviceCallback>& deviceCallback)
+     : mCachedPlayerIId(PLAYER_PIID_INVALID),
+       mCallback(NULL),
+-      mCallbackCookie(NULL),
+-      mCallbackData(NULL),
+       mStreamType(AUDIO_STREAM_MUSIC),
+       mLeftVolume(1.0),
+       mRightVolume(1.0),
+@@ -2085,7 +2083,7 @@ void MediaPlayerService::AudioOutput::close_l()
+ status_t MediaPlayerService::AudioOutput::open(
+         uint32_t sampleRate, int channelCount, audio_channel_mask_t channelMask,
+         audio_format_t format, int bufferCount,
+-        AudioCallback cb, void *cookie,
++        AudioCallback cb, const wp<RefBase>& cookie,
+         audio_output_flags_t flags,
+         const audio_offload_info_t *offloadInfo,
+         bool doNotReconnect,
+@@ -2714,7 +2712,7 @@ size_t MediaPlayerService::AudioOutput::CallbackData::onMoreData(const AudioTrac
+         return 0;
+     }
+     size_t actualSize = (*me->mCallback)(
+-            me.get(), buffer.data(), buffer.size(), me->mCallbackCookie,
++            me, buffer.data(), buffer.size(), me->mCallbackCookie,
+             CB_EVENT_FILL_BUFFER);
+ 
+     // Log when no data is returned from the callback.
+@@ -2739,7 +2737,7 @@ void MediaPlayerService::AudioOutput::CallbackData::onStreamEnd() {
+         return;
+     }
+     ALOGV("callbackwrapper: deliver EVENT_STREAM_END");
+-    (*me->mCallback)(me.get(), NULL /* buffer */, 0 /* size */,
++    (*me->mCallback)(me, nullptr /* buffer */, 0 /* size */,
+             me->mCallbackCookie, CB_EVENT_STREAM_END);
+     unlock();
+ }
+@@ -2753,7 +2751,7 @@ void MediaPlayerService::AudioOutput::CallbackData::onNewIAudioTrack() {
+         return;
+     }
+     ALOGV("callbackwrapper: deliver EVENT_TEAR_DOWN");
+-    (*me->mCallback)(me.get(),  NULL /* buffer */, 0 /* size */,
++    (*me->mCallback)(me, nullptr /* buffer */, 0 /* size */,
+             me->mCallbackCookie, CB_EVENT_TEAR_DOWN);
+     unlock();
+ }
+@@ -2803,7 +2801,7 @@ int64_t MediaPlayerService::AudioOutput::getBufferDurationInUs() const
+ struct CallbackThread : public Thread {
+     CallbackThread(const wp<MediaPlayerBase::AudioSink> &sink,
+                    MediaPlayerBase::AudioSink::AudioCallback cb,
+-                   void *cookie);
++                   const wp<RefBase>& cookie);
+ 
+ protected:
+     virtual ~CallbackThread();
+@@ -2813,7 +2811,7 @@ protected:
+ private:
+     wp<MediaPlayerBase::AudioSink> mSink;
+     MediaPlayerBase::AudioSink::AudioCallback mCallback;
+-    void *mCookie;
++    wp<RefBase> mCookie;
+     void *mBuffer;
+     size_t mBufferSize;
+ 
+@@ -2824,7 +2822,7 @@ private:
+ CallbackThread::CallbackThread(
+         const wp<MediaPlayerBase::AudioSink> &sink,
+         MediaPlayerBase::AudioSink::AudioCallback cb,
+-        void *cookie)
++        const wp<RefBase>& cookie)
+     : mSink(sink),
+       mCallback(cb),
+       mCookie(cookie),
+@@ -2851,7 +2849,7 @@ bool CallbackThread::threadLoop() {
+     }
+ 
+     size_t actualSize =
+-        (*mCallback)(sink.get(), mBuffer, mBufferSize, mCookie,
++        (*mCallback)(sink, mBuffer, mBufferSize, mCookie,
+                 MediaPlayerBase::AudioSink::CB_EVENT_FILL_BUFFER);
+ 
+     if (actualSize > 0) {
+diff --git a/media/libmediaplayerservice/MediaPlayerService.h b/media/libmediaplayerservice/MediaPlayerService.h
+index cb544bd26e..76b7bcfda0 100644
+--- a/media/libmediaplayerservice/MediaPlayerService.h
++++ b/media/libmediaplayerservice/MediaPlayerService.h
+@@ -104,14 +104,14 @@ class MediaPlayerService : public BnMediaPlayerService
+         virtual int64_t         getBufferDurationInUs() const;
+         virtual audio_output_flags_t getFlags() const { return mFlags; }
+ 
+-        virtual status_t        open(
++        status_t open(
+                 uint32_t sampleRate, int channelCount, audio_channel_mask_t channelMask,
+                 audio_format_t format, int bufferCount,
+-                AudioCallback cb, void *cookie,
++                AudioCallback cb, const wp<RefBase>& cookie,
+                 audio_output_flags_t flags = AUDIO_OUTPUT_FLAG_NONE,
+                 const audio_offload_info_t *offloadInfo = NULL,
+                 bool doNotReconnect = false,
+-                uint32_t suggestedFrameCount = 0);
++                uint32_t suggestedFrameCount = 0) override;
+ 
+         virtual void            setPlayerIId(int32_t playerIId);
+ 
+@@ -164,7 +164,7 @@ class MediaPlayerService : public BnMediaPlayerService
+         sp<AudioOutput>         mNextOutput;
+         int                     mCachedPlayerIId;
+         AudioCallback           mCallback;
+-        void *                  mCallbackCookie;
++        wp<RefBase>             mCallbackCookie;
+         sp<CallbackData>        mCallbackData;
+         audio_stream_type_t     mStreamType;
+         audio_attributes_t *    mAttributes;
+diff --git a/media/libmediaplayerservice/include/MediaPlayerInterface.h b/media/libmediaplayerservice/include/MediaPlayerInterface.h
+index be1aa004ce..495cf004cf 100644
+--- a/media/libmediaplayerservice/include/MediaPlayerInterface.h
++++ b/media/libmediaplayerservice/include/MediaPlayerInterface.h
+@@ -76,6 +76,33 @@ public:
+         virtual ~Listener() {}
+     };
+ 
++    // For the AudioCallback, we provide a WeakWrapper class
++    // to wrap a virtual RefBase derived object to pass into the AudioCallback.
++    // This is not used for NuPlayer::Renderer, only for legacy AudioPlayer implementation.
++    template <typename T>
++    class WeakWrapper : public RefBase {
++    public:
++        explicit WeakWrapper(const sp<T>& object)
++                : mObject(object) {}
++
++        sp<T> promote() const {
++            if (mObject == nullptr) return {};
++            return mObject.promote();
++        }
++
++        static sp<T> promoteFromRefBase(const wp<RefBase>& weakWrapper) {
++            if (weakWrapper == nullptr) return {};
++            const auto refBase = weakWrapper.promote();
++            if (!refBase) return {};
++            const auto wrapper = sp<WeakWrapper<T>>::fromExisting(
++                    static_cast<WeakWrapper<T>*>(refBase.get()));
++            return wrapper->promote();
++        }
++
++    private:
++        const wp<T> mObject;
++    };
++
+     // AudioSink: abstraction layer for audio output
+     class AudioSink : public RefBase {
+     public:
+@@ -89,8 +116,8 @@ public:
+ 
+         // Callback returns the number of bytes actually written to the buffer.
+         typedef size_t (*AudioCallback)(
+-                AudioSink *audioSink, void *buffer, size_t size, void *cookie,
+-                        cb_event_t event);
++                const sp<AudioSink>& audioSink, void *buffer, size_t size,
++                const wp<RefBase>& cookie, cb_event_t event);
+ 
+         virtual             ~AudioSink() {}
+         virtual bool        ready() const = 0; // audio output is open and ready
+@@ -117,7 +144,7 @@ public:
+                 audio_format_t format=AUDIO_FORMAT_PCM_16_BIT,
+                 int bufferCount=DEFAULT_AUDIOSINK_BUFFERCOUNT,
+                 AudioCallback cb = NULL,
+-                void *cookie = NULL,
++                const wp<RefBase>& cookie = {},
+                 audio_output_flags_t flags = AUDIO_OUTPUT_FLAG_NONE,
+                 const audio_offload_info_t *offloadInfo = NULL,
+                 bool doNotReconnect = false,
+diff --git a/media/libmediaplayerservice/nuplayer/NuPlayerRenderer.cpp b/media/libmediaplayerservice/nuplayer/NuPlayerRenderer.cpp
+index 899d50eb68..f6aff8363f 100644
+--- a/media/libmediaplayerservice/nuplayer/NuPlayerRenderer.cpp
++++ b/media/libmediaplayerservice/nuplayer/NuPlayerRenderer.cpp
+@@ -912,12 +912,15 @@ void NuPlayer::Renderer::notifyIfMediaRenderingStarted_l() {
+ 
+ // static
+ size_t NuPlayer::Renderer::AudioSinkCallback(
+-        MediaPlayerBase::AudioSink * /* audioSink */,
++        const sp<MediaPlayerBase::AudioSink>& /* audioSink */,
+         void *buffer,
+         size_t size,
+-        void *cookie,
++        const wp<RefBase>& cookie,
+         MediaPlayerBase::AudioSink::cb_event_t event) {
+-    NuPlayer::Renderer *me = (NuPlayer::Renderer *)cookie;
++    if (cookie == nullptr) return 0;
++    const auto ref = cookie.promote();
++    if (!ref) return 0;
++    const auto me = static_cast<NuPlayer::Renderer*>(ref.get()); // we already hold a sp.
+ 
+     switch (event) {
+         case MediaPlayerBase::AudioSink::CB_EVENT_FILL_BUFFER:
+diff --git a/media/libmediaplayerservice/nuplayer/include/nuplayer/NuPlayerRenderer.h b/media/libmediaplayerservice/nuplayer/include/nuplayer/NuPlayerRenderer.h
+index 574ad3d131..cfa742e148 100644
+--- a/media/libmediaplayerservice/nuplayer/include/nuplayer/NuPlayerRenderer.h
++++ b/media/libmediaplayerservice/nuplayer/include/nuplayer/NuPlayerRenderer.h
+@@ -43,8 +43,8 @@ struct NuPlayer::Renderer : public AHandler {
+              uint32_t flags = 0);
+ 
+     static size_t AudioSinkCallback(
+-            MediaPlayerBase::AudioSink *audioSink,
+-            void *data, size_t size, void *me,
++            const sp<MediaPlayerBase::AudioSink>& audioSink,
++            void *data, size_t size, const wp<RefBase>& me,
+             MediaPlayerBase::AudioSink::cb_event_t event);
+ 
+     void queueBuffer(
+-- 
+2.43.0
+

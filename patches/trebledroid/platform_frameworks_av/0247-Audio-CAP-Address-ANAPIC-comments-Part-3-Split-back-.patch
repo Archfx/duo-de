@@ -1,0 +1,598 @@
+From 2850b261145cf59cb7a4156856fd99c7cc181620 Mon Sep 17 00:00:00 2001
+From: Mikhail Naganov <mnaganov@google.com>
+Date: Thu, 7 Nov 2024 17:05:27 -0800
+Subject: [PATCH 247/436] Audio CAP: Address ANAPIC comments, Part 3 (Split
+ back AudioPolicyForceUse)
+
+Revert "Migrate forced config and force use to android.media.audio.common.types"
+This reverts commit 873738c761c34b56c018783455d908af1edf0605.
+
+The reason is that the stable version of parcelables `AudioPolicyForceUse`
+and `AudioPolicyForcedConfig` is being refactored for better
+structure. However since in the framework these types are used up to
+the Java layer, leave the framework versions as is.
+
+Bug: 364310317
+Test: m
+Change-Id: Ib36958c042f4e52186fe9d5c31bae45473b2ebe4
+---
+ .../AidlConversionCppNdk.cpp                  | 134 ------------------
+ .../include/media/AidlConversionCppNdk-impl.h |  15 --
+ media/libaudioclient/Android.bp               |   2 +
+ media/libaudioclient/AudioSystem.cpp          |   6 +-
+ media/libaudioclient/PolicyAidlConversion.cpp | 132 +++++++++++++++++
+ .../android/media/AudioPolicyForceUse.aidl    |  31 ++++
+ .../media/AudioPolicyForcedConfig.aidl        |  40 ++++++
+ .../android/media/IAudioPolicyService.aidl    |   4 +-
+ .../include/media/PolicyAidlConversion.h      |  12 ++
+ .../service/AudioPolicyInterfaceImpl.cpp      |  10 +-
+ .../audiopolicy/service/AudioPolicyService.h  |   8 +-
+ 11 files changed, 229 insertions(+), 165 deletions(-)
+ create mode 100644 media/libaudioclient/aidl/android/media/AudioPolicyForceUse.aidl
+ create mode 100644 media/libaudioclient/aidl/android/media/AudioPolicyForcedConfig.aidl
+
+diff --git a/media/audioaidlconversion/AidlConversionCppNdk.cpp b/media/audioaidlconversion/AidlConversionCppNdk.cpp
+index 40d5f5f8d3..0682f65713 100644
+--- a/media/audioaidlconversion/AidlConversionCppNdk.cpp
++++ b/media/audioaidlconversion/AidlConversionCppNdk.cpp
+@@ -76,8 +76,6 @@ using media::audio::common::AudioMode;
+ using media::audio::common::AudioOffloadInfo;
+ using media::audio::common::AudioOutputFlags;
+ using media::audio::common::AudioPlaybackRate;
+-using media::audio::common::AudioPolicyForcedConfig;
+-using media::audio::common::AudioPolicyForceUse;
+ using media::audio::common::AudioPort;
+ using media::audio::common::AudioPortConfig;
+ using media::audio::common::AudioPortDeviceExt;
+@@ -3322,138 +3320,6 @@ legacy2aidl_audio_microphone_characteristic_t_MicrophoneInfos(
+     return OK;
+ }
+ 
+-ConversionResult<audio_policy_force_use_t>
+-aidl2legacy_AudioPolicyForceUse_audio_policy_force_use_t(AudioPolicyForceUse aidl) {
+-    switch (aidl) {
+-        case AudioPolicyForceUse::COMMUNICATION:
+-            return AUDIO_POLICY_FORCE_FOR_COMMUNICATION;
+-        case AudioPolicyForceUse::MEDIA:
+-            return AUDIO_POLICY_FORCE_FOR_MEDIA;
+-        case AudioPolicyForceUse::RECORD:
+-            return AUDIO_POLICY_FORCE_FOR_RECORD;
+-        case AudioPolicyForceUse::DOCK:
+-            return AUDIO_POLICY_FORCE_FOR_DOCK;
+-        case AudioPolicyForceUse::SYSTEM:
+-            return AUDIO_POLICY_FORCE_FOR_SYSTEM;
+-        case AudioPolicyForceUse::HDMI_SYSTEM_AUDIO:
+-            return AUDIO_POLICY_FORCE_FOR_HDMI_SYSTEM_AUDIO;
+-        case AudioPolicyForceUse::ENCODED_SURROUND:
+-            return AUDIO_POLICY_FORCE_FOR_ENCODED_SURROUND;
+-        case AudioPolicyForceUse::VIBRATE_RINGING:
+-            return AUDIO_POLICY_FORCE_FOR_VIBRATE_RINGING;
+-    }
+-    return unexpected(BAD_VALUE);
+-}
+-
+-ConversionResult<AudioPolicyForceUse>
+-legacy2aidl_audio_policy_force_use_t_AudioPolicyForceUse(audio_policy_force_use_t legacy) {
+-    switch (legacy) {
+-        case AUDIO_POLICY_FORCE_FOR_COMMUNICATION:
+-            return AudioPolicyForceUse::COMMUNICATION;
+-        case AUDIO_POLICY_FORCE_FOR_MEDIA:
+-            return AudioPolicyForceUse::MEDIA;
+-        case AUDIO_POLICY_FORCE_FOR_RECORD:
+-            return AudioPolicyForceUse::RECORD;
+-        case AUDIO_POLICY_FORCE_FOR_DOCK:
+-            return AudioPolicyForceUse::DOCK;
+-        case AUDIO_POLICY_FORCE_FOR_SYSTEM:
+-            return AudioPolicyForceUse::SYSTEM;
+-        case AUDIO_POLICY_FORCE_FOR_HDMI_SYSTEM_AUDIO:
+-            return AudioPolicyForceUse::HDMI_SYSTEM_AUDIO;
+-        case AUDIO_POLICY_FORCE_FOR_ENCODED_SURROUND:
+-            return AudioPolicyForceUse::ENCODED_SURROUND;
+-        case AUDIO_POLICY_FORCE_FOR_VIBRATE_RINGING:
+-            return AudioPolicyForceUse::VIBRATE_RINGING;
+-        case AUDIO_POLICY_FORCE_USE_CNT:
+-            break;
+-    }
+-    return unexpected(BAD_VALUE);
+-}
+-
+-ConversionResult<audio_policy_forced_cfg_t>
+-aidl2legacy_AudioPolicyForcedConfig_audio_policy_forced_cfg_t(AudioPolicyForcedConfig aidl) {
+-    switch (aidl) {
+-        case AudioPolicyForcedConfig::NONE:
+-            return AUDIO_POLICY_FORCE_NONE;
+-        case AudioPolicyForcedConfig::SPEAKER:
+-            return AUDIO_POLICY_FORCE_SPEAKER;
+-        case AudioPolicyForcedConfig::HEADPHONES:
+-            return AUDIO_POLICY_FORCE_HEADPHONES;
+-        case AudioPolicyForcedConfig::BT_SCO:
+-            return AUDIO_POLICY_FORCE_BT_SCO;
+-        case AudioPolicyForcedConfig::BT_A2DP:
+-            return AUDIO_POLICY_FORCE_BT_A2DP;
+-        case AudioPolicyForcedConfig::WIRED_ACCESSORY:
+-            return AUDIO_POLICY_FORCE_WIRED_ACCESSORY;
+-        case AudioPolicyForcedConfig::BT_CAR_DOCK:
+-            return AUDIO_POLICY_FORCE_BT_CAR_DOCK;
+-        case AudioPolicyForcedConfig::BT_DESK_DOCK:
+-            return AUDIO_POLICY_FORCE_BT_DESK_DOCK;
+-        case AudioPolicyForcedConfig::ANALOG_DOCK:
+-            return AUDIO_POLICY_FORCE_ANALOG_DOCK;
+-        case AudioPolicyForcedConfig::DIGITAL_DOCK:
+-            return AUDIO_POLICY_FORCE_DIGITAL_DOCK;
+-        case AudioPolicyForcedConfig::NO_BT_A2DP:
+-            return AUDIO_POLICY_FORCE_NO_BT_A2DP;
+-        case AudioPolicyForcedConfig::SYSTEM_ENFORCED:
+-            return AUDIO_POLICY_FORCE_SYSTEM_ENFORCED;
+-        case AudioPolicyForcedConfig::HDMI_SYSTEM_AUDIO_ENFORCED:
+-            return AUDIO_POLICY_FORCE_HDMI_SYSTEM_AUDIO_ENFORCED;
+-        case AudioPolicyForcedConfig::ENCODED_SURROUND_NEVER:
+-            return AUDIO_POLICY_FORCE_ENCODED_SURROUND_NEVER;
+-        case AudioPolicyForcedConfig::ENCODED_SURROUND_ALWAYS:
+-            return AUDIO_POLICY_FORCE_ENCODED_SURROUND_ALWAYS;
+-        case AudioPolicyForcedConfig::ENCODED_SURROUND_MANUAL:
+-            return AUDIO_POLICY_FORCE_ENCODED_SURROUND_MANUAL;
+-        case AudioPolicyForcedConfig::BT_BLE:
+-            return AUDIO_POLICY_FORCE_BT_BLE;
+-    }
+-    return unexpected(BAD_VALUE);
+-}
+-
+-ConversionResult<AudioPolicyForcedConfig>
+-legacy2aidl_audio_policy_forced_cfg_t_AudioPolicyForcedConfig(audio_policy_forced_cfg_t legacy) {
+-    switch (legacy) {
+-        case AUDIO_POLICY_FORCE_NONE:
+-            return AudioPolicyForcedConfig::NONE;
+-        case AUDIO_POLICY_FORCE_SPEAKER:
+-            return AudioPolicyForcedConfig::SPEAKER;
+-        case AUDIO_POLICY_FORCE_HEADPHONES:
+-            return AudioPolicyForcedConfig::HEADPHONES;
+-        case AUDIO_POLICY_FORCE_BT_SCO:
+-            return AudioPolicyForcedConfig::BT_SCO;
+-        case AUDIO_POLICY_FORCE_BT_A2DP:
+-            return AudioPolicyForcedConfig::BT_A2DP;
+-        case AUDIO_POLICY_FORCE_WIRED_ACCESSORY:
+-            return AudioPolicyForcedConfig::WIRED_ACCESSORY;
+-        case AUDIO_POLICY_FORCE_BT_CAR_DOCK:
+-            return AudioPolicyForcedConfig::BT_CAR_DOCK;
+-        case AUDIO_POLICY_FORCE_BT_DESK_DOCK:
+-            return AudioPolicyForcedConfig::BT_DESK_DOCK;
+-        case AUDIO_POLICY_FORCE_ANALOG_DOCK:
+-            return AudioPolicyForcedConfig::ANALOG_DOCK;
+-        case AUDIO_POLICY_FORCE_DIGITAL_DOCK:
+-            return AudioPolicyForcedConfig::DIGITAL_DOCK;
+-        case AUDIO_POLICY_FORCE_NO_BT_A2DP:
+-            return AudioPolicyForcedConfig::NO_BT_A2DP;
+-        case AUDIO_POLICY_FORCE_SYSTEM_ENFORCED:
+-            return AudioPolicyForcedConfig::SYSTEM_ENFORCED;
+-        case AUDIO_POLICY_FORCE_HDMI_SYSTEM_AUDIO_ENFORCED:
+-            return AudioPolicyForcedConfig::HDMI_SYSTEM_AUDIO_ENFORCED;
+-        case AUDIO_POLICY_FORCE_ENCODED_SURROUND_NEVER:
+-            return AudioPolicyForcedConfig::ENCODED_SURROUND_NEVER;
+-        case AUDIO_POLICY_FORCE_ENCODED_SURROUND_ALWAYS:
+-            return AudioPolicyForcedConfig::ENCODED_SURROUND_ALWAYS;
+-        case AUDIO_POLICY_FORCE_ENCODED_SURROUND_MANUAL:
+-            return AudioPolicyForcedConfig::ENCODED_SURROUND_MANUAL;
+-        case AUDIO_POLICY_FORCE_BT_BLE:
+-            return AudioPolicyForcedConfig::BT_BLE;
+-        case AUDIO_POLICY_FORCE_CFG_CNT:
+-            break;
+-    }
+-    return unexpected(BAD_VALUE);
+-}
+-
+ }  // namespace android
+ 
+ #undef GET_DEVICE_DESC_CONNECTION
+diff --git a/media/audioaidlconversion/include/media/AidlConversionCppNdk-impl.h b/media/audioaidlconversion/include/media/AidlConversionCppNdk-impl.h
+index 9dfb7e7f1a..7268464dad 100644
+--- a/media/audioaidlconversion/include/media/AidlConversionCppNdk-impl.h
++++ b/media/audioaidlconversion/include/media/AidlConversionCppNdk-impl.h
+@@ -58,8 +58,6 @@
+ #include PREFIX(android/media/audio/common/AudioMode.h)
+ #include PREFIX(android/media/audio/common/AudioOffloadInfo.h)
+ #include PREFIX(android/media/audio/common/AudioOutputFlags.h)
+-#include PREFIX(android/media/audio/common/AudioPolicyForceUse.h)
+-#include PREFIX(android/media/audio/common/AudioPolicyForcedConfig.h)
+ #include PREFIX(android/media/audio/common/AudioPort.h)
+ #include PREFIX(android/media/audio/common/AudioPortConfig.h)
+ #include PREFIX(android/media/audio/common/AudioPortExt.h)
+@@ -78,7 +76,6 @@
+ 
+ #include <system/audio.h>
+ #include <system/audio_effect.h>
+-#include <system/audio_policy.h>
+ 
+ #if defined(BACKEND_NDK_IMPL)
+ namespace aidl {
+@@ -457,18 +454,6 @@ legacy2aidl_audio_microphone_characteristic_t_MicrophoneInfos(
+         media::audio::common::MicrophoneInfo* aidlInfo,
+         media::audio::common::MicrophoneDynamicInfo* aidlDynamic);
+ 
+-ConversionResult<audio_policy_forced_cfg_t>
+-aidl2legacy_AudioPolicyForcedConfig_audio_policy_forced_cfg_t(
+-        media::audio::common::AudioPolicyForcedConfig aidl);
+-ConversionResult<media::audio::common::AudioPolicyForcedConfig>
+-legacy2aidl_audio_policy_forced_cfg_t_AudioPolicyForcedConfig(audio_policy_forced_cfg_t legacy);
+-
+-ConversionResult<audio_policy_force_use_t>
+-aidl2legacy_AudioPolicyForceUse_audio_policy_force_use_t(
+-        media::audio::common::AudioPolicyForceUse aidl);
+-ConversionResult<media::audio::common::AudioPolicyForceUse>
+-legacy2aidl_audio_policy_force_use_t_AudioPolicyForceUse(audio_policy_force_use_t legacy);
+-
+ }  // namespace android
+ 
+ #if defined(BACKEND_NDK_IMPL)
+diff --git a/media/libaudioclient/Android.bp b/media/libaudioclient/Android.bp
+index 61204aebb8..6dfb327c69 100644
+--- a/media/libaudioclient/Android.bp
++++ b/media/libaudioclient/Android.bp
+@@ -359,6 +359,8 @@ aidl_interface {
+         "aidl/android/media/AudioMixerBehavior.aidl",
+         "aidl/android/media/AudioOffloadMode.aidl",
+         "aidl/android/media/AudioPolicyDeviceState.aidl",
++        "aidl/android/media/AudioPolicyForceUse.aidl",
++        "aidl/android/media/AudioPolicyForcedConfig.aidl",
+         "aidl/android/media/AudioProductStrategy.aidl",
+         "aidl/android/media/AudioVolumeGroup.aidl",
+         "aidl/android/media/DeviceRole.aidl",
+diff --git a/media/libaudioclient/AudioSystem.cpp b/media/libaudioclient/AudioSystem.cpp
+index 85f4a865c1..3f4fcfdf35 100644
+--- a/media/libaudioclient/AudioSystem.cpp
++++ b/media/libaudioclient/AudioSystem.cpp
+@@ -60,8 +60,6 @@ using media::audio::common::AudioFormatDescription;
+ using media::audio::common::AudioMMapPolicyInfo;
+ using media::audio::common::AudioMMapPolicyType;
+ using media::audio::common::AudioOffloadInfo;
+-using media::audio::common::AudioPolicyForceUse;
+-using media::audio::common::AudioPolicyForcedConfig;
+ using media::audio::common::AudioSource;
+ using media::audio::common::AudioStreamType;
+ using media::audio::common::AudioUsage;
+@@ -1061,9 +1059,9 @@ audio_policy_forced_cfg_t AudioSystem::getForceUse(audio_policy_force_use_t usag
+     if (aps == 0) return AUDIO_POLICY_FORCE_NONE;
+ 
+     auto result = [&]() -> ConversionResult<audio_policy_forced_cfg_t> {
+-        AudioPolicyForceUse usageAidl = VALUE_OR_RETURN(
++        media::AudioPolicyForceUse usageAidl = VALUE_OR_RETURN(
+                 legacy2aidl_audio_policy_force_use_t_AudioPolicyForceUse(usage));
+-        AudioPolicyForcedConfig configAidl;
++        media::AudioPolicyForcedConfig configAidl;
+         RETURN_IF_ERROR(statusTFromBinderStatus(
+                 aps->getForceUse(usageAidl, &configAidl)));
+         return aidl2legacy_AudioPolicyForcedConfig_audio_policy_forced_cfg_t(configAidl);
+diff --git a/media/libaudioclient/PolicyAidlConversion.cpp b/media/libaudioclient/PolicyAidlConversion.cpp
+index a414cb7f62..163a359a8a 100644
+--- a/media/libaudioclient/PolicyAidlConversion.cpp
++++ b/media/libaudioclient/PolicyAidlConversion.cpp
+@@ -296,6 +296,138 @@ legacy2aidl_audio_policy_dev_state_t_AudioPolicyDeviceState(audio_policy_dev_sta
+     return unexpected(BAD_VALUE);
+ }
+ 
++ConversionResult<audio_policy_force_use_t>
++aidl2legacy_AudioPolicyForceUse_audio_policy_force_use_t(media::AudioPolicyForceUse aidl) {
++    switch (aidl) {
++        case media::AudioPolicyForceUse::COMMUNICATION:
++            return AUDIO_POLICY_FORCE_FOR_COMMUNICATION;
++        case media::AudioPolicyForceUse::MEDIA:
++            return AUDIO_POLICY_FORCE_FOR_MEDIA;
++        case media::AudioPolicyForceUse::RECORD:
++            return AUDIO_POLICY_FORCE_FOR_RECORD;
++        case media::AudioPolicyForceUse::DOCK:
++            return AUDIO_POLICY_FORCE_FOR_DOCK;
++        case media::AudioPolicyForceUse::SYSTEM:
++            return AUDIO_POLICY_FORCE_FOR_SYSTEM;
++        case media::AudioPolicyForceUse::HDMI_SYSTEM_AUDIO:
++            return AUDIO_POLICY_FORCE_FOR_HDMI_SYSTEM_AUDIO;
++        case media::AudioPolicyForceUse::ENCODED_SURROUND:
++            return AUDIO_POLICY_FORCE_FOR_ENCODED_SURROUND;
++        case media::AudioPolicyForceUse::VIBRATE_RINGING:
++            return AUDIO_POLICY_FORCE_FOR_VIBRATE_RINGING;
++    }
++    return unexpected(BAD_VALUE);
++}
++
++ConversionResult<media::AudioPolicyForceUse>
++legacy2aidl_audio_policy_force_use_t_AudioPolicyForceUse(audio_policy_force_use_t legacy) {
++    switch (legacy) {
++        case AUDIO_POLICY_FORCE_FOR_COMMUNICATION:
++            return media::AudioPolicyForceUse::COMMUNICATION;
++        case AUDIO_POLICY_FORCE_FOR_MEDIA:
++            return media::AudioPolicyForceUse::MEDIA;
++        case AUDIO_POLICY_FORCE_FOR_RECORD:
++            return media::AudioPolicyForceUse::RECORD;
++        case AUDIO_POLICY_FORCE_FOR_DOCK:
++            return media::AudioPolicyForceUse::DOCK;
++        case AUDIO_POLICY_FORCE_FOR_SYSTEM:
++            return media::AudioPolicyForceUse::SYSTEM;
++        case AUDIO_POLICY_FORCE_FOR_HDMI_SYSTEM_AUDIO:
++            return media::AudioPolicyForceUse::HDMI_SYSTEM_AUDIO;
++        case AUDIO_POLICY_FORCE_FOR_ENCODED_SURROUND:
++            return media::AudioPolicyForceUse::ENCODED_SURROUND;
++        case AUDIO_POLICY_FORCE_FOR_VIBRATE_RINGING:
++            return media::AudioPolicyForceUse::VIBRATE_RINGING;
++        case AUDIO_POLICY_FORCE_USE_CNT:
++            break;
++    }
++    return unexpected(BAD_VALUE);
++}
++
++ConversionResult<audio_policy_forced_cfg_t>
++aidl2legacy_AudioPolicyForcedConfig_audio_policy_forced_cfg_t(media::AudioPolicyForcedConfig aidl) {
++    switch (aidl) {
++        case media::AudioPolicyForcedConfig::NONE:
++            return AUDIO_POLICY_FORCE_NONE;
++        case media::AudioPolicyForcedConfig::SPEAKER:
++            return AUDIO_POLICY_FORCE_SPEAKER;
++        case media::AudioPolicyForcedConfig::HEADPHONES:
++            return AUDIO_POLICY_FORCE_HEADPHONES;
++        case media::AudioPolicyForcedConfig::BT_SCO:
++            return AUDIO_POLICY_FORCE_BT_SCO;
++        case media::AudioPolicyForcedConfig::BT_A2DP:
++            return AUDIO_POLICY_FORCE_BT_A2DP;
++        case media::AudioPolicyForcedConfig::WIRED_ACCESSORY:
++            return AUDIO_POLICY_FORCE_WIRED_ACCESSORY;
++        case media::AudioPolicyForcedConfig::BT_CAR_DOCK:
++            return AUDIO_POLICY_FORCE_BT_CAR_DOCK;
++        case media::AudioPolicyForcedConfig::BT_DESK_DOCK:
++            return AUDIO_POLICY_FORCE_BT_DESK_DOCK;
++        case media::AudioPolicyForcedConfig::ANALOG_DOCK:
++            return AUDIO_POLICY_FORCE_ANALOG_DOCK;
++        case media::AudioPolicyForcedConfig::DIGITAL_DOCK:
++            return AUDIO_POLICY_FORCE_DIGITAL_DOCK;
++        case media::AudioPolicyForcedConfig::NO_BT_A2DP:
++            return AUDIO_POLICY_FORCE_NO_BT_A2DP;
++        case media::AudioPolicyForcedConfig::SYSTEM_ENFORCED:
++            return AUDIO_POLICY_FORCE_SYSTEM_ENFORCED;
++        case media::AudioPolicyForcedConfig::HDMI_SYSTEM_AUDIO_ENFORCED:
++            return AUDIO_POLICY_FORCE_HDMI_SYSTEM_AUDIO_ENFORCED;
++        case media::AudioPolicyForcedConfig::ENCODED_SURROUND_NEVER:
++            return AUDIO_POLICY_FORCE_ENCODED_SURROUND_NEVER;
++        case media::AudioPolicyForcedConfig::ENCODED_SURROUND_ALWAYS:
++            return AUDIO_POLICY_FORCE_ENCODED_SURROUND_ALWAYS;
++        case media::AudioPolicyForcedConfig::ENCODED_SURROUND_MANUAL:
++            return AUDIO_POLICY_FORCE_ENCODED_SURROUND_MANUAL;
++        case media::AudioPolicyForcedConfig::BT_BLE:
++            return AUDIO_POLICY_FORCE_BT_BLE;
++    }
++    return unexpected(BAD_VALUE);
++}
++
++ConversionResult<media::AudioPolicyForcedConfig>
++legacy2aidl_audio_policy_forced_cfg_t_AudioPolicyForcedConfig(audio_policy_forced_cfg_t legacy) {
++    switch (legacy) {
++        case AUDIO_POLICY_FORCE_NONE:
++            return media::AudioPolicyForcedConfig::NONE;
++        case AUDIO_POLICY_FORCE_SPEAKER:
++            return media::AudioPolicyForcedConfig::SPEAKER;
++        case AUDIO_POLICY_FORCE_HEADPHONES:
++            return media::AudioPolicyForcedConfig::HEADPHONES;
++        case AUDIO_POLICY_FORCE_BT_SCO:
++            return media::AudioPolicyForcedConfig::BT_SCO;
++        case AUDIO_POLICY_FORCE_BT_A2DP:
++            return media::AudioPolicyForcedConfig::BT_A2DP;
++        case AUDIO_POLICY_FORCE_WIRED_ACCESSORY:
++            return media::AudioPolicyForcedConfig::WIRED_ACCESSORY;
++        case AUDIO_POLICY_FORCE_BT_CAR_DOCK:
++            return media::AudioPolicyForcedConfig::BT_CAR_DOCK;
++        case AUDIO_POLICY_FORCE_BT_DESK_DOCK:
++            return media::AudioPolicyForcedConfig::BT_DESK_DOCK;
++        case AUDIO_POLICY_FORCE_ANALOG_DOCK:
++            return media::AudioPolicyForcedConfig::ANALOG_DOCK;
++        case AUDIO_POLICY_FORCE_DIGITAL_DOCK:
++            return media::AudioPolicyForcedConfig::DIGITAL_DOCK;
++        case AUDIO_POLICY_FORCE_NO_BT_A2DP:
++            return media::AudioPolicyForcedConfig::NO_BT_A2DP;
++        case AUDIO_POLICY_FORCE_SYSTEM_ENFORCED:
++            return media::AudioPolicyForcedConfig::SYSTEM_ENFORCED;
++        case AUDIO_POLICY_FORCE_HDMI_SYSTEM_AUDIO_ENFORCED:
++            return media::AudioPolicyForcedConfig::HDMI_SYSTEM_AUDIO_ENFORCED;
++        case AUDIO_POLICY_FORCE_ENCODED_SURROUND_NEVER:
++            return media::AudioPolicyForcedConfig::ENCODED_SURROUND_NEVER;
++        case AUDIO_POLICY_FORCE_ENCODED_SURROUND_ALWAYS:
++            return media::AudioPolicyForcedConfig::ENCODED_SURROUND_ALWAYS;
++        case AUDIO_POLICY_FORCE_ENCODED_SURROUND_MANUAL:
++            return media::AudioPolicyForcedConfig::ENCODED_SURROUND_MANUAL;
++        case AUDIO_POLICY_FORCE_BT_BLE:
++            return media::AudioPolicyForcedConfig::BT_BLE;
++        case AUDIO_POLICY_FORCE_CFG_CNT:
++            break;
++    }
++    return unexpected(BAD_VALUE);
++}
++
+ ConversionResult<device_role_t>
+ aidl2legacy_DeviceRole_device_role_t(media::DeviceRole aidl) {
+     switch (aidl) {
+diff --git a/media/libaudioclient/aidl/android/media/AudioPolicyForceUse.aidl b/media/libaudioclient/aidl/android/media/AudioPolicyForceUse.aidl
+new file mode 100644
+index 0000000000..9bb06057f3
+--- /dev/null
++++ b/media/libaudioclient/aidl/android/media/AudioPolicyForceUse.aidl
+@@ -0,0 +1,31 @@
++/*
++ * Copyright (C) 2021 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package android.media;
++
++/**
++ * {@hide}
++ */
++@Backing(type="int")
++enum AudioPolicyForceUse {
++    COMMUNICATION = 0,
++    MEDIA = 1,
++    RECORD = 2,
++    DOCK = 3,
++    SYSTEM = 4,
++    HDMI_SYSTEM_AUDIO = 5,
++    ENCODED_SURROUND = 6,
++    VIBRATE_RINGING = 7,
++}
+diff --git a/media/libaudioclient/aidl/android/media/AudioPolicyForcedConfig.aidl b/media/libaudioclient/aidl/android/media/AudioPolicyForcedConfig.aidl
+new file mode 100644
+index 0000000000..111bb2f1ea
+--- /dev/null
++++ b/media/libaudioclient/aidl/android/media/AudioPolicyForcedConfig.aidl
+@@ -0,0 +1,40 @@
++/*
++ * Copyright (C) 2021 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package android.media;
++
++/**
++ * {@hide}
++ */
++@Backing(type="int")
++enum AudioPolicyForcedConfig {
++    NONE = 0,
++    SPEAKER = 1,
++    HEADPHONES = 2,
++    BT_SCO = 3,
++    BT_A2DP = 4,
++    WIRED_ACCESSORY = 5,
++    BT_CAR_DOCK = 6,
++    BT_DESK_DOCK = 7,
++    ANALOG_DOCK = 8,
++    DIGITAL_DOCK = 9,
++    NO_BT_A2DP = 10, /* A2DP sink is not preferred to speaker or wired HS */
++    SYSTEM_ENFORCED = 11,
++    HDMI_SYSTEM_AUDIO_ENFORCED = 12,
++    ENCODED_SURROUND_NEVER = 13,
++    ENCODED_SURROUND_ALWAYS = 14,
++    ENCODED_SURROUND_MANUAL = 15,
++    BT_BLE = 16,
++}
+diff --git a/media/libaudioclient/aidl/android/media/IAudioPolicyService.aidl b/media/libaudioclient/aidl/android/media/IAudioPolicyService.aidl
+index 7f5e8e2b43..ac42ea925f 100644
+--- a/media/libaudioclient/aidl/android/media/IAudioPolicyService.aidl
++++ b/media/libaudioclient/aidl/android/media/IAudioPolicyService.aidl
+@@ -25,6 +25,8 @@ import android.media.AudioMixerAttributesInternal;
+ import android.media.AudioOffloadMode;
+ import android.media.AudioPatchFw;
+ import android.media.AudioPolicyDeviceState;
++import android.media.AudioPolicyForcedConfig;
++import android.media.AudioPolicyForceUse;
+ import android.media.AudioPortFw;
+ import android.media.AudioPortConfigFw;
+ import android.media.AudioPortRole;
+@@ -47,8 +49,6 @@ import android.media.audio.common.AudioDevice;
+ import android.media.audio.common.AudioDeviceDescription;
+ import android.media.audio.common.AudioFormatDescription;
+ import android.media.audio.common.AudioMode;
+-import android.media.audio.common.AudioPolicyForcedConfig;
+-import android.media.audio.common.AudioPolicyForceUse;
+ import android.media.audio.common.AudioProfile;
+ import android.media.audio.common.AudioOffloadInfo;
+ import android.media.audio.common.AudioPort;
+diff --git a/media/libaudioclient/include/media/PolicyAidlConversion.h b/media/libaudioclient/include/media/PolicyAidlConversion.h
+index 1b90d6b641..ed9ddd6971 100644
+--- a/media/libaudioclient/include/media/PolicyAidlConversion.h
++++ b/media/libaudioclient/include/media/PolicyAidlConversion.h
+@@ -28,6 +28,8 @@
+ #include <android/media/AudioMixRouteFlag.h>
+ #include <android/media/AudioMixType.h>
+ #include <android/media/AudioOffloadMode.h>
++#include <android/media/AudioPolicyForceUse.h>
++#include <android/media/AudioPolicyForcedConfig.h>
+ #include <android/media/DeviceRole.h>
+ 
+ #include <media/AidlConversionUtil.h>
+@@ -82,6 +84,16 @@ aidl2legacy_AudioPolicyDeviceState_audio_policy_dev_state_t(media::AudioPolicyDe
+ ConversionResult<media::AudioPolicyDeviceState>
+ legacy2aidl_audio_policy_dev_state_t_AudioPolicyDeviceState(audio_policy_dev_state_t legacy);
+ 
++ConversionResult<audio_policy_force_use_t>
++aidl2legacy_AudioPolicyForceUse_audio_policy_force_use_t(media::AudioPolicyForceUse aidl);
++ConversionResult<media::AudioPolicyForceUse>
++legacy2aidl_audio_policy_force_use_t_AudioPolicyForceUse(audio_policy_force_use_t legacy);
++
++ConversionResult<audio_policy_forced_cfg_t>
++aidl2legacy_AudioPolicyForcedConfig_audio_policy_forced_cfg_t(media::AudioPolicyForcedConfig aidl);
++ConversionResult<media::AudioPolicyForcedConfig>
++legacy2aidl_audio_policy_forced_cfg_t_AudioPolicyForcedConfig(audio_policy_forced_cfg_t legacy);
++
+ ConversionResult<device_role_t>
+ aidl2legacy_DeviceRole_device_role_t(media::DeviceRole aidl);
+ ConversionResult<media::DeviceRole>
+diff --git a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+index b2f0c22fe0..768cd07d15 100644
+--- a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
++++ b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+@@ -60,8 +60,6 @@ using media::audio::common::AudioDeviceDescription;
+ using media::audio::common::AudioFormatDescription;
+ using media::audio::common::AudioMode;
+ using media::audio::common::AudioOffloadInfo;
+-using media::audio::common::AudioPolicyForceUse;
+-using media::audio::common::AudioPolicyForcedConfig;
+ using media::audio::common::AudioSource;
+ using media::audio::common::AudioStreamType;
+ using media::audio::common::AudioUsage;
+@@ -255,8 +253,8 @@ Status AudioPolicyService::getPhoneState(AudioMode* _aidl_return) {
+     return Status::ok();
+ }
+ 
+-Status AudioPolicyService::setForceUse(AudioPolicyForceUse usageAidl,
+-                                       AudioPolicyForcedConfig configAidl)
++Status AudioPolicyService::setForceUse(media::AudioPolicyForceUse usageAidl,
++                                       media::AudioPolicyForcedConfig configAidl)
+ {
+     audio_policy_force_use_t usage = VALUE_OR_RETURN_BINDER_STATUS(
+             aidl2legacy_AudioPolicyForceUse_audio_policy_force_use_t(usageAidl));
+@@ -285,8 +283,8 @@ Status AudioPolicyService::setForceUse(AudioPolicyForceUse usageAidl,
+     return Status::ok();
+ }
+ 
+-Status AudioPolicyService::getForceUse(AudioPolicyForceUse usageAidl,
+-                                       AudioPolicyForcedConfig* _aidl_return) {
++Status AudioPolicyService::getForceUse(media::AudioPolicyForceUse usageAidl,
++                                       media::AudioPolicyForcedConfig* _aidl_return) {
+     audio_policy_force_use_t usage = VALUE_OR_RETURN_BINDER_STATUS(
+             aidl2legacy_AudioPolicyForceUse_audio_policy_force_use_t(usageAidl));
+ 
+diff --git a/services/audiopolicy/service/AudioPolicyService.h b/services/audiopolicy/service/AudioPolicyService.h
+index eccefa750f..428e560af6 100644
+--- a/services/audiopolicy/service/AudioPolicyService.h
++++ b/services/audiopolicy/service/AudioPolicyService.h
+@@ -105,10 +105,10 @@ public:
+             const std::string& deviceName,
+             const AudioFormatDescription& encodedFormat) override;
+     binder::Status setPhoneState(AudioMode state, int32_t uid) override;
+-    binder::Status setForceUse(android::media::audio::common::AudioPolicyForceUse usage,
+-            android::media::audio::common::AudioPolicyForcedConfig config) override;
+-    binder::Status getForceUse(android::media::audio::common::AudioPolicyForceUse usage,
+-            android::media::audio::common::AudioPolicyForcedConfig* _aidl_return) override;
++    binder::Status setForceUse(media::AudioPolicyForceUse usage,
++                               media::AudioPolicyForcedConfig config) override;
++    binder::Status getForceUse(media::AudioPolicyForceUse usage,
++                               media::AudioPolicyForcedConfig* _aidl_return) override;
+     binder::Status getOutput(AudioStreamType stream, int32_t* _aidl_return) override;
+     binder::Status getOutputForAttr(const media::audio::common::AudioAttributes& attr,
+                                     int32_t session,
+-- 
+2.43.0
+

@@ -1,0 +1,442 @@
+From 76a772a43d96e7ad846add6899e19004a759250f Mon Sep 17 00:00:00 2001
+From: Andy Hung <hunga@google.com>
+Date: Thu, 14 Nov 2024 19:58:12 -0800
+Subject: [PATCH 273/436] MediaMetricsService: Extract common string utilities
+ to audio_utils
+
+Flag: EXEMPT refactor
+Test: atest audio_stringutils_tests
+Test: atest mediametrics_tests
+Bug: 376579631
+Change-Id: Ic28c5f2b6c6cc55579b15300fc5ad80ff40cf673
+---
+ services/mediametrics/Android.bp              |  3 +-
+ services/mediametrics/AudioPowerUsage.cpp     |  3 +-
+ services/mediametrics/AudioTypes.cpp          | 13 +--
+ services/mediametrics/StringUtils.cpp         | 99 +------------------
+ services/mediametrics/fuzzer/Android.bp       |  1 +
+ .../include/mediametricsservice/StringUtils.h | 24 -----
+ services/mediametrics/statsd_codec.cpp        |  3 +-
+ .../mediametrics/tests/mediametrics_tests.cpp | 88 +----------------
+ 8 files changed, 19 insertions(+), 215 deletions(-)
+
+diff --git a/services/mediametrics/Android.bp b/services/mediametrics/Android.bp
+index c90488f2e7..d29aa805c8 100644
+--- a/services/mediametrics/Android.bp
++++ b/services/mediametrics/Android.bp
+@@ -159,7 +159,7 @@ cc_library {
+     },
+ 
+     shared_libs: [
+-        "mediametricsservice-aidl-cpp",
++        "libaudioutils",
+         "libbase", // android logging
+         "libbinder",
+         "libcutils",
+@@ -174,6 +174,7 @@ cc_library {
+         "libstatspull",
+         "libstatssocket",
+         "libutils",
++        "mediametricsservice-aidl-cpp",
+         "packagemanager_aidl-cpp",
+     ],
+ 
+diff --git a/services/mediametrics/AudioPowerUsage.cpp b/services/mediametrics/AudioPowerUsage.cpp
+index 201d7401c8..095832c26f 100644
+--- a/services/mediametrics/AudioPowerUsage.cpp
++++ b/services/mediametrics/AudioPowerUsage.cpp
+@@ -25,6 +25,7 @@
+ #include <sstream>
+ #include <string>
+ #include <audio_utils/clock.h>
++#include <audio_utils/StringUtils.h>
+ #include <cutils/properties.h>
+ #include <stats_media_metrics.h>
+ #include <sys/timerfd.h>
+@@ -131,7 +132,7 @@ bool AudioPowerUsage::deviceFromString(const std::string& device_string, int32_t
+ 
+ int32_t AudioPowerUsage::deviceFromStringPairs(const std::string& device_strings) {
+     int32_t deviceMask = 0;
+-    const auto devaddrvec = stringutils::getDeviceAddressPairs(device_strings);
++    const auto devaddrvec = audio_utils::stringutils::getDeviceAddressPairs(device_strings);
+     for (const auto &[device, addr] : devaddrvec) {
+         int32_t combo_device = 0;
+         deviceFromString(device, combo_device);
+diff --git a/services/mediametrics/AudioTypes.cpp b/services/mediametrics/AudioTypes.cpp
+index 353ae124e3..0eeff2bc40 100644
+--- a/services/mediametrics/AudioTypes.cpp
++++ b/services/mediametrics/AudioTypes.cpp
+@@ -17,6 +17,7 @@
+ #include "AudioTypes.h"
+ #include "MediaMetricsConstants.h"
+ #include "StringUtils.h"
++#include <audio_utils/StringUtils.h>
+ #include <media/TypeConverter.h> // requires libmedia_helper to get the Audio code.
+ #include <stats_media_metrics.h>            // statsd
+ 
+@@ -349,7 +350,7 @@ const std::unordered_map<std::string, int32_t>& getStatusMap() {
+ template <typename Traits>
+ int32_t int32FromFlags(const std::string &flags)
+ {
+-    const auto result = stringutils::split(flags, "|");
++    const auto result = audio_utils::stringutils::split(flags, "|");
+     int32_t intFlags = 0;
+     for (const auto& flag : result) {
+         typename Traits::Type value;
+@@ -364,7 +365,7 @@ int32_t int32FromFlags(const std::string &flags)
+ template <typename Traits>
+ std::string stringFromFlags(const std::string &flags, size_t len)
+ {
+-    const auto result = stringutils::split(flags, "|");
++    const auto result = audio_utils::stringutils::split(flags, "|");
+     std::string sFlags;
+     for (const auto& flag : result) {
+         typename Traits::Type value;
+@@ -383,7 +384,7 @@ std::string validateStringFromMap(const std::string &str, const M& map)
+ {
+     if (str.empty()) return {};
+ 
+-    const auto result = stringutils::split(str, "|");
++    const auto result = audio_utils::stringutils::split(str, "|");
+     std::stringstream ss;
+     for (const auto &s : result) {
+         if (map.count(s) > 0) {
+@@ -399,7 +400,7 @@ typename M::mapped_type flagsFromMap(const std::string &str, const M& map)
+ {
+     if (str.empty()) return {};
+ 
+-    const auto result = stringutils::split(str, "|");
++    const auto result = audio_utils::stringutils::split(str, "|");
+     typename M::mapped_type value{};
+     for (const auto &s : result) {
+         auto it = map.find(s);
+@@ -416,7 +417,7 @@ std::vector<int32_t> vectorFromMap(
+ 
+     if (str.empty()) return v;
+ 
+-    const auto result = stringutils::split(str, "|");
++    const auto result = audio_utils::stringutils::split(str, "|");
+     for (const auto &s : result) {
+         auto it = map.find(s);
+         if (it == map.end()) continue;
+@@ -429,7 +430,7 @@ std::vector<int64_t> channelMaskVectorFromString(const std::string &s)
+ {
+     std::vector<int64_t> v;
+ 
+-    const auto result = stringutils::split(s, "|");
++    const auto result = audio_utils::stringutils::split(s, "|");
+     for (const auto &mask : result) {
+         // 0 if undetected or if actually 0.
+         int64_t int64Mask = strtoll(mask.c_str(), nullptr, 0);
+diff --git a/services/mediametrics/StringUtils.cpp b/services/mediametrics/StringUtils.cpp
+index 3b2db85aac..c4111ae73f 100644
+--- a/services/mediametrics/StringUtils.cpp
++++ b/services/mediametrics/StringUtils.cpp
+@@ -19,105 +19,12 @@
+ #include <utils/Log.h>
+ 
+ #include "StringUtils.h"
+-
+-#include <charconv>
+-
+ #include "AudioTypes.h"
++#include <audio_utils/StringUtils.h>
++#include <charconv>
+ 
+ namespace android::mediametrics::stringutils {
+ 
+-std::string tokenizer(std::string::const_iterator& it,
+-        const std::string::const_iterator& end, const char *reserved)
+-{
+-    // consume leading white space
+-    for (; it != end && std::isspace(*it); ++it);
+-    if (it == end) return {};
+-
+-    auto start = it;
+-    // parse until we hit a reserved keyword or space
+-    if (strchr(reserved, *it)) return {start, ++it};
+-    for (;;) {
+-        ++it;
+-        if (it == end || std::isspace(*it) || strchr(reserved, *it)) return {start, it};
+-    }
+-}
+-
+-std::vector<std::string> split(const std::string& flags, const char *delim)
+-{
+-    std::vector<std::string> result;
+-    for (auto it = flags.begin(); ; ) {
+-        auto flag = tokenizer(it, flags.end(), delim);
+-        if (flag.empty() || !std::isalnum(flag[0])) return result;
+-        result.emplace_back(std::move(flag));
+-
+-        // look for the delimeter and discard
+-        auto token = tokenizer(it, flags.end(), delim);
+-        if (token.size() != 1 || strchr(delim, token[0]) == nullptr) return result;
+-    }
+-}
+-
+-bool parseVector(const std::string &str, std::vector<int32_t> *vector) {
+-    std::vector<int32_t> values;
+-    const char *p = str.c_str();
+-    const char *last = p + str.size();
+-    while (p != last) {
+-        if (*p == ',' || *p == '{' || *p == '}') {
+-            p++;
+-        }
+-        int32_t value = -1;
+-        auto [ptr, error] = std::from_chars(p, last, value);
+-        if (error == std::errc::invalid_argument || error == std::errc::result_out_of_range) {
+-            return false;
+-        }
+-        p = ptr;
+-        values.push_back(value);
+-    }
+-    *vector = std::move(values);
+-    return true;
+-}
+-
+-std::vector<std::pair<std::string, std::string>> getDeviceAddressPairs(const std::string& devices)
+-{
+-    std::vector<std::pair<std::string, std::string>> result;
+-
+-    // Currently, the device format is
+-    //
+-    // devices = device_addr OR device_addr|devices
+-    // device_addr = device OR (device, addr)
+-    //
+-    // EXAMPLE:
+-    // device1|(device2, addr2)|...
+-
+-    static constexpr char delim[] = "()|,";
+-    for (auto it = devices.begin(); ; ) {
+-        std::string address;
+-        std::string device = tokenizer(it, devices.end(), delim);
+-        if (device.empty()) return result;
+-        if (device == "(") {  // it is a pair otherwise we consider it a device
+-            device = tokenizer(it, devices.end(), delim); // get actual device
+-            auto token = tokenizer(it, devices.end(), delim);
+-            if (token != ",") return result;  // malformed, must have a comma
+-
+-            // special handling here for empty addresses
+-            address = tokenizer(it, devices.end(), delim);
+-            if (address.empty()) return result;
+-            if (address == ")") {  // no address, just the ")"
+-                address.clear();
+-            } else {
+-                token = tokenizer(it, devices.end(), delim);
+-                if (token != ")") return result;
+-            }
+-        }
+-        // misaligned token, device must start alphanumeric.
+-        if (!std::isalnum(device[0])) return result;
+-
+-        result.emplace_back(std::move(device), std::move(address));
+-
+-        auto token = tokenizer(it, devices.end(), delim);
+-        if (token != "|") return result;  // this includes end of string detection
+-    }
+-}
+-
+ size_t replace(std::string &str, const char *targetChars, const char replaceChar)
+ {
+     size_t replaced = 0;
+@@ -134,7 +41,7 @@ template <types::AudioEnumCategory CATEGORY>
+ std::pair<std::string /* external statsd */, std::string /* internal */>
+ parseDevicePairs(const std::string& devicePairs) {
+     std::pair<std::string, std::string> result{};
+-    const auto devaddrvec = stringutils::getDeviceAddressPairs(devicePairs);
++    const auto devaddrvec = audio_utils::stringutils::getDeviceAddressPairs(devicePairs);
+     for (const auto& [device, addr] : devaddrvec) { // addr ignored for now.
+         if (!result.second.empty()) {
+             result.second.append("|"); // delimit devices with '|'.
+diff --git a/services/mediametrics/fuzzer/Android.bp b/services/mediametrics/fuzzer/Android.bp
+index 99703e3673..efea2523f2 100644
+--- a/services/mediametrics/fuzzer/Android.bp
++++ b/services/mediametrics/fuzzer/Android.bp
+@@ -36,6 +36,7 @@ cc_defaults {
+     ],
+ 
+     shared_libs: [
++        "libaudioutils",
+         "libbase",
+         "libbinder",
+         "libcutils",
+diff --git a/services/mediametrics/include/mediametricsservice/StringUtils.h b/services/mediametrics/include/mediametricsservice/StringUtils.h
+index ed2cf2ef27..3e1cafc85f 100644
+--- a/services/mediametrics/include/mediametricsservice/StringUtils.h
++++ b/services/mediametrics/include/mediametricsservice/StringUtils.h
+@@ -60,30 +60,6 @@ void fieldPrint(std::stringstream& ss, const char * const (& fields)[N], Targs..
+     ((ss << *fptr++ << ":" << args << " "), ...); // (fold expression), send to stringstream.
+ }
+ 
+-/**
+- * Return string tokens from iterator, separated by spaces and reserved chars.
+- */
+-std::string tokenizer(std::string::const_iterator& it,
+-        const std::string::const_iterator& end, const char *reserved);
+-
+-/**
+- * Splits flags string based on delimeters (or, whitespace which is removed).
+- */
+-std::vector<std::string> split(const std::string& flags, const char *delim);
+-
+-/**
+- * Parses a vector of integers using ',' '{' and '}' as delimeters. Leaves
+- * vector unmodified if the parsing fails.
+- */
+-bool parseVector(const std::string &str, std::vector<int32_t> *vector);
+-
+-/**
+- * Parse the devices string and return a vector of device address pairs.
+- *
+- * A failure to parse returns early with the contents that were able to be parsed.
+- */
+-std::vector<std::pair<std::string, std::string>> getDeviceAddressPairs(const std::string &devices);
+-
+ /**
+  * Replaces targetChars with replaceChar in string, returns number of chars replaced.
+  */
+diff --git a/services/mediametrics/statsd_codec.cpp b/services/mediametrics/statsd_codec.cpp
+index 844f2040ea..2f7c4f93e5 100644
+--- a/services/mediametrics/statsd_codec.cpp
++++ b/services/mediametrics/statsd_codec.cpp
+@@ -33,6 +33,7 @@
+ #include <stats_media_metrics.h>
+ #include <stats_event.h>
+ 
++#include <audio_utils/StringUtils.h>
+ #include <frameworks/proto_logging/stats/message/mediametrics_message.pb.h>
+ #include <mediametricsservice/cleaner.h>
+ #include <mediametricsservice/iface_statsd.h>
+@@ -171,7 +172,7 @@ static int32_t getMetricsHdrFormatEnum(std::string &mime, std::string &component
+ }
+ 
+ static void parseVector(const std::string &str, std::vector<int32_t> *vector) {
+-    if (!mediametrics::stringutils::parseVector(str, vector)) {
++    if (!audio_utils::stringutils::parseVector(str, vector)) {
+         ALOGE("failed to parse integer vector from '%s'", str.c_str());
+     }
+ }
+diff --git a/services/mediametrics/tests/mediametrics_tests.cpp b/services/mediametrics/tests/mediametrics_tests.cpp
+index f3933a72f9..383ed6a478 100644
+--- a/services/mediametrics/tests/mediametrics_tests.cpp
++++ b/services/mediametrics/tests/mediametrics_tests.cpp
+@@ -22,6 +22,7 @@
+ #include <unordered_set>
+ #include <vector>
+ 
++#include <audio_utils/StringUtils.h>
+ #include <gtest/gtest.h>
+ #include <media/MediaMetricsItem.h>
+ #include <mediametricsservice/AudioTypes.h>
+@@ -31,7 +32,7 @@
+ #include <system/audio.h>
+ 
+ using namespace android;
+-using android::mediametrics::stringutils::parseVector;
++using android::audio_utils::stringutils::parseVector;
+ 
+ static size_t countNewlines(const char *s) {
+     size_t count = 0;
+@@ -59,35 +60,6 @@ TEST(mediametrics_tests, startsWith) {
+   ASSERT_EQ(false, android::mediametrics::startsWith(s, std::string("est")));
+ }
+ 
+-TEST(mediametrics_tests, parseVector) {
+-    {
+-        std::vector<int32_t> values;
+-        EXPECT_EQ(true, parseVector("0{4,300,0,-112343,350}9", &values));
+-        EXPECT_EQ(values, std::vector<int32_t>({0, 4, 300, 0, -112343, 350, 9}));
+-    }
+-    {
+-        std::vector<int32_t> values;
+-        EXPECT_EQ(true, parseVector("53", &values));
+-        EXPECT_EQ(values, std::vector<int32_t>({53}));
+-    }
+-    {
+-        std::vector<int32_t> values;
+-        EXPECT_EQ(false, parseVector("5{3,6*3}3", &values));
+-        EXPECT_EQ(values, std::vector<int32_t>({}));
+-    }
+-    {
+-        std::vector<int32_t> values = {1}; // should still be this when parsing fails
+-        std::vector<int32_t> expected = {1};
+-        EXPECT_EQ(false, parseVector("51342abcd,1232", &values));
+-        EXPECT_EQ(values, std::vector<int32_t>({1}));
+-    }
+-    {
+-        std::vector<int32_t> values = {2}; // should still be this when parsing fails
+-        EXPECT_EQ(false, parseVector("12345678901234,12345678901234", &values));
+-        EXPECT_EQ(values, std::vector<int32_t>({2}));
+-    }
+-}
+-
+ TEST(mediametrics_tests, defer) {
+   bool check = false;
+   {
+@@ -934,62 +906,6 @@ TEST(mediametrics_tests, audio_analytics_dump) {
+   }
+ }
+ 
+-TEST(mediametrics_tests, device_parsing) {
+-    auto devaddr = android::mediametrics::stringutils::getDeviceAddressPairs("(DEVICE, )");
+-    ASSERT_EQ((size_t)1, devaddr.size());
+-    ASSERT_EQ("DEVICE", devaddr[0].first);
+-    ASSERT_EQ("", devaddr[0].second);
+-
+-    devaddr = android::mediametrics::stringutils::getDeviceAddressPairs(
+-            "(DEVICE1, A)|(D, ADDRB)");
+-    ASSERT_EQ((size_t)2, devaddr.size());
+-    ASSERT_EQ("DEVICE1", devaddr[0].first);
+-    ASSERT_EQ("A", devaddr[0].second);
+-    ASSERT_EQ("D", devaddr[1].first);
+-    ASSERT_EQ("ADDRB", devaddr[1].second);
+-
+-    devaddr = android::mediametrics::stringutils::getDeviceAddressPairs(
+-            "(A,B)|(C,D)");
+-    ASSERT_EQ((size_t)2, devaddr.size());
+-    ASSERT_EQ("A", devaddr[0].first);
+-    ASSERT_EQ("B", devaddr[0].second);
+-    ASSERT_EQ("C", devaddr[1].first);
+-    ASSERT_EQ("D", devaddr[1].second);
+-
+-    devaddr = android::mediametrics::stringutils::getDeviceAddressPairs(
+-            "  ( A1 , B )  | ( C , D2 )  ");
+-    ASSERT_EQ((size_t)2, devaddr.size());
+-    ASSERT_EQ("A1", devaddr[0].first);
+-    ASSERT_EQ("B", devaddr[0].second);
+-    ASSERT_EQ("C", devaddr[1].first);
+-    ASSERT_EQ("D2", devaddr[1].second);
+-
+-    devaddr = android::mediametrics::stringutils::getDeviceAddressPairs(
+-            " Z  ");
+-    ASSERT_EQ((size_t)1, devaddr.size());
+-    ASSERT_EQ("Z", devaddr[0].first);
+-
+-    devaddr = android::mediametrics::stringutils::getDeviceAddressPairs(
+-            "  A | B|C  ");
+-    ASSERT_EQ((size_t)3, devaddr.size());
+-    ASSERT_EQ("A", devaddr[0].first);
+-    ASSERT_EQ("", devaddr[0].second);
+-    ASSERT_EQ("B", devaddr[1].first);
+-    ASSERT_EQ("", devaddr[1].second);
+-    ASSERT_EQ("C", devaddr[2].first);
+-    ASSERT_EQ("", devaddr[2].second);
+-
+-    devaddr = android::mediametrics::stringutils::getDeviceAddressPairs(
+-            "  A | (B1, 10) |C  ");
+-    ASSERT_EQ((size_t)3, devaddr.size());
+-    ASSERT_EQ("A", devaddr[0].first);
+-    ASSERT_EQ("", devaddr[0].second);
+-    ASSERT_EQ("B1", devaddr[1].first);
+-    ASSERT_EQ("10", devaddr[1].second);
+-    ASSERT_EQ("C", devaddr[2].first);
+-    ASSERT_EQ("", devaddr[2].second);
+-}
+-
+ TEST(mediametrics_tests, timed_action) {
+     android::mediametrics::TimedAction timedAction;
+     std::atomic_int value1 = 0;
+-- 
+2.43.0
+

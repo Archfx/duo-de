@@ -1,0 +1,28 @@
+From 06bfbcb3e7c57a7b1070a27cd06beb8a6909b994 Mon Sep 17 00:00:00 2001
+From: Kyle Zhang <kelzhan@google.com>
+Date: Wed, 13 Nov 2024 01:15:14 +0000
+Subject: [PATCH 261/436] Change the log level for failure to connect to HIDL
+ from error to warning
+
+Bug: 376022380
+Change-Id: I16cf69c4c5e0f908ebceefefd351b6951dfb76d8
+---
+ drm/libmediadrm/DrmHalHidl.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drm/libmediadrm/DrmHalHidl.cpp b/drm/libmediadrm/DrmHalHidl.cpp
+index c8c6e8edb8..33ea5ea9fc 100644
+--- a/drm/libmediadrm/DrmHalHidl.cpp
++++ b/drm/libmediadrm/DrmHalHidl.cpp
+@@ -339,7 +339,7 @@ std::vector<sp<IDrmFactory>> DrmHalHidl::makeDrmFactories() {
+             DrmUtils::LOG2BI("makeDrmFactories: using default passthrough drm instance");
+             factories.push_back(passthrough);
+         } else {
+-            DrmUtils::LOG2BE("Failed to find passthrough drm factories");
++            DrmUtils::LOG2BW("Failed to find passthrough drm factories");
+         }
+     }
+     return factories;
+-- 
+2.43.0
+

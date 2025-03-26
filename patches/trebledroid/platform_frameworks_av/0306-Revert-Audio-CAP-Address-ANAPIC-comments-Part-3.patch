@@ -1,0 +1,294 @@
+From 9dd417281866f0ba409d5bab8df88a8b349959f3 Mon Sep 17 00:00:00 2001
+From: "Priyanka Advani (xWF)" <padvani@google.com>
+Date: Wed, 20 Nov 2024 18:24:09 +0000
+Subject: [PATCH 306/436] Revert "Audio CAP: Address ANAPIC comments, Part 3."
+
+Revert submission 3341640-fix-b-364310317-fix-ANAPIC-comments-3
+
+Reason for revert: Droidmonitor created revert due to b/380080376. Will be verifying through ABTD before submission.
+
+Reverted changes: /q/submissionid:3341640-fix-b-364310317-fix-ANAPIC-comments-3
+
+Change-Id: Id5a16b796187b9674395fef32deb068a1d7cf20c
+---
+ .../config/src/CapEngineConfig.cpp            | 208 ++----------------
+ 1 file changed, 24 insertions(+), 184 deletions(-)
+
+diff --git a/services/audiopolicy/engineconfigurable/config/src/CapEngineConfig.cpp b/services/audiopolicy/engineconfigurable/config/src/CapEngineConfig.cpp
+index b89fba0961..b72e517d37 100644
+--- a/services/audiopolicy/engineconfigurable/config/src/CapEngineConfig.cpp
++++ b/services/audiopolicy/engineconfigurable/config/src/CapEngineConfig.cpp
+@@ -41,23 +41,21 @@
+ 
+ namespace android {
+ 
+-using base::unexpected;
++using utilities::convertTo;
+ using media::audio::common::AudioDeviceAddress;
+ using media::audio::common::AudioDeviceDescription;
+ using media::audio::common::AudioHalCapCriterion;
+-using media::audio::common::AudioHalCapCriterionV2;
+ using media::audio::common::AudioHalCapParameter;
+ using media::audio::common::AudioHalCapRule;
+-using media::audio::common::AudioPolicyForceUse;
+ using media::audio::common::AudioSource;
+ using media::audio::common::AudioStreamType;
+-using utilities::convertTo;
++using media::audio::common::AudioHalCapCriterionV2;
++using ::android::base::unexpected;
+ 
+ namespace capEngineConfig {
+ 
+ static constexpr const char *gLegacyOutputDevicePrefix = "AUDIO_DEVICE_OUT_";
+ static constexpr const char *gLegacyInputDevicePrefix = "AUDIO_DEVICE_IN_";
+-static constexpr const char *gLegacyForcePrefix = "AUDIO_POLICY_FORCE_";
+ static constexpr const char *gLegacyStreamPrefix = "AUDIO_STREAM_";
+ static constexpr const char *gLegacySourcePrefix = "AUDIO_SOURCE_";
+ static constexpr const char *gPolicyParamPrefix = "/Policy/policy/";
+@@ -85,134 +83,6 @@ ConversionResult<std::string> truncatePrefix(const std::string& name,  const std
+     return capName;
+ }
+ 
+-ConversionResult<audio_policy_forced_cfg_t>
+-        aidl2legacy_AudioPolicyForceUseCommunicationDeviceCategory_audio_policy_forced_cfg_t(
+-        const AudioPolicyForceUse::CommunicationDeviceCategory aidl) {
+-    switch (aidl) {
+-        case AudioPolicyForceUse::CommunicationDeviceCategory::NONE:
+-            return AUDIO_POLICY_FORCE_NONE;
+-        case AudioPolicyForceUse::CommunicationDeviceCategory::SPEAKER:
+-            return AUDIO_POLICY_FORCE_SPEAKER;
+-        case AudioPolicyForceUse::CommunicationDeviceCategory::BT_SCO:
+-            return AUDIO_POLICY_FORCE_BT_SCO;
+-        case AudioPolicyForceUse::CommunicationDeviceCategory::BT_BLE:
+-            return AUDIO_POLICY_FORCE_BT_BLE;
+-        case AudioPolicyForceUse::CommunicationDeviceCategory::WIRED_ACCESSORY:
+-            return AUDIO_POLICY_FORCE_WIRED_ACCESSORY;
+-    }
+-    return unexpected(BAD_VALUE);
+-}
+-
+-ConversionResult<audio_policy_forced_cfg_t>
+-        aidl2legacy_AudioPolicyForceUseMediaDeviceCategory_audio_policy_forced_cfg_t(
+-        const AudioPolicyForceUse::MediaDeviceCategory aidl) {
+-    switch (aidl) {
+-        case AudioPolicyForceUse::MediaDeviceCategory::NONE:
+-            return AUDIO_POLICY_FORCE_NONE;
+-        case AudioPolicyForceUse::MediaDeviceCategory::SPEAKER:
+-            return AUDIO_POLICY_FORCE_SPEAKER;
+-        case AudioPolicyForceUse::MediaDeviceCategory::HEADPHONES:
+-            return AUDIO_POLICY_FORCE_HEADPHONES;
+-        case AudioPolicyForceUse::MediaDeviceCategory::BT_A2DP:
+-            return AUDIO_POLICY_FORCE_BT_A2DP;
+-        case AudioPolicyForceUse::MediaDeviceCategory::ANALOG_DOCK:
+-            return AUDIO_POLICY_FORCE_ANALOG_DOCK;
+-        case AudioPolicyForceUse::MediaDeviceCategory::DIGITAL_DOCK:
+-            return AUDIO_POLICY_FORCE_DIGITAL_DOCK;
+-        case AudioPolicyForceUse::MediaDeviceCategory::WIRED_ACCESSORY:
+-            return AUDIO_POLICY_FORCE_WIRED_ACCESSORY;
+-        case AudioPolicyForceUse::MediaDeviceCategory::NO_BT_A2DP:
+-            return AUDIO_POLICY_FORCE_NO_BT_A2DP;
+-    }
+-    return unexpected(BAD_VALUE);
+-}
+-
+-ConversionResult<audio_policy_forced_cfg_t>
+-        aidl2legacy_AudioPolicyForceUseDockType_audio_policy_forced_cfg_t(
+-        const AudioPolicyForceUse::DockType aidl) {
+-    switch (aidl) {
+-        case AudioPolicyForceUse::DockType::NONE:
+-            return AUDIO_POLICY_FORCE_NONE;
+-        case AudioPolicyForceUse::DockType::BT_CAR_DOCK:
+-            return AUDIO_POLICY_FORCE_BT_CAR_DOCK;
+-        case AudioPolicyForceUse::DockType::BT_DESK_DOCK:
+-            return AUDIO_POLICY_FORCE_BT_DESK_DOCK;
+-        case AudioPolicyForceUse::DockType::ANALOG_DOCK:
+-            return AUDIO_POLICY_FORCE_ANALOG_DOCK;
+-        case AudioPolicyForceUse::DockType::DIGITAL_DOCK:
+-            return AUDIO_POLICY_FORCE_DIGITAL_DOCK;
+-        case AudioPolicyForceUse::DockType::WIRED_ACCESSORY:
+-            return AUDIO_POLICY_FORCE_WIRED_ACCESSORY;
+-    }
+-    return unexpected(BAD_VALUE);
+-}
+-
+-ConversionResult<audio_policy_forced_cfg_t>
+-        aidl2legacy_AudioPolicyForceUseEncodedSurroundConfig_audio_policy_forced_cfg_t(
+-        const AudioPolicyForceUse::EncodedSurroundConfig aidl) {
+-    switch (aidl) {
+-        case AudioPolicyForceUse::EncodedSurroundConfig::UNSPECIFIED:
+-            return AUDIO_POLICY_FORCE_NONE;
+-        case AudioPolicyForceUse::EncodedSurroundConfig::NEVER:
+-            return AUDIO_POLICY_FORCE_ENCODED_SURROUND_NEVER;
+-        case AudioPolicyForceUse::EncodedSurroundConfig::ALWAYS:
+-            return AUDIO_POLICY_FORCE_ENCODED_SURROUND_ALWAYS;
+-        case AudioPolicyForceUse::EncodedSurroundConfig::MANUAL:
+-            return AUDIO_POLICY_FORCE_ENCODED_SURROUND_MANUAL;
+-    }
+-    return unexpected(BAD_VALUE);
+-}
+-
+-ConversionResult<std::pair<audio_policy_force_use_t, audio_policy_forced_cfg_t>>
+-        aidl2legacy_AudioPolicyForceUse_audio_policy_force_use_t_audio_policy_forced_cfg_t(
+-        const AudioPolicyForceUse& aidl) {
+-    switch (aidl.getTag()) {
+-        case AudioPolicyForceUse::forCommunication:
+-            return std::make_pair(
+-                    AUDIO_POLICY_FORCE_FOR_COMMUNICATION,
+-                    VALUE_OR_RETURN(
+-                            aidl2legacy_AudioPolicyForceUseCommunicationDeviceCategory_audio_policy_forced_cfg_t(
+-                                    aidl.get<AudioPolicyForceUse::forCommunication>())));
+-        case AudioPolicyForceUse::forMedia:
+-            return std::make_pair(
+-                    AUDIO_POLICY_FORCE_FOR_MEDIA,
+-                    VALUE_OR_RETURN(
+-                            aidl2legacy_AudioPolicyForceUseMediaDeviceCategory_audio_policy_forced_cfg_t(
+-                                    aidl.get<AudioPolicyForceUse::forMedia>())));
+-        case AudioPolicyForceUse::forRecord:
+-            return std::make_pair(
+-                    AUDIO_POLICY_FORCE_FOR_RECORD,
+-                    VALUE_OR_RETURN(
+-                            aidl2legacy_AudioPolicyForceUseCommunicationDeviceCategory_audio_policy_forced_cfg_t(
+-                                    aidl.get<AudioPolicyForceUse::forRecord>())));
+-        case AudioPolicyForceUse::dock:
+-            return std::make_pair(AUDIO_POLICY_FORCE_FOR_DOCK,
+-                    VALUE_OR_RETURN(
+-                            aidl2legacy_AudioPolicyForceUseDockType_audio_policy_forced_cfg_t(
+-                                    aidl.get<AudioPolicyForceUse::dock>())));
+-        case AudioPolicyForceUse::systemSounds:
+-            return std::make_pair(AUDIO_POLICY_FORCE_FOR_SYSTEM,
+-                    aidl.get<AudioPolicyForceUse::systemSounds>() ?
+-                    AUDIO_POLICY_FORCE_SYSTEM_ENFORCED : AUDIO_POLICY_FORCE_NONE);
+-        case AudioPolicyForceUse::hdmiSystemAudio:
+-            return std::make_pair(
+-                    AUDIO_POLICY_FORCE_FOR_HDMI_SYSTEM_AUDIO,
+-                    aidl.get<AudioPolicyForceUse::hdmiSystemAudio>() ?
+-                    AUDIO_POLICY_FORCE_HDMI_SYSTEM_AUDIO_ENFORCED : AUDIO_POLICY_FORCE_NONE);
+-        case AudioPolicyForceUse::encodedSurround:
+-            return std::make_pair(AUDIO_POLICY_FORCE_FOR_ENCODED_SURROUND, VALUE_OR_RETURN(
+-                aidl2legacy_AudioPolicyForceUseEncodedSurroundConfig_audio_policy_forced_cfg_t(
+-                        aidl.get<AudioPolicyForceUse::encodedSurround>())));
+-        case AudioPolicyForceUse::forVibrateRinging:
+-            return std::make_pair(
+-                    AUDIO_POLICY_FORCE_FOR_VIBRATE_RINGING,
+-                    VALUE_OR_RETURN(
+-                            aidl2legacy_AudioPolicyForceUseCommunicationDeviceCategory_audio_policy_forced_cfg_t(
+-                                    aidl.get<AudioPolicyForceUse::forVibrateRinging>())));
+-    }
+-    return unexpected(BAD_VALUE);
+-}
+-
+ ConversionResult<std::string> aidl2legacy_AudioHalCapCriterionV2_CapName(
+         const AudioHalCapCriterionV2& aidl) {
+     switch (aidl.getTag()) {
+@@ -227,14 +97,14 @@ ConversionResult<std::string> aidl2legacy_AudioHalCapCriterionV2_CapName(
+         case AudioHalCapCriterionV2::telephonyMode:
+             return gPhoneStateCriterionName;
+         case AudioHalCapCriterionV2::forceConfigForUse: {
+-            auto aidlCriterion = aidl.get<AudioHalCapCriterionV2::forceConfigForUse>().values[0];
+-            const auto [forceUse, _] = VALUE_OR_RETURN(
+-                aidl2legacy_AudioPolicyForceUse_audio_policy_force_use_t_audio_policy_forced_cfg_t(
+-                        aidlCriterion));
+-            return gForceUseCriterionTag[forceUse];
++            auto aidlCriterion = aidl.get<AudioHalCapCriterionV2::forceConfigForUse>();
++            return gForceUseCriterionTag[VALUE_OR_RETURN(
++                    aidl2legacy_AudioPolicyForceUse_audio_policy_force_use_t(
++                            aidlCriterion.forceUse))];
+         }
++        default:
++            return unexpected(BAD_VALUE);
+     }
+-    return unexpected(BAD_VALUE);
+ }
+ 
+ ConversionResult<std::string> aidl2legacy_AudioHalCapCriterionV2TypeDevice_CapCriterionValue(
+@@ -251,32 +121,6 @@ ConversionResult<std::string> aidl2legacy_AudioHalCapCriterionV2TypeDevice_CapCr
+             isOut ? gLegacyOutputDevicePrefix : gLegacyInputDevicePrefix);
+ }
+ 
+-ConversionResult<audio_policy_forced_cfg_t>
+-        aidl2legacy_AudioHalCapCriterionV2ForceUse_audio_policy_forced_cfg_t(
+-        const AudioPolicyForceUse& aidl) {
+-    const auto [_, legacyForcedCfg] = VALUE_OR_RETURN(
+-            aidl2legacy_AudioPolicyForceUse_audio_policy_force_use_t_audio_policy_forced_cfg_t(
+-                    aidl));
+-    return legacyForcedCfg;
+-}
+-
+-ConversionResult<std::string> audio_policy_forced_cfg_t_CapCriterionValue(
+-        audio_policy_forced_cfg_t legacyForcedCfg) {
+-    std::string legacyForcedCfgLiteral = audio_policy_forced_cfg_to_string(legacyForcedCfg);
+-    if (legacyForcedCfgLiteral.empty()) {
+-        ALOGE("%s Invalid forced config value %d", __func__, legacyForcedCfg);
+-        return unexpected(BAD_VALUE);
+-    }
+-    return truncatePrefix(legacyForcedCfgLiteral, gLegacyForcePrefix);
+-}
+-
+-ConversionResult<std::string> aidl2legacy_AudioHalCapCriterionV2ForceUse_CapCriterionValue(
+-        const AudioPolicyForceUse& aidl) {
+-    const audio_policy_forced_cfg_t legacyForcedCfg = VALUE_OR_RETURN(
+-            aidl2legacy_AudioHalCapCriterionV2ForceUse_audio_policy_forced_cfg_t(aidl));
+-    return audio_policy_forced_cfg_t_CapCriterionValue(legacyForcedCfg);
+-}
+-
+ ConversionResult<std::string> aidl2legacy_AudioHalCapCriterionV2Type_CapCriterionValue(
+         const AudioHalCapCriterionV2& aidl) {
+     switch (aidl.getTag()) {
+@@ -295,10 +139,10 @@ ConversionResult<std::string> aidl2legacy_AudioHalCapCriterionV2Type_CapCriterio
+         case AudioHalCapCriterionV2::telephonyMode:
+             return toString(aidl.get<AudioHalCapCriterionV2::telephonyMode>().values[0]);
+         case AudioHalCapCriterionV2::forceConfigForUse:
+-            return aidl2legacy_AudioHalCapCriterionV2ForceUse_CapCriterionValue(
+-                    aidl.get<AudioHalCapCriterionV2::forceConfigForUse>().values[0]);
++            return toString(aidl.get<AudioHalCapCriterionV2::forceConfigForUse>().values[0]);
++        default:
++            return unexpected(BAD_VALUE);
+     }
+-    return unexpected(BAD_VALUE);
+ }
+ 
+ ConversionResult<std::string> aidl2legacy_AudioHalCapRule_CapRule(
+@@ -487,28 +331,24 @@ ConversionResult<CapCriterion> aidl2legacy_AudioHalCapCriterionV2_Criterion(
+     engineConfig::Criterion& criterion = capCriterion.criterion;
+     engineConfig::CriterionType& criterionType = capCriterion.criterionType;
+ 
+-    auto loadForceUseCriterion = [](const auto& aidlCriterion, auto& criterion,
+-                                    auto& criterionType) -> status_t {
+-        if (aidlCriterion.values.empty()) {
+-            return BAD_VALUE;
+-        }
+-        const auto [legacyForceUse, _] = VALUE_OR_RETURN_STATUS(
+-                aidl2legacy_AudioPolicyForceUse_audio_policy_force_use_t_audio_policy_forced_cfg_t(
+-                        aidlCriterion.values[0]));
++    auto loadForceUseCriterion = [](const auto &aidlCriterion, auto &criterion,
++            auto &criterionType) -> status_t {
++        uint32_t legacyForceUse = VALUE_OR_RETURN_STATUS(
++                aidl2legacy_AudioPolicyForceUse_audio_policy_force_use_t(
++                        aidlCriterion.forceUse));
+         criterion.typeName = criterionType.name;
+         criterionType.name = criterion.typeName + gCriterionTypeSuffix;
+         criterionType.isInclusive =
+                 (aidlCriterion.logic == AudioHalCapCriterionV2::LogicalDisjunction::INCLUSIVE);
+         criterion.name = gForceUseCriterionTag[legacyForceUse];
+-        criterion.defaultLiteralValue = toString(
+-                aidlCriterion.defaultValue.template get<AudioPolicyForceUse::forMedia>());
++        criterion.defaultLiteralValue = toString(aidlCriterion.defaultValue);
++        if (aidlCriterion.values.empty()) {
++            return BAD_VALUE;
++        }
+         for (auto &value : aidlCriterion.values) {
+-            const audio_policy_forced_cfg_t legacyForcedCfg = VALUE_OR_RETURN_STATUS(
+-                    aidl2legacy_AudioHalCapCriterionV2ForceUse_audio_policy_forced_cfg_t(value));
+-            const std::string legacyForcedCfgLiteral = VALUE_OR_RETURN_STATUS(
+-                    audio_policy_forced_cfg_t_CapCriterionValue(legacyForcedCfg));
+-            criterionType.valuePairs.push_back(
+-                    {legacyForcedCfg, 0, legacyForcedCfgLiteral});
++            uint32_t legacyForcedConfig = VALUE_OR_RETURN_STATUS(
++                    aidl2legacy_AudioPolicyForcedConfig_audio_policy_forced_cfg_t(value));
++            criterionType.valuePairs.push_back({legacyForcedConfig, 0, toString(value)});
+         }
+         return NO_ERROR;
+     };
+-- 
+2.43.0
+

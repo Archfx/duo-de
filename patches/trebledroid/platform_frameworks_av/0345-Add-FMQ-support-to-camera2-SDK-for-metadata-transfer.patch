@@ -1,0 +1,1424 @@
+From dcae796ffe640c00a65c18294c0c70563bae644c Mon Sep 17 00:00:00 2001
+From: Jayant Chowdhary <jchowdhary@google.com>
+Date: Tue, 20 Aug 2024 21:20:10 +0000
+Subject: [PATCH 345/436] Add FMQ support to camera2 SDK for metadata transfer
+
+This CL adds support for CaptureResult metadata to be transferred over
+FMQ instead of binder copies.
+
+Bug: 362791857
+
+Flag: com.android.internal.camera.flags.fmq_metadata
+
+Test: GCA
+Test: Perfetto profiling shows decreased cameraserver to client
+      onResultReceived latency
+
+Change-Id: Ia8df1a4cef5008c06dc2ca4fdd319704d5e049ab
+Signed-off-by: Jayant Chowdhary <jchowdhary@google.com>
+---
+ camera/Android.bp                             |   7 ++
+ camera/CaptureResult.cpp                      |  33 ++---
+ .../hardware/camera2/CameraMetadataInfo.aidl  |  25 ++++
+ .../camera2/ICameraDeviceCallbacks.aidl       |   3 +-
+ .../hardware/camera2/ICameraDeviceUser.aidl   |   3 +
+ camera/camera_platform.aconfig                |  10 ++
+ camera/include/camera/CameraMetadata.h        |  33 ++++-
+ camera/include/camera/CaptureResult.h         |  19 ++-
+ camera/ndk/Android.bp                         |   3 +
+ camera/ndk/impl/ACameraDevice.cpp             |  80 +++++++++++-
+ camera/ndk/impl/ACameraDevice.h               |  19 ++-
+ camera/ndk/impl/ACameraManager.cpp            |   1 +
+ camera/tests/CameraBinderTests.cpp            |   5 +-
+ services/camera/libcameraservice/Android.bp   |   2 +
+ .../camera/libcameraservice/CameraService.cpp |  43 +++++--
+ .../camera/libcameraservice/CameraService.h   |  20 ++-
+ .../aidl/AidlCameraDeviceCallbacks.cpp        |  10 +-
+ .../aidl/AidlCameraDeviceCallbacks.h          |   4 +-
+ .../aidl/AidlCameraService.cpp                |   2 +-
+ .../libcameraservice/aidl/AidlUtils.cpp       |   6 +-
+ .../api2/CameraDeviceClient.cpp               | 114 +++++++++++++++++-
+ .../api2/CameraDeviceClient.h                 |  24 +++-
+ .../api2/CameraOfflineSessionClient.cpp       |   5 +-
+ .../common/FrameProcessorBase.cpp             |   4 +-
+ .../device3/Camera3OutputUtils.cpp            |  26 ++--
+ .../hidl/AidlCameraDeviceCallbacks.cpp        |  10 +-
+ .../hidl/AidlCameraDeviceCallbacks.h          |   4 +-
+ .../hidl/HidlCameraService.cpp                |   2 +-
+ .../camera/libcameraservice/hidl/Utils.cpp    |   7 +-
+ .../camera_service_fuzzer.cpp                 |   3 +-
+ .../tests/CameraPermissionsTest.cpp           |   3 +-
+ 31 files changed, 454 insertions(+), 76 deletions(-)
+ create mode 100644 camera/aidl/android/hardware/camera2/CameraMetadataInfo.aidl
+
+diff --git a/camera/Android.bp b/camera/Android.bp
+index 25b5e2cf62..71c1673606 100644
+--- a/camera/Android.bp
++++ b/camera/Android.bp
+@@ -82,6 +82,8 @@ cc_library {
+         include_dirs: [
+             "frameworks/native/aidl/gui",
+             "frameworks/native/libs/permission/aidl",
++            "hardware/interfaces/common/fmq/aidl",
++            "hardware/interfaces/common/aidl",
+         ],
+     },
+ 
+@@ -112,6 +114,8 @@ cc_library {
+     ],
+ 
+     shared_libs: [
++        "android.hardware.common.fmq-V1-cpp",
++        "android.hardware.common-V2-cpp",
+         "camera_platform_flags_c_lib",
+         "framework-permission-aidl-cpp",
+         "lib-platform-compat-native-api",
+@@ -136,6 +140,8 @@ cc_library {
+     ],
+     export_shared_lib_headers: [
+         "framework-permission-aidl-cpp",
++        "android.hardware.common.fmq-V1-cpp",
++        "android.hardware.common-V2-cpp",
+         "libcamera_metadata",
+         "libgui",
+         "libnativewindow",
+@@ -187,6 +193,7 @@ filegroup {
+         "aidl/android/hardware/camera2/ICameraInjectionCallback.aidl",
+         "aidl/android/hardware/camera2/ICameraInjectionSession.aidl",
+         "aidl/android/hardware/camera2/ICameraOfflineSession.aidl",
++        "aidl/android/hardware/camera2/CameraMetadataInfo.aidl",
+     ],
+     path: "aidl",
+ }
+diff --git a/camera/CaptureResult.cpp b/camera/CaptureResult.cpp
+index 9ff257872f..254984fbe1 100644
+--- a/camera/CaptureResult.cpp
++++ b/camera/CaptureResult.cpp
+@@ -98,7 +98,6 @@ status_t PhysicalCaptureResultInfo::readFromParcel(const android::Parcel* parcel
+     status_t res;
+ 
+     mPhysicalCameraId = "";
+-    mPhysicalCameraMetadata.clear();
+ 
+     String16 physicalCameraId;
+     if ((res = parcel->readString16(&physicalCameraId)) != OK) {
+@@ -107,10 +106,11 @@ status_t PhysicalCaptureResultInfo::readFromParcel(const android::Parcel* parcel
+     }
+     mPhysicalCameraId = toStdString(physicalCameraId);
+ 
+-    if ((res = mPhysicalCameraMetadata.readFromParcel(parcel)) != OK) {
++    if ((res = mCameraMetadataInfo.readFromParcel(parcel)) != OK) {
+         ALOGE("%s: Failed to read metadata from parcel: %d", __FUNCTION__, res);
+         return res;
+     }
++
+     return OK;
+ }
+ 
+@@ -121,11 +121,13 @@ status_t PhysicalCaptureResultInfo::writeToParcel(android::Parcel* parcel) const
+                 __FUNCTION__, res);
+         return res;
+     }
+-    if ((res = mPhysicalCameraMetadata.writeToParcel(parcel)) != OK) {
++
++    if ((res = mCameraMetadataInfo.writeToParcel(parcel)) != OK) {
+         ALOGE("%s: Failed to write physical camera metadata to parcel: %d",
+                 __FUNCTION__, res);
+         return res;
+     }
++
+     return OK;
+ }
+ 
+@@ -178,20 +180,12 @@ status_t CaptureResult::readFromParcel(android::Parcel *parcel) {
+     }
+ 
+     for (int32_t i = 0; i < physicalMetadataCount; i++) {
+-        String16 cameraId;
+-        if ((res = parcel->readString16(&cameraId)) != OK) {
+-            ALOGE("%s: Failed to read camera id: %d", __FUNCTION__, res);
++        PhysicalCaptureResultInfo result;
++        if ((res = result.readFromParcel(parcel)) != OK) {
++            ALOGE("%s: Failed to read physical result from parcel: %d", __FUNCTION__, res);
+             return res;
+         }
+-
+-        CameraMetadata physicalMetadata;
+-        if ((res = physicalMetadata.readFromParcel(parcel)) != OK) {
+-            ALOGE("%s: Failed to read metadata from parcel: %d", __FUNCTION__, res);
+-            return res;
+-        }
+-
+-        mPhysicalMetadatas.emplace(mPhysicalMetadatas.end(), toStdString(cameraId),
+-                physicalMetadata);
++        mPhysicalMetadatas.emplace(mPhysicalMetadatas.end(), result);
+     }
+     ALOGV("%s: Read physical metadata from parcel", __FUNCTION__);
+ 
+@@ -232,13 +226,8 @@ status_t CaptureResult::writeToParcel(android::Parcel *parcel) const {
+         return BAD_VALUE;
+     }
+     for (const auto& physicalMetadata : mPhysicalMetadatas) {
+-        if ((res = parcel->writeString16(toString16(physicalMetadata.mPhysicalCameraId))) != OK) {
+-            ALOGE("%s: Failed to write physical camera ID to parcel: %d",
+-                    __FUNCTION__, res);
+-            return res;
+-        }
+-        if ((res = physicalMetadata.mPhysicalCameraMetadata.writeToParcel(parcel)) != OK) {
+-            ALOGE("%s: Failed to write physical camera metadata to parcel: %d",
++        if ((res = physicalMetadata.writeToParcel(parcel)) != OK) {
++            ALOGE("%s: Failed to write physicalMetadata to parcel: %d",
+                     __FUNCTION__, res);
+             return res;
+         }
+diff --git a/camera/aidl/android/hardware/camera2/CameraMetadataInfo.aidl b/camera/aidl/android/hardware/camera2/CameraMetadataInfo.aidl
+new file mode 100644
+index 0000000000..74c207e4db
+--- /dev/null
++++ b/camera/aidl/android/hardware/camera2/CameraMetadataInfo.aidl
+@@ -0,0 +1,25 @@
++/*
++ * Copyright (C) 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package android.hardware.camera2;
++
++import android.hardware.camera2.impl.CameraMetadataNative;
++
++/** @hide */
++union CameraMetadataInfo {
++    long fmqSize;
++    CameraMetadataNative metadata;
++}
+\ No newline at end of file
+diff --git a/camera/aidl/android/hardware/camera2/ICameraDeviceCallbacks.aidl b/camera/aidl/android/hardware/camera2/ICameraDeviceCallbacks.aidl
+index 49e992043b..68e63541e2 100644
+--- a/camera/aidl/android/hardware/camera2/ICameraDeviceCallbacks.aidl
++++ b/camera/aidl/android/hardware/camera2/ICameraDeviceCallbacks.aidl
+@@ -16,6 +16,7 @@
+ 
+ package android.hardware.camera2;
+ 
++import android.hardware.camera2.CameraMetadataInfo;
+ import android.hardware.camera2.impl.CameraMetadataNative;
+ import android.hardware.camera2.impl.CaptureResultExtras;
+ import android.hardware.camera2.impl.PhysicalCaptureResultInfo;
+@@ -36,7 +37,7 @@ interface ICameraDeviceCallbacks
+     oneway void onDeviceError(int errorCode, in CaptureResultExtras resultExtras);
+     oneway void onDeviceIdle();
+     oneway void onCaptureStarted(in CaptureResultExtras resultExtras, long timestamp);
+-    oneway void onResultReceived(in CameraMetadataNative result,
++    oneway void onResultReceived(in CameraMetadataInfo resultInfo,
+                                  in CaptureResultExtras resultExtras,
+                                  in PhysicalCaptureResultInfo[] physicalCaptureResultInfos);
+     oneway void onPrepared(int streamId);
+diff --git a/camera/aidl/android/hardware/camera2/ICameraDeviceUser.aidl b/camera/aidl/android/hardware/camera2/ICameraDeviceUser.aidl
+index c1da12681a..a9191eb567 100644
+--- a/camera/aidl/android/hardware/camera2/ICameraDeviceUser.aidl
++++ b/camera/aidl/android/hardware/camera2/ICameraDeviceUser.aidl
+@@ -23,6 +23,8 @@ import android.hardware.camera2.impl.CameraMetadataNative;
+ import android.hardware.camera2.params.OutputConfiguration;
+ import android.hardware.camera2.params.SessionConfiguration;
+ import android.hardware.camera2.utils.SubmitInfo;
++import android.hardware.common.fmq.MQDescriptor;
++import android.hardware.common.fmq.SynchronizedReadWrite;
+ import android.view.Surface;
+ 
+ /** @hide */
+@@ -173,6 +175,7 @@ interface ICameraDeviceUser
+ 
+     void finalizeOutputConfigurations(int streamId, in OutputConfiguration outputConfiguration);
+ 
++    MQDescriptor<byte, SynchronizedReadWrite> getCaptureResultMetadataQueue();
+ 
+     // Keep in sync with public API in
+     // frameworks/base/core/java/android/hardware/camera2/CameraDevice.java
+diff --git a/camera/camera_platform.aconfig b/camera/camera_platform.aconfig
+index 3b199b3ede..5682ad2040 100644
+--- a/camera/camera_platform.aconfig
++++ b/camera/camera_platform.aconfig
+@@ -263,3 +263,13 @@ flag {
+         purpose: PURPOSE_BUGFIX
+     }
+ }
++
++flag {
++    namespace: "camera_platform"
++    name: "fmq_metadata"
++    description: "Allow CameraMetadata transfer for ndk / sdk clients."
++    bug: "362791857"
++    metadata {
++        purpose: PURPOSE_BUGFIX
++    }
++}
+\ No newline at end of file
+diff --git a/camera/include/camera/CameraMetadata.h b/camera/include/camera/CameraMetadata.h
+index 2903dfbc0c..10ecc4f739 100644
+--- a/camera/include/camera/CameraMetadata.h
++++ b/camera/include/camera/CameraMetadata.h
+@@ -247,6 +247,38 @@ class CameraMetadata: public Parcelable {
+      */
+     metadata_vendor_id_t getVendorId() const;
+ 
++   // Needed for auto-generated code if CameraMetadata is used in
++   // parcelables in .aidl files.
++   inline bool operator == (const CameraMetadata& rhs) const {
++        return mBuffer == rhs.mBuffer;
++    }
++
++    inline bool operator < (const CameraMetadata& rhs) const {
++        return mBuffer < rhs.mBuffer;
++    }
++
++    inline bool operator != (const CameraMetadata& rhs) const {
++        return !(*this == rhs);
++    }
++
++    inline bool operator > (const CameraMetadata& rhs) const {
++        return rhs < *this;
++    }
++
++    inline bool operator >= (const CameraMetadata& rhs) const {
++        return !(*this < rhs);
++    }
++
++    inline bool operator <= (const CameraMetadata& rhs) const {
++        return !(rhs < *this);
++    }
++
++  inline std::string toString() const {
++        std::string descStr = "CameraMetadata";
++        return descStr;
++  }
++
++
+   private:
+     camera_metadata_t *mBuffer;
+     mutable bool       mLocked;
+@@ -265,7 +297,6 @@ class CameraMetadata: public Parcelable {
+      * Resize metadata buffer if needed by reallocating it and copying it over.
+      */
+     status_t resizeIfNeeded(size_t extraEntries, size_t extraData);
+-
+ };
+ 
+ namespace hardware {
+diff --git a/camera/include/camera/CaptureResult.h b/camera/include/camera/CaptureResult.h
+index e08c9ca3b8..cc6b529c95 100644
+--- a/camera/include/camera/CaptureResult.h
++++ b/camera/include/camera/CaptureResult.h
+@@ -20,7 +20,7 @@
+ #include <utils/RefBase.h>
+ #include <binder/Parcelable.h>
+ #include <camera/CameraMetadata.h>
+-
++#include <android/hardware/camera2/CameraMetadataInfo.h>
+ 
+ namespace android {
+ 
+@@ -145,19 +145,26 @@ struct CaptureResultExtras : public android::Parcelable {
+ };
+ 
+ struct PhysicalCaptureResultInfo : public android::Parcelable {
+-
++    using CameraMetadataInfo = android::hardware::camera2::CameraMetadataInfo;
+     PhysicalCaptureResultInfo()
+         : mPhysicalCameraId(),
+-          mPhysicalCameraMetadata() {
++          mCameraMetadataInfo() {
+     }
+     PhysicalCaptureResultInfo(const std::string& cameraId,
+             const CameraMetadata& cameraMetadata)
+-            : mPhysicalCameraId(cameraId),
+-              mPhysicalCameraMetadata(cameraMetadata) {
++            : mPhysicalCameraId(cameraId) {
++              mCameraMetadataInfo.set<CameraMetadataInfo::metadata>(cameraMetadata);
++    }
++
++   PhysicalCaptureResultInfo(const std::string& cameraId,
++            uint64_t fmqSize)
++            : mPhysicalCameraId(cameraId) {
++              mCameraMetadataInfo.set<CameraMetadataInfo::fmqSize>(fmqSize);
+     }
+ 
+     std::string mPhysicalCameraId;
+-    CameraMetadata mPhysicalCameraMetadata;
++
++    CameraMetadataInfo mCameraMetadataInfo;
+ 
+     virtual status_t                readFromParcel(const android::Parcel* parcel) override;
+     virtual status_t                writeToParcel(android::Parcel* parcel) const override;
+diff --git a/camera/ndk/Android.bp b/camera/ndk/Android.bp
+index 508808f456..fc1e547990 100644
+--- a/camera/ndk/Android.bp
++++ b/camera/ndk/Android.bp
+@@ -79,6 +79,8 @@ cc_library_shared {
+     shared_libs: [
+         "android.companion.virtual.virtualdevice_aidl-cpp",
+         "android.companion.virtualdevice.flags-aconfig-cc",
++        "android.hardware.common-V2-cpp",
++        "android.hardware.common.fmq-V1-cpp",
+         "camera_platform_flags_c_lib",
+         "framework-permission-aidl-cpp",
+         "libandroid_runtime",
+@@ -86,6 +88,7 @@ cc_library_shared {
+         "libcamera_client",
+         "libcamera_metadata",
+         "libcutils",
++        "libfmq",
+         "libgui",
+         "liblog",
+         "libmediandk",
+diff --git a/camera/ndk/impl/ACameraDevice.cpp b/camera/ndk/impl/ACameraDevice.cpp
+index aed740fc71..7840fa0a2b 100644
+--- a/camera/ndk/impl/ACameraDevice.cpp
++++ b/camera/ndk/impl/ACameraDevice.cpp
+@@ -37,6 +37,8 @@ ACameraDevice::~ACameraDevice() {
+ namespace android {
+ namespace acam {
+ 
++using android::hardware::common::fmq::MQDescriptor;
++
+ // Static member definitions
+ const char* CameraDevice::kContextKey        = "Context";
+ const char* CameraDevice::kDeviceKey         = "Device";
+@@ -788,6 +790,27 @@ CameraDevice::setRemoteDevice(sp<hardware::camera2::ICameraDeviceUser> remote) {
+     mRemote = remote;
+ }
+ 
++bool CameraDevice::setDeviceMetadataQueues() {
++    if (mRemote == nullptr) {
++        ALOGE("mRemote must not be null while trying to fetch metadata queues");
++        return false;
++    }
++    MQDescriptor<int8_t, SynchronizedReadWrite> resMqDescriptor;
++    binder::Status ret = mRemote->getCaptureResultMetadataQueue(&resMqDescriptor);
++    if (!ret.isOk()) {
++        ALOGE("Transaction error trying to get capture result metadata queue");
++        return false;
++    }
++    mCaptureResultMetadataQueue = std::make_unique<ResultMetadataQueue>(resMqDescriptor);
++    if (!mCaptureResultMetadataQueue->isValid()) {
++        ALOGE("Empty fmq from cameraserver");
++        mCaptureResultMetadataQueue = nullptr;
++        return false;
++    }
++
++    return true;
++}
++
+ camera_status_t
+ CameraDevice::checkCameraClosedOrErrorLocked() const {
+     if (mRemote == nullptr) {
+@@ -1247,7 +1270,9 @@ void CameraDevice::CallbackHandler::onMessageReceived(
+                         String8 physicalId8 = toString8(physicalResultInfo[i].mPhysicalCameraId);
+                         physicalCameraIds.push_back(physicalId8.c_str());
+ 
+-                        CameraMetadata clone = physicalResultInfo[i].mPhysicalCameraMetadata;
++                        CameraMetadata clone =
++                                physicalResultInfo[i].
++                                        mCameraMetadataInfo.get<CameraMetadataInfo::metadata>();
+                         clone.update(ANDROID_SYNC_FRAME_NUMBER,
+                                 &physicalResult->mFrameNumber, /*data_count*/1);
+                         sp<ACameraMetadata> metadata =
+@@ -1777,7 +1802,7 @@ CameraDevice::ServiceCallback::onCaptureStarted(
+ 
+ binder::Status
+ CameraDevice::ServiceCallback::onResultReceived(
+-        const CameraMetadata& metadata,
++        const CameraMetadataInfo &resultMetadata,
+         const CaptureResultExtras& resultExtras,
+         const std::vector<PhysicalCaptureResultInfo>& physicalResultInfos) {
+     binder::Status ret = binder::Status::ok();
+@@ -1786,11 +1811,11 @@ CameraDevice::ServiceCallback::onResultReceived(
+     if (dev == nullptr) {
+         return ret; // device has been closed
+     }
++
+     int sequenceId = resultExtras.requestId;
+     int64_t frameNumber = resultExtras.frameNumber;
+     int32_t burstId = resultExtras.burstId;
+     bool    isPartialResult = (resultExtras.partialResultCount < dev->mPartialResultCount);
+-
+     if (!isPartialResult) {
+         ALOGV("SeqId %d frame %" PRId64 " result arrive.", sequenceId, frameNumber);
+     }
+@@ -1808,7 +1833,13 @@ CameraDevice::ServiceCallback::onResultReceived(
+         return ret;
+     }
+ 
+-    CameraMetadata metadataCopy = metadata;
++    CameraMetadata metadataCopy;
++    camera_status_t status = readOneResultMetadata(resultMetadata,
++            dev->mCaptureResultMetadataQueue.get(), &metadataCopy);
++    if (status != ACAMERA_OK) {
++        ALOGE("%s: result metadata couldn't be converted", __FUNCTION__);
++        return ret;
++    }
+     metadataCopy.update(ANDROID_LENS_INFO_SHADING_MAP_SIZE, dev->mShadingMapSize, /*data_count*/2);
+     metadataCopy.update(ANDROID_SYNC_FRAME_NUMBER, &frameNumber, /*data_count*/1);
+ 
+@@ -1824,8 +1855,24 @@ CameraDevice::ServiceCallback::onResultReceived(
+         sp<CaptureRequest> request = cbh.mRequests[burstId];
+         sp<ACameraMetadata> result(new ACameraMetadata(
+                 metadataCopy.release(), ACameraMetadata::ACM_RESULT));
++
++        std::vector<PhysicalCaptureResultInfo> localPhysicalResult;
++        localPhysicalResult.resize(physicalResultInfos.size());
++        for (size_t i = 0; i < physicalResultInfos.size(); i++) {
++            CameraMetadata physicalMetadata;
++            localPhysicalResult[i].mPhysicalCameraId = physicalResultInfos[i].mPhysicalCameraId;
++            status = readOneResultMetadata(physicalResultInfos[i].mCameraMetadataInfo,
++                    dev->mCaptureResultMetadataQueue.get(),
++                    &physicalMetadata);
++            if (status != ACAMERA_OK) {
++                ALOGE("%s: physical camera result metadata couldn't be converted", __FUNCTION__);
++                return ret;
++            }
++            localPhysicalResult[i].mCameraMetadataInfo.set<CameraMetadataInfo::metadata>(
++                    std::move(physicalMetadata));
++        }
+         sp<ACameraPhysicalCaptureResultInfo> physicalResult(
+-                new ACameraPhysicalCaptureResultInfo(physicalResultInfos, frameNumber));
++                new ACameraPhysicalCaptureResultInfo(localPhysicalResult, frameNumber));
+ 
+         sp<AMessage> msg = new AMessage(
+                 cbh.mIsLogicalCameraCallback ? kWhatLogicalCaptureResult : kWhatCaptureResult,
+@@ -1946,5 +1993,28 @@ CameraDevice::sendCaptureSequenceCompletedLocked(int sequenceId, int64_t lastFra
+     }
+ }
+ 
++camera_status_t CameraDevice::ServiceCallback::readOneResultMetadata(
++        const CameraMetadataInfo& resultInfo, ResultMetadataQueue* metadataQueue,
++        CameraMetadata* metadata) {
++    if (metadataQueue == nullptr || metadata == nullptr) {
++        return ACAMERA_ERROR_INVALID_PARAMETER;
++    }
++    if (resultInfo.getTag() == CameraMetadataInfo::fmqSize) {
++        int64_t metadataSize = resultInfo.get<CameraMetadataInfo::fmqSize>();
++        auto metadataVec = std::make_unique<int8_t []>(metadataSize);
++        bool read = metadataQueue->read(reinterpret_cast<int8_t*>(metadataVec.get()), metadataSize);
++        if (!read) {
++            ALOGE("%s capture request settings could't be read from fmq", __FUNCTION__);
++            return ACAMERA_ERROR_UNKNOWN;
++        }
++        *metadata = CameraMetadata(reinterpret_cast<camera_metadata_t *>(metadataVec.release()));
++    } else {
++        *metadata =
++                resultInfo.get<CameraMetadataInfo::metadata>();
++    }
++
++    return ACAMERA_OK;
++}
++
+ } // namespace acam
+ } // namespace android
+diff --git a/camera/ndk/impl/ACameraDevice.h b/camera/ndk/impl/ACameraDevice.h
+index d3aed4b2a4..ff68bb94b8 100644
+--- a/camera/ndk/impl/ACameraDevice.h
++++ b/camera/ndk/impl/ACameraDevice.h
+@@ -37,6 +37,7 @@
+ #include <camera/camera2/OutputConfiguration.h>
+ #include <camera/camera2/SessionConfiguration.h>
+ #include <camera/camera2/CaptureRequest.h>
++#include <fmq/AidlMessageQueueCpp.h>
+ 
+ #include <camera/NdkCameraManager.h>
+ #include <camera/NdkCameraCaptureSession.h>
+@@ -46,6 +47,9 @@
+ namespace android {
+ namespace acam {
+ 
++using android::hardware::common::fmq::SynchronizedReadWrite;
++using ResultMetadataQueue = AidlMessageQueueCpp<int8_t, SynchronizedReadWrite>;
++
+ // Wrap ACameraCaptureFailure so it can be ref-counted
+ struct CameraCaptureFailure : public RefBase, public ACameraCaptureFailure {};
+ 
+@@ -61,6 +65,8 @@ struct ACameraPhysicalCaptureResultInfo: public RefBase {
+ 
+ class CameraDevice final : public RefBase {
+   public:
++
++    using CameraMetadataInfo = android::hardware::camera2::CameraMetadataInfo;
+     CameraDevice(const char* id, ACameraDevice_StateCallbacks* cb,
+                   sp<ACameraMetadata> chars,
+                   ACameraDevice* wrapper, bool sharedMode);
+@@ -91,7 +97,7 @@ class CameraDevice final : public RefBase {
+         binder::Status onDeviceIdle() override;
+         binder::Status onCaptureStarted(const CaptureResultExtras& resultExtras,
+                               int64_t timestamp) override;
+-        binder::Status onResultReceived(const CameraMetadata& metadata,
++        binder::Status onResultReceived(const CameraMetadataInfo &resultInfo,
+                               const CaptureResultExtras& resultExtras,
+                               const std::vector<PhysicalCaptureResultInfo>& physicalResultInfos) override;
+         binder::Status onPrepared(int streamId) override;
+@@ -100,6 +106,9 @@ class CameraDevice final : public RefBase {
+                 int32_t stoppedSequenceId) override;
+         binder::Status onClientSharedAccessPriorityChanged(bool isPrimaryClient) override;
+       private:
++        camera_status_t readOneResultMetadata(
++                const CameraMetadataInfo& resultInfo, ResultMetadataQueue* metadataQueue,
++                CameraMetadata* metadata);
+         const wp<CameraDevice> mDevice;
+     };
+     inline sp<hardware::camera2::ICameraDeviceCallbacks> getServiceCallback() {
+@@ -108,6 +117,7 @@ class CameraDevice final : public RefBase {
+ 
+     // Camera device is only functional after remote being set
+     void setRemoteDevice(sp<hardware::camera2::ICameraDeviceUser> remote);
++    bool setDeviceMetadataQueues();
+ 
+     inline ACameraDevice* getWrapper() const { return mWrapper; };
+ 
+@@ -399,6 +409,9 @@ class CameraDevice final : public RefBase {
+     int32_t mPartialResultCount;  // const after constructor
+     std::vector<std::string> mPhysicalIds; // const after constructor
+ 
++    // Metadata queue to write the result metadata to.
++    std::unique_ptr<ResultMetadataQueue> mCaptureResultMetadataQueue;
++
+ };
+ 
+ } // namespace acam;
+@@ -452,6 +465,10 @@ struct ACameraDevice {
+         mDevice->setRemoteDevice(remote);
+     }
+ 
++    inline bool setDeviceMetadataQueues() {
++        return mDevice->setDeviceMetadataQueues();
++    }
++
+     inline void setPrimaryClient(bool isPrimary) {
+         mDevice->setPrimaryClient(isPrimary);
+     }
+diff --git a/camera/ndk/impl/ACameraManager.cpp b/camera/ndk/impl/ACameraManager.cpp
+index f9c1a8aa46..acd79173ae 100644
+--- a/camera/ndk/impl/ACameraManager.cpp
++++ b/camera/ndk/impl/ACameraManager.cpp
+@@ -971,6 +971,7 @@ ACameraManager::openCamera(
+         return ACAMERA_ERROR_CAMERA_DISCONNECTED;
+     }
+     device->setRemoteDevice(deviceRemote);
++    device->setDeviceMetadataQueues();
+     if (flags::camera_multi_client() && sharedMode) {
+         binder::Status remoteRet = deviceRemote->isPrimaryClient(primaryClient);
+         if (!remoteRet.isOk()) {
+diff --git a/camera/tests/CameraBinderTests.cpp b/camera/tests/CameraBinderTests.cpp
+index 4384df93ea..5f7f2f6391 100644
+--- a/camera/tests/CameraBinderTests.cpp
++++ b/camera/tests/CameraBinderTests.cpp
+@@ -63,6 +63,7 @@
+ using namespace android;
+ using ::android::hardware::ICameraService;
+ using ::android::hardware::camera2::ICameraDeviceUser;
++using ::android::hardware::camera2::CameraMetadataInfo;
+ 
+ #define ASSERT_NOT_NULL(x) \
+     ASSERT_TRUE((x) != nullptr)
+@@ -249,10 +250,10 @@ public:
+         return binder::Status::ok();
+     }
+ 
+-    virtual binder::Status onResultReceived(const CameraMetadata& metadata,
++    virtual binder::Status onResultReceived(const CameraMetadataInfo& resultInfo,
+             const CaptureResultExtras& resultExtras,
+             const std::vector<PhysicalCaptureResultInfo>& physicalResultInfos) {
+-        (void) metadata;
++        (void) resultInfo;
+         (void) resultExtras;
+         (void) physicalResultInfos;
+         Mutex::Autolock l(mLock);
+diff --git a/services/camera/libcameraservice/Android.bp b/services/camera/libcameraservice/Android.bp
+index b9c8206d00..b44f94923c 100644
+--- a/services/camera/libcameraservice/Android.bp
++++ b/services/camera/libcameraservice/Android.bp
+@@ -87,7 +87,9 @@ cc_defaults {
+         "android.hardware.camera.device@3.6",
+         "android.hardware.camera.device@3.7",
+         "android.hardware.common-V2-ndk",
++        "android.hardware.common-V2-cpp",
+         "android.hardware.common.fmq-V1-ndk",
++        "android.hardware.common.fmq-V1-cpp",
+         "camera_platform_flags_c_lib",
+         "com.android.window.flags.window-aconfig_flags_c_lib",
+         "media_permission-aidl-cpp",
+diff --git a/services/camera/libcameraservice/CameraService.cpp b/services/camera/libcameraservice/CameraService.cpp
+index 31a45c381b..fdb5b7d11c 100644
+--- a/services/camera/libcameraservice/CameraService.cpp
++++ b/services/camera/libcameraservice/CameraService.cpp
+@@ -1492,6 +1492,7 @@ Status CameraService::makeClient(
+         int servicePid, std::pair<int, IPCTransport> deviceVersionAndTransport,
+         apiLevel effectiveApiLevel, bool overrideForPerfClass, int rotationOverride,
+         bool forceSlowJpegMode, const std::string& originalCameraId, bool sharedMode,
++        bool isVendorClient,
+         /*out*/sp<BasicClient>* client) {
+     // For HIDL devices
+     if (deviceVersionAndTransport.second == IPCTransport::HIDL) {
+@@ -1537,7 +1538,8 @@ Status CameraService::makeClient(
+                 cameraService, tmp, cameraService->mCameraServiceProxyWrapper,
+                 cameraService->mAttributionAndPermissionUtils, clientAttribution, callingPid,
+                 systemNativeClient, cameraId, facing, sensorOrientation, servicePid,
+-                overrideForPerfClass, rotationOverride, originalCameraId, sharedMode);
++                overrideForPerfClass, rotationOverride, originalCameraId, sharedMode,
++                isVendorClient);
+         ALOGI("%s: Camera2 API, rotationOverride %d", __FUNCTION__, rotationOverride);
+     }
+     return Status::ok();
+@@ -1638,7 +1640,7 @@ Status CameraService::initializeShimMetadata(int cameraId) {
+                   /*rotationOverride*/
+                   hardware::ICameraService::ROTATION_OVERRIDE_OVERRIDE_TO_PORTRAIT,
+                   /*forceSlowJpegMode*/ false, cameraIdStr, /*isNonSystemNdk*/ false,
+-                  /*sharedMode*/false, /*out*/ tmp))
++                  /*sharedMode*/false, /*isVendorClient*/false,/*out*/ tmp))
+                  .isOk()) {
+         ALOGE("%s: Error initializing shim metadata: %s", __FUNCTION__, ret.toString8().c_str());
+     }
+@@ -2202,7 +2204,8 @@ Status CameraService::connect(
+             cameraClient, cameraIdStr, api1CameraId, resolvedClientAttribution,
+             /*systemNativeClient*/ false, API_1,
+             /*shimUpdateOnly*/ false, /*oomScoreOffset*/ 0, targetSdkVersion, rotationOverride,
+-            forceSlowJpegMode, cameraIdStr, isNonSystemNdk, /*sharedMode*/false, /*out*/ client);
++            forceSlowJpegMode, cameraIdStr, isNonSystemNdk, /*sharedMode*/false,
++            /*isVendorClient*/ false, /*out*/ client);
+ 
+     if (!ret.isOk()) {
+         logRejected(cameraIdStr, getCallingPid(),
+@@ -2286,7 +2289,32 @@ Status CameraService::connectDevice(
+         const std::string& unresolvedCameraId,
+         int oomScoreOffset, int targetSdkVersion,
+         int rotationOverride, const AttributionSourceState& clientAttribution, int32_t devicePolicy,
+-        bool sharedMode, /*out*/sp<hardware::camera2::ICameraDeviceUser>* device) {
++        bool sharedMode,
++        /*out*/sp<hardware::camera2::ICameraDeviceUser>* device) {
++    return connectDeviceImpl(cameraCb, unresolvedCameraId, oomScoreOffset, targetSdkVersion,
++            rotationOverride, clientAttribution, devicePolicy, sharedMode,
++            /*isVendorClient*/false, device);
++}
++
++Status CameraService::connectDeviceVendor(
++        const sp<hardware::camera2::ICameraDeviceCallbacks>& cameraCb,
++        const std::string& unresolvedCameraId,
++        int oomScoreOffset, int targetSdkVersion,
++        int rotationOverride, const AttributionSourceState& clientAttribution, int32_t devicePolicy,
++        bool sharedMode,
++        /*out*/sp<hardware::camera2::ICameraDeviceUser>* device) {
++            return connectDeviceImpl(cameraCb, unresolvedCameraId, oomScoreOffset, targetSdkVersion,
++                    rotationOverride, clientAttribution, devicePolicy, sharedMode,
++                    /*isVendorClient*/true, device);
++}
++
++Status CameraService::connectDeviceImpl(
++        const sp<hardware::camera2::ICameraDeviceCallbacks>& cameraCb,
++        const std::string& unresolvedCameraId,
++        int oomScoreOffset, int targetSdkVersion,
++        int rotationOverride, const AttributionSourceState& clientAttribution, int32_t devicePolicy,
++        bool sharedMode, bool isVendorClient,
++        /*out*/sp<hardware::camera2::ICameraDeviceUser>* device) {
+     ATRACE_CALL();
+     RunThreadWithRealtimePriority priorityBump;
+     Status ret = Status::ok();
+@@ -2367,7 +2395,7 @@ Status CameraService::connectDevice(
+             cameraCb, cameraId, /*api1CameraId*/ -1, resolvedClientAttribution, systemNativeClient,
+             API_2, /*shimUpdateOnly*/ false, oomScoreOffset, targetSdkVersion, rotationOverride,
+             /*forceSlowJpegMode*/ false, unresolvedCameraId, isNonSystemNdk, sharedMode,
+-            /*out*/ client);
++            isVendorClient, /*out*/ client);
+ 
+     if (!ret.isOk()) {
+         logRejected(cameraId, clientPid, clientPackageName, toStdString(ret.toString8()));
+@@ -2447,7 +2475,8 @@ Status CameraService::connectHelper(const sp<CALLBACK>& cameraCb, const std::str
+                                     bool shimUpdateOnly, int oomScoreOffset, int targetSdkVersion,
+                                     int rotationOverride, bool forceSlowJpegMode,
+                                     const std::string& originalCameraId, bool isNonSystemNdk,
+-                                    bool sharedMode, /*out*/ sp<CLIENT>& device) {
++                                    bool sharedMode, bool isVendorClient,
++                                    /*out*/ sp<CLIENT>& device) {
+     binder::Status ret = binder::Status::ok();
+ 
+     nsecs_t openTimeNs = systemTime();
+@@ -2546,7 +2575,7 @@ Status CameraService::connectHelper(const sp<CALLBACK>& cameraCb, const std::str
+                                systemNativeClient, cameraId, api1CameraId, facing, orientation,
+                                getpid(), deviceVersionAndTransport, effectiveApiLevel,
+                                overrideForPerfClass, rotationOverride, forceSlowJpegMode,
+-                               originalCameraId, sharedMode,
++                               originalCameraId, sharedMode, isVendorClient,
+                                /*out*/ &tmp))
+                      .isOk()) {
+             return ret;
+diff --git a/services/camera/libcameraservice/CameraService.h b/services/camera/libcameraservice/CameraService.h
+index 6f29ff4cbb..c4d2d671d2 100644
+--- a/services/camera/libcameraservice/CameraService.h
++++ b/services/camera/libcameraservice/CameraService.h
+@@ -280,6 +280,14 @@ public:
+             std::vector<hardware::CameraStatus>* cameraStatuses, bool isVendor = false,
+             bool isProcessLocalTest = false);
+ 
++    binder::Status  connectDeviceVendor(
++            const sp<hardware::camera2::ICameraDeviceCallbacks>& cameraCb,
++            const std::string& cameraId, int scoreOffset, int targetSdkVersion,
++            int rotationOverride, const AttributionSourceState& clientAttribution,
++            int32_t devicePolicy, bool sharedMode,
++            /*out*/
++            sp<hardware::camera2::ICameraDeviceUser>* device);
++
+     // Monitored UIDs availability notification
+     void                notifyMonitoredUids();
+     void                notifyMonitoredUids(const std::unordered_set<uid_t> &notifyUidSet);
+@@ -996,7 +1004,16 @@ private:
+                                  bool shimUpdateOnly, int scoreOffset, int targetSdkVersion,
+                                  int rotationOverride, bool forceSlowJpegMode,
+                                  const std::string& originalCameraId, bool isNonSystemNdk,
+-                                 bool sharedMode, /*out*/ sp<CLIENT>& device);
++                                 bool sharedMode, bool isVendorClient,
++                                 /*out*/ sp<CLIENT>& device);
++
++    binder::Status connectDeviceImpl(
++            const sp<hardware::camera2::ICameraDeviceCallbacks>& cameraCb,
++            const std::string& cameraId, int scoreOffset, int targetSdkVersion,
++            int rotationOverride, const AttributionSourceState& clientAttribution,
++            int32_t devicePolicy, bool sharedMode, bool isVendorClient,
++            /*out*/
++            sp<hardware::camera2::ICameraDeviceUser>* device);
+ 
+     // Lock guarding camera service state
+     Mutex               mServiceLock;
+@@ -1493,6 +1510,7 @@ private:
+                                      apiLevel effectiveApiLevel, bool overrideForPerfClass,
+                                      int rotationOverride, bool forceSlowJpegMode,
+                                      const std::string& originalCameraId, bool sharedMode,
++                                     bool isVendorClient,
+                                      /*out*/ sp<BasicClient>* client);
+ 
+     static std::string toString(std::set<userid_t> intSet);
+diff --git a/services/camera/libcameraservice/aidl/AidlCameraDeviceCallbacks.cpp b/services/camera/libcameraservice/aidl/AidlCameraDeviceCallbacks.cpp
+index 70647b4fdd..950ea05fe8 100644
+--- a/services/camera/libcameraservice/aidl/AidlCameraDeviceCallbacks.cpp
++++ b/services/camera/libcameraservice/aidl/AidlCameraDeviceCallbacks.cpp
+@@ -174,11 +174,19 @@ void AidlCameraDeviceCallbacks::CallbackHandler::processResultMessage(
+ }
+ 
+ binder::Status AidlCameraDeviceCallbacks::onResultReceived(
+-    const CameraMetadataNative& result,
++    const CameraMetadataInfo &resultInfo,
+     const UCaptureResultExtras& resultExtras,
+     const ::std::vector<UPhysicalCaptureResultInfo>& physicalCaptureResultInfos) {
+     // Wrap CameraMetadata, resultExtras and physicalCaptureResultInfos in on
+     // sp<RefBase>-able structure and post it.
++    // We modify metadata - since we want to filter out tags based on the vndk
++    // version, and also this communication is an in process function call.
++    // So we don't use FMQ for the shim layer. FMQ is still used for VNDK IPC.
++    if (resultInfo.getTag() != CameraMetadataInfo::metadata) {
++        ALOGE("Vendor callbacks got metadata in fmq ? ");
++        return binder::Status::ok();
++    }
++    const CameraMetadataNative &result = resultInfo.get<CameraMetadataInfo::metadata>();
+     sp<ResultWrapper> resultWrapper = new ResultWrapper(const_cast<CameraMetadataNative &>(result),
+                                                         resultExtras, physicalCaptureResultInfos);
+     sp<AMessage> msg = new AMessage(kWhatResultReceived, mHandler);
+diff --git a/services/camera/libcameraservice/aidl/AidlCameraDeviceCallbacks.h b/services/camera/libcameraservice/aidl/AidlCameraDeviceCallbacks.h
+index 07bf7d8ea5..6504cdc945 100644
+--- a/services/camera/libcameraservice/aidl/AidlCameraDeviceCallbacks.h
++++ b/services/camera/libcameraservice/aidl/AidlCameraDeviceCallbacks.h
+@@ -46,6 +46,7 @@ using ::android::AidlMessageQueue;
+ using ::android::frameworks::cameraservice::utils::DeathPipe;
+ using ::android::hardware::camera2::impl::CameraMetadataNative;
+ 
++using CameraMetadataInfo = android::hardware::camera2::CameraMetadataInfo;
+ using CaptureResultMetadataQueue = AidlMessageQueue<int8_t, SynchronizedReadWrite>;
+ 
+ class AidlCameraDeviceCallbacks : public UBnCameraDeviceCallbacks {
+@@ -65,7 +66,8 @@ class AidlCameraDeviceCallbacks : public UBnCameraDeviceCallbacks {
+                                     int64_t timestamp) override;
+ 
+     binder::Status onResultReceived(
+-            const CameraMetadataNative& result, const CaptureResultExtras& resultExtras,
++            const CameraMetadataInfo &resultInfo,
++            const CaptureResultExtras& resultExtras,
+             const std::vector<PhysicalCaptureResultInfo>& physicalCaptureResultInfos) override;
+ 
+     binder::Status onPrepared(int32_t streamId) override;
+diff --git a/services/camera/libcameraservice/aidl/AidlCameraService.cpp b/services/camera/libcameraservice/aidl/AidlCameraService.cpp
+index a2c431e8df..46e2280b5c 100644
+--- a/services/camera/libcameraservice/aidl/AidlCameraService.cpp
++++ b/services/camera/libcameraservice/aidl/AidlCameraService.cpp
+@@ -177,7 +177,7 @@ ndk::ScopedAStatus AidlCameraService::connectDeviceImpl(
+                     kDefaultDeviceId);
+     clientAttribution.packageName = "";
+     clientAttribution.attributionTag = std::nullopt;
+-    binder::Status serviceRet = mCameraService->connectDevice(
++    binder::Status serviceRet = mCameraService->connectDeviceVendor(
+             callbacks,
+             in_cameraId,
+             /* scoreOffset= */ 0,
+diff --git a/services/camera/libcameraservice/aidl/AidlUtils.cpp b/services/camera/libcameraservice/aidl/AidlUtils.cpp
+index 1ec50722b0..ea7b9c0c42 100644
+--- a/services/camera/libcameraservice/aidl/AidlUtils.cpp
++++ b/services/camera/libcameraservice/aidl/AidlUtils.cpp
+@@ -32,6 +32,7 @@ namespace android::hardware::cameraservice::utils::conversion::aidl {
+ 
+ using aimg::AImageReader_getHGBPFromHandle;
+ using hardware::graphics::bufferqueue::V1_0::utils::H2BGraphicBufferProducer;
++using CameraMetadataInfo = android::hardware::camera2::CameraMetadataInfo;
+ 
+ // Note: existing data in dst will be gone. Caller still owns the memory of src
+ void cloneToAidl(const camera_metadata_t* src, SCameraMetadata* dst) {
+@@ -254,7 +255,8 @@ SPhysicalCaptureResultInfo convertToAidl(const UPhysicalCaptureResultInfo & src,
+     SPhysicalCaptureResultInfo dst;
+     dst.physicalCameraId = src.mPhysicalCameraId;
+ 
+-    const camera_metadata_t *rawMetadata = src.mPhysicalCameraMetadata.getAndLock();
++    const camera_metadata_t *rawMetadata =
++            src.mCameraMetadataInfo.get<CameraMetadataInfo::metadata>().getAndLock();
+     // Try using fmq at first.
+     size_t metadata_size = get_camera_metadata_size(rawMetadata);
+     if ((metadata_size > 0) && (fmq->availableToWrite() > 0)) {
+@@ -267,7 +269,7 @@ SPhysicalCaptureResultInfo convertToAidl(const UPhysicalCaptureResultInfo & src,
+             dst.physicalCameraMetadata.set<SCaptureMetadataInfo::metadata>(std::move(metadata));
+         }
+     }
+-    src.mPhysicalCameraMetadata.unlock(rawMetadata);
++    src.mCameraMetadataInfo.get<CameraMetadataInfo::metadata>().unlock(rawMetadata);
+     return dst;
+ }
+ 
+diff --git a/services/camera/libcameraservice/api2/CameraDeviceClient.cpp b/services/camera/libcameraservice/api2/CameraDeviceClient.cpp
+index 8c30d54de7..56797204d3 100644
+--- a/services/camera/libcameraservice/api2/CameraDeviceClient.cpp
++++ b/services/camera/libcameraservice/api2/CameraDeviceClient.cpp
+@@ -16,6 +16,11 @@
+ 
+ #define LOG_TAG "CameraDeviceClient"
+ #define ATRACE_TAG ATRACE_TAG_CAMERA
++#ifdef LOG_NNDEBUG
++#define ALOGVV(...) ALOGV(__VA_ARGS__)
++#else
++#define ALOGVV(...) ((void)0)
++#endif
+ //#define LOG_NDEBUG 0
+ 
+ #include <com_android_internal_camera_flags.h>
+@@ -40,6 +45,7 @@
+ #include "JpegRCompositeStream.h"
+ 
+ // Convenience methods for constructing binder::Status objects for error returns
++constexpr int32_t METADATA_QUEUE_SIZE = 1 << 20;
+ 
+ #define STATUS_ERROR(errorCode, errorString) \
+     binder::Status::fromServiceSpecificError(errorCode, \
+@@ -80,7 +86,7 @@ CameraDeviceClient::CameraDeviceClient(
+         const AttributionSourceState& clientAttribution, int callingPid, bool systemNativeClient,
+         const std::string& cameraId, int cameraFacing, int sensorOrientation, int servicePid,
+         bool overrideForPerfClass, int rotationOverride, const std::string& originalCameraId,
+-        bool sharedMode)
++        bool sharedMode, bool isVendorClient)
+     : Camera2ClientBase(cameraService, remoteCallback, cameraServiceProxyWrapper,
+                         attributionAndPermissionUtils, clientAttribution, callingPid,
+                         systemNativeClient, cameraId, /*API1 camera ID*/ -1, cameraFacing,
+@@ -90,7 +96,8 @@ CameraDeviceClient::CameraDeviceClient(
+       mStreamingRequestId(REQUEST_ID_NONE),
+       mRequestIdCounter(0),
+       mOverrideForPerfClass(overrideForPerfClass),
+-      mOriginalCameraId(originalCameraId) {
++      mOriginalCameraId(originalCameraId),
++      mIsVendorClient(isVendorClient) {
+     ATRACE_CALL();
+     ALOGI("CameraDeviceClient %s: Opened", cameraId.c_str());
+ }
+@@ -180,6 +187,14 @@ status_t CameraDeviceClient::initializeImpl(TProviderPtr providerPtr,
+             mHighResolutionSensors.insert(physicalId);
+         }
+     }
++    int32_t resultMQSize =
++            property_get_int32("ro.vendor.camera.res.fmq.size", /*default*/METADATA_QUEUE_SIZE);
++    res = CreateMetadataQueue(&mResultMetadataQueue, resultMQSize);
++    if (res != OK) {
++        ALOGE("%s: Creating result metadata queue failed: %s(%d)", __FUNCTION__,
++            strerror(-res), res);
++        return res;
++    }
+     return OK;
+ }
+ 
+@@ -1768,6 +1783,34 @@ binder::Status CameraDeviceClient::setCameraAudioRestriction(int32_t mode) {
+     return binder::Status::ok();
+ }
+ 
++status_t CameraDeviceClient::CreateMetadataQueue(
++        std::unique_ptr<MetadataQueue>* metadata_queue, uint32_t default_size_bytes) {
++        if (metadata_queue == nullptr) {
++            ALOGE("%s: metadata_queue is nullptr", __FUNCTION__);
++            return BAD_VALUE;
++        }
++
++        int32_t size = default_size_bytes;
++
++        *metadata_queue =
++                std::make_unique<MetadataQueue>(static_cast<size_t>(size),
++                        /*configureEventFlagWord*/ false);
++        if (!(*metadata_queue)->isValid()) {
++            ALOGE("%s: Creating metadata queue (size %d) failed.", __FUNCTION__, size);
++            return NO_INIT;
++        }
++
++        return OK;
++}
++
++binder::Status CameraDeviceClient::getCaptureResultMetadataQueue(
++          android::hardware::common::fmq::MQDescriptor<
++          int8_t, android::hardware::common::fmq::SynchronizedReadWrite>* aidl_return) {
++
++    *aidl_return = mResultMetadataQueue->dupeDesc();
++    return binder::Status::ok();
++}
++
+ binder::Status CameraDeviceClient::getGlobalAudioRestriction(/*out*/ int32_t* outMode) {
+     ATRACE_CALL();
+     binder::Status res;
+@@ -2190,16 +2233,76 @@ void CameraDeviceClient::detachDevice() {
+     mCameraServiceProxyWrapper->logClose(mCameraIdStr, closeLatencyMs, hasDeviceError);
+ }
+ 
++size_t CameraDeviceClient::writeResultMetadataIntoResultQueue(
++        const CameraMetadata &resultMetadata) {
++    ATRACE_CALL();
++
++    const camera_metadata_t *resultMetadataP = resultMetadata.getAndLock();
++    size_t resultSize = get_camera_metadata_size(resultMetadataP);
++    if (mResultMetadataQueue != nullptr &&
++        mResultMetadataQueue->write(reinterpret_cast<const int8_t*>(resultMetadataP),
++                resultSize)) {
++        resultMetadata.unlock(resultMetadataP);
++        return resultSize;
++    }
++    resultMetadata.unlock(resultMetadataP);
++    ALOGE(" %s couldn't write metadata into result queue ", __FUNCTION__);
++    return 0;
++}
++
+ /** Device-related methods */
++std::vector<PhysicalCaptureResultInfo> CameraDeviceClient::convertToFMQ(
++        const std::vector<PhysicalCaptureResultInfo> &physicalResults) {
++    std::vector<PhysicalCaptureResultInfo> retVal;
++    ALOGVV("%s E", __FUNCTION__);
++    for (const auto &srcPhysicalResult : physicalResults) {
++        size_t fmqSize = 0;
++        if (!mIsVendorClient && flags::fmq_metadata()) {
++            fmqSize = writeResultMetadataIntoResultQueue(
++                    srcPhysicalResult.mCameraMetadataInfo.get<CameraMetadataInfo::metadata>());
++        }
++        ALOGVV("%s physical metadata write size is %d", __FUNCTION__, (int)fmqSize);
++        if (fmqSize != 0) {
++            retVal.emplace_back(srcPhysicalResult.mPhysicalCameraId, fmqSize);
++        } else {
++            // The flag was off / we're serving VNDK shim call or FMQ write failed.
++            retVal.emplace_back(srcPhysicalResult.mPhysicalCameraId,
++                    srcPhysicalResult.mCameraMetadataInfo.get<CameraMetadataInfo::metadata>());
++        }
++    }
++    ALOGVV("%s X", __FUNCTION__);
++    return retVal;
++}
++
+ void CameraDeviceClient::onResultAvailable(const CaptureResult& result) {
+     ATRACE_CALL();
+-    ALOGV("%s", __FUNCTION__);
++    ALOGVV("%s E", __FUNCTION__);
+ 
+     // Thread-safe. No lock necessary.
+     sp<hardware::camera2::ICameraDeviceCallbacks> remoteCb = mRemoteCallback;
+     if (remoteCb != NULL) {
+-        remoteCb->onResultReceived(result.mMetadata, result.mResultExtras,
+-                result.mPhysicalMetadatas);
++        // Write  result metadata into metadataQueue
++        size_t fmqMetadataSize = 0;
++        // Vendor clients need to modify metadata and also this call is in process
++        // before going through FMQ to vendor clients. So don't use FMQ here.
++        if (!mIsVendorClient && flags::fmq_metadata()) {
++            fmqMetadataSize = writeResultMetadataIntoResultQueue(result.mMetadata);
++        }
++        hardware::camera2::impl::CameraMetadataNative resultMetadata;
++        CameraMetadataInfo resultInfo;
++        if (fmqMetadataSize == 0) {
++            // The flag was off / we're serving VNDK shim call or FMQ write failed.
++            resultMetadata = result.mMetadata;
++            resultInfo.set<CameraMetadataInfo::metadata>(resultMetadata);
++        } else {
++            resultInfo.set<CameraMetadataInfo::fmqSize>(fmqMetadataSize);
++        }
++
++        std::vector<PhysicalCaptureResultInfo> physicalMetadatas =
++                convertToFMQ(result.mPhysicalMetadatas);
++
++        remoteCb->onResultReceived(resultInfo, result.mResultExtras,
++                physicalMetadatas);
+     }
+ 
+     // Access to the composite stream map must be synchronized
+@@ -2207,6 +2310,7 @@ void CameraDeviceClient::onResultAvailable(const CaptureResult& result) {
+     for (size_t i = 0; i < mCompositeStreamMap.size(); i++) {
+         mCompositeStreamMap.valueAt(i)->onResultAvailable(result);
+     }
++    ALOGVV("%s X", __FUNCTION__);
+ }
+ 
+ binder::Status CameraDeviceClient::checkPidStatus(const char* checkLocation) {
+diff --git a/services/camera/libcameraservice/api2/CameraDeviceClient.h b/services/camera/libcameraservice/api2/CameraDeviceClient.h
+index a8cf451e2b..691fa8d130 100644
+--- a/services/camera/libcameraservice/api2/CameraDeviceClient.h
++++ b/services/camera/libcameraservice/api2/CameraDeviceClient.h
+@@ -24,6 +24,8 @@
+ #include <camera/camera2/SubmitInfo.h>
+ #include <unordered_map>
+ 
++#include <fmq/AidlMessageQueueCpp.h>
++
+ #include "CameraOfflineSessionClient.h"
+ #include "CameraService.h"
+ #include "common/FrameProcessorBase.h"
+@@ -161,6 +163,11 @@ public:
+ 
+     virtual binder::Status setCameraAudioRestriction(int32_t mode) override;
+ 
++    virtual binder::Status getCaptureResultMetadataQueue(
++          android::hardware::common::fmq::MQDescriptor<
++          int8_t, android::hardware::common::fmq::SynchronizedReadWrite>*
++          aidl_return) override;
++
+     virtual binder::Status getGlobalAudioRestriction(/*out*/int32_t* outMode) override;
+ 
+     virtual binder::Status switchToOffline(
+@@ -182,7 +189,8 @@ public:
+                        const AttributionSourceState& clientAttribution, int callingPid,
+                        bool clientPackageOverride, const std::string& cameraId, int cameraFacing,
+                        int sensorOrientation, int servicePid, bool overrideForPerfClass,
+-                       int rotationOverride, const std::string& originalCameraId, bool sharedMode);
++                       int rotationOverride, const std::string& originalCameraId, bool sharedMode,
++                       bool isVendorClient);
+     virtual ~CameraDeviceClient();
+ 
+     virtual status_t      initialize(sp<CameraProviderManager> manager,
+@@ -233,6 +241,10 @@ public:
+      */
+ protected:
+     /** FilteredListener implementation **/
++
++    size_t writeResultMetadataIntoResultQueue(const CameraMetadata &result);
++    std::vector<PhysicalCaptureResultInfo> convertToFMQ(
++            const std::vector<PhysicalCaptureResultInfo> &physicalResults);
+     virtual void          onResultAvailable(const CaptureResult& result);
+     virtual void          detachDevice();
+ 
+@@ -244,6 +256,11 @@ protected:
+     const CameraMetadata &getStaticInfo(const std::string &cameraId);
+ 
+ private:
++    using MetadataQueue = AidlMessageQueueCpp<
++            int8_t, android::hardware::common::fmq::SynchronizedReadWrite>;
++    using CameraMetadataInfo = android::hardware::camera2::CameraMetadataInfo;
++    status_t CreateMetadataQueue(
++            std::unique_ptr<MetadataQueue>* metadata_queue, uint32_t default_size);
+     // StreamSurfaceId encapsulates streamId + surfaceId for a particular surface.
+     // streamId specifies the index of the stream the surface belongs to, and the
+     // surfaceId specifies the index of the surface within the stream. (one stream
+@@ -322,6 +339,9 @@ private:
+ 
+     int32_t mRequestIdCounter;
+ 
++    // Metadata queue to write the result metadata to.
++    std::unique_ptr<MetadataQueue> mResultMetadataQueue;
++
+     std::vector<std::string> mPhysicalCameraIds;
+ 
+     // The list of output streams whose surfaces are deferred. We have to track them separately
+@@ -361,6 +381,8 @@ private:
+ 
+     // This only exists in case of camera ID Remapping.
+     const std::string mOriginalCameraId;
++
++    bool mIsVendorClient = false;
+ };
+ 
+ }; // namespace android
+diff --git a/services/camera/libcameraservice/api2/CameraOfflineSessionClient.cpp b/services/camera/libcameraservice/api2/CameraOfflineSessionClient.cpp
+index 71fd3ba1d9..1e73d79501 100644
+--- a/services/camera/libcameraservice/api2/CameraOfflineSessionClient.cpp
++++ b/services/camera/libcameraservice/api2/CameraOfflineSessionClient.cpp
+@@ -299,7 +299,10 @@ void CameraOfflineSessionClient::onResultAvailable(const CaptureResult& result)
+     ALOGV("%s", __FUNCTION__);
+ 
+     if (mRemoteCallback.get() != NULL) {
+-        mRemoteCallback->onResultReceived(result.mMetadata, result.mResultExtras,
++        using hardware::camera2::CameraMetadataInfo;
++        CameraMetadataInfo resultInfo;
++        resultInfo.set<CameraMetadataInfo::metadata>(result.mMetadata);
++        mRemoteCallback->onResultReceived(resultInfo, result.mResultExtras,
+                 result.mPhysicalMetadatas);
+     }
+ 
+diff --git a/services/camera/libcameraservice/common/FrameProcessorBase.cpp b/services/camera/libcameraservice/common/FrameProcessorBase.cpp
+index 2322defcb6..31dcce264c 100644
+--- a/services/camera/libcameraservice/common/FrameProcessorBase.cpp
++++ b/services/camera/libcameraservice/common/FrameProcessorBase.cpp
+@@ -29,6 +29,8 @@
+ namespace android {
+ namespace camera2 {
+ 
++using CameraMetadataInfo = android::hardware::camera2::CameraMetadataInfo;
++
+ FrameProcessorBase::FrameProcessorBase(wp<FrameProducer> device) :
+     Thread(/*canCallJava*/false),
+     mDevice(device),
+@@ -99,7 +101,7 @@ void FrameProcessorBase::dump(int fd, const Vector<String16>& /*args*/) {
+ 
+         for (const auto& physicalFrame : mLastPhysicalFrames) {
+             lastPhysicalFrames.emplace(physicalFrame.mPhysicalCameraId,
+-                    physicalFrame.mPhysicalCameraMetadata);
++                    physicalFrame.mCameraMetadataInfo.get<CameraMetadataInfo::metadata>());
+         }
+     }
+     lastFrame.dump(fd, /*verbosity*/2, /*indentation*/6);
+diff --git a/services/camera/libcameraservice/device3/Camera3OutputUtils.cpp b/services/camera/libcameraservice/device3/Camera3OutputUtils.cpp
+index ed11a96111..66dcbc3b0b 100644
+--- a/services/camera/libcameraservice/device3/Camera3OutputUtils.cpp
++++ b/services/camera/libcameraservice/device3/Camera3OutputUtils.cpp
+@@ -56,6 +56,7 @@
+ using namespace android::camera3;
+ using namespace android::camera3::SessionConfigurationUtils;
+ using namespace android::hardware::camera;
++using CameraMetadataInfo = android::hardware::camera2::CameraMetadataInfo;
+ namespace flags = com::android::internal::camera::flags;
+ 
+ namespace android {
+@@ -231,11 +232,12 @@ void insertResultLocked(CaptureOutputStates& states, CaptureResult *result, uint
+ 
+     // Update vendor tag id for physical metadata
+     for (auto& physicalMetadata : result->mPhysicalMetadatas) {
+-        camera_metadata_t *pmeta = const_cast<camera_metadata_t *>(
+-                physicalMetadata.mPhysicalCameraMetadata.getAndLock());
++        auto &metadata =
++                physicalMetadata.mCameraMetadataInfo.get<CameraMetadataInfo::metadata>();
++        camera_metadata_t *pmeta = const_cast<camera_metadata_t *>(metadata.getAndLock());
+         set_camera_metadata_vendor_id(pmeta, states.vendorTagId);
+         correctMeteringRegions(pmeta);
+-        physicalMetadata.mPhysicalCameraMetadata.unlock(pmeta);
++        metadata.unlock(pmeta);
+     }
+ 
+     // Valid result, insert into queue
+@@ -362,7 +364,8 @@ void sendCaptureResult(
+ 
+     for (auto& physicalMetadata : captureResult.mPhysicalMetadatas) {
+         camera_metadata_entry timestamp =
+-                physicalMetadata.mPhysicalCameraMetadata.find(ANDROID_SENSOR_TIMESTAMP);
++                physicalMetadata.mCameraMetadataInfo.get<CameraMetadataInfo::metadata>().
++                        find(ANDROID_SENSOR_TIMESTAMP);
+         if (timestamp.count == 0) {
+             SET_ERR("No timestamp provided by HAL for physical camera %s frame %d!",
+                     physicalMetadata.mPhysicalCameraId.c_str(), frameNumber);
+@@ -415,7 +418,8 @@ void sendCaptureResult(
+         return;
+     }
+     for (auto& physicalMetadata : captureResult.mPhysicalMetadatas) {
+-        res = fixupManualFlashStrengthControlTags(physicalMetadata.mPhysicalCameraMetadata);
++        res = fixupManualFlashStrengthControlTags(physicalMetadata.mCameraMetadataInfo.
++                get<CameraMetadataInfo::metadata>());
+         if (res != OK) {
+             SET_ERR("Failed to set flash strength level defaults in physical result"
+                     " metadata: %s (%d)", strerror(-res), res);
+@@ -431,7 +435,8 @@ void sendCaptureResult(
+         return;
+     }
+     for (auto& physicalMetadata : captureResult.mPhysicalMetadatas) {
+-        res = fixupAutoframingTags(physicalMetadata.mPhysicalCameraMetadata);
++        res = fixupAutoframingTags(physicalMetadata.mCameraMetadataInfo.
++                get<CameraMetadataInfo::metadata>());
+         if (res != OK) {
+             SET_ERR("Failed to set autoframing defaults in physical result metadata: %s (%d)",
+                     strerror(-res), res);
+@@ -444,7 +449,7 @@ void sendCaptureResult(
+         auto mapper = states.distortionMappers.find(cameraId);
+         if (mapper != states.distortionMappers.end()) {
+             res = mapper->second.correctCaptureResult(
+-                    &physicalMetadata.mPhysicalCameraMetadata);
++                    &physicalMetadata.mCameraMetadataInfo.get<CameraMetadataInfo::metadata>());
+             if (res != OK) {
+                 SET_ERR("Unable to correct physical capture result metadata for frame %d: %s (%d)",
+                         frameNumber, strerror(-res), res);
+@@ -455,7 +460,8 @@ void sendCaptureResult(
+         // Note: Physical camera continues to use SCALER_CROP_REGION to reflect
+         // zoom levels.
+         res = states.zoomRatioMappers[cameraId].updateCaptureResult(
+-                &physicalMetadata.mPhysicalCameraMetadata, /*zoomMethodIsRatio*/false,
++                &physicalMetadata.mCameraMetadataInfo.get<CameraMetadataInfo::metadata>(),
++                /*zoomMethodIsRatio*/false,
+                 /*zoomRatioIs1*/false);
+         if (res != OK) {
+             SET_ERR("Failed to update camera %s's physical zoom ratio metadata for "
+@@ -474,7 +480,7 @@ void sendCaptureResult(
+         const std::string &cameraId = physicalMetadata.mPhysicalCameraId;
+         res = fixupMonochromeTags(states,
+                 states.physicalDeviceInfoMap.at(cameraId),
+-                physicalMetadata.mPhysicalCameraMetadata);
++                physicalMetadata.mCameraMetadataInfo.get<CameraMetadataInfo::metadata>());
+         if (res != OK) {
+             SET_ERR("Failed to override result metadata: %s (%d)", strerror(-res), res);
+             return;
+@@ -484,7 +490,7 @@ void sendCaptureResult(
+     std::unordered_map<std::string, CameraMetadata> monitoredPhysicalMetadata;
+     for (auto& m : physicalMetadatas) {
+         monitoredPhysicalMetadata.emplace(m.mPhysicalCameraId,
+-                CameraMetadata(m.mPhysicalCameraMetadata));
++                CameraMetadata(m.mCameraMetadataInfo.get<CameraMetadataInfo::metadata>()));
+     }
+     states.tagMonitor.monitorMetadata(TagMonitor::RESULT,
+             frameNumber, sensorTimestamp, captureResult.mMetadata,
+diff --git a/services/camera/libcameraservice/hidl/AidlCameraDeviceCallbacks.cpp b/services/camera/libcameraservice/hidl/AidlCameraDeviceCallbacks.cpp
+index de51ffa118..24d9a7ed33 100644
+--- a/services/camera/libcameraservice/hidl/AidlCameraDeviceCallbacks.cpp
++++ b/services/camera/libcameraservice/hidl/AidlCameraDeviceCallbacks.cpp
+@@ -167,11 +167,19 @@ void H2BCameraDeviceCallbacks::CallbackHandler::processResultMessage(
+ }
+ 
+ binder::Status H2BCameraDeviceCallbacks::onResultReceived(
+-    const CameraMetadataNative& result,
++    const CameraMetadataInfo &resultInfo,
+     const CaptureResultExtras& resultExtras,
+     const ::std::vector<PhysicalCaptureResultInfo>& physicalCaptureResultInfos) {
+     // Wrap CameraMetadata, resultExtras and physicalCaptureResultInfos in on
+     // sp<RefBase>-able structure and post it.
++    // We modify metadata - since we want to filter out tags based on the vndk
++    // version, and also this communication is an in process function call.
++    // So we don't use FMQ for the shim layer. FMQ is still used for VNDK IPC.
++    if (resultInfo.getTag() != CameraMetadataInfo::metadata) {
++        ALOGE("Vendor callbacks got metadata in fmq ? ");
++        return binder::Status::ok();
++    }
++    const CameraMetadataNative &result = resultInfo.get<CameraMetadataInfo::metadata>();
+     sp<ResultWrapper> resultWrapper = new ResultWrapper(const_cast<CameraMetadataNative &>(result),
+                                                         resultExtras, physicalCaptureResultInfos);
+     sp<AMessage> msg = new AMessage(kWhatResultReceived, mHandler);
+diff --git a/services/camera/libcameraservice/hidl/AidlCameraDeviceCallbacks.h b/services/camera/libcameraservice/hidl/AidlCameraDeviceCallbacks.h
+index 98a0dbb299..e36c2eae6e 100644
+--- a/services/camera/libcameraservice/hidl/AidlCameraDeviceCallbacks.h
++++ b/services/camera/libcameraservice/hidl/AidlCameraDeviceCallbacks.h
+@@ -54,6 +54,7 @@ using hardware::camera2::impl::PhysicalCaptureResultInfo;
+ using hardware::kSynchronizedReadWrite;
+ using hardware::MessageQueue;
+ using CaptureResultMetadataQueue = MessageQueue<uint8_t, kSynchronizedReadWrite>;
++using CameraMetadataInfo = android::hardware::camera2::CameraMetadataInfo;
+ 
+ struct H2BCameraDeviceCallbacks :
+     public H2BConverter<HCameraDeviceCallback, ICameraDeviceCallbacks, BnCameraDeviceCallbacks> {
+@@ -72,7 +73,8 @@ struct H2BCameraDeviceCallbacks :
+                                             int64_t timestamp) override;
+ 
+     virtual binder::Status onResultReceived(
+-        const CameraMetadataNative& result, const CaptureResultExtras& resultExtras,
++        const CameraMetadataInfo &,
++        const CaptureResultExtras& resultExtras,
+         const std::vector<PhysicalCaptureResultInfo>& physicalCaptureResultInfos) override;
+ 
+     virtual binder::Status onPrepared(int32_t streamId) override;
+diff --git a/services/camera/libcameraservice/hidl/HidlCameraService.cpp b/services/camera/libcameraservice/hidl/HidlCameraService.cpp
+index 9d140f2c6b..9e66236bd4 100644
+--- a/services/camera/libcameraservice/hidl/HidlCameraService.cpp
++++ b/services/camera/libcameraservice/hidl/HidlCameraService.cpp
+@@ -132,7 +132,7 @@ Return<void> HidlCameraService::connectDevice(const sp<HCameraDeviceCallback>& h
+                     kDefaultDeviceId);
+     clientAttribution.packageName = "";
+     clientAttribution.attributionTag = std::nullopt;
+-    binder::Status serviceRet = mAidlICameraService->connectDevice(
++    binder::Status serviceRet = mAidlICameraService->connectDeviceVendor(
+             callbacks, cameraId, 0/*oomScoreOffset*/,
+             /*targetSdkVersion*/__ANDROID_API_FUTURE__, ROTATION_OVERRIDE_NONE,
+             clientAttribution, /*devicePolicy*/0, /*sharedMode*/false, /*out*/&deviceRemote);
+diff --git a/services/camera/libcameraservice/hidl/Utils.cpp b/services/camera/libcameraservice/hidl/Utils.cpp
+index d0302d0eb2..d37287bf9b 100644
+--- a/services/camera/libcameraservice/hidl/Utils.cpp
++++ b/services/camera/libcameraservice/hidl/Utils.cpp
+@@ -28,6 +28,7 @@ namespace conversion {
+ 
+ using hardware::graphics::bufferqueue::V1_0::utils::H2BGraphicBufferProducer;
+ using aimg::AImageReader_getHGBPFromHandle;
++using CameraMetadataInfo = android::hardware::camera2::CameraMetadataInfo;
+ 
+ // Note: existing data in dst will be gone. Caller still owns the memory of src
+ void convertToHidl(const camera_metadata_t *src, HCameraMetadata* dst) {
+@@ -274,7 +275,8 @@ HPhysicalCaptureResultInfo convertToHidl(
+     hPhysicalCaptureResultInfo.physicalCameraId =
+         toString8(physicalCaptureResultInfo.mPhysicalCameraId);
+     const camera_metadata_t *rawMetadata =
+-        physicalCaptureResultInfo.mPhysicalCameraMetadata.getAndLock();
++        physicalCaptureResultInfo.mCameraMetadataInfo.get<CameraMetadataInfo::metadata>().
++                getAndLock();
+     // Try using fmq at first.
+     size_t metadata_size = get_camera_metadata_size(rawMetadata);
+     if ((metadata_size > 0) && (captureResultMetadataQueue->availableToWrite() > 0)) {
+@@ -287,7 +289,8 @@ HPhysicalCaptureResultInfo convertToHidl(
+             hPhysicalCaptureResultInfo.physicalCameraMetadata.metadata(std::move(metadata));
+         }
+     }
+-    physicalCaptureResultInfo.mPhysicalCameraMetadata.unlock(rawMetadata);
++    physicalCaptureResultInfo.mCameraMetadataInfo.get<CameraMetadataInfo::metadata>().
++            unlock(rawMetadata);
+     return hPhysicalCaptureResultInfo;
+ }
+ 
+diff --git a/services/camera/libcameraservice/libcameraservice_fuzzer/camera_service_fuzzer.cpp b/services/camera/libcameraservice/libcameraservice_fuzzer/camera_service_fuzzer.cpp
+index 6c98837995..8c7d39e2fd 100644
+--- a/services/camera/libcameraservice/libcameraservice_fuzzer/camera_service_fuzzer.cpp
++++ b/services/camera/libcameraservice/libcameraservice_fuzzer/camera_service_fuzzer.cpp
+@@ -54,6 +54,7 @@ using namespace std;
+ 
+ using ICameraService::ROTATION_OVERRIDE_NONE;
+ using ICameraService::ROTATION_OVERRIDE_OVERRIDE_TO_PORTRAIT;
++using android::hardware::camera2::CameraMetadataInfo;
+ 
+ const int32_t kPreviewThreshold = 8;
+ const int32_t kNumRequestsTested = 8;
+@@ -778,7 +779,7 @@ public:
+         return binder::Status::ok();
+     }
+ 
+-    virtual binder::Status onResultReceived(const CameraMetadata& /*metadata*/,
++    virtual binder::Status onResultReceived(const CameraMetadataInfo& /*metadata*/,
+             const CaptureResultExtras& /*resultExtras*/,
+             const std::vector<PhysicalCaptureResultInfo>& /*physicalResultInfos*/) {
+         return binder::Status::ok();
+diff --git a/services/camera/libcameraservice/tests/CameraPermissionsTest.cpp b/services/camera/libcameraservice/tests/CameraPermissionsTest.cpp
+index ff58c4aa73..2f035e7a02 100644
+--- a/services/camera/libcameraservice/tests/CameraPermissionsTest.cpp
++++ b/services/camera/libcameraservice/tests/CameraPermissionsTest.cpp
+@@ -34,6 +34,7 @@
+ 
+ using namespace android;
+ using namespace android::hardware::camera;
++using android::hardware::camera2::CameraMetadataInfo;
+ 
+ // Empty service listener.
+ class TestCameraServiceListener : public hardware::BnCameraServiceListener {
+@@ -107,7 +108,7 @@ public:
+         return binder::Status::ok();
+     }
+ 
+-    virtual binder::Status onResultReceived(const CameraMetadata& /*metadata*/,
++    virtual binder::Status onResultReceived(const CameraMetadataInfo& /*metadata*/,
+             const CaptureResultExtras& /*resultExtras*/,
+             const std::vector<PhysicalCaptureResultInfo>& /*physicalResultInfos*/) {
+         return binder::Status::ok();
+-- 
+2.43.0
+

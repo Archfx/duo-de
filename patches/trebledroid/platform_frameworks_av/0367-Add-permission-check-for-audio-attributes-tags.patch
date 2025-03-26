@@ -1,0 +1,107 @@
+From 7616b33d9bf4b25fadc85c7aea326a3fa8e403e2 Mon Sep 17 00:00:00 2001
+From: jiabin <jiabin@google.com>
+Date: Wed, 20 Nov 2024 04:47:02 +0000
+Subject: [PATCH 367/436] Add permission check for audio attributes tags.
+
+Audio attributes tags are system APIs in NDK that can be used to affect
+routing, volume control, etc. In that case, apply
+MODIFY_AUDIO_SETTINGS_PRIVILEGED permission check to protect it.
+
+Bug: 378909923
+Test: atest test_attributes
+Flag: EXEMPT NDK
+Change-Id: Id2a4063b72587e9495bd1221ef82122725f28b5a
+---
+ .../android/media/permission/PermissionEnum.aidl    |  3 ++-
+ media/utils/ServiceUtilities.cpp                    | 13 +++++++++++++
+ media/utils/include/mediautils/ServiceUtilities.h   |  1 +
+ .../service/AudioPolicyInterfaceImpl.cpp            | 11 +++++++++++
+ 4 files changed, 27 insertions(+), 1 deletion(-)
+
+diff --git a/aidl/com/android/media/permission/PermissionEnum.aidl b/aidl/com/android/media/permission/PermissionEnum.aidl
+index 7badb87add..8eeae10f5a 100644
+--- a/aidl/com/android/media/permission/PermissionEnum.aidl
++++ b/aidl/com/android/media/permission/PermissionEnum.aidl
+@@ -38,5 +38,6 @@ enum PermissionEnum {
+     CAPTURE_VOICE_COMMUNICATION_OUTPUT = 12,
+     BLUETOOTH_CONNECT = 13,
+     BYPASS_CONCURRENT_RECORD_AUDIO_RESTRICTION = 14,
+-    ENUM_SIZE = 15, // Not for actual usage, used by Java
++    MODIFY_AUDIO_SETTINGS_PRIVILEGED = 15,
++    ENUM_SIZE = 16, // Not for actual usage, used by Java
+ }
+diff --git a/media/utils/ServiceUtilities.cpp b/media/utils/ServiceUtilities.cpp
+index 39a172f732..8ceff96888 100644
+--- a/media/utils/ServiceUtilities.cpp
++++ b/media/utils/ServiceUtilities.cpp
+@@ -55,6 +55,8 @@ static const String16 sAndroidPermissionRecordAudio("android.permission.RECORD_A
+ static const String16 sModifyPhoneState("android.permission.MODIFY_PHONE_STATE");
+ static const String16 sModifyAudioRouting("android.permission.MODIFY_AUDIO_ROUTING");
+ static const String16 sCallAudioInterception("android.permission.CALL_AUDIO_INTERCEPTION");
++static const String16 sModifyAudioSettingsPrivileged(
++        "android.permission.MODIFY_AUDIO_SETTINGS_PRIVILEGED");
+ 
+ static String16 resolveCallingPackage(PermissionController& permissionController,
+         const std::optional<String16> opPackageName, uid_t uid) {
+@@ -387,6 +389,17 @@ bool modifyDefaultAudioEffectsAllowed(const AttributionSourceState& attributionS
+     return ok;
+ }
+ 
++bool modifyAudioSettingsPrivilegedAllowed(const AttributionSourceState& attributionSource) {
++    uid_t uid = VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid));
++    pid_t pid = VALUE_OR_FATAL(aidl2legacy_int32_t_pid_t(attributionSource.pid));
++    if (isAudioServerUid(uid)) return true;
++    // IMPORTANT: Use PermissionCache - not a runtime permission and may not change.
++    bool ok = PermissionCache::checkPermission(sModifyAudioSettingsPrivileged, pid, uid);
++    if (!ok) ALOGE("%s(): android.permission.MODIFY_AUDIO_SETTINGS_PRIVILEGED denied for uid %d",
++                   __func__, uid);
++    return ok;
++}
++
+ bool dumpAllowed() {
+     static const String16 sDump("android.permission.DUMP");
+     // IMPORTANT: Use PermissionCache - not a runtime permission and may not change.
+diff --git a/media/utils/include/mediautils/ServiceUtilities.h b/media/utils/include/mediautils/ServiceUtilities.h
+index 573cc14ef4..42789d5b20 100644
+--- a/media/utils/include/mediautils/ServiceUtilities.h
++++ b/media/utils/include/mediautils/ServiceUtilities.h
+@@ -110,6 +110,7 @@ bool modifyAudioRoutingAllowed();
+ bool modifyAudioRoutingAllowed(const AttributionSourceState& attributionSource);
+ bool modifyDefaultAudioEffectsAllowed();
+ bool modifyDefaultAudioEffectsAllowed(const AttributionSourceState& attributionSource);
++bool modifyAudioSettingsPrivilegedAllowed(const AttributionSourceState& attributionSource);
+ bool dumpAllowed();
+ bool modifyPhoneStateAllowed(const AttributionSourceState& attributionSource);
+ bool bypassInterruptionPolicyAllowed(const AttributionSourceState& attributionSource);
+diff --git a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+index 12320b7472..802ebeb318 100644
+--- a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
++++ b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+@@ -73,6 +73,7 @@ using com::android::media::permission::PermissionEnum::CAPTURE_MEDIA_OUTPUT;
+ using com::android::media::permission::PermissionEnum::CAPTURE_TUNER_AUDIO_INPUT;
+ using com::android::media::permission::PermissionEnum::MODIFY_AUDIO_ROUTING;
+ using com::android::media::permission::PermissionEnum::MODIFY_AUDIO_SETTINGS;
++using com::android::media::permission::PermissionEnum::MODIFY_AUDIO_SETTINGS_PRIVILEGED;
+ using com::android::media::permission::PermissionEnum::MODIFY_DEFAULT_AUDIO_EFFECTS;
+ using com::android::media::permission::PermissionEnum::MODIFY_PHONE_STATE;
+ using com::android::media::permission::PermissionEnum::RECORD_AUDIO;
+@@ -443,6 +444,16 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
+         }
+     }
+ 
++    if (strlen(attr.tags) != 0) {
++        if (!(audioserver_permissions() ?
++              CHECK_PERM(MODIFY_AUDIO_SETTINGS_PRIVILEGED, attributionSource.uid)
++              : modifyAudioSettingsPrivilegedAllowed(attributionSource))) {
++            ALOGE("%s: permission denied: audio attributes tags not allowed for uid %d pid %d",
++                  __func__, attributionSource.uid, attributionSource.pid);
++            return binderStatusFromStatusT(PERMISSION_DENIED);
++        }
++    }
++
+     AutoCallerClear acc;
+     AudioPolicyInterface::output_type_t outputType;
+     bool isSpatialized = false;
+-- 
+2.43.0
+

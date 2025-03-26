@@ -1,0 +1,72 @@
+From f7b48d22b8cb08d6580ca432e71c8da055398a5b Mon Sep 17 00:00:00 2001
+From: Mikhail Naganov <mnaganov@google.com>
+Date: Fri, 1 Nov 2024 14:36:15 -0700
+Subject: [PATCH 190/436] Audio CAP: Address ANAPIC comments, Part 2.
+
+See ag/30063274.
+
+Remove superfluous field and type from AudioHalCapCriterionV2.
+
+Bug: 364310317
+Test: m
+Change-Id: Ifbb327dfd5859337682b2b8ee176f62407471d7e
+---
+ .../config/src/CapEngineConfig.cpp            | 30 +++++++++++--------
+ 1 file changed, 18 insertions(+), 12 deletions(-)
+
+diff --git a/services/audiopolicy/engineconfigurable/config/src/CapEngineConfig.cpp b/services/audiopolicy/engineconfigurable/config/src/CapEngineConfig.cpp
+index a1b4470eb9..b72e517d37 100644
+--- a/services/audiopolicy/engineconfigurable/config/src/CapEngineConfig.cpp
++++ b/services/audiopolicy/engineconfigurable/config/src/CapEngineConfig.cpp
+@@ -122,18 +122,24 @@ ConversionResult<std::string> aidl2legacy_AudioHalCapCriterionV2TypeDevice_CapCr
+ }
+ 
+ ConversionResult<std::string> aidl2legacy_AudioHalCapCriterionV2Type_CapCriterionValue(
+-        const AudioHalCapCriterionV2::Type& aidl) {
++        const AudioHalCapCriterionV2& aidl) {
+     switch (aidl.getTag()) {
+-        case AudioHalCapCriterionV2::Type::availableDevicesType:
++        case AudioHalCapCriterionV2::availableInputDevices:
++            return aidl2legacy_AudioHalCapCriterionV2TypeDevice_CapCriterionValue(
++                    aidl.get<AudioHalCapCriterionV2::availableInputDevices>().values[0]);
++        case AudioHalCapCriterionV2::availableOutputDevices:
+             return aidl2legacy_AudioHalCapCriterionV2TypeDevice_CapCriterionValue(
+-                    aidl.get<AudioHalCapCriterionV2::Type::availableDevicesType>());
+-        case AudioHalCapCriterionV2::Type::availableDevicesAddressesType:
+-            return aidl.get<AudioHalCapCriterionV2::Type::availableDevicesAddressesType>().template
+-                    get<AudioDeviceAddress::id>();
+-        case AudioHalCapCriterionV2::Type::telephonyModeType:
+-            return toString(aidl.get<AudioHalCapCriterionV2::Type::telephonyModeType>());
+-        case AudioHalCapCriterionV2::Type::forcedConfigType:
+-            return toString(aidl.get<AudioHalCapCriterionV2::Type::forcedConfigType>());
++                    aidl.get<AudioHalCapCriterionV2::availableOutputDevices>().values[0]);
++        case AudioHalCapCriterionV2::availableInputDevicesAddresses:
++            return aidl.get<AudioHalCapCriterionV2::availableInputDevicesAddresses>().values[0].
++                    template get<AudioDeviceAddress::id>();
++        case AudioHalCapCriterionV2::availableOutputDevicesAddresses:
++            return aidl.get<AudioHalCapCriterionV2::availableOutputDevicesAddresses>().values[0].
++                    template get<AudioDeviceAddress::id>();
++        case AudioHalCapCriterionV2::telephonyMode:
++            return toString(aidl.get<AudioHalCapCriterionV2::telephonyMode>().values[0]);
++        case AudioHalCapCriterionV2::forceConfigForUse:
++            return toString(aidl.get<AudioHalCapCriterionV2::forceConfigForUse>().values[0]);
+         default:
+             return unexpected(BAD_VALUE);
+     }
+@@ -168,11 +174,11 @@ ConversionResult<std::string> aidl2legacy_AudioHalCapRule_CapRule(
+         }
+         isFirstCriterionRule = false;
+         std::string selectionCriterion = VALUE_OR_RETURN(
+-                aidl2legacy_AudioHalCapCriterionV2_CapName(criterionRule.criterion));
++                aidl2legacy_AudioHalCapCriterionV2_CapName(criterionRule.criterionAndValue));
+         std::string matchesWhen;
+         std::string value = VALUE_OR_RETURN(
+                 aidl2legacy_AudioHalCapCriterionV2Type_CapCriterionValue(
+-                        criterionRule.criterionTypeValue));
++                        criterionRule.criterionAndValue));
+ 
+         switch (criterionRule.matchingRule) {
+             case AudioHalCapRule::MatchingRule::IS:
+-- 
+2.43.0
+

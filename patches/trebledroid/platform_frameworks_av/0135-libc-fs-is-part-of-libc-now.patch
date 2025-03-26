@@ -1,0 +1,27 @@
+From ff90a5a0446ede943ae0c00165e135987f519bf2 Mon Sep 17 00:00:00 2001
+From: Elliott Hughes <enh@google.com>
+Date: Thu, 24 Oct 2024 14:32:15 +0000
+Subject: [PATCH 135/436] libc++fs is part of libc++ now.
+
+Change-Id: I64d9236b7c0976a00d168cb3709b9d1dcad0811f
+---
+ drm/libdrmframework/plugins/passthru/Android.bp | 3 ---
+ 1 file changed, 3 deletions(-)
+
+diff --git a/drm/libdrmframework/plugins/passthru/Android.bp b/drm/libdrmframework/plugins/passthru/Android.bp
+index 0a6cd47fd9..6ac7188b10 100644
+--- a/drm/libdrmframework/plugins/passthru/Android.bp
++++ b/drm/libdrmframework/plugins/passthru/Android.bp
+@@ -45,9 +45,6 @@ cc_library_shared {
+         "libdl",
+         "libdrmframeworkcommon",
+     ],
+-    whole_static_libs: [
+-        "libc++fs",
+-    ],
+ 
+     local_include_dirs: ["include"],
+ 
+-- 
+2.43.0
+

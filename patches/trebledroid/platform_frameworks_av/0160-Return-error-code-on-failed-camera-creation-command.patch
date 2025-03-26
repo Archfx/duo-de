@@ -1,0 +1,77 @@
+From e6ca52951a658bad0f4386dc3d84b9370d5c4285 Mon Sep 17 00:00:00 2001
+From: Vadim Caen <caen@google.com>
+Date: Mon, 28 Oct 2024 13:46:22 +0100
+Subject: [PATCH 160/436] Return error code on failed camera creation command
+
+We were not returning the error code in case the test camera could not
+be created.
+
+Flag: EXEMPT Bug fix
+Bug: 372971702
+Test: CtsVirtualDevicesCameraCtsTestCases
+Change-Id: I4cf7e98bdea14562fca4b5798a5505787bd4eba1
+---
+ .../virtualcamera/VirtualCameraService.cc      | 18 ++++++++++--------
+ .../virtualcamera/VirtualCameraService.h       |  2 +-
+ 2 files changed, 11 insertions(+), 9 deletions(-)
+
+diff --git a/services/camera/virtualcamera/VirtualCameraService.cc b/services/camera/virtualcamera/VirtualCameraService.cc
+index de09a628b7..67225c9b23 100644
+--- a/services/camera/virtualcamera/VirtualCameraService.cc
++++ b/services/camera/virtualcamera/VirtualCameraService.cc
+@@ -395,7 +395,7 @@ binder_status_t VirtualCameraService::handleShellCommand(int, int out, int err,
+       status = enableTestCameraCmd(out, err, cmd.optionToValueMap);
+       break;
+     case Command::DISABLE_TEST_CAMERA:
+-      disableTestCameraCmd(out);
++      status = disableTestCameraCmd(out);
+       break;
+   }
+ 
+@@ -490,21 +490,23 @@ binder_status_t VirtualCameraService::enableTestCameraCmd(
+       mTestCameraToken, configuration,
+       cameraId.value_or(std::to_string(sNextIdNumericalPortion++)),
+       kDefaultDeviceId, &ret);
+-  if (ret) {
+-    dprintf(out, "Successfully registered test camera %s\n",
+-            getCamera(mTestCameraToken)->getCameraName().c_str());
+-  } else {
+-    dprintf(err, "Failed to create test camera\n");
++  if (!ret) {
++    dprintf(err, "Failed to create test camera (error %d)\n", ret);
++    return ret;
+   }
++
++  dprintf(out, "Successfully registered test camera %s\n",
++          getCamera(mTestCameraToken)->getCameraName().c_str());
+   return STATUS_OK;
+ }
+ 
+-void VirtualCameraService::disableTestCameraCmd(const int out) {
++binder_status_t VirtualCameraService::disableTestCameraCmd(const int out) {
+   if (mTestCameraToken == nullptr) {
+     dprintf(out, "Test camera is not registered.");
+   }
+-  unregisterCamera(mTestCameraToken);
++  binder_status_t ret = unregisterCamera(mTestCameraToken).getStatus();
+   mTestCameraToken.set(nullptr);
++  return ret;
+ }
+ 
+ }  // namespace virtualcamera
+diff --git a/services/camera/virtualcamera/VirtualCameraService.h b/services/camera/virtualcamera/VirtualCameraService.h
+index 3be5c3e896..defa75b089 100644
+--- a/services/camera/virtualcamera/VirtualCameraService.h
++++ b/services/camera/virtualcamera/VirtualCameraService.h
+@@ -85,7 +85,7 @@ class VirtualCameraService
+   binder_status_t enableTestCameraCmd(
+       int out, int err, const std::map<std::string, std::string>& options);
+   // Disable and destroy test camera instance if there's one.
+-  void disableTestCameraCmd(int out);
++  binder_status_t disableTestCameraCmd(int out);
+ 
+   // Register camera corresponding to the binder token without checking for
+   // caller permission.
+-- 
+2.43.0
+

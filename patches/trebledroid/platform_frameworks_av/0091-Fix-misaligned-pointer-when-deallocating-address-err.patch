@@ -1,0 +1,31 @@
+From 45c9b78fcdf74fe6cf6ff1020bb66601b7683d6d Mon Sep 17 00:00:00 2001
+From: Ashish Kumar Gupta <kumarashishg@google.com>
+Date: Mon, 14 Oct 2024 04:43:45 +0000
+Subject: [PATCH 091/436] Fix misaligned pointer when deallocating address
+ error
+
+Vector automatically allocates memory for its elements and takes care of allocating and deallocating memory as needed. Don't need to manually delete objects within a vector.
+
+Bug: 372823688
+Flag: EXEMPT bug fix
+Test: presubmit
+Change-Id: I695f355cea1d157869437cebf8a990dcde708346
+---
+ media/mtp/MtpFfsHandle.cpp | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/media/mtp/MtpFfsHandle.cpp b/media/mtp/MtpFfsHandle.cpp
+index 4645a75dcb..26e5ddfe04 100644
+--- a/media/mtp/MtpFfsHandle.cpp
++++ b/media/mtp/MtpFfsHandle.cpp
+@@ -300,7 +300,6 @@ void MtpFfsHandle::close() {
+     int count = mChildThreads.size();
+     for (int i = 0; i < count; i++) {
+         mChildThreads[i].join();
+-        delete &mChildThreads[i];
+     }
+     mChildThreads.clear();
+ 
+-- 
+2.43.0
+

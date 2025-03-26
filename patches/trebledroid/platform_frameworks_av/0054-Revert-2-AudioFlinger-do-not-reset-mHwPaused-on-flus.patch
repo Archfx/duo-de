@@ -1,0 +1,38 @@
+From 0770bc8b890e96aa615414f2662890fb5226b6bf Mon Sep 17 00:00:00 2001
+From: Haofan Wang <haofanw@google.com>
+Date: Thu, 3 Oct 2024 17:37:55 +0000
+Subject: [PATCH 054/436] Revert^2 "AudioFlinger: do not reset mHwPaused on
+ flush"
+
+This reverts commit 5f1ee2c965d5b15402f43c0c124e89d689bd7023.
+
+Reason for revert: <The problem has been fixed at AOSP/2893100, this patch is ok to merge now>
+
+Change-Id: I8431c6c0a368d986405c9200c55e24ff099c353d
+---
+ services/audioflinger/Threads.cpp | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/services/audioflinger/Threads.cpp b/services/audioflinger/Threads.cpp
+index bcd8b99e3f..fd5d5fc6ce 100644
+--- a/services/audioflinger/Threads.cpp
++++ b/services/audioflinger/Threads.cpp
+@@ -7145,11 +7145,14 @@ void DirectOutputThread::flushHw_l()
+ {
+     PlaybackThread::flushHw_l();
+     mOutput->flush();
+-    mHwPaused = false;
+     mFlushPending = false;
+     mTimestampVerifier.discontinuity(discontinuityForStandbyOrFlush());
+     mTimestamp.clear();
+     mMonotonicFrameCounter.onFlush();
++    // We do not reset mHwPaused which is hidden from the Track client.
++    // Note: the client track in Tracks.cpp and AudioTrack.cpp
++    // has a FLUSHED state but the DirectOutputThread does not;
++    // those tracks will continue to show isStopped().
+ }
+ 
+ int64_t DirectOutputThread::computeWaitTimeNs_l() const {
+-- 
+2.43.0
+

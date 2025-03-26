@@ -1,0 +1,79 @@
+From 0749b392058382c6132d2877cb38503ba303120c Mon Sep 17 00:00:00 2001
+From: Peter Cai <peter@typeblog.net>
+Date: Thu, 25 Aug 2022 13:30:29 -0400
+Subject: [PATCH 417/436] APM: Remove A2DP audio ports from the primary HAL
+
+These ports defined in the primary HAL are intended for A2DP offloading,
+however they do not work in general on GSIs, and will interfere with
+sysbta, the system-side generic bluetooth audio implementation.
+
+Remove them as we parse the policy XML.
+
+Co-authored-by: Pierre-Hugues Husson <phh@phh.me>
+Change-Id: I3305594a17285da113167b419543543f0ef71122
+---
+ .../managerdefinitions/src/Serializer.cpp     | 26 ++++++++++++++++---
+ 1 file changed, 22 insertions(+), 4 deletions(-)
+
+diff --git a/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp b/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp
+index 29d36ca00b..839974b9d3 100644
+--- a/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp
++++ b/services/audiopolicy/common/managerdefinitions/src/Serializer.cpp
+@@ -26,6 +26,7 @@
+ #include <libxml/xinclude.h>
+ #include <media/convert.h>
+ #include <cutils/properties.h>
++#include <system/audio.h>
+ #include <utils/Log.h>
+ #include <utils/StrongPointer.h>
+ #include <utils/Errors.h>
+@@ -334,11 +335,8 @@ status_t PolicySerializer::deserializeCollection(const xmlNode *cur,
+                             Trait::collectionTag);
+                         return status;
+                     }
+-                } else if (mIgnoreVendorExtensions && std::get<status_t>(maybeElement) == NO_INIT) {
+-                    // Skip a vendor extension element.
+-                } else {
+-                    return BAD_VALUE;
+                 }
++                // Ignore elements that failed to parse, e.g. routes with invalid sinks
+             }
+         }
+         if (!xmlStrcmp(cur->name, reinterpret_cast<const xmlChar*>(Trait::tag))) {
+@@ -775,6 +773,7 @@ std::variant<status_t, ModuleTraits::Element> PolicySerializer::deserialize<Modu
+         ALOGE("%s: No %s found", __func__, Attributes::name);
+         return BAD_VALUE;
+     }
++
+     uint32_t versionMajor = 0, versionMinor = 0;
+     std::string versionLiteral = getXmlAttribute(cur, Attributes::version);
+     if (!versionLiteral.empty()) {
+@@ -800,6 +799,25 @@ std::variant<status_t, ModuleTraits::Element> PolicySerializer::deserialize<Modu
+     if (status != NO_ERROR) {
+         return status;
+     }
++    bool shouldEraseA2DP = name == "primary" && property_get_bool("persist.bluetooth.system_audio_hal.enabled", false);
++    if (shouldEraseA2DP) {
++        // Having A2DP ports in the primary audio HAL module will interfere with sysbta
++        // so remove them here. Note that we do not need to explicitly remove the
++        // corresponding routes below, because routes with invalid sinks will be ignored
++        auto iter = devicePorts.begin();
++        while (iter != devicePorts.end()) {
++            auto port = *iter;
++            auto type = port->type();
++            if (type == AUDIO_DEVICE_OUT_BLUETOOTH_A2DP
++                    || type == AUDIO_DEVICE_OUT_BLUETOOTH_A2DP_HEADPHONES
++                    || type == AUDIO_DEVICE_OUT_BLUETOOTH_A2DP_SPEAKER) {
++                ALOGE("Erasing A2DP device port %s", port->getTagName().c_str());
++                iter = devicePorts.erase(iter);
++            } else {
++                iter++;
++            }
++        }
++    }
+     module->setDeclaredDevices(devicePorts);
+ 
+     RouteTraits::Collection routes;
+-- 
+2.43.0
+

@@ -1,0 +1,78 @@
+From 611efd59d30061807b0b1c7ac1a7ac800d9d35ee Mon Sep 17 00:00:00 2001
+From: "Liana Kazanova (xWF)" <lkazanova@google.com>
+Date: Thu, 31 Oct 2024 19:22:02 +0000
+Subject: [PATCH 184/436] Revert "audiopolicy: speaker cleanup AudioAttributes
+ usage"
+
+Revert submission 30116824-spkr_cleanup
+
+Reason for revert: DroidMonitor: Potential culprit for http://b/376600163 - verifying through ABTD before revert submission. This is part of the standard investigation process, and does not mean your CL will be reverted.
+Reverted changes: /q/submissionid:30116824-spkr_cleanup
+
+Change-Id: I08aa4728f3ad8f24d1cf0275c701c82e8c7bbdc0
+---
+ media/audioaidlconversion/AidlConversionCppNdk.cpp    |  4 ----
+ .../engine/common/src/EngineDefaultConfig.h           |  2 --
+ .../audiopolicy/service/AudioPolicyInterfaceImpl.cpp  | 11 -----------
+ 3 files changed, 17 deletions(-)
+
+diff --git a/media/audioaidlconversion/AidlConversionCppNdk.cpp b/media/audioaidlconversion/AidlConversionCppNdk.cpp
+index de6742ace1..cdcce08c24 100644
+--- a/media/audioaidlconversion/AidlConversionCppNdk.cpp
++++ b/media/audioaidlconversion/AidlConversionCppNdk.cpp
+@@ -1797,8 +1797,6 @@ aidl2legacy_AudioUsage_audio_usage_t(AudioUsage aidl) {
+             return AUDIO_USAGE_VEHICLE_STATUS;
+         case AudioUsage::ANNOUNCEMENT:
+             return AUDIO_USAGE_ANNOUNCEMENT;
+-        case AudioUsage::SPEAKER_CLEANUP:
+-            return AUDIO_USAGE_SPEAKER_CLEANUP;
+     }
+     return unexpected(BAD_VALUE);
+ }
+@@ -1850,8 +1848,6 @@ legacy2aidl_audio_usage_t_AudioUsage(audio_usage_t legacy) {
+             return AudioUsage::VEHICLE_STATUS;
+         case AUDIO_USAGE_ANNOUNCEMENT:
+             return AudioUsage::ANNOUNCEMENT;
+-        case AUDIO_USAGE_SPEAKER_CLEANUP:
+-            return AudioUsage::SPEAKER_CLEANUP;
+     }
+     return unexpected(BAD_VALUE);
+ }
+diff --git a/services/audiopolicy/engine/common/src/EngineDefaultConfig.h b/services/audiopolicy/engine/common/src/EngineDefaultConfig.h
+index 229c5e2930..c4bf64a15c 100644
+--- a/services/audiopolicy/engine/common/src/EngineDefaultConfig.h
++++ b/services/audiopolicy/engine/common/src/EngineDefaultConfig.h
+@@ -131,8 +131,6 @@ const engineConfig::ProductStrategies gOrderedStrategies = {
+               {AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_UNKNOWN, AUDIO_SOURCE_DEFAULT,
+                 AUDIO_FLAG_BEACON, ""},
+               {AUDIO_CONTENT_TYPE_ULTRASOUND, AUDIO_USAGE_UNKNOWN, AUDIO_SOURCE_DEFAULT,
+-                AUDIO_FLAG_NONE, ""},
+-              {AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_SPEAKER_CLEANUP, AUDIO_SOURCE_DEFAULT,
+                 AUDIO_FLAG_NONE, ""}
+           }
+          }
+diff --git a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+index 0d9427a1ff..1ffa176963 100644
+--- a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
++++ b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+@@ -425,17 +425,6 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
+         }
+     }
+ 
+-    //TODO this permission check should extend to all system usages
+-    if (attr.usage == AUDIO_USAGE_SPEAKER_CLEANUP) {
+-        if (!(audioserver_permissions() ?
+-              CHECK_PERM(MODIFY_AUDIO_ROUTING, attributionSource.uid)
+-              : modifyAudioRoutingAllowed())) {
+-            ALOGE("%s: permission denied: SPEAKER_CLEANUP not allowed for uid %d pid %d",
+-                    __func__, attributionSource.uid, attributionSource.pid);
+-            return binderStatusFromStatusT(PERMISSION_DENIED);
+-        }
+-    }
+-
+     AutoCallerClear acc;
+     AudioPolicyInterface::output_type_t outputType;
+     bool isSpatialized = false;
+-- 
+2.43.0
+

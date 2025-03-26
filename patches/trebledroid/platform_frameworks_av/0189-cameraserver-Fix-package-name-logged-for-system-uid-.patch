@@ -1,0 +1,78 @@
+From 0267d472423edde70a733585da197720338211ad Mon Sep 17 00:00:00 2001
+From: Jayant Chowdhary <jchowdhary@google.com>
+Date: Fri, 1 Nov 2024 20:42:15 +0000
+Subject: [PATCH 189/436] cameraserver: Fix package name logged for system uid
+ ndk clients
+
+Bug: 376427318
+
+Flag: EXEMPT bugfix
+
+Test: Check system ndk client as well as 3P package name logged
+
+Change-Id: I6e2efb61346cf1f8cbe3a8370d903f2f68fd7947
+Signed-off-by: Jayant Chowdhary <jchowdhary@google.com>
+---
+ .../camera/libcameraservice/CameraService.cpp    |  5 ++++-
+ .../utils/AttributionAndPermissionUtils.h        | 16 ++++++++++++++--
+ 2 files changed, 18 insertions(+), 3 deletions(-)
+
+diff --git a/services/camera/libcameraservice/CameraService.cpp b/services/camera/libcameraservice/CameraService.cpp
+index 6da160648f..f59ad186d0 100644
+--- a/services/camera/libcameraservice/CameraService.cpp
++++ b/services/camera/libcameraservice/CameraService.cpp
+@@ -2254,9 +2254,12 @@ Status CameraService::connectDevice(
+     int callingPid = getCallingPid();
+     int callingUid = getCallingUid();
+     bool systemNativeClient = false;
++    AttributionSourceState resolvedClientAttribution(clientAttribution);
+     if (callerHasSystemUid() && (clientPackageNameMaybe.size() == 0)) {
+         std::string systemClient = fmt::sprintf("client.pid<%d>", callingPid);
+         clientPackageNameMaybe = systemClient;
++        // Pass in packageName since AttributionAndPermissionUtils can't resolve vndk clients.
++        resolvedClientAttribution.packageName = clientPackageNameMaybe;
+         systemNativeClient = true;
+     }
+ 
+@@ -2272,10 +2275,10 @@ Status CameraService::connectDevice(
+ 
+     bool isNonSystemNdk = clientPackageNameMaybe.size() == 0;
+ 
+-    AttributionSourceState resolvedClientAttribution(clientAttribution);
+     if (!flags::use_context_attribution_source()) {
+         resolvedClientAttribution.pid = USE_CALLING_PID;
+     }
++
+     ret = resolveAttributionSource(resolvedClientAttribution, __FUNCTION__, cameraId);
+     if (!ret.isOk()) {
+         logRejected(cameraId, getCallingPid(), clientAttribution.packageName.value_or(""),
+diff --git a/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.h b/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.h
+index 3361eaae5b..8b2804d42a 100644
+--- a/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.h
++++ b/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.h
+@@ -263,8 +263,20 @@ class AttributionAndPermissionUtilsEncapsulator {
+     binder::Status resolveAttributionSource(AttributionSourceState& resolvedAttributionSource,
+                                             const std::string& methodName,
+                                             const std::optional<std::string>& cameraIdMaybe) {
+-        return mAttributionAndPermissionUtils->resolveAttributionSource(resolvedAttributionSource,
+-                                                                        methodName, cameraIdMaybe);
++        std::string passedPackageName;
++        if (resolvedAttributionSource.packageName.has_value()) {
++            passedPackageName = resolvedAttributionSource.packageName.value();
++        }
++        auto ret = mAttributionAndPermissionUtils->resolveAttributionSource(
++                resolvedAttributionSource, methodName, cameraIdMaybe);
++        if (!ret.isOk()) {
++            return ret;
++        }
++        // Fix up package name
++        if (passedPackageName.size() != 0) {
++            resolvedAttributionSource.packageName = std::move(passedPackageName);
++        }
++        return ret;
+     }
+ 
+     // The word 'System' here does not refer to callers only on the system
+-- 
+2.43.0
+

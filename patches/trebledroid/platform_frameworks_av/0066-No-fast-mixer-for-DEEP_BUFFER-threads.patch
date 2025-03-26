@@ -1,0 +1,55 @@
+From 470b399e12ec4ff8889dc1a27c6394eb38c5b4c9 Mon Sep 17 00:00:00 2001
+From: Henrik Tillman <henrik.tillman@sony.com>
+Date: Tue, 8 Oct 2024 12:49:28 +0200
+Subject: [PATCH 066/436] No fast mixer for DEEP_BUFFER threads
+
+Do not initialize a fast mixer on output threads that is running as deep
+buffer. Deep buffer is made for big buffers to save power and so on and
+not for low latency which fast mixer is created for hence fastmixer is
+not allowed on threads that is deep buffered.
+
+Bug: 364329918
+Test: manual
+Change-Id: I256c168cde1f240a8c97473458bdb5aaaa09dc51
+---
+ services/audioflinger/Threads.cpp | 17 +++++++++++++----
+ 1 file changed, 13 insertions(+), 4 deletions(-)
+
+diff --git a/services/audioflinger/Threads.cpp b/services/audioflinger/Threads.cpp
+index ecbd0ae34c..90d3ef99cb 100644
+--- a/services/audioflinger/Threads.cpp
++++ b/services/audioflinger/Threads.cpp
+@@ -3220,9 +3220,9 @@ NO_THREAD_SAFETY_ANALYSIS
+ 
+     // Calculate size of normal sink buffer relative to the HAL output buffer size
+     double multiplier = 1.0;
+-    // Note: mType == SPATIALIZER does not support FastMixer.
+-    if (mType == MIXER && (kUseFastMixer == FastMixer_Static ||
+-            kUseFastMixer == FastMixer_Dynamic)) {
++    // Note: mType == SPATIALIZER does not support FastMixer and DEEP is by definition not "fast"
++    if ((mType == MIXER && !(mOutput->flags & AUDIO_OUTPUT_FLAG_DEEP_BUFFER)) &&
++            (kUseFastMixer == FastMixer_Static || kUseFastMixer == FastMixer_Dynamic)) {
+         size_t minNormalFrameCount = (kMinNormalSinkBufferSizeMs * mSampleRate) / 1000;
+         size_t maxNormalFrameCount = (kMaxNormalSinkBufferSizeMs * mSampleRate) / 1000;
+ 
+@@ -5135,7 +5135,16 @@ MixerThread::MixerThread(const sp<IAfThreadCallback>& afThreadCallback, AudioStr
+             break;
+         case FastMixer_Static:
+         case FastMixer_Dynamic:
+-            initFastMixer = mFrameCount < mNormalFrameCount;
++            if (mType == MIXER && (output->flags & AUDIO_OUTPUT_FLAG_DEEP_BUFFER)) {
++                /* Do not init fast mixer on deep buffer, warn if buffers are confed too small */
++                initFastMixer = false;
++                ALOGW_IF(mFrameCount * 1000 / mSampleRate < kMinNormalSinkBufferSizeMs,
++                         "HAL DEEP BUFFER Buffer (%zu ms) is smaller than set minimal buffer "
++                         "(%u ms), seems like a configuration error",
++                         mFrameCount * 1000 / mSampleRate, kMinNormalSinkBufferSizeMs);
++            } else {
++                initFastMixer = mFrameCount < mNormalFrameCount;
++            }
+             break;
+         }
+         ALOGW_IF(initFastMixer == false && mFrameCount < mNormalFrameCount,
+-- 
+2.43.0
+

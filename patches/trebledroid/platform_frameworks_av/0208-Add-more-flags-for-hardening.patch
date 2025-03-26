@@ -1,0 +1,43 @@
+From d94d60020470cdb8d9671423fa92722537ffcfa2 Mon Sep 17 00:00:00 2001
+From: Atneya Nair <atneya@google.com>
+Date: Tue, 5 Nov 2024 15:46:11 -0800
+Subject: [PATCH 208/436] Add more flags for hardening
+
+Flag: android.media.audio.hardening_impl
+Bug: 376480814
+Test: compile
+Change-Id: I3b8122fa13f16a18a03ae473c11a483d1bb0bff0
+---
+ media/audio/aconfig/audio.aconfig | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/media/audio/aconfig/audio.aconfig b/media/audio/aconfig/audio.aconfig
+index 97a3edf2ea..fe53824250 100644
+--- a/media/audio/aconfig/audio.aconfig
++++ b/media/audio/aconfig/audio.aconfig
+@@ -75,6 +75,22 @@ flag {
+     bug: "364364777"
+ }
+ 
++flag {
++    name: "hardening_impl"
++    is_exported: true
++    namespace: "media_audio"
++    description: "Flag for overall implementation of hardening"
++    bug: "376480814"
++}
++
++flag {
++    name: "hardening_strict"
++    is_exported: true
++    namespace: "media_audio"
++    description: "Flag for strict enforcement (deny access) of hardening"
++    bug: "376480814"
++}
++
+ flag {
+     name: "music_fx_edge_to_edge"
+     namespace: "media_audio"
+-- 
+2.43.0
+

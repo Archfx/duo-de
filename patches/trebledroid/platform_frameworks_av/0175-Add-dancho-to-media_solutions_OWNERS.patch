@@ -1,0 +1,25 @@
+From ac2cae1939760e479f2291a43832f3ef21a5b95f Mon Sep 17 00:00:00 2001
+From: Yordan Chaparov <dancho@google.com>
+Date: Wed, 30 Oct 2024 18:28:23 +0000
+Subject: [PATCH 175/436] Add dancho@ to media_solutions_OWNERS
+
+Change-Id: Ic41962969a715e3adf771d6f4bf181222e858185
+---
+ media/janitors/media_solutions_OWNERS | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/media/janitors/media_solutions_OWNERS b/media/janitors/media_solutions_OWNERS
+index 3243726c4f..95c2b9794a 100644
+--- a/media/janitors/media_solutions_OWNERS
++++ b/media/janitors/media_solutions_OWNERS
+@@ -4,6 +4,7 @@
+ andrewlewis@google.com
+ bachinger@google.com
+ claincly@google.com
++dancho@google.com
+ ibaker@google.com
+ ivanbuper@google.com
+ jbibik@google.com
+-- 
+2.43.0
+

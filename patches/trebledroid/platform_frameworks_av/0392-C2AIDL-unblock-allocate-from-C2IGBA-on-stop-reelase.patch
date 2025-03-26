@@ -1,0 +1,244 @@
+From 258536e54972ac19ab193e7c2cc3f6b33c768de2 Mon Sep 17 00:00:00 2001
+From: Sungtak Lee <taklee@google.com>
+Date: Tue, 3 Dec 2024 07:45:30 +0000
+Subject: [PATCH 392/436] C2AIDL: unblock allocate from C2IGBA on
+ stop()/reelase()
+
+alocate() can be blocked if consumer does not release buffer during
+stop()/release(). unblock allocate() in the case.
+
+Bug: 366059860
+Test: presubmit
+Change-Id: I856cb40d531984341156693258d3dd294c7a9ac9
+---
+ .../hal/client/GraphicBufferAllocator.cpp     |  4 ++
+ media/codec2/hal/client/GraphicsTracker.cpp   | 65 +++++++++++++++++--
+ media/codec2/hal/client/client.cpp            | 10 +++
+ .../codec2/aidl/GraphicBufferAllocator.h      |  5 ++
+ .../include/codec2/aidl/GraphicsTracker.h     | 18 ++++-
+ 5 files changed, 95 insertions(+), 7 deletions(-)
+
+diff --git a/media/codec2/hal/client/GraphicBufferAllocator.cpp b/media/codec2/hal/client/GraphicBufferAllocator.cpp
+index 6a6da0ff4e..3cfc244ce5 100644
+--- a/media/codec2/hal/client/GraphicBufferAllocator.cpp
++++ b/media/codec2/hal/client/GraphicBufferAllocator.cpp
+@@ -119,6 +119,10 @@ c2_status_t GraphicBufferAllocator::displayBuffer(
+     return mGraphicsTracker->render(block, input, output);
+ }
+ 
++void GraphicBufferAllocator::onRequestStop() {
++    mGraphicsTracker->onRequestStop();
++}
++
+ GraphicBufferAllocator::~GraphicBufferAllocator() {}
+ 
+ std::shared_ptr<GraphicBufferAllocator> GraphicBufferAllocator::CreateGraphicBufferAllocator(
+diff --git a/media/codec2/hal/client/GraphicsTracker.cpp b/media/codec2/hal/client/GraphicsTracker.cpp
+index bdfc409d31..0bc1c459eb 100644
+--- a/media/codec2/hal/client/GraphicsTracker.cpp
++++ b/media/codec2/hal/client/GraphicsTracker.cpp
+@@ -32,6 +32,9 @@ namespace {
+ static constexpr int kMaxDequeueMin = 1;
+ static constexpr int kMaxDequeueMax = ::android::BufferQueueDefs::NUM_BUFFER_SLOTS - 2;
+ 
++// Just some delay for HAL to receive the stop()/release() request.
++static constexpr int kAllocateDirectDelayUs = 16666;
++
+ c2_status_t retrieveAHardwareBufferId(const C2ConstGraphicBlock &blk, uint64_t *bid) {
+     std::shared_ptr<const _C2BlockPoolData> bpData = _C2BlockFactory::GetGraphicBlockPoolData(blk);
+     if (!bpData || bpData->getType() != _C2BlockPoolData::TYPE_AHWBUFFER) {
+@@ -177,7 +180,7 @@ GraphicsTracker::GraphicsTracker(int maxDequeueCount)
+     mMaxDequeueCommitted{maxDequeueCount},
+     mDequeueable{maxDequeueCount},
+     mTotalDequeued{0}, mTotalCancelled{0}, mTotalDropped{0}, mTotalReleased{0},
+-    mInConfig{false}, mStopped{false} {
++    mInConfig{false}, mStopped{false}, mStopRequested{false}, mAllocAfterStopRequested{0} {
+     if (maxDequeueCount < kMaxDequeueMin) {
+         mMaxDequeue = kMaxDequeueMin;
+         mMaxDequeueCommitted = kMaxDequeueMin;
+@@ -490,6 +493,18 @@ void GraphicsTracker::stop() {
+     }
+ }
+ 
++void GraphicsTracker::onRequestStop() {
++    std::unique_lock<std::mutex> l(mLock);
++    if (mStopped) {
++        return;
++    }
++    if (mStopRequested) {
++        return;
++    }
++    mStopRequested = true;
++    writeIncDequeueableLocked(kMaxDequeueMax - 1);
++}
++
+ void GraphicsTracker::writeIncDequeueableLocked(int inc) {
+     CHECK(inc > 0 && inc < kMaxDequeueMax);
+     thread_local char buf[kMaxDequeueMax];
+@@ -544,8 +559,7 @@ c2_status_t GraphicsTracker::getWaitableFd(int *pipeFd) {
+     return C2_OK;
+ }
+ 
+-c2_status_t GraphicsTracker::requestAllocate(std::shared_ptr<BufferCache> *cache) {
+-    std::lock_guard<std::mutex> l(mLock);
++c2_status_t GraphicsTracker::requestAllocateLocked(std::shared_ptr<BufferCache> *cache) {
+     if (mDequeueable > 0) {
+         char buf[1];
+         int ret = ::read(mReadPipeFd.get(), buf, 1);
+@@ -728,6 +742,34 @@ c2_status_t GraphicsTracker::_allocate(const std::shared_ptr<BufferCache> &cache
+     return C2_OK;
+ }
+ 
++c2_status_t GraphicsTracker::_allocateDirect(
++        uint32_t width, uint32_t height, PixelFormat format, uint64_t usage,
++        AHardwareBuffer **buf, sp<Fence> *rFence) {
++    AHardwareBuffer_Desc desc;
++    desc.width = width;
++    desc.height = height;
++    desc.layers = 1u;
++    desc.format = ::android::AHardwareBuffer_convertFromPixelFormat(format);
++    desc.usage = ::android::AHardwareBuffer_convertFromGrallocUsageBits(usage);
++    desc.rfu0 = 0;
++    desc.rfu1 = 0;
++
++    int res = AHardwareBuffer_allocate(&desc, buf);
++    if (res != ::android::OK) {
++        ALOGE("_allocateDirect() failed(%d)", res);
++        if (res == ::android::NO_MEMORY) {
++            return C2_NO_MEMORY;
++        } else {
++            return C2_CORRUPTED;
++        }
++    }
++
++    int alloced = mAllocAfterStopRequested++;
++    *rFence = Fence::NO_FENCE;
++    ALOGD("_allocateDirect() allocated %d buffer", alloced);
++    return C2_OK;
++}
++
+ c2_status_t GraphicsTracker::allocate(
+         uint32_t width, uint32_t height, PixelFormat format, uint64_t usage,
+         AHardwareBuffer **buf, sp<Fence> *rFence) {
+@@ -735,10 +777,21 @@ c2_status_t GraphicsTracker::allocate(
+         ALOGE("cannot allocate due to being stopped");
+         return C2_BAD_STATE;
+     }
++    c2_status_t res = C2_OK;
+     std::shared_ptr<BufferCache> cache;
+-    c2_status_t res = requestAllocate(&cache);
+-    if (res != C2_OK) {
+-        return res;
++    {
++        std::unique_lock<std::mutex> l(mLock);
++        if (mStopRequested) {
++            l.unlock();
++            res = _allocateDirect(width, height, format, usage, buf, rFence);
++            // Delay a little bit for HAL to receive stop()/release() request.
++            ::usleep(kAllocateDirectDelayUs);
++            return res;
++        }
++        c2_status_t res = requestAllocateLocked(&cache);
++        if (res != C2_OK) {
++            return res;
++        }
+     }
+     ALOGV("allocatable or dequeueable");
+ 
+diff --git a/media/codec2/hal/client/client.cpp b/media/codec2/hal/client/client.cpp
+index 9ee9b9ee86..068ca6c3cb 100644
+--- a/media/codec2/hal/client/client.cpp
++++ b/media/codec2/hal/client/client.cpp
+@@ -3170,6 +3170,11 @@ c2_status_t Codec2Client::Component::start() {
+ 
+ c2_status_t Codec2Client::Component::stop() {
+     if (mAidlBase) {
++        std::shared_ptr<AidlGraphicBufferAllocator> gba =
++                mGraphicBufferAllocators->current();
++        if (gba) {
++            gba->onRequestStop();
++        }
+         ::ndk::ScopedAStatus transStatus = mAidlBase->stop();
+         return GetC2Status(transStatus, "stop");
+     }
+@@ -3220,6 +3225,11 @@ c2_status_t Codec2Client::Component::release() {
+         }
+     }
+     if (mAidlBase) {
++        std::shared_ptr<AidlGraphicBufferAllocator> gba =
++                mGraphicBufferAllocators->current();
++        if (gba) {
++            gba->onRequestStop();
++        }
+         ::ndk::ScopedAStatus transStatus = mAidlBase->release();
+         return GetC2Status(transStatus, "release");
+     }
+diff --git a/media/codec2/hal/client/include/codec2/aidl/GraphicBufferAllocator.h b/media/codec2/hal/client/include/codec2/aidl/GraphicBufferAllocator.h
+index a797cb78c3..e5884e65d2 100644
+--- a/media/codec2/hal/client/include/codec2/aidl/GraphicBufferAllocator.h
++++ b/media/codec2/hal/client/include/codec2/aidl/GraphicBufferAllocator.h
+@@ -125,6 +125,11 @@ public:
+             const ::android::IGraphicBufferProducer::QueueBufferInput& input,
+             ::android::IGraphicBufferProducer::QueueBufferOutput *output);
+ 
++    /**
++     * Notify stop()/release() is in progress.
++     */
++    void onRequestStop();
++
+     ~GraphicBufferAllocator();
+ 
+     /**
+diff --git a/media/codec2/hal/client/include/codec2/aidl/GraphicsTracker.h b/media/codec2/hal/client/include/codec2/aidl/GraphicsTracker.h
+index 9a4fa12f08..559bf51237 100644
+--- a/media/codec2/hal/client/include/codec2/aidl/GraphicsTracker.h
++++ b/media/codec2/hal/client/include/codec2/aidl/GraphicsTracker.h
+@@ -175,6 +175,14 @@ public:
+      */
+     void stop();
+ 
++    /**
++     * stop()/release() request to HAL is in process from the client.
++     * The class will never be active again after the request.
++     * Still, allocation requests from HAL should be served until stop()
++     * is being called.
++     */
++    void onRequestStop();
++
+ private:
+     struct BufferCache;
+ 
+@@ -290,6 +298,10 @@ private:
+ 
+     std::atomic<bool> mStopped;
+ 
++    bool mStopRequested;
++    std::atomic<int> mAllocAfterStopRequested;
++
++
+ private:
+     explicit GraphicsTracker(int maxDequeueCount);
+ 
+@@ -304,7 +316,7 @@ private:
+             const std::shared_ptr<BufferCache> &cache,
+             int maxDequeueCommitted);
+ 
+-    c2_status_t requestAllocate(std::shared_ptr<BufferCache> *cache);
++    c2_status_t requestAllocateLocked(std::shared_ptr<BufferCache> *cache);
+     c2_status_t requestDeallocate(uint64_t bid, const sp<Fence> &fence,
+                                   bool *completed, bool *updateDequeue,
+                                   std::shared_ptr<BufferCache> *cache, int *slotId,
+@@ -334,6 +346,10 @@ private:
+             bool *cached, int *rSlotId, sp<Fence> *rFence,
+             std::shared_ptr<BufferItem> *buffer);
+ 
++    c2_status_t _allocateDirect(
++            uint32_t width, uint32_t height, PixelFormat format, uint64_t usage,
++            AHardwareBuffer **buf, sp<Fence> *fence);
++
+     void writeIncDequeueableLocked(int inc);
+     void drainDequeueableLocked(int dec);
+ };
+-- 
+2.43.0
+

@@ -1,0 +1,171 @@
+From d66d8247d052948b4bb51928309c986dbf6343eb Mon Sep 17 00:00:00 2001
+From: Sungtak Lee <taklee@google.com>
+Date: Fri, 15 Nov 2024 22:25:35 +0000
+Subject: [PATCH 338/436] AImageReader: Add setUsage() interface
+
+Add setUsage() interface to update usage bits while using AImageReader.
+
+The new interface should not be used for dynamic use cases.
+Setup and cleanup for producer side should be done before use after
+calling the interface.
+
+Bug: 201479783
+Test: presubmit
+Change-Id: I5c146f98358b97c71770ac3655da0b4ae9db8afe
+---
+ media/ndk/NdkImageReader.cpp                  | 33 ++++++++++++
+ media/ndk/NdkImageReaderPriv.h                |  4 +-
+ .../ndk/include/media-vndk/VndkImageReader.h  | 51 +++++++++++++++++++
+ media/ndk/libmediandk.map.txt                 |  1 +
+ 4 files changed, 88 insertions(+), 1 deletion(-)
+ create mode 100644 media/ndk/include/media-vndk/VndkImageReader.h
+
+diff --git a/media/ndk/NdkImageReader.cpp b/media/ndk/NdkImageReader.cpp
+index 7b19ac01f2..7797841c3d 100644
+--- a/media/ndk/NdkImageReader.cpp
++++ b/media/ndk/NdkImageReader.cpp
+@@ -655,6 +655,28 @@ AImageReader::acquireLatestImage(/*out*/AImage** image, /*out*/int* acquireFence
+     }
+ }
+ 
++media_status_t
++AImageReader::setUsage(uint64_t usage) {
++    Mutex::Autolock _l(mLock);
++    if (!mIsOpen || mBufferItemConsumer == nullptr) {
++        ALOGE("not ready to perform setUsage()");
++        return AMEDIA_ERROR_INVALID_PARAMETER;
++    }
++    if (mUsage == usage) {
++        return AMEDIA_OK;
++    }
++
++    uint64_t halUsage = AHardwareBuffer_convertToGrallocUsageBits(mUsage);
++    status_t ret = mBufferItemConsumer->setConsumerUsageBits(halUsage);
++    if (ret != OK) {
++        ALOGE("setConsumerUsageBits() failed %d", ret);
++        return AMEDIA_ERROR_UNKNOWN;
++    }
++    mUsage = usage;
++    mHalUsage = halUsage;
++    return AMEDIA_OK;
++}
++
+ static
+ media_status_t validateParameters(int32_t width, int32_t height, int32_t format,
+                                   uint64_t usage, int32_t maxImages,
+@@ -912,3 +934,14 @@ media_status_t AImageReader_setBufferRemovedListener(
+     reader->setBufferRemovedListener(listener);
+     return AMEDIA_OK;
+ }
++
++EXPORT
++media_status_t AImageReader_setUsage(
++    AImageReader *reader, uint64_t usage) {
++    ALOGV("%s", __FUNCTION__);
++    if (reader == nullptr) {
++        ALOGE("%s: invalid argument! reader %p", __FUNCTION__, reader);
++        return AMEDIA_ERROR_INVALID_PARAMETER;
++    }
++    return reader->setUsage(usage);
++}
+diff --git a/media/ndk/NdkImageReaderPriv.h b/media/ndk/NdkImageReaderPriv.h
+index 01996165a6..1c50d83e3d 100644
+--- a/media/ndk/NdkImageReaderPriv.h
++++ b/media/ndk/NdkImageReaderPriv.h
+@@ -20,6 +20,7 @@
+ #include <inttypes.h>
+ 
+ #include <media/NdkImageReader.h>
++#include <media-vndk/VndkImageReader.h>
+ 
+ #include <utils/List.h>
+ #include <utils/Mutex.h>
+@@ -67,6 +68,7 @@ struct AImageReader : public RefBase {
+ 
+     media_status_t setImageListener(AImageReader_ImageListener* listener);
+     media_status_t setBufferRemovedListener(AImageReader_BufferRemovedListener* listener);
++    media_status_t setUsage(uint64_t usage);
+ 
+     media_status_t acquireNextImage(/*out*/AImage** image, /*out*/int* fenceFd);
+     media_status_t acquireLatestImage(/*out*/AImage** image, /*out*/int* fenceFd);
+@@ -120,7 +122,7 @@ struct AImageReader : public RefBase {
+     const int32_t mWidth;
+     const int32_t mHeight;
+     int32_t mFormat;
+-    const uint64_t mUsage;  // AHARDWAREBUFFER_USAGE_* flags.
++    uint64_t mUsage;  // AHARDWAREBUFFER_USAGE_* flags.
+     const int32_t mMaxImages;
+ 
+     // TODO(jwcai) Seems completely unused in AImageReader class.
+diff --git a/media/ndk/include/media-vndk/VndkImageReader.h b/media/ndk/include/media-vndk/VndkImageReader.h
+new file mode 100644
+index 0000000000..c67a38c99a
+--- /dev/null
++++ b/media/ndk/include/media-vndk/VndkImageReader.h
+@@ -0,0 +1,51 @@
++/*
++ * Copyright (C) 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#ifndef _VNDK_IMAGE_READER_H
++#define _VNDK_IMAGE_READER_H
++
++// vndk is a superset of the NDK
++#include <media/NdkImageReader.h>
++
++__BEGIN_DECLS
++
++/**
++ * Set the usage of this image reader.
++ *
++ * <p>Note that calling this method will replace the previously set usage.</p>
++ *
++ * <p>Note: This will trigger re-allocation, could cause producer failures mid-stream
++ * if the new usage combination isn't supported, and thus should be avoided as much as
++ * possible regardless.</p>
++ *
++ * Available since API level 36.
++ *
++ * @param reader The image reader of interest.
++ * @param usage specifies how the consumer will access the AImage.
++ *              See {@link AImageReader_newWithUsage} parameter description for more details.
++ * @return <ul>
++ *         <li>{@link AMEDIA_OK} if the method call succeeds.</li>
++ *         <li>{@link AMEDIA_ERROR_INVALID_PARAMETER} if reader is NULL.</li>
++ *         <li>{@link AMEDIA_ERROR_UNKNOWN} if the method fails for some other reasons.</li></ul>
++ *
++ * @see AImage_getHardwareBuffer
++ */
++media_status_t AImageReader_setUsage(
++        AImageReader* _Nonnull reader, uint64_t usage) __INTRODUCED_IN(36);
++
++__END_DECLS
++
++#endif //_VNDK_IMAGE_READER_H
+diff --git a/media/ndk/libmediandk.map.txt b/media/ndk/libmediandk.map.txt
+index 262c169785..8fb203fbaf 100644
+--- a/media/ndk/libmediandk.map.txt
++++ b/media/ndk/libmediandk.map.txt
+@@ -16,6 +16,7 @@ LIBMEDIANDK {
+     AImageReader_newWithDataSpace; # introduced=UpsideDownCake
+     AImageReader_setBufferRemovedListener; # introduced=26
+     AImageReader_setImageListener; # introduced=24
++    AImageReader_setUsage; # introduced=36 llndk
+     AImage_delete; # introduced=24
+     AImage_deleteAsync; # introduced=26
+     AImage_getCropRect; # introduced=24
+-- 
+2.43.0
+

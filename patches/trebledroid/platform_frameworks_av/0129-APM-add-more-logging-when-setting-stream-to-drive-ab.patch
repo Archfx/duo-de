@@ -1,0 +1,61 @@
+From 08502d83a363fabc4aae669964dffe0bf24ae202 Mon Sep 17 00:00:00 2001
+From: Vlad Popa <pvlad@google.com>
+Date: Tue, 22 Oct 2024 20:17:47 -0700
+Subject: [PATCH 129/436] APM: add more logging when setting stream to drive
+ abs vol
+
+Also using iterator for getting the map value instead of direct access.
+
+Flag: EXEMPT bugfix
+Test: manual check of logs
+Bug: 361461410
+Change-Id: I16570cb31e74c98b9ae210571da90b2fe457a71e
+---
+ .../audiopolicy/managerdefault/AudioPolicyManager.cpp    | 9 ++++++---
+ .../audiopolicy/service/AudioPolicyInterfaceImpl.cpp     | 3 +++
+ 2 files changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index 13db5b38de..62cb6c7759 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -3556,6 +3556,9 @@ status_t AudioPolicyManager::setDeviceAbsoluteVolumeEnabled(audio_devices_t devi
+                                                             bool enabled,
+                                                             audio_stream_type_t streamToDriveAbs)
+ {
++    ALOGI("%s: deviceType 0x%X, enabled %d, streamToDriveAbs %d", __func__, deviceType, enabled,
++          streamToDriveAbs);
++
+     if (!enabled) {
+         mAbsoluteVolumeDrivingStreams.erase(deviceType);
+         return NO_ERROR;
+@@ -8312,9 +8315,9 @@ float AudioPolicyManager::adjustDeviceAttenuationForAbsVolume(IVolumeCurves &cur
+     float volumeDb = curves.volIndexToDb(deviceCategory, index);
+ 
+     if (com_android_media_audio_abs_volume_index_fix()) {
+-        if (mAbsoluteVolumeDrivingStreams.find(volumeDevice) !=
+-            mAbsoluteVolumeDrivingStreams.end()) {
+-            audio_attributes_t attributesToDriveAbs = mAbsoluteVolumeDrivingStreams[volumeDevice];
++        const auto it = mAbsoluteVolumeDrivingStreams.find(volumeDevice);
++        if (it != mAbsoluteVolumeDrivingStreams.end()) {
++            audio_attributes_t attributesToDriveAbs = it->second;
+             auto groupToDriveAbs = mEngine->getVolumeGroupForAttributes(attributesToDriveAbs);
+             if (groupToDriveAbs == VOLUME_GROUP_NONE) {
+                 ALOGD("%s: no group matching with %s", __FUNCTION__,
+diff --git a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+index 8fbe1ccfc1..a8aefb09de 100644
+--- a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
++++ b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+@@ -1121,6 +1121,9 @@ Status AudioPolicyService::releaseInput(int32_t portIdAidl)
+ Status AudioPolicyService::setDeviceAbsoluteVolumeEnabled(const AudioDevice& deviceAidl,
+                                                           bool enabled,
+                                                           AudioStreamType streamToDriveAbsAidl) {
++    ALOGI("%s: deviceAidl %s, enabled %d, streamToDriveAbsAidl %d", __func__,
++          deviceAidl.toString().c_str(), enabled, streamToDriveAbsAidl);
++
+     audio_stream_type_t streamToDriveAbs = VALUE_OR_RETURN_BINDER_STATUS(
+             aidl2legacy_AudioStreamType_audio_stream_type_t(streamToDriveAbsAidl));
+     audio_devices_t deviceType;
+-- 
+2.43.0
+

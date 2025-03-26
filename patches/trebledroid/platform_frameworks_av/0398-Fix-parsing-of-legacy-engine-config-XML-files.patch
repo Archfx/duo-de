@@ -1,0 +1,351 @@
+From bada1f5e01d3a41e33eeae73b23cb5cf0278977d Mon Sep 17 00:00:00 2001
+From: Mikhail Naganov <mnaganov@google.com>
+Date: Tue, 3 Dec 2024 16:20:10 -0800
+Subject: [PATCH 398/436] Fix parsing of legacy engine config XML files
+
+The change aosp/3020124 adds a requirement for having
+an 'id' field for product strategies. However, legacy
+XML configuration files lack it. In order to preserve
+compatibility, attempt to parse the string name of
+the strategy in order to assign it the corresponding id.
+
+Bug: 376030167
+Test: atest audiopolicy_tests
+Change-Id: I57a69f0507ef0bd4d06957e69b3fbe81b7febf40
+---
+ services/audiopolicy/common/include/policy.h  | 72 +++++++++++++++----
+ .../engine/common/include/EngineBase.h        |  5 +-
+ .../engine/common/src/EngineBase.cpp          |  7 +-
+ .../engine/config/include/EngineConfig.h      |  2 +-
+ .../engine/config/src/EngineConfig.cpp        | 16 ++++-
+ .../engineconfigurable/src/Engine.cpp         |  2 +-
+ .../audiopolicy/enginedefault/src/Engine.cpp  | 18 +----
+ .../tests/audiopolicymanager_tests.cpp        | 28 +++++++-
+ 8 files changed, 110 insertions(+), 40 deletions(-)
+
+diff --git a/services/audiopolicy/common/include/policy.h b/services/audiopolicy/common/include/policy.h
+index d499222463..0c039005a9 100644
+--- a/services/audiopolicy/common/include/policy.h
++++ b/services/audiopolicy/common/include/policy.h
+@@ -22,31 +22,77 @@
+ 
+ #include <media/AudioContainers.h>
+ 
++#include <string.h>
++
+ namespace android {
+ 
+ using StreamTypeVector = std::vector<audio_stream_type_t>;
+ 
++#define AUDIO_ENUM_QUOTE(x) #x
++#define AUDIO_ENUM_STRINGIFY(x) AUDIO_ENUM_QUOTE(x)
++#define AUDIO_DEFINE_ENUM_SYMBOL_V(symbol, value) symbol = value,
++#define AUDIO_DEFINE_STRINGIFY_CASE_V(symbol, _) case symbol: return AUDIO_ENUM_STRINGIFY(symbol);
++#define AUDIO_DEFINE_PARSE_CASE_V(symbol, _) \
++    if (strcmp(s, AUDIO_ENUM_STRINGIFY(symbol)) == 0) { *t = symbol; return true; } else
++#define AUDIO_DEFINE_MAP_ENTRY_V(symbol, _) { AUDIO_ENUM_STRINGIFY(symbol), symbol },
++
+ /**
+  * Legacy audio policy product strategies IDs. These strategies are supported by the default
+  * policy engine.
+  * IMPORTANT NOTE: the order of this enum is important as it determines the priority
+- * between active strategies for routing decisions: lower enum value => higher prioriy
++ * between active strategies for routing decisions: lower enum value => higher priority
+  */
++#define AUDIO_LEGACY_STRATEGY_LIST_DEF(V)      \
++    V(STRATEGY_NONE, -1)                       \
++    V(STRATEGY_PHONE, 0)                       \
++    V(STRATEGY_SONIFICATION, 1)                \
++    V(STRATEGY_ENFORCED_AUDIBLE, 2)            \
++    V(STRATEGY_ACCESSIBILITY, 3)               \
++    V(STRATEGY_SONIFICATION_RESPECTFUL, 4)     \
++    V(STRATEGY_MEDIA, 5)                       \
++    V(STRATEGY_DTMF, 6)                        \
++    V(STRATEGY_CALL_ASSISTANT, 7)              \
++    V(STRATEGY_TRANSMITTED_THROUGH_SPEAKER, 8) \
++    V(STRATEGY_REROUTING, 9)                   \
++    V(STRATEGY_PATCH, 10)
++
+ enum legacy_strategy {
+-    STRATEGY_NONE = -1,
+-    STRATEGY_PHONE,
+-    STRATEGY_SONIFICATION,
+-    STRATEGY_ENFORCED_AUDIBLE,
+-    STRATEGY_ACCESSIBILITY,
+-    STRATEGY_SONIFICATION_RESPECTFUL,
+-    STRATEGY_MEDIA,
+-    STRATEGY_DTMF,
+-    STRATEGY_CALL_ASSISTANT,
+-    STRATEGY_TRANSMITTED_THROUGH_SPEAKER,
+-    STRATEGY_REROUTING,
+-    STRATEGY_PATCH,
++    AUDIO_LEGACY_STRATEGY_LIST_DEF(AUDIO_DEFINE_ENUM_SYMBOL_V)
+ };
+ 
++inline const char* legacy_strategy_to_string(legacy_strategy t) {
++    switch (t) {
++    AUDIO_LEGACY_STRATEGY_LIST_DEF(AUDIO_DEFINE_STRINGIFY_CASE_V)
++    }
++    return "";
++}
++
++inline bool legacy_strategy_from_string(const char* s, legacy_strategy* t) {
++    AUDIO_LEGACY_STRATEGY_LIST_DEF(AUDIO_DEFINE_PARSE_CASE_V)
++    return false;
++}
++
++namespace audio_policy {
++
++struct legacy_strategy_map { const char *name; legacy_strategy id; };
++
++inline std::vector<legacy_strategy_map> getLegacyStrategyMap() {
++    return std::vector<legacy_strategy_map> {
++    AUDIO_LEGACY_STRATEGY_LIST_DEF(AUDIO_DEFINE_MAP_ENTRY_V)
++    };
++}
++
++}  // namespace audio_policy
++
++#undef AUDIO_LEGACY_STRATEGY_LIST_DEF
++
++#undef AUDIO_DEFINE_MAP_ENTRY_V
++#undef AUDIO_DEFINE_PARSE_CASE_V
++#undef AUDIO_DEFINE_STRINGIFY_CASE_V
++#undef AUDIO_DEFINE_ENUM_SYMBOL_V
++#undef AUDIO_ENUM_STRINGIFY
++#undef AUDIO_ENUM_QUOTE
++
+ static const audio_attributes_t defaultAttr = AUDIO_ATTRIBUTES_INITIALIZER;
+ 
+ static const std::set<audio_usage_t > gHighPriorityUseCases = {
+diff --git a/services/audiopolicy/engine/common/include/EngineBase.h b/services/audiopolicy/engine/common/include/EngineBase.h
+index edb2e29391..4445b6617a 100644
+--- a/services/audiopolicy/engine/common/include/EngineBase.h
++++ b/services/audiopolicy/engine/common/include/EngineBase.h
+@@ -117,9 +117,10 @@ public:
+             AudioDeviceTypeAddrVector &devices) const override;
+ 
+     engineConfig::ParsingResult loadAudioPolicyEngineConfig(
+-            const media::audio::common::AudioHalEngineConfig& aidlConfig);
++            const media::audio::common::AudioHalEngineConfig& aidlConfig, bool);
+ 
+-    engineConfig::ParsingResult loadAudioPolicyEngineConfig(const std::string& xmlFilePath = "");
++    engineConfig::ParsingResult loadAudioPolicyEngineConfig(
++            const std::string& xmlFilePath = "", bool isConfigurable = false);
+ 
+     const ProductStrategyMap &getProductStrategies() const { return mProductStrategies; }
+ 
+diff --git a/services/audiopolicy/engine/common/src/EngineBase.cpp b/services/audiopolicy/engine/common/src/EngineBase.cpp
+index fb8379edee..07993994c6 100644
+--- a/services/audiopolicy/engine/common/src/EngineBase.cpp
++++ b/services/audiopolicy/engine/common/src/EngineBase.cpp
+@@ -126,7 +126,7 @@ std::string EngineBase::getProductStrategyName(product_strategy_t id) const {
+ }
+ 
+ engineConfig::ParsingResult EngineBase::loadAudioPolicyEngineConfig(
+-        const media::audio::common::AudioHalEngineConfig& aidlConfig)
++        const media::audio::common::AudioHalEngineConfig& aidlConfig, bool)
+ {
+     engineConfig::ParsingResult result = engineConfig::convert(aidlConfig);
+     if (result.parsedConfig == nullptr) {
+@@ -141,7 +141,8 @@ engineConfig::ParsingResult EngineBase::loadAudioPolicyEngineConfig(
+     return processParsingResult(std::move(result));
+ }
+ 
+-engineConfig::ParsingResult EngineBase::loadAudioPolicyEngineConfig(const std::string& xmlFilePath)
++engineConfig::ParsingResult EngineBase::loadAudioPolicyEngineConfig(
++        const std::string& xmlFilePath, bool isConfigurable)
+ {
+     auto fileExists = [](const char* path) {
+         struct stat fileStat;
+@@ -150,7 +151,7 @@ engineConfig::ParsingResult EngineBase::loadAudioPolicyEngineConfig(const std::s
+     const std::string filePath = xmlFilePath.empty() ? engineConfig::DEFAULT_PATH : xmlFilePath;
+     engineConfig::ParsingResult result =
+             fileExists(filePath.c_str()) ?
+-            engineConfig::parse(filePath.c_str()) : engineConfig::ParsingResult{};
++            engineConfig::parse(filePath.c_str(), isConfigurable) : engineConfig::ParsingResult{};
+     if (result.parsedConfig == nullptr) {
+         ALOGD("%s: No configuration found, using default matching phone experience.", __FUNCTION__);
+         engineConfig::Config config = gDefaultEngineConfig;
+diff --git a/services/audiopolicy/engine/config/include/EngineConfig.h b/services/audiopolicy/engine/config/include/EngineConfig.h
+index 054bdae1b3..8a4fc88465 100644
+--- a/services/audiopolicy/engine/config/include/EngineConfig.h
++++ b/services/audiopolicy/engine/config/include/EngineConfig.h
+@@ -116,7 +116,7 @@ struct ParsingResult {
+ /** Parses the provided audio policy usage configuration.
+  * @return audio policy usage @see Config
+  */
+-ParsingResult parse(const char* path = DEFAULT_PATH);
++ParsingResult parse(const char* path = DEFAULT_PATH, bool isConfigurable = false);
+ android::status_t parseLegacyVolumes(VolumeGroups &volumeGroups);
+ ParsingResult convert(const ::android::media::audio::common::AudioHalEngineConfig& aidlConfig);
+ // Exposed for testing.
+diff --git a/services/audiopolicy/engine/config/src/EngineConfig.cpp b/services/audiopolicy/engine/config/src/EngineConfig.cpp
+index 714ab78203..b8d95ee899 100644
+--- a/services/audiopolicy/engine/config/src/EngineConfig.cpp
++++ b/services/audiopolicy/engine/config/src/EngineConfig.cpp
+@@ -52,6 +52,8 @@ static const char *const gReferenceAttributeName = "name";
+ 
+ namespace {
+ 
++static bool gIsConfigurableEngine = false;
++
+ ConversionResult<std::string> aidl2legacy_AudioHalProductStrategy_ProductStrategyType(int id) {
+     using AudioProductStrategyType = media::audio::common::AudioProductStrategyType;
+ 
+@@ -547,9 +549,16 @@ status_t ProductStrategyTraits::deserialize(_xmlDoc *doc, const _xmlNode *child,
+         if (!convertTo(idLiteral, id)) {
+             return BAD_VALUE;
+         }
+-        ALOGV("%s: %s, %s = %d", __FUNCTION__, name.c_str(), Attributes::id, id);
++    } else {
++        legacy_strategy legacyId;
++        if (legacy_strategy_from_string(name.c_str(), &legacyId)) {
++            id = legacyId;
++        } else if (!gIsConfigurableEngine) {
++            return BAD_VALUE;
++        }
++        // With a configurable engine it can be a vendor-provided strategy name.
+     }
+-    ALOGV("%s: %s = %s", __FUNCTION__, Attributes::name, name.c_str());
++    ALOGV("%s: %s, %s = %d", __FUNCTION__, name.c_str(), Attributes::id, id);
+ 
+     size_t skipped = 0;
+     AttributesGroups attrGroups;
+@@ -776,7 +785,7 @@ private:
+ 
+ }  // namespace
+ 
+-ParsingResult parse(const char* path) {
++ParsingResult parse(const char* path, bool isConfigurable) {
+     XmlErrorHandler errorHandler;
+     auto doc = make_xmlUnique(xmlParseFile(path));
+     if (doc == NULL) {
+@@ -801,6 +810,7 @@ ParsingResult parse(const char* path) {
+         ALOGE("%s: No version found", __func__);
+         return {nullptr, 0};
+     }
++    gIsConfigurableEngine = isConfigurable;
+     size_t nbSkippedElements = 0;
+     auto config = std::make_unique<Config>();
+     config->version = std::stof(version);
+diff --git a/services/audiopolicy/engineconfigurable/src/Engine.cpp b/services/audiopolicy/engineconfigurable/src/Engine.cpp
+index 45da7b043e..ad49b19301 100644
+--- a/services/audiopolicy/engineconfigurable/src/Engine.cpp
++++ b/services/audiopolicy/engineconfigurable/src/Engine.cpp
+@@ -112,7 +112,7 @@ status_t Engine::loadFromXmlConfigWithFallback(const std::string& xmlFilePath)
+ 
+ template<typename T>
+ status_t Engine::loadWithFallback(const T& configSource) {
+-    auto result = EngineBase::loadAudioPolicyEngineConfig(configSource);
++    auto result = EngineBase::loadAudioPolicyEngineConfig(configSource, true /*isConfigurable*/);
+     ALOGE_IF(result.nbSkippedElement != 0,
+              "Policy Engine configuration is partially invalid, skipped %zu elements",
+              result.nbSkippedElement);
+diff --git a/services/audiopolicy/enginedefault/src/Engine.cpp b/services/audiopolicy/enginedefault/src/Engine.cpp
+index 7e35cca118..b495f72592 100644
+--- a/services/audiopolicy/enginedefault/src/Engine.cpp
++++ b/services/audiopolicy/enginedefault/src/Engine.cpp
+@@ -38,22 +38,8 @@
+ 
+ namespace android::audio_policy {
+ 
+-struct legacy_strategy_map { const char *name; legacy_strategy id; };
+ static const std::vector<legacy_strategy_map>& getLegacyStrategy() {
+-    static const std::vector<legacy_strategy_map> legacyStrategy = {
+-        { "STRATEGY_NONE", STRATEGY_NONE },
+-        { "STRATEGY_MEDIA", STRATEGY_MEDIA },
+-        { "STRATEGY_PHONE", STRATEGY_PHONE },
+-        { "STRATEGY_SONIFICATION", STRATEGY_SONIFICATION },
+-        { "STRATEGY_SONIFICATION_RESPECTFUL", STRATEGY_SONIFICATION_RESPECTFUL },
+-        { "STRATEGY_DTMF", STRATEGY_DTMF },
+-        { "STRATEGY_ENFORCED_AUDIBLE", STRATEGY_ENFORCED_AUDIBLE },
+-        { "STRATEGY_TRANSMITTED_THROUGH_SPEAKER", STRATEGY_TRANSMITTED_THROUGH_SPEAKER },
+-        { "STRATEGY_ACCESSIBILITY", STRATEGY_ACCESSIBILITY },
+-        { "STRATEGY_REROUTING", STRATEGY_REROUTING },
+-        { "STRATEGY_PATCH", STRATEGY_PATCH }, // boiler to manage stream patch volume
+-        { "STRATEGY_CALL_ASSISTANT", STRATEGY_CALL_ASSISTANT },
+-    };
++    static const std::vector<legacy_strategy_map> legacyStrategy = getLegacyStrategyMap();
+     return legacyStrategy;
+ }
+ 
+@@ -68,7 +54,7 @@ status_t Engine::loadFromXmlConfigWithFallback(const std::string& xmlFilePath) {
+ 
+ template<typename T>
+ status_t Engine::loadWithFallback(const T& configSource) {
+-    auto result = EngineBase::loadAudioPolicyEngineConfig(configSource);
++    auto result = EngineBase::loadAudioPolicyEngineConfig(configSource, false /*isConfigurable*/);
+     ALOGE_IF(result.nbSkippedElement != 0,
+              "Policy Engine configuration is partially invalid, skipped %zu elements",
+              result.nbSkippedElement);
+diff --git a/services/audiopolicy/tests/audiopolicymanager_tests.cpp b/services/audiopolicy/tests/audiopolicymanager_tests.cpp
+index 5278b7320d..3662ddf962 100644
+--- a/services/audiopolicy/tests/audiopolicymanager_tests.cpp
++++ b/services/audiopolicy/tests/audiopolicymanager_tests.cpp
+@@ -185,6 +185,7 @@ class AudioPolicyManagerTest : public testing::Test {
+     void SetUp() override;
+     void TearDown() override;
+     virtual void SetUpManagerConfig();
++    virtual std::string getEngineConfigFilePath() const { return sTestEngineConfig; }
+ 
+     void dumpToLog();
+     // When explicit routing is needed, selectedDeviceId needs to be set as the wanted port
+@@ -223,6 +224,7 @@ class AudioPolicyManagerTest : public testing::Test {
+             const std::string &address, audio_port_v7 *foundPort);
+     static audio_port_handle_t getDeviceIdFromPatch(const struct audio_patch* patch);
+     virtual AudioPolicyManagerTestClient* getClient() { return new AudioPolicyManagerTestClient; }
++    void verifyBuiltInStrategyIdsAreValid();
+ 
+     sp<AudioPolicyConfig> mConfig;
+     std::unique_ptr<AudioPolicyManagerTestClient> mClient;
+@@ -237,7 +239,7 @@ const std::string AudioPolicyManagerTest::sTestEngineConfig =
+ void AudioPolicyManagerTest::SetUp() {
+     mClient.reset(getClient());
+     ASSERT_NO_FATAL_FAILURE(SetUpManagerConfig());  // Subclasses may want to customize the config.
+-    mManager.reset(new AudioPolicyTestManager(mConfig, mClient.get(), sTestEngineConfig));
++    mManager.reset(new AudioPolicyTestManager(mConfig, mClient.get(), getEngineConfigFilePath()));
+     ASSERT_EQ(NO_ERROR, mManager->initialize());
+     ASSERT_EQ(NO_ERROR, mManager->initCheck());
+ }
+@@ -397,6 +399,16 @@ audio_port_handle_t AudioPolicyManagerTest::getDeviceIdFromPatch(
+     return AUDIO_PORT_HANDLE_NONE;
+ }
+ 
++void AudioPolicyManagerTest::verifyBuiltInStrategyIdsAreValid() {
++    AudioProductStrategyVector strategies;
++    ASSERT_EQ(NO_ERROR, mManager->listAudioProductStrategies(strategies));
++    for (const auto& strategy : strategies) {
++        // Since ids are unsigned, this will also cover the case when the id is 'NONE' which is -1.
++        EXPECT_LT(strategy.getId(),
++                  media::audio::common::AudioHalProductStrategy::VENDOR_STRATEGY_ID_START)
++                << strategy.getName();
++    }
++}
+ 
+ TEST_F(AudioPolicyManagerTest, InitSuccess) {
+     // SetUp must finish with no assertions.
+@@ -454,6 +466,20 @@ TEST_F(AudioPolicyManagerTest, CreateAudioPatchFromMix) {
+ 
+ // TODO: Add patch creation tests that involve already existing patch
+ 
++TEST_F(AudioPolicyManagerTest, BuiltInStrategyIdsAreValid) {
++    verifyBuiltInStrategyIdsAreValid();
++}
++
++class AudioPolicyManagerTestWithDefaultEngineConfig : public AudioPolicyManagerTest {
++  protected:
++    // The APM will use the default engine config from EngineDefaultConfig.h.
++    std::string getEngineConfigFilePath() const override { return ""; }
++};
++
++TEST_F(AudioPolicyManagerTestWithDefaultEngineConfig, BuiltInStrategyIdsAreValid) {
++    verifyBuiltInStrategyIdsAreValid();
++}
++
+ enum
+ {
+     MSD_AUDIO_PATCH_COUNT_NUM_AUDIO_PATCHES_INDEX = 0,
+-- 
+2.43.0
+

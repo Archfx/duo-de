@@ -1,0 +1,29 @@
+From 4447c8fceb999105bcab7fd41f5e53e401779e5a Mon Sep 17 00:00:00 2001
+From: Shuzhen Wang <shuzhenwang@google.com>
+Date: Sat, 9 Nov 2024 22:46:14 -0800
+Subject: [PATCH 245/436] Camera: Fix out-of-order function parameters
+
+Flag: EXEMPT bugfix
+Bug: 378193446
+Test: testDigitalZoomPreviewCombinations on cuttlefish
+Change-Id: I82cbee451fdb5d80cae152887cb0e99bef3da18c
+---
+ services/camera/libcameraservice/device3/Camera3Device.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/services/camera/libcameraservice/device3/Camera3Device.cpp b/services/camera/libcameraservice/device3/Camera3Device.cpp
+index 6260b9b14d..35a192f58a 100644
+--- a/services/camera/libcameraservice/device3/Camera3Device.cpp
++++ b/services/camera/libcameraservice/device3/Camera3Device.cpp
+@@ -2894,7 +2894,7 @@ status_t Camera3Device::registerInFlight(uint32_t frameNumber,
+     res = mInFlightMap.add(frameNumber, InFlightRequest(numBuffers, resultExtras, hasInput,
+             hasAppCallback, minExpectedDuration, maxExpectedDuration, isFixedFps, physicalCameraIds,
+             isStillCapture, isZslCapture, rotateAndCropAuto, autoframingAuto, cameraIdsWithZoom,
+-            useZoomRatio, requestTimeNs, outputSurfaces));
++            requestTimeNs, useZoomRatio, outputSurfaces));
+     if (res < 0) return res;
+ 
+     if (mInFlightMap.size() == 1) {
+-- 
+2.43.0
+

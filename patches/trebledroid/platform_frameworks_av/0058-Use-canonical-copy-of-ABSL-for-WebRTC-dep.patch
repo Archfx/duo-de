@@ -1,0 +1,41 @@
+From da22e9e8b35e35c8f660e871c4840aa01e21351e Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Krzysztof=20Kosi=C5=84ski?= <krzysio@google.com>
+Date: Tue, 19 Mar 2024 20:39:15 +0000
+Subject: [PATCH 058/436] Use canonical copy of ABSL for WebRTC dep.
+
+Required to update Protobuf to version 22.x, which has a
+mandatory ABSL dependency.
+
+Bug: 329747255
+Test: unit tests
+Change-Id: Iab33dd57bfcf36a7e1d8743d4e2c4f2606bdbaef
+---
+ media/libeffects/preprocessing/Android.bp | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/media/libeffects/preprocessing/Android.bp b/media/libeffects/preprocessing/Android.bp
+index 44b7d97b58..d791fab2da 100644
+--- a/media/libeffects/preprocessing/Android.bp
++++ b/media/libeffects/preprocessing/Android.bp
+@@ -55,8 +55,8 @@ cc_library {
+     defaults: ["libaudiopreprocessing-defaults"],
+     relative_install_path: "soundfx",
+     srcs: ["PreProcessing.cpp"],
+-    header_libs: [
+-        "libwebrtc_absl_headers",
++    static_libs: [
++        "libabsl",
+     ],
+ }
+ 
+@@ -77,6 +77,7 @@ cc_library_shared {
+         "libutils",
+     ],
+     static_libs: [
++        "libabsl",
+         "webrtc_audio_processing",
+     ],
+     header_libs: [
+-- 
+2.43.0
+

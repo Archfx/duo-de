@@ -1,0 +1,48 @@
+From 0513d304608b853d413b44445040bec1dbd4efd0 Mon Sep 17 00:00:00 2001
+From: Andy Hung <hunga@google.com>
+Date: Thu, 17 Oct 2024 17:52:21 -0700
+Subject: [PATCH 118/436] AudioRecord: fix obtainBuffer restore sequence
+
+A counter mismatch can prevent the restoreRecord_l() from being
+called.
+
+Test: atest AudioRecordTest
+Test: launch camera app and start record
+Test: for run in {1..10}; do (sleep 8; echo $run; adb shell pkill audioserver); done
+Flag: EXEMPT bugfix
+Bug: 374318264
+Merged-In: I9693dfbf471bd8e041b477e8916db48922c48c57
+Change-Id: I9693dfbf471bd8e041b477e8916db48922c48c57
+---
+ media/libaudioclient/AudioRecord.cpp | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/media/libaudioclient/AudioRecord.cpp b/media/libaudioclient/AudioRecord.cpp
+index a1d5b2be5f..8c330d42b6 100644
+--- a/media/libaudioclient/AudioRecord.cpp
++++ b/media/libaudioclient/AudioRecord.cpp
+@@ -1141,11 +1141,10 @@ status_t AudioRecord::obtainBuffer(Buffer* audioBuffer, const struct timespec *r
+             // start of lock scope
+             AutoMutex lock(mLock);
+ 
+-            uint32_t newSequence = mSequence;
+             // did previous obtainBuffer() fail due to media server death or voluntary invalidation?
+             if (status == DEAD_OBJECT) {
+                 // re-create track, unless someone else has already done so
+-                if (newSequence == oldSequence) {
++                if (mSequence == oldSequence) {
+                     if (!audio_is_linear_pcm(mFormat)) {
+                         // If compressed capture, don't attempt to restore the track.
+                         // Return a DEAD_OBJECT error and let the caller recreate.
+@@ -1161,7 +1160,7 @@ status_t AudioRecord::obtainBuffer(Buffer* audioBuffer, const struct timespec *r
+                     }
+                 }
+             }
+-            oldSequence = newSequence;
++            oldSequence = mSequence;
+ 
+             // Keep the extra references
+             proxy = mProxy;
+-- 
+2.43.0
+

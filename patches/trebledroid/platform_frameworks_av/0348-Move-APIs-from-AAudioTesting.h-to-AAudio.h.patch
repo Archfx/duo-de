@@ -1,0 +1,120 @@
+From 0c0cbf870aeedd66069db683455539d9bfb92ef0 Mon Sep 17 00:00:00 2001
+From: jiabin <jiabin@google.com>
+Date: Fri, 22 Nov 2024 19:56:13 +0000
+Subject: [PATCH 348/436] Move APIs from AAudioTesting.h to AAudio.h
+
+The APIs in AAudioTesting.h are public NDK. It makes more sense to have
+them in AAudio.h.
+
+Bug: 378909883
+Test: atest AAudioTests
+Flag: EXEMPT NDK
+Change-Id: Ic14a9a48bb9590dd5f41f59a01921254e01818ac
+---
+ media/libaaudio/include/aaudio/AAudio.h       | 28 +++++++++++
+ .../libaaudio/include/aaudio/AAudioTesting.h  | 47 +------------------
+ 2 files changed, 29 insertions(+), 46 deletions(-)
+
+diff --git a/media/libaaudio/include/aaudio/AAudio.h b/media/libaaudio/include/aaudio/AAudio.h
+index c3e7583068..e72685c999 100644
+--- a/media/libaaudio/include/aaudio/AAudio.h
++++ b/media/libaaudio/include/aaudio/AAudio.h
+@@ -2571,6 +2571,34 @@ AAUDIO_API aaudio_policy_t AAudio_getPlatformMMapPolicy(
+ AAUDIO_API aaudio_policy_t AAudio_getPlatformMMapExclusivePolicy(
+         AAudio_DeviceType device, aaudio_direction_t direction) __INTRODUCED_IN(36);
+ 
++/**
++ * Control whether AAudioStreamBuilder_openStream() will use the new MMAP data path
++ * or the older "Legacy" data path.
++ *
++ * This will only affect the current process.
++ *
++ * If unspecified then the policy will be based on system properties or configuration.
++ *
++ * @param policy {@link #AAUDIO_UNSPECIFIED}, {@link #AAUDIO_POLICY_NEVER},
++ *               {@link #AAUDIO_POLICY_AUTO}, or {@link #AAUDIO_POLICY_ALWAYS}
++ * @return AAUDIO_OK or a negative error
++ */
++AAUDIO_API aaudio_result_t AAudio_setMMapPolicy(aaudio_policy_t policy) __INTRODUCED_IN(36);
++
++/**
++ * Get the current MMAP policy set by AAudio_setMMapPolicy().
++ *
++ * @return current policy or {@link #AAUDIO_UNSPECIFIED} if it is never set.
++ */
++AAUDIO_API aaudio_policy_t AAudio_getMMapPolicy() __INTRODUCED_IN(36);
++
++/**
++ * Return true if the stream uses the MMAP data path versus the legacy path.
++ *
++ * @return true if the stream uses the MMAP data path
++ */
++AAUDIO_API bool AAudioStream_isMMapUsed(AAudioStream* _Nonnull stream) __INTRODUCED_IN(36);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/media/libaaudio/include/aaudio/AAudioTesting.h b/media/libaaudio/include/aaudio/AAudioTesting.h
+index 8758e077ae..842a2db3fe 100644
+--- a/media/libaaudio/include/aaudio/AAudioTesting.h
++++ b/media/libaaudio/include/aaudio/AAudioTesting.h
+@@ -22,55 +22,10 @@
+ 
+ #include <aaudio/AAudio.h>
+ 
+-#ifdef __cplusplus
+-extern "C" {
+-#endif
+-
+ /************************************************************************************
+- * The definitions below are only for testing. Do not use them in an application.
+- * They may change or be removed at any time.
++ * These MMap functions were moved to AAudio.h
+  ************************************************************************************/
+ 
+-/**
+- * Control whether AAudioStreamBuilder_openStream() will use the new MMAP data path
+- * or the older "Legacy" data path.
+- *
+- * This will only affect the current process.
+- *
+- * If unspecified then the policy will be based on system properties or configuration.
+- *
+- * @note This is only for testing. Do not use this in an application.
+- * It may change or be removed at any time.
+- *
+- * @param policy AAUDIO_UNSPECIFIED, AAUDIO_POLICY_NEVER, AAUDIO_POLICY_AUTO, or AAUDIO_POLICY_ALWAYS
+- * @return AAUDIO_OK or a negative error
+- */
+-AAUDIO_API aaudio_result_t AAudio_setMMapPolicy(aaudio_policy_t policy);
+-
+-/**
+- * Get the current MMAP policy set by AAudio_setMMapPolicy().
+- *
+- * @note This is only for testing. Do not use this in an application.
+- * It may change or be removed at any time.
+- *
+- * @return current policy
+- */
+-AAUDIO_API aaudio_policy_t AAudio_getMMapPolicy();
+-
+-/**
+- * Return true if the stream uses the MMAP data path versus the legacy path.
+- *
+- * @note This is only for testing. Do not use this in an application.
+- * It may change or be removed at any time.
+- *
+- * @return true if the stream uses the MMAP data path
+- */
+-AAUDIO_API bool AAudioStream_isMMapUsed(AAudioStream* stream);
+-
+-#ifdef __cplusplus
+-}
+-#endif
+-
+ #endif //AAUDIO_AAUDIO_TESTING_H
+ 
+ /** @} */
+-- 
+2.43.0
+

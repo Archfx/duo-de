@@ -1,0 +1,63 @@
+From fba97d88e096befaafb255a7bd77b96bc86eca96 Mon Sep 17 00:00:00 2001
+From: Mikhail Naganov <mnaganov@google.com>
+Date: Tue, 15 Oct 2024 10:53:20 -0700
+Subject: [PATCH 096/436] libaudiohal@aidl: Resolve async callbacks concurrency
+
+While the I/O thread is receiving a reply from sending of
+a 'burst' or 'drain' command, the HAL can already invoke
+an asynchronous notification. This makes possible to read
+the current stream state from the last reply in the notification
+handler before it was updated by 'sendCommand' on the I/O thread.
+
+The asynchronous handler needs to "wait" before 'sendCommand'
+finished. This is achieved by taking the lock which protects
+access to command and reply queues, as 'sendCommand' only
+releases when the command handling is done and the last reply
+was updated.
+
+Bug: 363958142
+Test: atest CtsMediaAudioTestCases
+Change-Id: I4d4d94ffc7f093b6716d291a8f705376f079965b
+---
+ media/libaudiohal/impl/StreamHalAidl.cpp | 18 ++++++++++++++++--
+ 1 file changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/media/libaudiohal/impl/StreamHalAidl.cpp b/media/libaudiohal/impl/StreamHalAidl.cpp
+index d65701a069..a08e948b48 100644
+--- a/media/libaudiohal/impl/StreamHalAidl.cpp
++++ b/media/libaudiohal/impl/StreamHalAidl.cpp
+@@ -528,7 +528,14 @@ status_t StreamHalAidl::exit() {
+ }
+ 
+ void StreamHalAidl::onAsyncTransferReady() {
+-    if (auto state = getState(); state == StreamDescriptor::State::TRANSFERRING) {
++    StreamDescriptor::State state;
++    {
++        // Use 'mCommandReplyLock' to ensure that 'sendCommand' has finished updating the state
++        // after the reply from the 'burst' command.
++        std::lock_guard l(mCommandReplyLock);
++        state = getState();
++    }
++    if (state == StreamDescriptor::State::TRANSFERRING) {
+         // Retrieve the current state together with position counters unconditionally
+         // to ensure that the state on our side gets updated.
+         sendCommand(makeHalCommand<HalCommand::Tag::getStatus>(),
+@@ -539,7 +546,14 @@ void StreamHalAidl::onAsyncTransferReady() {
+ }
+ 
+ void StreamHalAidl::onAsyncDrainReady() {
+-    if (auto state = getState(); state == StreamDescriptor::State::DRAINING) {
++    StreamDescriptor::State state;
++    {
++        // Use 'mCommandReplyLock' to ensure that 'sendCommand' has finished updating the state
++        // after the reply from the 'drain' command.
++        std::lock_guard l(mCommandReplyLock);
++        state = getState();
++    }
++    if (state == StreamDescriptor::State::DRAINING) {
+         // Retrieve the current state together with position counters unconditionally
+         // to ensure that the state on our side gets updated.
+         sendCommand(makeHalCommand<HalCommand::Tag::getStatus>(), nullptr,
+-- 
+2.43.0
+

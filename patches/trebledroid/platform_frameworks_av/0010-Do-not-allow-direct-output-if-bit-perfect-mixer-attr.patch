@@ -1,0 +1,57 @@
+From 8a09667cee40615f0dabd59927171590bccfcb62 Mon Sep 17 00:00:00 2001
+From: jiabin <jiabin@google.com>
+Date: Wed, 18 Sep 2024 18:20:24 +0000
+Subject: [PATCH 010/436] Do not allow direct output if bit-perfect mixer
+ attributes is used.
+
+Bug: 357786293
+Test: play MP3 file from YTM and then play DSD file
+Test: atest AudioManagerTest audiopolicy_tests
+Flag: EXEMPT bugfix
+Change-Id: Idfd5e7d9a0de9542a1ec572ef4e0d1075e04fc22
+---
+ .../managerdefault/AudioPolicyManager.cpp     | 21 +++++++++++++++++++
+ 1 file changed, 21 insertions(+)
+
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index 574307a7e0..e9132f32c2 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -1407,6 +1407,16 @@ status_t AudioPolicyManager::getOutputForAttrInt(
+                 (!info->isBitPerfect() || info->getActiveClientCount() == 0)) {
+                 info = nullptr;
+             }
++
++            if (info != nullptr && info->isBitPerfect() &&
++                (*flags & (AUDIO_OUTPUT_FLAG_DIRECT | AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD |
++                        AUDIO_OUTPUT_FLAG_HW_AV_SYNC | AUDIO_OUTPUT_FLAG_MMAP_NOIRQ)) != 0) {
++                // Reject direct request if a preferred mixer config in use is bit-perfect.
++                ALOGD("%s reject direct request as bit-perfect mixer attributes is active",
++                      __func__);
++                return BAD_VALUE;
++            }
++
+             if (com::android::media::audioserver::
+                     fix_concurrent_playback_behavior_with_bit_perfect_client()) {
+                 if (info != nullptr && info->getUid() == uid &&
+@@ -4832,6 +4842,17 @@ audio_direct_mode_t AudioPolicyManager::getDirectPlaybackSupport(const audio_att
+     flags = (audio_output_flags_t)((flags & relevantFlags) | AUDIO_OUTPUT_FLAG_DIRECT);
+ 
+     DeviceVector engineOutputDevices = mEngine->getOutputDevicesForAttributes(*attr);
++    if (std::any_of(engineOutputDevices.begin(), engineOutputDevices.end(),
++            [this, attr](sp<DeviceDescriptor> device) {
++                    return getPreferredMixerAttributesInfo(
++                            device->getId(),
++                            mEngine->getProductStrategyForAttributes(*attr),
++                            true /*activeBitPerfectPreferred*/) != nullptr;
++            })) {
++        // Bit-perfect playback is active on one of the selected devices, direct output will
++        // be rejected at this instant.
++        return AUDIO_DIRECT_NOT_SUPPORTED;
++    }
+     for (const auto& hwModule : mHwModules) {
+         DeviceVector outputDevices = engineOutputDevices;
+         // the MSD module checks for different conditions and output devices
+-- 
+2.43.0
+

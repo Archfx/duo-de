@@ -1,0 +1,61 @@
+From c2575c62c61c9e66b2ad1c1a550196186bfa478d Mon Sep 17 00:00:00 2001
+From: Ping Tsai <Yung-ping.Tsai@mediatek.com>
+Date: Thu, 21 Nov 2024 15:08:33 +0000
+Subject: [PATCH 344/436] audio policy: check volume device before
+ setVoiceVolume
+
+If the volume device setting is different from the current rx device, there is no need to call setVoiceVolume to change the call volume.
+
+Bug: 376772314
+Test: Manual
+Switch to speaker mode quickly after initiating a call
+(cherry picked from https://partner-android-review.googlesource.com/q/commit:ebcece6a374834a9dd0581bace727a4ba081b9c8)
+Flag: EXEMPT bug fix
+Merged-In: I60b360d0adcc940706405e6e9618bc40e0717436
+Change-Id: I60b360d0adcc940706405e6e9618bc40e0717436
+---
+ .../managerdefault/AudioPolicyManager.cpp     | 28 ++++++++++---------
+ 1 file changed, 15 insertions(+), 13 deletions(-)
+
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index 18b5ea9d30..8ca783ef31 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -3804,19 +3804,21 @@ status_t AudioPolicyManager::setVolumeIndexForAttributes(const audio_attributes_
+         }
+     }
+ 
+-    // update voice volume if the an active call route exists
+-    if (mCallRxSourceClient != nullptr && mCallRxSourceClient->isConnected()
+-            && (curSrcDevices.find(
+-                Volume::getDeviceForVolume({mCallRxSourceClient->sinkDevice()->type()}))
+-                != curSrcDevices.end())) {
+-        bool isVoiceVolSrc;
+-        bool isBtScoVolSrc;
+-        if (isVolumeConsistentForCalls(vs, {mCallRxSourceClient->sinkDevice()->type()},
+-                isVoiceVolSrc, isBtScoVolSrc, __func__)
+-                && (isVoiceVolSrc || isBtScoVolSrc)) {
+-            bool voiceVolumeManagedByHost = !isBtScoVolSrc &&
+-                    !audio_is_ble_out_device(mCallRxSourceClient->sinkDevice()->type());
+-            setVoiceVolume(index, curves, voiceVolumeManagedByHost, 0);
++    // update voice volume if the an active call route exists and target device is same as current
++    if (mCallRxSourceClient != nullptr && mCallRxSourceClient->isConnected()) {
++        audio_devices_t rxSinkDevice = mCallRxSourceClient->sinkDevice()->type();
++        audio_devices_t curVoiceDevice = Volume::getDeviceForVolume({rxSinkDevice});
++        if (curVoiceDevice == device
++                && curSrcDevices.find(curVoiceDevice) != curSrcDevices.end()) {
++            bool isVoiceVolSrc;
++            bool isBtScoVolSrc;
++            if (isVolumeConsistentForCalls(vs, {rxSinkDevice},
++                    isVoiceVolSrc, isBtScoVolSrc, __func__)
++                    && (isVoiceVolSrc || isBtScoVolSrc)) {
++                bool voiceVolumeManagedByHost = !isBtScoVolSrc &&
++                        !audio_is_ble_out_device(rxSinkDevice);
++                setVoiceVolume(index, curves, voiceVolumeManagedByHost, 0);
++            }
+         }
+     }
+ 
+-- 
+2.43.0
+

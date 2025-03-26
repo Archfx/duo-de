@@ -1,0 +1,45 @@
+From 80edb96aab691070d03e66bdba18c159f1fb4541 Mon Sep 17 00:00:00 2001
+From: Ashish Kumar Gupta <kumarashishg@google.com>
+Date: Thu, 10 Oct 2024 06:21:31 +0000
+Subject: [PATCH 082/436] Fix memory leak in MtpFfsHandle.
+
+The MtpFfsHandle class creates a number of child threads, but does not delete them when the handle is destroyed. This can lead to a memory leak. This CL fixes the memory leak by deleting the child threads when the handle is destroyed.
+
+Bug: 365686062
+Flag: EXEMPT bug fix
+Test: Run mtp in host and device mode
+Change-Id: I2fd586a01e3ff5bd49fbb53ba3a34a3f439049ae
+---
+ media/mtp/MtpFfsHandle.cpp | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/media/mtp/MtpFfsHandle.cpp b/media/mtp/MtpFfsHandle.cpp
+index 979edabca7..4645a75dcb 100644
+--- a/media/mtp/MtpFfsHandle.cpp
++++ b/media/mtp/MtpFfsHandle.cpp
+@@ -20,7 +20,6 @@
+ #include <dirent.h>
+ #include <errno.h>
+ #include <fcntl.h>
+-#include <memory>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+@@ -298,9 +297,12 @@ int MtpFfsHandle::start(bool ptp) {
+ 
+ void MtpFfsHandle::close() {
+     // Join all child threads before destruction
+-    for (auto& thread : mChildThreads) {
+-        thread.join();
++    int count = mChildThreads.size();
++    for (int i = 0; i < count; i++) {
++        mChildThreads[i].join();
++        delete &mChildThreads[i];
+     }
++    mChildThreads.clear();
+ 
+     io_destroy(mCtx);
+     closeEndpoints();
+-- 
+2.43.0
+

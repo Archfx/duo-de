@@ -1,0 +1,91 @@
+From 4aa99a8438dae5a58cabef6e4510d08d45c1b089 Mon Sep 17 00:00:00 2001
+From: Wonsik Kim <wonsik@google.com>
+Date: Wed, 25 Sep 2024 22:51:19 +0000
+Subject: [PATCH 027/436] Add a comment about the order of
+ SetPreferredCodec2ComponentStore() and ComponentStore() in the code.
+
+Bug: 369641052
+Test: presubmit
+Change-Id: I73bdcf574a2f7f0cfb47c49ad31c8ab446d4ff46
+---
+ media/codec2/hal/aidl/include/codec2/aidl/ComponentStore.h | 7 +++++++
+ .../1.0/utils/include/codec2/hidl/1.0/ComponentStore.h     | 7 +++++++
+ .../1.1/utils/include/codec2/hidl/1.1/ComponentStore.h     | 7 +++++++
+ .../1.2/utils/include/codec2/hidl/1.2/ComponentStore.h     | 7 +++++++
+ 4 files changed, 28 insertions(+)
+
+diff --git a/media/codec2/hal/aidl/include/codec2/aidl/ComponentStore.h b/media/codec2/hal/aidl/include/codec2/aidl/ComponentStore.h
+index de0f566c0f..bb4c596cba 100644
+--- a/media/codec2/hal/aidl/include/codec2/aidl/ComponentStore.h
++++ b/media/codec2/hal/aidl/include/codec2/aidl/ComponentStore.h
+@@ -52,6 +52,13 @@ struct Component;
+ using ::aidl::android::hardware::media::bufferpool2::IClientManager;
+ 
+ struct ComponentStore : public BnComponentStore {
++    /**
++     * Constructor for ComponentStore.
++     *
++     * IMPORTANT: SetPreferredCodec2ComponentStore() is called in the constructor.
++     * Be careful about the order of SetPreferredCodec2ComponentStore() and
++     * ComponentStore() in the code.
++     */
+     ComponentStore(const std::shared_ptr<C2ComponentStore>& store);
+     virtual ~ComponentStore();
+ 
+diff --git a/media/codec2/hal/hidl/1.0/utils/include/codec2/hidl/1.0/ComponentStore.h b/media/codec2/hal/hidl/1.0/utils/include/codec2/hidl/1.0/ComponentStore.h
+index 847c90c474..028238bd24 100644
+--- a/media/codec2/hal/hidl/1.0/utils/include/codec2/hidl/1.0/ComponentStore.h
++++ b/media/codec2/hal/hidl/1.0/utils/include/codec2/hidl/1.0/ComponentStore.h
+@@ -55,6 +55,13 @@ using ::android::hardware::Void;
+ using ::android::sp;
+ 
+ struct ComponentStore : public IComponentStore {
++    /**
++     * Constructor for ComponentStore.
++     *
++     * IMPORTANT: SetPreferredCodec2ComponentStore() is called in the constructor.
++     * Be careful about the order of SetPreferredCodec2ComponentStore() and
++     * ComponentStore() in the code.
++     */
+     ComponentStore(const std::shared_ptr<C2ComponentStore>& store);
+     virtual ~ComponentStore();
+ 
+diff --git a/media/codec2/hal/hidl/1.1/utils/include/codec2/hidl/1.1/ComponentStore.h b/media/codec2/hal/hidl/1.1/utils/include/codec2/hidl/1.1/ComponentStore.h
+index 9028149f81..b0231151b3 100644
+--- a/media/codec2/hal/hidl/1.1/utils/include/codec2/hidl/1.1/ComponentStore.h
++++ b/media/codec2/hal/hidl/1.1/utils/include/codec2/hidl/1.1/ComponentStore.h
+@@ -56,6 +56,13 @@ using ::android::hardware::Void;
+ using ::android::sp;
+ 
+ struct ComponentStore : public IComponentStore {
++    /**
++     * Constructor for ComponentStore.
++     *
++     * IMPORTANT: SetPreferredCodec2ComponentStore() is called in the constructor.
++     * Be careful about the order of SetPreferredCodec2ComponentStore() and
++     * ComponentStore() in the code.
++     */
+     ComponentStore(const std::shared_ptr<C2ComponentStore>& store);
+     virtual ~ComponentStore();
+ 
+diff --git a/media/codec2/hal/hidl/1.2/utils/include/codec2/hidl/1.2/ComponentStore.h b/media/codec2/hal/hidl/1.2/utils/include/codec2/hidl/1.2/ComponentStore.h
+index 4fd260b0ce..a7e043bc5f 100644
+--- a/media/codec2/hal/hidl/1.2/utils/include/codec2/hidl/1.2/ComponentStore.h
++++ b/media/codec2/hal/hidl/1.2/utils/include/codec2/hidl/1.2/ComponentStore.h
+@@ -56,6 +56,13 @@ using ::android::hardware::Void;
+ using ::android::sp;
+ 
+ struct ComponentStore : public IComponentStore {
++    /**
++     * Constructor for ComponentStore.
++     *
++     * IMPORTANT: SetPreferredCodec2ComponentStore() is called in the constructor.
++     * Be careful about the order of SetPreferredCodec2ComponentStore() and
++     * ComponentStore() in the code.
++     */
+     ComponentStore(const std::shared_ptr<C2ComponentStore>& store);
+     virtual ~ComponentStore();
+ 
+-- 
+2.43.0
+

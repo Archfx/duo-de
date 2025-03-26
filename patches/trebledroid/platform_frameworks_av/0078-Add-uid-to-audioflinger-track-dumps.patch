@@ -1,0 +1,263 @@
+From b01390fad2fc89dc296b6a00612143c0f22e36dc Mon Sep 17 00:00:00 2001
+From: Atneya Nair <atneya@google.com>
+Date: Wed, 9 Oct 2024 23:33:27 +0000
+Subject: [PATCH 078/436] Add uid to audioflinger track dumps
+
+Helpful for debugging app-specific activity.
+
+Test: adb shell dumpsys media.audio_flinger
+Flag: EXEMPT logs only
+Bug: 372070273
+Change-Id: I0d18de57d43b7fdd1bc6d59c40883433490b9650
+---
+ services/audioflinger/AudioFlinger.cpp | 14 +++++++-------
+ services/audioflinger/AudioFlinger.h   |  3 ++-
+ services/audioflinger/Client.cpp       |  5 +++--
+ services/audioflinger/Client.h         |  4 +++-
+ services/audioflinger/IAfTrack.h       |  7 ++++---
+ services/audioflinger/MmapTracks.h     |  3 ++-
+ services/audioflinger/Tracks.cpp       | 14 +++++++++-----
+ 7 files changed, 30 insertions(+), 20 deletions(-)
+
+diff --git a/services/audioflinger/AudioFlinger.cpp b/services/audioflinger/AudioFlinger.cpp
+index f077c7ff6e..b9dbbad698 100644
+--- a/services/audioflinger/AudioFlinger.cpp
++++ b/services/audioflinger/AudioFlinger.cpp
+@@ -1009,14 +1009,14 @@ status_t AudioFlinger::dump(int fd, const Vector<String16>& args)
+     return NO_ERROR;
+ }
+ 
+-sp<Client> AudioFlinger::registerPid(pid_t pid)
++sp<Client> AudioFlinger::registerClient(pid_t pid, uid_t uid)
+ {
+     audio_utils::lock_guard _cl(clientMutex());
+     // If pid is already in the mClients wp<> map, then use that entry
+     // (for which promote() is always != 0), otherwise create a new entry and Client.
+     sp<Client> client = mClients.valueFor(pid).promote();
+     if (client == 0) {
+-        client = sp<Client>::make(sp<IAfClientCallback>::fromExisting(this), pid);
++        client = sp<Client>::make(sp<IAfClientCallback>::fromExisting(this), pid, uid);
+         mClients.add(pid, client);
+     }
+ 
+@@ -1194,7 +1194,7 @@ status_t AudioFlinger::createTrack(const media::CreateTrackRequest& _input,
+             goto Exit;
+         }
+ 
+-        client = registerPid(adjAttributionSource.pid);
++        client = registerClient(adjAttributionSource.pid, adjAttributionSource.uid);
+ 
+         IAfPlaybackThread* effectThread = nullptr;
+         sp<IAfEffectChain> effectChain = nullptr;
+@@ -2489,7 +2489,7 @@ status_t AudioFlinger::createRecord(const media::CreateRecordRequest& _input,
+     output.selectedDeviceId = input.selectedDeviceId;
+     output.flags = input.flags;
+ 
+-    client = registerPid(VALUE_OR_FATAL(aidl2legacy_int32_t_pid_t(adjAttributionSource.pid)));
++    client = registerClient(adjAttributionSource.pid, adjAttributionSource.uid);
+ 
+     // Not a conventional loop, but a retry loop for at most two iterations total.
+     // Try first maybe with FAST flag then try again without FAST flag if that fails.
+@@ -4412,7 +4412,7 @@ status_t AudioFlinger::createEffect(const media::CreateEffectRequest& request,
+         audio_utils::lock_guard _l(mutex());
+ 
+         if (sessionId == AUDIO_SESSION_DEVICE) {
+-            sp<Client> client = registerPid(currentPid);
++            sp<Client> client = registerClient(currentPid, adjAttributionSource.uid);
+             ALOGV("%s device type %#x address %s", __func__, device.mType, device.getAddress());
+             handle = mDeviceEffectManager->createEffect_l(
+                     &descOut, device, client, effectClient, mPatchPanel->patches_l(),
+@@ -4474,7 +4474,7 @@ status_t AudioFlinger::createEffect(const media::CreateEffectRequest& request,
+                     goto Exit;
+                 }
+                 ALOGV("%s() got io %d for effect %s", __func__, io, descOut.name);
+-                sp<Client> client = registerPid(currentPid);
++                sp<Client> client = registerClient(currentPid, adjAttributionSource.uid);
+                 bool pinned = !audio_is_global_session(sessionId) && isSessionAcquired_l(sessionId);
+                 handle = createOrphanEffect_l(client, effectClient, priority, sessionId,
+                                               &descOut, &enabledOut, &lStatus, pinned,
+@@ -4536,7 +4536,7 @@ status_t AudioFlinger::createEffect(const media::CreateEffectRequest& request,
+             }
+         }
+ 
+-        sp<Client> client = registerPid(currentPid);
++        sp<Client> client = registerClient(currentPid, adjAttributionSource.uid);
+ 
+         // create effect on selected output thread
+         bool pinned = !audio_is_global_session(sessionId) && isSessionAcquired_l(sessionId);
+diff --git a/services/audioflinger/AudioFlinger.h b/services/audioflinger/AudioFlinger.h
+index 6d3eea55bf..2bc18ee686 100644
+--- a/services/audioflinger/AudioFlinger.h
++++ b/services/audioflinger/AudioFlinger.h
+@@ -728,7 +728,8 @@ private:
+                 // Audio data transfer is directly handled by the client creating the MMAP stream
+     DefaultKeyedVector<audio_io_handle_t, sp<IAfMmapThread>> mMmapThreads GUARDED_BY(mutex());
+ 
+-    sp<Client> registerPid(pid_t pid) EXCLUDES_AudioFlinger_ClientMutex; // always returns non-0
++    // always returns non-null
++    sp<Client> registerClient(pid_t pid, uid_t uid) EXCLUDES_AudioFlinger_ClientMutex;
+ 
+     sp<IAfEffectHandle> createOrphanEffect_l(const sp<Client>& client,
+                                           const sp<media::IEffectClient>& effectClient,
+diff --git a/services/audioflinger/Client.cpp b/services/audioflinger/Client.cpp
+index 93599acae7..48584693ed 100644
+--- a/services/audioflinger/Client.cpp
++++ b/services/audioflinger/Client.cpp
+@@ -18,9 +18,10 @@
+ 
+ namespace android {
+ 
+-Client::Client(const sp<IAfClientCallback>& afClientCallback, pid_t pid)
++Client::Client(const sp<IAfClientCallback>& afClientCallback, pid_t pid, uid_t uid)
+     : mAfClientCallback(afClientCallback)
+     , mPid(pid)
++    , mUid(uid)
+     , mClientAllocator(AllocatorFactory::getClientAllocator()) {}
+ 
+ // Client destructor must be called with AudioFlinger::mClientLock held
+@@ -34,4 +35,4 @@ AllocatorFactory::ClientAllocator& Client::allocator()
+     return mClientAllocator;
+ }
+ 
+-}   // namespace android
+\ No newline at end of file
++}   // namespace android
+diff --git a/services/audioflinger/Client.h b/services/audioflinger/Client.h
+index ff0d751112..c2fef391d4 100644
+--- a/services/audioflinger/Client.h
++++ b/services/audioflinger/Client.h
+@@ -42,13 +42,14 @@ public:
+ 
+ class Client : public RefBase {
+ public:
+-    Client(const sp<IAfClientCallback>& audioFlinger, pid_t pid);
++    Client(const sp<IAfClientCallback>& audioFlinger, pid_t pid, uid_t uid);
+ 
+     // TODO(b/289139675) make Client container.
+     // Client destructor must be called with AudioFlinger::mClientLock held
+     ~Client() override;
+     AllocatorFactory::ClientAllocator& allocator();
+     pid_t pid() const { return mPid; }
++    uid_t uid() const { return mUid; }
+     const auto& afClientCallback() const { return mAfClientCallback; }
+ 
+ private:
+@@ -56,6 +57,7 @@ private:
+ 
+     const sp<IAfClientCallback> mAfClientCallback;
+     const pid_t mPid;
++    const uid_t mUid;
+     AllocatorFactory::ClientAllocator mClientAllocator;
+ };
+ 
+diff --git a/services/audioflinger/IAfTrack.h b/services/audioflinger/IAfTrack.h
+index 9650f3e2c8..2049adc946 100644
+--- a/services/audioflinger/IAfTrack.h
++++ b/services/audioflinger/IAfTrack.h
+@@ -295,7 +295,7 @@ public:
+ 
+     static constexpr std::string_view getLogHeader() {
+         using namespace std::literals;
+-        return "Type     Id Active Client Session Port Id S  Flags "
++        return "Type     Id Active Client(pid/uid) Session Port Id S  Flags "
+                         "  Format Chn mask  SRate "
+                         "ST Usg CT "
+                         " G db  L dB  R dB  VS dB  PortVol dB "
+@@ -480,7 +480,8 @@ public:
+ 
+     static constexpr std::string_view getLogHeader() {
+         using namespace std::literals;
+-        return "Client Session Port Id   Format Chn mask  SRate Flags Usg/Src PortVol dB\n"sv;
++        return "Client(pid/uid) Session Port Id"
++                "   Format Chn mask  SRate Flags Usg/Src PortVol dB\n"sv;
+     };
+ 
+     // protected by MMapThread::mLock
+@@ -528,7 +529,7 @@ public:
+ 
+     static constexpr std::string_view getLogHeader() {
+         using namespace std::literals;
+-        return "Active     Id Client Session Port Id  S  Flags  "
++        return "Active     Id Client(pid/uid) Session Port Id  S  Flags  "
+                         " Format Chn mask  SRate Source  "
+                         " Server FrmCnt FrmRdy Sil   Latency\n"sv;
+     }
+diff --git a/services/audioflinger/MmapTracks.h b/services/audioflinger/MmapTracks.h
+index 8758bd023f..442dd8092f 100644
+--- a/services/audioflinger/MmapTracks.h
++++ b/services/audioflinger/MmapTracks.h
+@@ -86,6 +86,7 @@ private:
+     void onTimestamp(const ExtendedTimestamp &timestamp) final;
+ 
+     const pid_t mPid;
++    const uid_t mUid;
+     bool  mSilenced;            // protected by MMapThread::mLock
+     bool  mSilencedNotified;    // protected by MMapThread::mLock
+ 
+@@ -99,4 +100,4 @@ private:
+     float mVolume = 0.0f;
+ };  // end of Track
+ 
+-} // namespace android
+\ No newline at end of file
++} // namespace android
+diff --git a/services/audioflinger/Tracks.cpp b/services/audioflinger/Tracks.cpp
+index eab3b44e41..b08b0b7c25 100644
+--- a/services/audioflinger/Tracks.cpp
++++ b/services/audioflinger/Tracks.cpp
+@@ -1081,13 +1081,14 @@ void Track::appendDump(String8& result, bool active) const
+             ? 'r' /* buffer reduced */: bufferSizeInFrames > mFrameCount
+                     ? 'e' /* error */ : ' ' /* identical */;
+ 
+-    result.appendFormat("%7s %6u %7u %7u %2s 0x%03X "
++    result.appendFormat("%7s %7u/%7u %7u %7u %2s 0x%03X "
+                         "%08X %08X %6u "
+                         "%2u %3x %2x "
+                         "%5.2g %5.2g %5.2g %5.2g%c %11.2g "
+                         "%08X %6zu%c %6zu %c %9u%c %7u %10s %12s",
+             active ? "yes" : "no",
+-            (mClient == 0) ? getpid() : mClient->pid(),
++            mClient ? mClient->pid() : getpid() ,
++            mClient ? mClient->uid() : getuid(),
+             mSessionId,
+             mPortId,
+             getTrackStateAsCodedString(),
+@@ -2990,13 +2991,14 @@ void RecordTrack::appendDumpHeader(String8& result) const
+ 
+ void RecordTrack::appendDump(String8& result, bool active) const
+ {
+-    result.appendFormat("%c%5s %6d %6u %7u %7u  %2s 0x%03X "
++    result.appendFormat("%c%5s %6d %7u/%7u %7u %7u  %2s 0x%03X "
+             "%08X %08X %6u %6X "
+             "%08X %6zu %6zu %3c",
+             isFastTrack() ? 'F' : ' ',
+             active ? "yes" : "no",
+             mId,
+-            (mClient == 0) ? getpid() : mClient->pid(),
++            mClient ? mClient->pid() : getpid(),
++            mClient ? mClient->uid() : getuid(),
+             mSessionId,
+             mPortId,
+             getTrackStateAsCodedString(),
+@@ -3554,6 +3556,7 @@ MmapTrack::MmapTrack(IAfThreadBase* thread,
+                   TYPE_DEFAULT, portId,
+                   std::string(AMEDIAMETRICS_KEY_PREFIX_AUDIO_MMAP) + std::to_string(portId)),
+         mPid(VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.pid))),
++        mUid(VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid))),
+             mSilenced(false), mSilencedNotified(false), mVolume(volume)
+ {
+     // Once this item is logged by the server, the client can add properties.
+@@ -3647,8 +3650,9 @@ void MmapTrack::appendDumpHeader(String8& result) const
+ 
+ void MmapTrack::appendDump(String8& result, bool active __unused) const
+ {
+-    result.appendFormat("%6u %7u %7u %08X %08X %6u 0x%03X ",
++    result.appendFormat("%7u/%7u %7u %7u %08X %08X %6u 0x%03X ",
+             mPid,
++            mUid,
+             mSessionId,
+             mPortId,
+             mFormat,
+-- 
+2.43.0
+

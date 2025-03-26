@@ -1,0 +1,35 @@
+From a2fb29cb633acbdf00e2e3919044116b163d817b Mon Sep 17 00:00:00 2001
+From: Andy Hung <hunga@google.com>
+Date: Mon, 11 Nov 2024 15:56:41 -0800
+Subject: [PATCH 253/436] AudioSystem: Reduce service timeout from 10s to 5s
+
+This improves the ANR prevention.
+
+Flag: EXEMPT bugfix
+Test: Treehugger
+Bug: 375691003
+Change-Id: I09a5d6f775fe6486a9b6bd737c9d91e9280f4931
+---
+ media/libaudioclient/AudioSystem.cpp | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/media/libaudioclient/AudioSystem.cpp b/media/libaudioclient/AudioSystem.cpp
+index bb0deb1fb9..47d5dd5528 100644
+--- a/media/libaudioclient/AudioSystem.cpp
++++ b/media/libaudioclient/AudioSystem.cpp
+@@ -127,10 +127,10 @@ sp<CaptureStateListenerImpl> AudioSystem::gSoundTriggerCaptureStateListener;
+ // Such an audioserver failure is considered benign as the ground truth is stored in
+ // the Java AudioService and can be restored once audioserver has finished initialization.
+ //
+-// TODO(b/375691003) We use 10s as a conservative timeout value, and will tune closer to 3s.
++// TODO(b/375691003) We use 5s as a conservative timeout value, and will tune closer to 3s.
+ // Too small a value (i.e. less than 1s would churn repeated calls to get the service).
+ // The value can be tuned by the property audio.service.client_wait_ms.
+-static constexpr int32_t kServiceClientWaitMs = 10'000;
++static constexpr int32_t kServiceClientWaitMs = 5'000;
+ 
+ static constexpr const char kServiceWaitProperty[] = "audio.service.client_wait_ms";
+ 
+-- 
+2.43.0
+

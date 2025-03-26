@@ -1,0 +1,152 @@
+From 7493e05f88d945eab15de21937448506c66e5dcb Mon Sep 17 00:00:00 2001
+From: Atneya Nair <atneya@google.com>
+Date: Fri, 1 Nov 2024 10:40:21 -0700
+Subject: [PATCH 188/436] Fix audioflinger allocator concurrency
+
+The allocators for the backing pools are shared between clients, so they
+need to be locked.
+
+Add a locking allocator which locks on all accesses.
+
+Pull out some common logic into a helper in the factory.
+
+Test: compiles
+Fixes: 326429091
+Bug: 326429091
+Flag: EXEMPT bugfix
+Change-Id: I61eb0ede32f336265f6281c865e253f181f7ad89
+---
+ .../mediautils/SharedMemoryAllocator.h        | 50 +++++++++++++++++++
+ .../audioflinger/afutils/AllocatorFactory.h   | 26 +++++++---
+ 2 files changed, 68 insertions(+), 8 deletions(-)
+
+diff --git a/media/utils/include/mediautils/SharedMemoryAllocator.h b/media/utils/include/mediautils/SharedMemoryAllocator.h
+index 4243b9cfe1..7d4f62ea4c 100644
+--- a/media/utils/include/mediautils/SharedMemoryAllocator.h
++++ b/media/utils/include/mediautils/SharedMemoryAllocator.h
+@@ -28,6 +28,7 @@
+ #include <type_traits>
+ #include <unordered_map>
+ 
++#include <android-base/thread_annotations.h>
+ #include <binder/MemoryBase.h>
+ #include <binder/MemoryHeapBase.h>
+ #include <log/log_main.h>
+@@ -425,8 +426,57 @@ class FallbackAllocator {
+     [[no_unique_address]] SecondaryAllocator mSecondary;
+ };
+ 
++// Wrap an allocator with a lock if backs multiple allocators through indirection
++template <typename Allocator>
++class LockedAllocator {
++  public:
++    static size_t alignment() { return Allocator::alignment(); }
++
++    explicit LockedAllocator(Allocator allocator) : mAllocator(allocator) {}
++
++    LockedAllocator() = default;
++
++    template <typename T>
++    AllocationType allocate(T&& request) {
++        static_assert(std::is_base_of_v<android::mediautils::BasicAllocRequest, std::decay_t<T>>);
++        std::lock_guard l_{mMutex};
++        return mAllocator.allocate(std::forward<T>(request));
++    }
++
++    void deallocate(const AllocationType& allocation) {
++        std::lock_guard l_{mMutex};
++        mAllocator.deallocate(allocation);
++    }
++
++    template <typename Enable = void>
++    auto deallocate_all()
++            -> std::enable_if_t<shared_allocator_impl::has_deallocate_all<Allocator>, Enable> {
++        std::lock_guard l_{mMutex};
++        mAllocator.deallocate_all();
++    }
++
++    template <typename Enable = bool>
++    auto owns(const AllocationType& allocation) const
++            -> std::enable_if_t<shared_allocator_impl::has_owns<Allocator>, Enable> {
++        std::lock_guard l_{mMutex};
++        return mAllocator.owns(allocation);
++    }
++
++    template <typename Enable = std::string>
++    auto dump() const -> std::enable_if_t<shared_allocator_impl::has_dump<Allocator>, Enable> {
++        std::lock_guard l_{mMutex};
++        return mAllocator.dump();
++    }
++
++  private:
++    std::mutex mMutex;
++    [[no_unique_address]] Allocator mAllocator GUARDED_BY(mMutex);
++};
++
+ // An allocator which is backed by a shared_ptr to an allocator, so multiple
+ // allocators can share the same backing allocator (and thus the same state).
++// When the same backing allocator is used by multiple higher level allocators,
++// locking at the sharing level is necessary.
+ template <typename Allocator>
+ class IndirectAllocator {
+   public:
+diff --git a/services/audioflinger/afutils/AllocatorFactory.h b/services/audioflinger/afutils/AllocatorFactory.h
+index 7534607fbd..4c290a0c69 100644
+--- a/services/audioflinger/afutils/AllocatorFactory.h
++++ b/services/audioflinger/afutils/AllocatorFactory.h
+@@ -33,25 +33,36 @@ constexpr inline size_t SHARED_SIZE_LARGE = (SHARED_SIZE * 4) / 6;            //
+ constexpr inline size_t SHARED_SIZE_SMALL = SHARED_SIZE - SHARED_SIZE_LARGE;  // 20 MiB
+ constexpr inline size_t SMALL_THRESHOLD = 1024 * 40;                          // 40 KiB
+ 
++template <typename Policy>
++inline auto getSharedPool() {
++    using namespace mediautils;
++    return std::make_shared<LockedAllocator<PolicyAllocator<MemoryHeapBaseAllocator, Policy>>>();
++}
++
++// The following pools are global but lazy initialized. Stored in shared_ptr since they are
++// referred by clients, but they could also be leaked.
++
++// Pool from which every client gets their dedicated, exclusive quota.
+ inline auto getDedicated() {
+     using namespace mediautils;
+-    static const auto allocator =
+-            std::make_shared<PolicyAllocator<MemoryHeapBaseAllocator, SizePolicy<DED_SIZE>>>();
++    static const auto allocator = getSharedPool<SizePolicy<DED_SIZE>>();
+     return allocator;
+ }
+ 
++// Pool from which clients with large allocation sizes can fall back to when their dedicated
++// allocation is surpassed. More likely to fill.
+ inline auto getSharedLarge() {
+     using namespace mediautils;
+-    static const auto allocator = std::make_shared<
+-            PolicyAllocator<MemoryHeapBaseAllocator, SizePolicy<SHARED_SIZE_LARGE>>>();
++    static const auto allocator = getSharedPool<SizePolicy<SHARED_SIZE_LARGE>>();
+     return allocator;
+ }
+ 
++// Pool from which clients with reasonable allocation sizes can fall back to when
++// their dedicated allocation is surpassed, so that small buffer clients are always served.
+ inline auto getSharedSmall() {
+     using namespace mediautils;
+     static const auto allocator =
+-            std::make_shared<PolicyAllocator<MemoryHeapBaseAllocator,
+-                                             SizePolicy<SHARED_SIZE_SMALL, 0, SMALL_THRESHOLD>>>();
++            getSharedPool<SizePolicy<SHARED_SIZE_SMALL, 0, SMALL_THRESHOLD>>();
+     return allocator;
+ }
+ 
+@@ -78,8 +89,7 @@ inline auto getClientAllocator() {
+                 getSharedLarge(), "Large Shared");
+     };
+     const auto makeSmallShared = []() {
+-        return wrapWithPolicySnooping<
+-                SizePolicy<SHARED_SIZE_SMALL / ADV_THRESHOLD_INV>>(
++        return wrapWithPolicySnooping<SizePolicy<SHARED_SIZE_SMALL / ADV_THRESHOLD_INV>>(
+                 getSharedSmall(), "Small Shared");
+     };
+ 
+-- 
+2.43.0
+

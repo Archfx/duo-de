@@ -1,0 +1,117 @@
+From 9aab1380a87a0cedb35788e48016737805564a2d Mon Sep 17 00:00:00 2001
+From: Jean-Michel Trivi <jmtrivi@google.com>
+Date: Fri, 22 Nov 2024 16:38:24 -0800
+Subject: [PATCH 365/436] Spatializer speaker capabilities queried from effect
+
+Bug: 377582613
+Flag: android.media.audio.spatializer_capabilities
+Test: adb shell dumpsys audio | grep "Spatial audio" -A 7
+Change-Id: Ic000fcb8f98f80afa140155653173e41ce3db5f5
+---
+ .../aidl/android/media/ISpatializer.aidl      |  7 ++++
+ services/audiopolicy/service/Spatializer.cpp  | 38 +++++++++++++++++++
+ services/audiopolicy/service/Spatializer.h    |  2 +
+ 3 files changed, 47 insertions(+)
+
+diff --git a/media/libaudioclient/aidl/android/media/ISpatializer.aidl b/media/libaudioclient/aidl/android/media/ISpatializer.aidl
+index 37dd77614d..4a5321e63e 100644
+--- a/media/libaudioclient/aidl/android/media/ISpatializer.aidl
++++ b/media/libaudioclient/aidl/android/media/ISpatializer.aidl
+@@ -163,4 +163,11 @@ interface ISpatializer {
+      * Gets the io handle of the output stream the spatializer is connected to.
+      */
+      int getOutput();
++
++     /**
++      * Returns a list of channel masks that represent the widest channel masks the spatializer
++      * is capable of rendering with individual channel positions.
++      * Note that each channel mask is in the native format.
++      */
++      int[] getSpatializedChannelMasks();
+ }
+diff --git a/services/audiopolicy/service/Spatializer.cpp b/services/audiopolicy/service/Spatializer.cpp
+index c7740ada62..d177b92af0 100644
+--- a/services/audiopolicy/service/Spatializer.cpp
++++ b/services/audiopolicy/service/Spatializer.cpp
+@@ -413,6 +413,29 @@ status_t Spatializer::loadEngineConfiguration(sp<EffectHalInterface> effect) {
+         return BAD_VALUE;
+     }
+ 
++    std::vector<audio_channel_mask_t> spatializedChannelMasks;
++    status = getHalParameter<true>(effect, SPATIALIZER_PARAM_SPATIALIZED_CHANNEL_MASKS,
++                                   &spatializedChannelMasks);
++    if (status != NO_ERROR) {
++        ALOGW("%s: cannot get SPATIALIZER_PARAM_SPATIALIZED_CHANNEL_MASKS", __func__);
++        return status;
++    }
++    if (spatializedChannelMasks.empty()) {
++        ALOGW("%s: SPATIALIZER_PARAM_SPATIALIZED_CHANNEL_MASKS reports empty", __func__);
++        return BAD_VALUE;
++    }
++    for (const audio_channel_mask_t spatializedMask : spatializedChannelMasks) {
++        // spatialized masks must be contained in the supported input masks
++        if (std::find(mChannelMasks.begin(), mChannelMasks.end(), spatializedMask)
++                != mChannelMasks.end()) {
++            mSpatializedChannelMasks.emplace_back(spatializedMask);
++        } else {
++            ALOGE("%s: spatialized mask %#x not in list reported by PARAM_SUPPORTED_CHANNEL_MASKS",
++                  __func__, spatializedMask);
++            return BAD_VALUE;
++        }
++    }
++
+     if (com::android::media::audio::dsa_over_bt_le_audio()
+             && mSupportsHeadTracking) {
+         mHeadtrackingConnectionMode = HeadTracking::ConnectionMode::FRAMEWORK_PROCESSED;
+@@ -474,6 +497,17 @@ audio_config_base_t Spatializer::getAudioInConfig() const {
+     return config;
+ }
+ 
++Status Spatializer::getSpatializedChannelMasks(std::vector<int>* masks) {
++        audio_utils::lock_guard lock(mMutex);
++        ALOGV("%s", __func__);
++        if (masks == nullptr) {
++            return binderStatusFromStatusT(BAD_VALUE);
++        }
++        masks->insert(masks->end(), mSpatializedChannelMasks.begin(),
++                      mSpatializedChannelMasks.end());
++        return Status::ok();
++    }
++
+ status_t Spatializer::registerCallback(
+         const sp<media::INativeSpatializerCallback>& callback) {
+     audio_utils::lock_guard lock(mMutex);
+@@ -1254,6 +1288,10 @@ std::string Spatializer::toString(unsigned level) const {
+     for (auto& mask : mChannelMasks) {
+         base::StringAppendF(&ss, "%s", audio_channel_out_mask_to_string(mask));
+     }
++    base::StringAppendF(&ss, "%smSpatializedChannelMasks: ", prefixSpace.c_str());
++    for (auto& mask : mSpatializedChannelMasks) {
++        base::StringAppendF(&ss, "%s", audio_channel_out_mask_to_string(mask));
++    }
+     base::StringAppendF(&ss, "\n%smSupportsHeadTracking: %s\n", prefixSpace.c_str(),
+                         mSupportsHeadTracking ? "true" : "false");
+     // 2. Settings (Output, tracks)
+diff --git a/services/audiopolicy/service/Spatializer.h b/services/audiopolicy/service/Spatializer.h
+index 5ea3258a72..6141165b05 100644
+--- a/services/audiopolicy/service/Spatializer.h
++++ b/services/audiopolicy/service/Spatializer.h
+@@ -133,6 +133,7 @@ class Spatializer : public media::BnSpatializer,
+     binder::Status setParameter(int key, const std::vector<unsigned char>& value) override;
+     binder::Status getParameter(int key, std::vector<unsigned char> *value) override;
+     binder::Status getOutput(int *output);
++    binder::Status getSpatializedChannelMasks(std::vector<int>* masks) override;
+ 
+     /** IBinder::DeathRecipient. Listen to the death of the INativeSpatializerCallback. */
+     virtual void binderDied(const wp<IBinder>& who);
+@@ -536,6 +537,7 @@ private:
+     std::vector<media::audio::common::HeadTracking::Mode> mHeadTrackingModes;
+     std::vector<media::audio::common::Spatialization::Mode> mSpatializationModes;
+     std::vector<audio_channel_mask_t> mChannelMasks;
++    std::vector<audio_channel_mask_t> mSpatializedChannelMasks;
+     bool mSupportsHeadTracking;
+ 
+     /** List of supported head tracking connection modes reported by the spatializer.
+-- 
+2.43.0
+

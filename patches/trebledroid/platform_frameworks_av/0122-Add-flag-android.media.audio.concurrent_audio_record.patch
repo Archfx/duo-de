@@ -1,0 +1,39 @@
+From 3244bbd6c7b37ac12573d5e46383272dfac72b4e Mon Sep 17 00:00:00 2001
+From: Eric Laurent <elaurent@google.com>
+Date: Mon, 21 Oct 2024 15:52:44 +0000
+Subject: [PATCH 122/436] Add flag
+ android.media.audio.concurrent_audio_record_bypass_permission
+
+Add flag for new privileged permission CONCURRENT_AUDIO_RECORD_BYPASS.
+Bug: 374751406
+Test: make
+Flag: EXEMPT flag definition
+
+Change-Id: Ie13f60e74cc8fd020bd895dc117d288c5bdb24ac
+---
+ media/audio/aconfig/audio_framework.aconfig | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/media/audio/aconfig/audio_framework.aconfig b/media/audio/aconfig/audio_framework.aconfig
+index 411996ea82..b11c367bc1 100644
+--- a/media/audio/aconfig/audio_framework.aconfig
++++ b/media/audio/aconfig/audio_framework.aconfig
+@@ -22,6 +22,15 @@ flag {
+     bug: "302323921"
+ }
+ 
++flag {
++    name: "concurrent_audio_record_bypass_permission"
++    namespace: "media_audio"
++    description:
++       "New privileged permission to allow bypassing concurrent audio"
++       "capture rules."
++    bug: "374751406"
++}
++
+ flag{
+     name: "enable_ringtone_haptics_customization"
+     namespace: "media_audio"
+-- 
+2.43.0
+

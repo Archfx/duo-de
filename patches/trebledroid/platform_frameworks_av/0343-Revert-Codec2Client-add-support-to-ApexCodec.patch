@@ -1,0 +1,1614 @@
+From 65af9eb37610303201a59c767f4a36f40255ba09 Mon Sep 17 00:00:00 2001
+From: Satish Yalla <satishy@google.com>
+Date: Mon, 25 Nov 2024 02:13:51 +0000
+Subject: [PATCH 343/436] Revert "Codec2Client: add support to ApexCodec"
+
+This reverts commit a9ee43d5d2b5b7079d2da54dcfee45a80d12f2fc.
+
+Reason for revert: DroidMonitor created revert due to b/380752122. Will be verified through ABTD for standard investigation.
+
+Change-Id: I5663aa245d3cf5caa81f191657f41f7e529116cb
+---
+ media/codec2/hal/client/Android.bp            |   6 +-
+ media/codec2/hal/client/ApexCodecsLazy.cpp    | 246 -----
+ media/codec2/hal/client/client.cpp            | 983 +-----------------
+ .../hal/client/include/codec2/hidl/client.h   |  38 -
+ media/module/libapexcodecs/Android.bp         |   9 -
+ 5 files changed, 32 insertions(+), 1250 deletions(-)
+ delete mode 100644 media/codec2/hal/client/ApexCodecsLazy.cpp
+
+diff --git a/media/codec2/hal/client/Android.bp b/media/codec2/hal/client/Android.bp
+index 72d3ebc39c..864eeb8831 100644
+--- a/media/codec2/hal/client/Android.bp
++++ b/media/codec2/hal/client/Android.bp
+@@ -42,7 +42,6 @@ cc_library {
+ 
+     header_libs: [
+         "libcodec2_internal", // private
+-        "libapexcodecs-header",
+     ],
+ 
+     shared_libs: [
+@@ -80,10 +79,6 @@ cc_library {
+         "include",
+     ],
+ 
+-    export_header_lib_headers: [
+-        "libapexcodecs-header",
+-    ],
+-
+     export_shared_lib_headers: [
+         "android.hardware.media.c2@1.0",
+         "android.hardware.media.c2@1.1",
+@@ -94,4 +89,5 @@ cc_library {
+         "libcodec2_hidl_client@1.2",
+         "libcodec2_vndk",
+     ],
++
+ }
+diff --git a/media/codec2/hal/client/ApexCodecsLazy.cpp b/media/codec2/hal/client/ApexCodecsLazy.cpp
+deleted file mode 100644
+index 69437f52d0..0000000000
+--- a/media/codec2/hal/client/ApexCodecsLazy.cpp
++++ /dev/null
+@@ -1,246 +0,0 @@
+-/*
+- * Copyright (C) 2024 The Android Open Source Project
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *      http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-#include <mutex>
+-
+-#include <dlfcn.h>
+-
+-#include "log/log.h"
+-
+-#include <apex/ApexCodecs.h>
+-
+-// This file provides a lazy interface to libapexcodecs.so to address early boot dependencies.
+-
+-// Method pointers to libapexcodecs methods are held in an array which simplifies checking
+-// all pointers are initialized.
+-enum MethodIndex {
+-    k_ApexCodec_Component_create,
+-    k_ApexCodec_Component_destroy,
+-    k_ApexCodec_Component_flush,
+-    k_ApexCodec_Component_getConfigurable,
+-    k_ApexCodec_Component_process,
+-    k_ApexCodec_Component_start,
+-    k_ApexCodec_Component_reset,
+-    k_ApexCodec_Configurable_config,
+-    k_ApexCodec_Configurable_query,
+-    k_ApexCodec_Configurable_querySupportedParams,
+-    k_ApexCodec_Configurable_querySupportedValues,
+-    k_ApexCodec_GetComponentStore,
+-    k_ApexCodec_ParamDescriptors_getDescriptor,
+-    k_ApexCodec_ParamDescriptors_getIndices,
+-    k_ApexCodec_ParamDescriptors_release,
+-    k_ApexCodec_SettingResults_getResultAtIndex,
+-    k_ApexCodec_SettingResults_release,
+-    k_ApexCodec_SupportedValues_getTypeAndValues,
+-    k_ApexCodec_SupportedValues_release,
+-    k_ApexCodec_Traits_get,
+-
+-    // Marker for count of methods
+-    k_MethodCount
+-};
+-
+-// Table of methods pointers in libapexcodecs APIs.
+-static void* g_Methods[k_MethodCount];
+-
+-static void* LoadLibapexcodecs(int dlopen_flags) {
+-    return dlopen("libapexcodecs.so", dlopen_flags);
+-}
+-
+-// Initialization and symbol binding.
+-
+-static void BindSymbol(void* handle, const char* name, enum MethodIndex index) {
+-    void* symbol = dlsym(handle, name);
+-    LOG_ALWAYS_FATAL_IF(symbol == nullptr, "Failed to find symbol '%s' in libapexcodecs.so: %s",
+-                        name, dlerror());
+-    g_Methods[index] = symbol;
+-}
+-
+-static void InitializeOnce() {
+-    void* handle = LoadLibstatssocket(RTLD_NOW);
+-    LOG_ALWAYS_FATAL_IF(handle == nullptr, "Failed to load libapexcodecs.so: %s", dlerror());
+-
+-#undef BIND_SYMBOL
+-#define BIND_SYMBOL(name) BindSymbol(handle, #name, k_##name);
+-    BIND_SYMBOL(ApexCodec_Component_create);
+-    BIND_SYMBOL(ApexCodec_Component_destroy);
+-    BIND_SYMBOL(ApexCodec_Component_flush);
+-    BIND_SYMBOL(ApexCodec_Component_getConfigurable);
+-    BIND_SYMBOL(ApexCodec_Component_process);
+-    BIND_SYMBOL(ApexCodec_Component_start);
+-    BIND_SYMBOL(ApexCodec_Component_reset);
+-    BIND_SYMBOL(ApexCodec_Configurable_config);
+-    BIND_SYMBOL(ApexCodec_Configurable_query);
+-    BIND_SYMBOL(ApexCodec_Configurable_querySupportedParams);
+-    BIND_SYMBOL(ApexCodec_Configurable_querySupportedValues);
+-    BIND_SYMBOL(ApexCodec_GetComponentStore);
+-    BIND_SYMBOL(ApexCodec_ParamDescriptors_getDescriptor);
+-    BIND_SYMBOL(ApexCodec_ParamDescriptors_getIndices);
+-    BIND_SYMBOL(ApexCodec_ParamDescriptors_release);
+-    BIND_SYMBOL(ApexCodec_SettingResults_getResultAtIndex);
+-    BIND_SYMBOL(ApexCodec_SettingResults_release);
+-    BIND_SYMBOL(ApexCodec_SupportedValues_getTypeAndValues);
+-    BIND_SYMBOL(ApexCodec_SupportedValues_release);
+-    BIND_SYMBOL(ApexCodec_Traits_get);
+-#undef BIND_SYMBOL
+-
+-    // Check every symbol is bound.
+-    for (int i = 0; i < k_MethodCount; ++i) {
+-        LOG_ALWAYS_FATAL_IF(g_Methods[i] == nullptr,
+-                            "Uninitialized method in libapexcodecs_lazy at index: %d", i);
+-    }
+-}
+-
+-static void EnsureInitialized() {
+-    static std::once_flag initialize_flag;
+-    std::call_once(initialize_flag, InitializeOnce);
+-}
+-
+-#define INVOKE_METHOD(name, args...)                            \
+-    do {                                                        \
+-        EnsureInitialized();                                    \
+-        void* method = g_Methods[k_##name];                     \
+-        return reinterpret_cast<decltype(&name)>(method)(args); \
+-    } while (0)
+-
+-//
+-// Forwarding for methods in ApexCodecs.h.
+-//
+-
+-ApexCodec_ComponentStore *ApexCodec_GetComponentStore() {
+-    INVOKE_METHOD(ApexCodec_GetComponentStore);
+-}
+-
+-ApexCodec_ComponentTraits *ApexCodec_Traits_get(
+-        ApexCodec_ComponentStore *store, size_t index) {
+-    INVOKE_METHOD(ApexCodec_Traits_get, store, index);
+-}
+-
+-ApexCodec_Status ApexCodec_Component_create(
+-        ApexCodec_ComponentStore *store, const char *name, ApexCodec_Component **comp) {
+-    INVOKE_METHOD(ApexCodec_Component_create, store, name, comp);
+-}
+-
+-void ApexCodec_Component_destroy(ApexCodec_Component *comp) {
+-    INVOKE_METHOD(ApexCodec_Component_destroy, comp);
+-}
+-
+-ApexCodec_Status ApexCodec_Component_start(ApexCodec_Component *comp) {
+-    INVOKE_METHOD(ApexCodec_Component_start, comp);
+-}
+-
+-ApexCodec_Status ApexCodec_Component_flush(ApexCodec_Component *comp) {
+-    INVOKE_METHOD(ApexCodec_Component_flush, comp);
+-}
+-
+-ApexCodec_Status ApexCodec_Component_reset(ApexCodec_Component *comp) {
+-    INVOKE_METHOD(ApexCodec_Component_reset, comp);
+-}
+-
+-ApexCodec_Configurable *ApexCodec_Component_getConfigurable(
+-        ApexCodec_Component *comp) {
+-    INVOKE_METHOD(ApexCodec_Component_getConfigurable, comp);
+-}
+-
+-ApexCodec_Status ApexCodec_SupportedValues_getTypeAndValues(
+-        ApexCodec_SupportedValues *supportedValues,
+-        ApexCodec_SupportedValuesType *type,
+-        ApexCodec_SupportedValuesNumberType *numberType,
+-        ApexCodec_Value **values,
+-        uint32_t *numValues) {
+-    INVOKE_METHOD(ApexCodec_SupportedValues_getTypeAndValues,
+-                  supportedValues, type, numberType, values, numValues);
+-}
+-
+-void ApexCodec_SupportedValues_release(ApexCodec_SupportedValues *values) {
+-    INVOKE_METHOD(ApexCodec_SupportedValues_release, values);
+-}
+-
+-ApexCodec_Status ApexCodec_SettingResults_getResultAtIndex(
+-        ApexCodec_SettingResults *results,
+-        size_t index,
+-        ApexCodec_SettingResultFailure *failure,
+-        ApexCodec_ParamFieldValues *field,
+-        ApexCodec_ParamFieldValues **conflicts,
+-        size_t *numConflicts) {
+-    INVOKE_METHOD(ApexCodec_SettingResults_getResultAtIndex,
+-                  results, index, failure, field, conflicts, numConflicts);
+-}
+-
+-void ApexCodec_SettingResults_release(ApexCodec_SettingResults *results) {
+-    INVOKE_METHOD(ApexCodec_SettingResults_release, results);
+-}
+-
+-ApexCodec_Status ApexCodec_Component_process(
+-        ApexCodec_Component *comp,
+-        const ApexCodec_Buffer *input,
+-        ApexCodec_Buffer *output,
+-        size_t *consumed,
+-        size_t *produced) {
+-    INVOKE_METHOD(ApexCodec_Component_process, comp, input, output, consumed, produced);
+-}
+-
+-ApexCodec_Status ApexCodec_Configurable_config(
+-        ApexCodec_Configurable *comp,
+-        ApexCodec_LinearBuffer *config,
+-        ApexCodec_SettingResults **results) {
+-    INVOKE_METHOD(ApexCodec_Configurable_config, comp, config, results);
+-}
+-
+-ApexCodec_Status ApexCodec_Configurable_query(
+-        ApexCodec_Configurable *comp,
+-        uint32_t indices[],
+-        size_t numIndices,
+-        ApexCodec_LinearBuffer *config,
+-        size_t *writtenOrRequested) {
+-    INVOKE_METHOD(ApexCodec_Configurable_query,
+-                  comp, indices, numIndices, config, writtenOrRequested);
+-}
+-
+-ApexCodec_Status ApexCodec_ParamDescriptors_getIndices(
+-        ApexCodec_ParamDescriptors *descriptors,
+-        uint32_t **indices,
+-        size_t *numIndices) {
+-    INVOKE_METHOD(ApexCodec_ParamDescriptors_getIndices, descriptors, indices, numIndices);
+-}
+-
+-ApexCodec_Status ApexCodec_ParamDescriptors_getDescriptor(
+-        ApexCodec_ParamDescriptors *descriptors,
+-        uint32_t index,
+-        ApexCodec_ParamAttribute *attr,
+-        const char **name,
+-        uint32_t **dependencies,
+-        size_t *numDependencies) {
+-    INVOKE_METHOD(ApexCodec_ParamDescriptors_getDescriptor,
+-                  descriptors, index, attr, name, dependencies, numDependencies);
+-}
+-
+-ApexCodec_Status ApexCodec_ParamDescriptors_release(
+-        ApexCodec_ParamDescriptors *descriptors) {
+-    INVOKE_METHOD(ApexCodec_ParamDescriptors_release, descriptors);
+-}
+-
+-ApexCodec_Status ApexCodec_Configurable_querySupportedParams(
+-        ApexCodec_Configurable *comp,
+-        ApexCodec_ParamDescriptors **descriptors) {
+-    INVOKE_METHOD(ApexCodec_Configurable_querySupportedParams, comp, descriptors);
+-}
+-
+-ApexCodec_Status ApexCodec_Configurable_querySupportedValues(
+-        ApexCodec_Configurable *comp,
+-        ApexCodec_SupportedValuesQuery *queries,
+-        size_t numQueries) {
+-    INVOKE_METHOD(ApexCodec_Configurable_querySupportedValues, comp, queries, numQueries);
+-}
+\ No newline at end of file
+diff --git a/media/codec2/hal/client/client.cpp b/media/codec2/hal/client/client.cpp
+index 9ee9b9ee86..6348e423d1 100644
+--- a/media/codec2/hal/client/client.cpp
++++ b/media/codec2/hal/client/client.cpp
+@@ -20,8 +20,6 @@
+ #include <android-base/logging.h>
+ #include <utils/Trace.h>
+ 
+-#include <android_media_codec.h>
+-
+ #include <codec2/aidl/GraphicBufferAllocator.h>
+ #include <codec2/common/HalSelection.h>
+ #include <codec2/hidl/client.h>
+@@ -57,9 +55,7 @@
+ #include <android/binder_ibinder.h>
+ #include <android/binder_manager.h>
+ #include <android-base/properties.h>
+-#include <android-base/scopeguard.h>
+ #include <android-base/stringprintf.h>
+-#include <apex/ApexCodecs.h>
+ #include <bufferpool/ClientManager.h>
+ #include <bufferpool2/ClientManager.h>
+ #include <codec2/aidl/BufferTypes.h>
+@@ -68,14 +64,14 @@
+ #include <codec2/hidl/1.1/types.h>
+ #include <codec2/hidl/1.2/types.h>
+ #include <codec2/hidl/output.h>
++
+ #include <cutils/native_handle.h>
+ #include <gui/bufferqueue/2.0/B2HGraphicBufferProducer.h>
+ #include <gui/bufferqueue/2.0/H2BGraphicBufferProducer.h>
+ #include <hardware/gralloc.h> // for GRALLOC_USAGE_*
+ #include <hidl/HidlSupport.h>
+-#include <media/stagefright/foundation/ADebug.h> // for asString(status_t)
+-#include <private/android/AHardwareBufferHelpers.h>
+ #include <system/window.h> // for NATIVE_WINDOW_QUERY_*
++#include <media/stagefright/foundation/ADebug.h> // for asString(status_t)
+ 
+ #include <deque>
+ #include <iterator>
+@@ -803,386 +799,6 @@ c2_status_t Codec2ConfigurableClient::AidlImpl::querySupportedValues(
+     return status;
+ }
+ 
+-// Codec2ConfigurableClient::ApexImpl
+-
+-struct Codec2ConfigurableClient::ApexImpl : public Codec2ConfigurableClient::ImplBase {
+-    ApexImpl(ApexCodec_Configurable *base, const C2String &name);
+-
+-    const C2String& getName() const override {
+-        return mName;
+-    }
+-
+-    c2_status_t query(
+-            const std::vector<C2Param*>& stackParams,
+-            const std::vector<C2Param::Index> &heapParamIndices,
+-            c2_blocking_t mayBlock,
+-            std::vector<std::unique_ptr<C2Param>>* const heapParams) const override;
+-
+-    c2_status_t config(
+-            const std::vector<C2Param*> &params,
+-            c2_blocking_t mayBlock,
+-            std::vector<std::unique_ptr<C2SettingResult>>* const failures) override;
+-
+-    c2_status_t querySupportedParams(
+-            std::vector<std::shared_ptr<C2ParamDescriptor>>* const params
+-            ) const override;
+-
+-    c2_status_t querySupportedValues(
+-            std::vector<C2FieldSupportedValuesQuery>& fields,
+-            c2_blocking_t mayBlock) const override;
+-
+-private:
+-    ApexCodec_Configurable* mBase;
+-    const C2String mName;
+-};
+-
+-Codec2ConfigurableClient::ApexImpl::ApexImpl(ApexCodec_Configurable *base, const C2String &name)
+-      : mBase{base},
+-        mName{name} {
+-}
+-
+-c2_status_t Codec2ConfigurableClient::ApexImpl::query(
+-        const std::vector<C2Param*> &stackParams,
+-        const std::vector<C2Param::Index> &heapParamIndices,
+-        [[maybe_unused]] c2_blocking_t mayBlock,
+-        std::vector<std::unique_ptr<C2Param>>* const heapParams) const {
+-    if (mBase == nullptr) {
+-        return C2_OMITTED;
+-    }
+-
+-    if (__builtin_available(android 36, *)) {
+-        std::vector<uint32_t> indices(
+-                stackParams.size() + heapParamIndices.size());
+-        size_t numIndices = 0;
+-        for (C2Param* const& stackParam : stackParams) {
+-            if (!stackParam) {
+-                LOG(WARNING) << "query -- null stack param encountered.";
+-                continue;
+-            }
+-            indices[numIndices++] = uint32_t(stackParam->index());
+-        }
+-        size_t numStackIndices = numIndices;
+-        for (const C2Param::Index& index : heapParamIndices) {
+-            indices[numIndices++] = uint32_t(index);
+-        }
+-        indices.resize(numIndices);
+-        if (heapParams) {
+-            heapParams->reserve(heapParams->size() + numIndices);
+-        }
+-        if (numIndices == 0) {
+-            return C2_OK;
+-        }
+-        thread_local std::vector<uint8_t> configBuffer(1024);
+-        if (configBuffer.capacity() < numIndices * 16u) {
+-            configBuffer.resize(numIndices * 16u);
+-        }
+-        ApexCodec_LinearBuffer config{configBuffer.data(), configBuffer.capacity()};
+-        size_t writtenOrRequested = 0;
+-        ApexCodec_Status status = ApexCodec_Configurable_query(
+-                mBase, indices.data(), indices.size(), &config, &writtenOrRequested);
+-        if (status == APEXCODEC_STATUS_NO_MEMORY) {
+-            size_t requested = writtenOrRequested;
+-            configBuffer.resize(align(requested, 1024));
+-            config.data = configBuffer.data();
+-            config.size = configBuffer.capacity();
+-            status = ApexCodec_Configurable_query(
+-                    mBase, indices.data(), indices.size(), &config, &writtenOrRequested);
+-        }
+-        size_t written = writtenOrRequested;
+-        if (status != APEXCODEC_STATUS_OK && status != APEXCODEC_STATUS_BAD_INDEX) {
+-            written = 0;
+-        }
+-        configBuffer.resize(written);
+-        std::vector<C2Param*> paramPointers;
+-        if (!::android::parseParamsBlob(&paramPointers, configBuffer)) {
+-            LOG(ERROR) << "query -- error while parsing params.";
+-            return C2_CORRUPTED;
+-        }
+-        size_t i = 0;
+-        size_t numQueried = 0;
+-        for (auto it = paramPointers.begin(); it != paramPointers.end(); ) {
+-            C2Param* paramPointer = *it;
+-            if (numStackIndices > 0) {
+-                --numStackIndices;
+-                if (!paramPointer) {
+-                    LOG(DEBUG) << "query -- null stack param.";
+-                    ++it;
+-                    continue;
+-                }
+-                for (; i < stackParams.size() && !stackParams[i]; ) {
+-                    ++i;
+-                }
+-                if (i >= stackParams.size()) {
+-                    LOG(ERROR) << "query -- unexpected error.";
+-                    status = APEXCODEC_STATUS_CORRUPTED;
+-                    break;
+-                }
+-                if (stackParams[i]->index() != paramPointer->index()) {
+-                    LOG(DEBUG) << "query -- param skipped: "
+-                                "index = "
+-                            << stackParams[i]->index() << ".";
+-                    stackParams[i++]->invalidate();
+-                    // this means that the param could not be queried.
+-                    // signalling C2_BAD_INDEX to the client.
+-                    status = APEXCODEC_STATUS_BAD_INDEX;
+-                    continue;
+-                }
+-                if (stackParams[i++]->updateFrom(*paramPointer)) {
+-                    ++numQueried;
+-                } else {
+-                    LOG(WARNING) << "query -- param update failed: "
+-                                    "index = "
+-                                << paramPointer->index() << ".";
+-                }
+-            } else {
+-                if (!paramPointer) {
+-                    LOG(DEBUG) << "query -- null heap param.";
+-                    ++it;
+-                    continue;
+-                }
+-                if (!heapParams) {
+-                    LOG(WARNING) << "query -- "
+-                                    "unexpected extra stack param.";
+-                } else {
+-                    heapParams->emplace_back(C2Param::Copy(*paramPointer));
+-                    ++numQueried;
+-                }
+-            }
+-            ++it;
+-        }
+-        if (status == APEXCODEC_STATUS_OK && indices.size() != numQueried) {
+-            status = APEXCODEC_STATUS_BAD_INDEX;
+-        }
+-        return (c2_status_t)status;
+-    } else {
+-        return C2_OMITTED;
+-    }
+-}
+-
+-namespace {
+-struct ParamOrField : public C2ParamField {
+-    explicit ParamOrField(const ApexCodec_ParamFieldValues& field)
+-            : C2ParamField(field.index, field.offset, field.size) {}
+-};
+-
+-static bool FromApex(
+-        ApexCodec_SupportedValues *apexValues,
+-        C2FieldSupportedValues* c2Values) {
+-    if (__builtin_available(android 36, *)) {
+-        if (apexValues == nullptr) {
+-            c2Values->type = C2FieldSupportedValues::EMPTY;
+-            return true;
+-        }
+-        ApexCodec_SupportedValuesType type = APEXCODEC_SUPPORTED_VALUES_EMPTY;
+-        ApexCodec_SupportedValuesNumberType numberType = APEXCODEC_SUPPORTED_VALUES_TYPE_NONE;
+-        ApexCodec_Value* values = nullptr;
+-        uint32_t numValues = 0;
+-        ApexCodec_SupportedValues_getTypeAndValues(
+-                apexValues, &type, &numberType, &values, &numValues);
+-        c2Values->type = (C2FieldSupportedValues::type_t)type;
+-        std::function<C2Value::Primitive(const ApexCodec_Value &)> getPrimitive;
+-        switch (numberType) {
+-            case APEXCODEC_SUPPORTED_VALUES_TYPE_NONE:
+-                getPrimitive = [](const ApexCodec_Value &) -> C2Value::Primitive {
+-                    return C2Value::Primitive();
+-                };
+-                break;
+-            case APEXCODEC_SUPPORTED_VALUES_TYPE_INT32:
+-                getPrimitive = [](const ApexCodec_Value &value) -> C2Value::Primitive {
+-                    return C2Value::Primitive(value.i32);
+-                };
+-                break;
+-            case APEXCODEC_SUPPORTED_VALUES_TYPE_UINT32:
+-                getPrimitive = [](const ApexCodec_Value &value) -> C2Value::Primitive {
+-                    return C2Value::Primitive(value.u32);
+-                };
+-                break;
+-            case APEXCODEC_SUPPORTED_VALUES_TYPE_INT64:
+-                getPrimitive = [](const ApexCodec_Value &value) -> C2Value::Primitive {
+-                    return C2Value::Primitive(value.i64);
+-                };
+-                break;
+-            case APEXCODEC_SUPPORTED_VALUES_TYPE_UINT64:
+-                getPrimitive = [](const ApexCodec_Value &value) -> C2Value::Primitive {
+-                    return C2Value::Primitive(value.u64);
+-                };
+-                break;
+-            case APEXCODEC_SUPPORTED_VALUES_TYPE_FLOAT:
+-                getPrimitive = [](const ApexCodec_Value &value) -> C2Value::Primitive {
+-                    return C2Value::Primitive(value.f);
+-                };
+-                break;
+-            default:
+-                LOG(ERROR) << "Unsupported number type: " << numberType;
+-                return false;
+-        }
+-        switch (type) {
+-            case APEXCODEC_SUPPORTED_VALUES_EMPTY:
+-                break;
+-            case APEXCODEC_SUPPORTED_VALUES_RANGE:
+-                c2Values->range.min   = getPrimitive(values[0]);
+-                c2Values->range.max   = getPrimitive(values[1]);
+-                c2Values->range.step  = getPrimitive(values[2]);
+-                c2Values->range.num   = getPrimitive(values[3]);
+-                c2Values->range.denom = getPrimitive(values[4]);
+-                break;
+-            case APEXCODEC_SUPPORTED_VALUES_VALUES:
+-            case APEXCODEC_SUPPORTED_VALUES_FLAGS:
+-                c2Values->values.clear();
+-                for (uint32_t i = 0; i < numValues; ++i) {
+-                    c2Values->values.push_back(getPrimitive(values[i]));
+-                }
+-                break;
+-            default:
+-                LOG(ERROR) << "Unsupported supported values type: " << type;
+-                return false;
+-        }
+-        return true;
+-    } else {
+-        return false;
+-    }
+-}
+-
+-}  // anonymous namespace
+-
+-c2_status_t Codec2ConfigurableClient::ApexImpl::config(
+-        const std::vector<C2Param*> &params,
+-        c2_blocking_t mayBlock,
+-        std::vector<std::unique_ptr<C2SettingResult>>* const failures) {
+-    (void)mayBlock;
+-    if (mBase == nullptr) {
+-        return C2_OMITTED;
+-    }
+-
+-    if (__builtin_available(android 36, *)) {
+-        std::vector<uint8_t> configBuffer;
+-        if (!::android::_createParamsBlob(&configBuffer, params)) {
+-            LOG(ERROR) << "config -- bad input.";
+-            return C2_TRANSACTION_FAILED;
+-        }
+-        ApexCodec_SettingResults* result = nullptr;
+-        ApexCodec_LinearBuffer config{configBuffer.data(), configBuffer.size()};
+-        ApexCodec_Status status = ApexCodec_Configurable_config(
+-                mBase, &config, &result);
+-        base::ScopeGuard guard([result] {
+-            if (result) {
+-                ApexCodec_SettingResults_release(result);
+-            }
+-        });
+-        size_t index = 0;
+-        ApexCodec_SettingResultFailure failure;
+-        ApexCodec_ParamFieldValues field;
+-        ApexCodec_ParamFieldValues* conflicts = nullptr;
+-        size_t numConflicts = 0;
+-        ApexCodec_Status getResultStatus = ApexCodec_SettingResults_getResultAtIndex(
+-            result, 0, &failure, &field, &conflicts, &numConflicts);
+-        while (getResultStatus == APEXCODEC_STATUS_OK) {
+-            std::unique_ptr<C2SettingResult> settingResult;
+-            settingResult.reset(new C2SettingResult{
+-                C2SettingResult::Failure(failure), C2ParamFieldValues(ParamOrField(field)), {}
+-            });
+-            // TODO: settingResult->field.values = ?
+-            for (size_t i = 0; i < numConflicts; ++i) {
+-                settingResult->conflicts.emplace_back(ParamOrField(conflicts[i]));
+-                C2ParamFieldValues& conflict = settingResult->conflicts.back();
+-                conflict.values = std::make_unique<C2FieldSupportedValues>();
+-                FromApex(conflicts[i].values, conflict.values.get());
+-            }
+-            failures->push_back(std::move(settingResult));
+-            getResultStatus = ApexCodec_SettingResults_getResultAtIndex(
+-                    result, ++index, &failure, &field, &conflicts, &numConflicts);
+-        }
+-        if (!::android::updateParamsFromBlob(params, configBuffer)) {
+-            LOG(ERROR) << "config -- "
+-                    << "failed to parse returned params.";
+-            status = APEXCODEC_STATUS_CORRUPTED;
+-        }
+-        return (c2_status_t)status;
+-    } else {
+-        return C2_OMITTED;
+-    }
+-}
+-
+-c2_status_t Codec2ConfigurableClient::ApexImpl::querySupportedParams(
+-        std::vector<std::shared_ptr<C2ParamDescriptor>>* const params) const {
+-    if (mBase == nullptr) {
+-        return C2_OMITTED;
+-    }
+-
+-    if (__builtin_available(android 36, *)) {
+-        // TODO: Cache and query properly!
+-        ApexCodec_ParamDescriptors* paramDescs = nullptr;
+-        ApexCodec_Configurable_querySupportedParams(mBase, &paramDescs);
+-        base::ScopeGuard guard([paramDescs] {
+-            if (paramDescs) {
+-                ApexCodec_ParamDescriptors_release(paramDescs);
+-            }
+-        });
+-        uint32_t *indices = nullptr;
+-        size_t numIndices = 0;
+-        ApexCodec_Status status = ApexCodec_ParamDescriptors_getIndices(
+-                paramDescs, &indices, &numIndices);
+-        if (status != APEXCODEC_STATUS_OK) {
+-            return (c2_status_t)status;
+-        }
+-        if (numIndices > 0) {
+-            for (int i = 0; i < numIndices; ++i) {
+-                uint32_t index = indices[i];
+-                ApexCodec_ParamAttribute attr = (ApexCodec_ParamAttribute)0;
+-                const char* name = nullptr;
+-                uint32_t* dependencies = nullptr;
+-                size_t numDependencies = 0;
+-                ApexCodec_Status status = ApexCodec_ParamDescriptors_getDescriptor(
+-                        paramDescs, index, &attr, &name, &dependencies, &numDependencies);
+-                if (status != APEXCODEC_STATUS_OK) {
+-                    LOG(WARNING) << "querySupportedParams -- "
+-                                << "failed to get descriptor for index "
+-                                << std::hex << index << std::dec << " with status " << status;
+-                    continue;
+-                }
+-                params->push_back(std::make_shared<C2ParamDescriptor>(
+-                        C2Param::Index(index), C2ParamDescriptor::attrib_t(attr), name,
+-                        std::vector<C2Param::Index>(dependencies, dependencies + numDependencies)));
+-            }
+-        }
+-        return (c2_status_t)status;
+-    } else {
+-        return C2_OMITTED;
+-    }
+-}
+-
+-c2_status_t Codec2ConfigurableClient::ApexImpl::querySupportedValues(
+-        std::vector<C2FieldSupportedValuesQuery>& fields,
+-        [[maybe_unused]] c2_blocking_t mayBlock) const {
+-    if (mBase == nullptr) {
+-        return C2_OMITTED;
+-    }
+-
+-    if (__builtin_available(android 36, *)) {
+-        std::vector<ApexCodec_SupportedValuesQuery> queries(fields.size());
+-        for (size_t i = 0; i < fields.size(); ++i) {
+-            queries[i].index  = _C2ParamInspector::GetIndex(fields[i].field());
+-            queries[i].offset = _C2ParamInspector::GetOffset(fields[i].field());
+-            queries[i].type   = (ApexCodec_SupportedValuesQueryType)fields[i].type();
+-            queries[i].status = APEXCODEC_STATUS_OK;
+-            queries[i].values = nullptr;
+-        }
+-        ApexCodec_Status status = ApexCodec_Configurable_querySupportedValues(
+-                mBase, queries.data(), queries.size());
+-        for (size_t i = 0; i < fields.size(); ++i) {
+-            fields[i].status = (c2_status_t)queries[i].status;
+-            FromApex(queries[i].values, &fields[i].values);
+-            if (queries[i].values) {
+-                ApexCodec_SupportedValues_release(queries[i].values);
+-                queries[i].values = nullptr;
+-            }
+-        }
+-        return (c2_status_t)status;
+-    } else {
+-        return C2_OMITTED;
+-    }
+-}
+-
+ // Codec2ConfigurableClient
+ 
+ Codec2ConfigurableClient::Codec2ConfigurableClient(const sp<HidlBase> &hidlBase)
+@@ -1194,11 +810,6 @@ Codec2ConfigurableClient::Codec2ConfigurableClient(
+     : mImpl(new Codec2ConfigurableClient::AidlImpl(aidlBase)) {
+ }
+ 
+-Codec2ConfigurableClient::Codec2ConfigurableClient(
+-        ApexCodec_Configurable *apexBase, const C2String &name)
+-    : mImpl(new Codec2ConfigurableClient::ApexImpl(apexBase, name)) {
+-}
+-
+ const C2String& Codec2ConfigurableClient::getName() const {
+     return mImpl->getName();
+ }
+@@ -1424,393 +1035,6 @@ struct Codec2Client::Component::AidlListener : public c2_aidl::BnComponentListen
+ 
+ };
+ 
+-// Codec2Client::Component::ApexHandler
+-class Codec2Client::Component::ApexHandler {
+-public:
+-    ApexHandler(ApexCodec_Component *apexComponent,
+-                const std::shared_ptr<Listener> &listener,
+-                const std::shared_ptr<Component> &comp)
+-          : mApexComponent(apexComponent),
+-            mListener(listener),
+-            mComponent(comp),
+-            mStopped(false),
+-            mOutputBufferType(APEXCODEC_BUFFER_TYPE_INVALID) {
+-    }
+-
+-    void start() {
+-        std::shared_ptr<Component> comp = mComponent.lock();
+-        if (!comp) {
+-            LOG(ERROR) << "ApexHandler::start -- component died.";
+-            return;
+-        }
+-        C2ComponentDomainSetting domain;
+-        C2ComponentKindSetting kind;
+-        c2_status_t status = comp->query({&domain, &kind}, {}, C2_MAY_BLOCK, {});
+-        if (status != C2_OK) {
+-            LOG(ERROR) << "ApexHandler::start -- failed to query component domain and kind";
+-            return;
+-        }
+-        if (kind.value != C2Component::KIND_DECODER
+-                && kind.value != C2Component::KIND_ENCODER) {
+-            LOG(ERROR) << "ApexHandler::start -- unrecognized component kind " << kind.value;
+-            return;
+-        }
+-        ApexCodec_BufferType outputBufferType = APEXCODEC_BUFFER_TYPE_INVALID;
+-        if (domain.value == C2Component::DOMAIN_AUDIO) {
+-            // For both encoders and decoders the output buffer type is linear.
+-            outputBufferType = APEXCODEC_BUFFER_TYPE_LINEAR;
+-        } else if (domain.value == C2Component::DOMAIN_VIDEO
+-                    || domain.value == C2Component::DOMAIN_IMAGE) {
+-            // For video / image domain the decoder outputs a graphic buffer, and the encoder
+-            // outputs a linear buffer.
+-            outputBufferType = (kind.value == C2Component::KIND_DECODER)
+-                    ? APEXCODEC_BUFFER_TYPE_GRAPHIC : APEXCODEC_BUFFER_TYPE_LINEAR;
+-        } else {
+-            LOG(ERROR) << "ApexHandler::start -- unrecognized component domain " << domain.value;
+-            return;
+-        }
+-        {
+-            std::unique_lock<std::mutex> l(mMutex);
+-            mStopped = false;
+-            mOutputBufferType = outputBufferType;
+-        }
+-        mThread = std::thread([this]() {
+-            run();
+-        });
+-    }
+-
+-    void queue(std::list<std::unique_ptr<C2Work>>& workItems) {
+-        std::unique_lock<std::mutex> l(mMutex);
+-        mWorkQueue.splice(mWorkQueue.end(), workItems);
+-        mCondition.notify_all();
+-    }
+-
+-    void stop() {
+-        std::unique_lock<std::mutex> l(mMutex);
+-        mStopped = true;
+-        mCondition.notify_all();
+-        l.unlock();
+-        mThread.join();
+-    }
+-
+-private:
+-    void run() {
+-        while (true) {
+-            std::unique_lock<std::mutex> l(mMutex);
+-            mCondition.wait(l, [this]() {
+-                return !mWorkQueue.empty() || mStopped;
+-            });
+-            if (mStopped) {
+-                break;
+-            }
+-            if (mWorkQueue.empty()) {
+-                continue;
+-            }
+-            std::list<std::unique_ptr<C2Work>> workItems;
+-            mWorkQueue.swap(workItems);
+-            for (std::unique_ptr<C2Work>& workItem : workItems) {
+-                if (mStopped) {
+-                    break;
+-                }
+-                l.unlock();
+-                handleWork(std::move(workItem));
+-                l.lock();
+-            }
+-        }
+-        mWorkQueue.clear();
+-        mWorkMap.clear();
+-    }
+-
+-    void handleWork(std::unique_ptr<C2Work> &&workItem) {
+-        if (__builtin_available(android 36, *)) {
+-            std::shared_ptr<Listener> listener = mListener.lock();
+-            if (!listener) {
+-                LOG(DEBUG) << "handleWork -- listener died.";
+-                return;
+-            }
+-            ApexCodec_Buffer input;
+-            input.flags = (ApexCodec_BufferFlags)workItem->input.flags;
+-            input.frameIndex = workItem->input.ordinal.frameIndex.peekll();
+-            input.timestampUs = workItem->input.ordinal.timestamp.peekll();
+-
+-            if (workItem->input.buffers.size() > 1) {
+-                LOG(ERROR) << "handleWork -- input buffer size is "
+-                           << workItem->input.buffers.size();
+-                return;
+-            }
+-            std::shared_ptr<C2Buffer> buffer;
+-            std::optional<C2ReadView> linearView;
+-            if (!workItem->input.buffers.empty()) {
+-                buffer = workItem->input.buffers[0];
+-            }
+-            if (!FillMemory(buffer, &input, &linearView)) {
+-                LOG(ERROR) << "handleWork -- failed to map input";
+-                return;
+-            }
+-
+-            std::vector<uint8_t> configUpdatesVector;
+-            if (!_createParamsBlob(&configUpdatesVector, workItem->input.configUpdate)) {
+-                listener->onError(mComponent, C2_CORRUPTED);
+-                return;
+-            }
+-            input.configUpdates.data = configUpdatesVector.data();
+-            input.configUpdates.size = configUpdatesVector.size();
+-            mWorkMap.insert_or_assign(
+-                    workItem->input.ordinal.frameIndex.peekll(), std::move(workItem));
+-
+-            std::list<std::unique_ptr<C2Work>> workItems;
+-            bool inputDrained = false;
+-            while (!inputDrained) {
+-                ApexCodec_Buffer output;
+-                std::shared_ptr<C2LinearBlock> linearBlock;
+-                std::optional<C2WriteView> linearView;
+-                std::shared_ptr<C2GraphicBlock> graphicBlock;
+-                allocOutputBuffer(&output, &linearBlock, &linearView, &graphicBlock);
+-                size_t consumed = 0;
+-                size_t produced = 0;
+-                ApexCodec_Status status = ApexCodec_Component_process(
+-                        mApexComponent, &input, &output, &consumed, &produced);
+-                if (status == APEXCODEC_STATUS_NO_MEMORY) {
+-                    continue;
+-                }
+-                if (produced > 0) {
+-                    auto it = mWorkMap.find(output.frameIndex);
+-                    std::unique_ptr<C2Work> outputWorkItem;
+-                    if (it != mWorkMap.end()) {
+-                        if (output.flags & APEXCODEC_FLAG_INCOMPLETE) {
+-                            outputWorkItem = std::make_unique<C2Work>();
+-                            outputWorkItem->input.ordinal = it->second->input.ordinal;
+-                            outputWorkItem->input.flags = it->second->input.flags;
+-                        } else {
+-                            outputWorkItem = std::move(it->second);
+-                            mWorkMap.erase(it);
+-                        }
+-                    } else {
+-                        LOG(WARNING) << "handleWork -- no work item found for output frame index "
+-                                    << output.frameIndex;
+-                        outputWorkItem = std::make_unique<C2Work>();
+-                        outputWorkItem->input.ordinal.frameIndex = output.frameIndex;
+-                        outputWorkItem->input.ordinal.timestamp = output.timestampUs;
+-                    }
+-                    outputWorkItem->worklets.emplace_back(new C2Worklet);
+-                    const std::unique_ptr<C2Worklet> &worklet = outputWorkItem->worklets.front();
+-                    if (worklet == nullptr) {
+-                        LOG(ERROR) << "handleWork -- output work item has null worklet";
+-                        return;
+-                    }
+-                    worklet->output.ordinal.frameIndex = output.frameIndex;
+-                    worklet->output.ordinal.timestamp = output.timestampUs;
+-                    // non-owning hidl_vec<> to wrap around the output config updates
+-                    hidl_vec<uint8_t> outputConfigUpdates;
+-                    outputConfigUpdates.setToExternal(
+-                            output.configUpdates.data, output.configUpdates.size);
+-                    std::vector<C2Param*> outputConfigUpdatePtrs;
+-                    parseParamsBlob(&outputConfigUpdatePtrs, outputConfigUpdates);
+-                    worklet->output.configUpdate.clear();
+-                    std::ranges::transform(
+-                            outputConfigUpdatePtrs,
+-                            std::back_inserter(worklet->output.configUpdate),
+-                            [](C2Param* param) { return C2Param::Copy(*param); });
+-                    worklet->output.flags = (C2FrameData::flags_t)output.flags;
+-
+-                    workItems.push_back(std::move(outputWorkItem));
+-                }
+-
+-                // determine whether the input buffer is drained
+-                if (input.type == APEXCODEC_BUFFER_TYPE_LINEAR) {
+-                    if (input.memory.linear.size < consumed) {
+-                        LOG(WARNING) << "handleWork -- component consumed more bytes "
+-                                    << "than the input buffer size";
+-                        inputDrained = true;
+-                    } else {
+-                        input.memory.linear.data += consumed;
+-                        input.memory.linear.size -= consumed;
+-                    }
+-                } else if (input.type == APEXCODEC_BUFFER_TYPE_GRAPHIC) {
+-                    inputDrained = (consumed > 0);
+-                }
+-            }
+-
+-            if (!workItems.empty()) {
+-                listener->onWorkDone(mComponent, workItems);
+-            }
+-        }
+-    }
+-
+-    bool ensureBlockPool() {
+-        std::shared_ptr<Component> comp = mComponent.lock();
+-        if (!comp) {
+-            return false;
+-        }
+-        std::vector<std::unique_ptr<C2Param>> heapParams;
+-        comp->query({}, {C2PortBlockPoolsTuning::output::PARAM_TYPE}, C2_MAY_BLOCK, &heapParams);
+-        if (heapParams.size() != 1) {
+-            return false;
+-        }
+-        const C2Param* param = heapParams[0].get();
+-        if (param->type() != C2PortBlockPoolsTuning::output::PARAM_TYPE) {
+-            return false;
+-        }
+-        const C2PortBlockPoolsTuning::output *blockPools =
+-                static_cast<const C2PortBlockPoolsTuning::output *>(param);
+-        if (blockPools->flexCount() == 0) {
+-            return false;
+-        }
+-        C2BlockPool::local_id_t blockPoolId = blockPools->m.values[0];
+-        if (mBlockPool && mBlockPool->getLocalId() == blockPoolId) {
+-            // no need to update
+-            return true;
+-        }
+-        return C2_OK == GetCodec2BlockPool(blockPoolId, nullptr, &mBlockPool);
+-    }
+-
+-    void allocOutputBuffer(
+-            ApexCodec_Buffer* output,
+-            std::shared_ptr<C2LinearBlock> *linearBlock,
+-            std::optional<C2WriteView> *linearView,
+-            std::shared_ptr<C2GraphicBlock> *graphicBlock) {
+-        if (mOutputBufferType == APEXCODEC_BUFFER_TYPE_LINEAR) {
+-            if (!ensureBlockPool()) {
+-                return;
+-            }
+-            {
+-                std::shared_ptr<Component> comp = mComponent.lock();
+-                if (!comp) {
+-                    return;
+-                }
+-                C2StreamMaxBufferSizeInfo::output maxBufferSize(0u /* stream */);
+-                comp->query({&maxBufferSize}, {}, C2_MAY_BLOCK, {});
+-                mLinearBlockCapacity = maxBufferSize ? maxBufferSize.value : 1024 * 1024;
+-            }
+-            output->type = APEXCODEC_BUFFER_TYPE_LINEAR;
+-            c2_status_t status = mBlockPool->fetchLinearBlock(
+-                    mLinearBlockCapacity,
+-                    C2MemoryUsage(C2MemoryUsage::CPU_READ | C2MemoryUsage::CPU_WRITE),
+-                    linearBlock);
+-            if (!(*linearBlock)) {
+-                return;
+-            }
+-            linearView->emplace((*linearBlock)->map().get());
+-            if ((*linearView)->error() != C2_OK) {
+-                return;
+-            }
+-            output->memory.linear.data = (*linearView)->data();
+-            output->memory.linear.size = (*linearView)->capacity();
+-        } else if (mOutputBufferType == APEXCODEC_BUFFER_TYPE_GRAPHIC) {
+-            if (!ensureBlockPool()) {
+-                return;
+-            }
+-            {
+-                std::shared_ptr<Component> comp = mComponent.lock();
+-                if (!comp) {
+-                    return;
+-                }
+-                C2StreamMaxPictureSizeTuning::output maxPictureSize(0u /* stream */);
+-                C2StreamPictureSizeInfo::output pictureSize(0u /* stream */);
+-                C2StreamPixelFormatInfo::output pixelFormat(0u /* stream */);
+-                comp->query({&maxPictureSize, &pictureSize, &pixelFormat}, {}, C2_MAY_BLOCK, {});
+-                mWidth = maxPictureSize ? maxPictureSize.width : pictureSize.width;
+-                mHeight = maxPictureSize ? maxPictureSize.height : pictureSize.height;
+-                mFormat = pixelFormat ? pixelFormat.value : HAL_PIXEL_FORMAT_YCBCR_420_888;
+-            }
+-            output->type = APEXCODEC_BUFFER_TYPE_GRAPHIC;
+-            c2_status_t status = mBlockPool->fetchGraphicBlock(
+-                    mWidth, mHeight, mFormat,
+-                    C2MemoryUsage(C2MemoryUsage::CPU_READ | C2MemoryUsage::CPU_WRITE),
+-                    graphicBlock);
+-            if (!(*graphicBlock)) {
+-                return;
+-            }
+-            const C2Handle *handle = (*graphicBlock)->handle();
+-            uint32_t width, height, format, stride, igbp_slot, generation;
+-            uint64_t usage, igbp_id;
+-            _UnwrapNativeCodec2GrallocMetadata(
+-                    handle, &width, &height, &format, &usage, &stride, &generation,
+-                    &igbp_id, &igbp_slot);
+-            native_handle_t *grallocHandle = UnwrapNativeCodec2GrallocHandle(handle);
+-            sp<GraphicBuffer> graphicBuffer = new GraphicBuffer(
+-                    grallocHandle, GraphicBuffer::CLONE_HANDLE,
+-                    width, height, format, 1, usage, stride);
+-            native_handle_delete(grallocHandle);
+-            AHardwareBuffer *hardwareBuffer =
+-                AHardwareBuffer_from_GraphicBuffer(graphicBuffer.get());
+-            AHardwareBuffer_acquire(hardwareBuffer);
+-            output->memory.graphic = hardwareBuffer;
+-        } else {
+-            LOG(ERROR) << "allocOutputBuffer -- unsupported output buffer type: "
+-                       << mOutputBufferType;
+-            return;
+-        }
+-    }
+-
+-    static bool FillMemory(
+-            const std::shared_ptr<C2Buffer>& buffer,
+-            ApexCodec_Buffer* apexBuffer,
+-            std::optional<C2ReadView>* linearView) {
+-        if (buffer->data().type() == C2BufferData::LINEAR) {
+-            apexBuffer->type = APEXCODEC_BUFFER_TYPE_LINEAR;
+-            if (buffer->data().linearBlocks().empty()) {
+-                apexBuffer->memory.linear.data = nullptr;
+-                apexBuffer->memory.linear.size = 0;
+-                return true;
+-            } else if (buffer->data().linearBlocks().size() > 1) {
+-                return false;
+-            }
+-            linearView->emplace(buffer->data().linearBlocks().front().map().get());
+-            if ((*linearView)->error() != C2_OK) {
+-                return false;
+-            }
+-            apexBuffer->memory.linear.data = const_cast<uint8_t*>((*linearView)->data());
+-            apexBuffer->memory.linear.size = (*linearView)->capacity();
+-            return true;
+-        } else if (buffer->data().type() == C2BufferData::GRAPHIC) {
+-            apexBuffer->type = APEXCODEC_BUFFER_TYPE_GRAPHIC;
+-            if (buffer->data().graphicBlocks().empty()) {
+-                apexBuffer->memory.graphic = nullptr;
+-                return true;
+-            } else if (buffer->data().graphicBlocks().size() > 1) {
+-                return false;
+-            }
+-            const C2Handle *handle = buffer->data().graphicBlocks().front().handle();
+-            uint32_t width, height, format, stride, igbp_slot, generation;
+-            uint64_t usage, igbp_id;
+-            _UnwrapNativeCodec2GrallocMetadata(
+-                    handle, &width, &height, &format, &usage, &stride, &generation,
+-                    &igbp_id, &igbp_slot);
+-            native_handle_t *grallocHandle = UnwrapNativeCodec2GrallocHandle(handle);
+-            sp<GraphicBuffer> graphicBuffer = new GraphicBuffer(
+-                    grallocHandle, GraphicBuffer::CLONE_HANDLE,
+-                    width, height, format, 1, usage, stride);
+-            native_handle_delete(grallocHandle);
+-            AHardwareBuffer *hardwareBuffer =
+-                AHardwareBuffer_from_GraphicBuffer(graphicBuffer.get());
+-            AHardwareBuffer_acquire(hardwareBuffer);
+-            apexBuffer->memory.graphic = hardwareBuffer;
+-            return true;
+-        }
+-        return false;
+-    }
+-
+-    ApexCodec_Component *mApexComponent;
+-    std::weak_ptr<Listener> mListener;
+-    std::weak_ptr<Component> mComponent;
+-
+-    std::thread mThread;
+-    std::mutex mMutex;
+-    std::condition_variable mCondition;
+-    bool mStopped;
+-    ApexCodec_BufferType mOutputBufferType;
+-
+-    size_t mLinearBlockCapacity;
+-    uint32_t mWidth;
+-    uint32_t mHeight;
+-    uint32_t mFormat;
+-
+-    std::shared_ptr<C2BlockPool> mBlockPool;
+-    std::list<std::unique_ptr<C2Work>> mWorkQueue;
+-    std::map<uint64_t, std::unique_ptr<C2Work>> mWorkMap;
+-};
+-
+ // Codec2Client::Component::HidlBufferPoolSender
+ struct Codec2Client::Component::HidlBufferPoolSender :
+         hardware::media::c2::V1_1::utils::DefaultBufferPoolSender {
+@@ -1944,13 +1168,6 @@ Codec2Client::Codec2Client(std::shared_ptr<AidlBase> const& base,
+     }
+ }
+ 
+-Codec2Client::Codec2Client(ApexCodec_ComponentStore *base,
+-                           size_t serviceIndex)
+-      : Configurable{nullptr, "android.componentStore.apexCodecs"},
+-        mApexBase{base},
+-        mServiceIndex{serviceIndex} {
+-}
+-
+ sp<Codec2Client::HidlBase> const& Codec2Client::getHidlBase() const {
+     return mHidlBase1_0;
+ }
+@@ -1979,71 +1196,36 @@ c2_status_t Codec2Client::createComponent(
+         const C2String& name,
+         const std::shared_ptr<Codec2Client::Listener>& listener,
+         std::shared_ptr<Codec2Client::Component>* const component) {
+-    if (mApexBase) {
+-        return createComponent_apex(name, listener, component);
+-    } else if (mAidlBase) {
+-        return createComponent_aidl(name, listener, component);
+-    } else {
+-        return createComponent_hidl(name, listener, component);
+-    }
+-}
+-
+-c2_status_t Codec2Client::createComponent_apex(
+-        const C2String& name,
+-        const std::shared_ptr<Codec2Client::Listener>& listener,
+-        std::shared_ptr<Codec2Client::Component>* const component) {
+-    if (__builtin_available(android 36, *)) {
+-        ApexCodec_Component *apexComponent = nullptr;
+-        ApexCodec_Status status = ApexCodec_Component_create(
+-                mApexBase, name.c_str(), &apexComponent);
+-        if (status != APEXCODEC_STATUS_OK) {
+-            return (c2_status_t)status;
+-        }
+-        *component = std::make_shared<Codec2Client::Component>(apexComponent, name);
+-        (*component)->initApexHandler(listener, *component);
+-        return C2_OK;
+-    } else {
+-        return C2_OMITTED;
+-    }
+-}
+-
+-c2_status_t Codec2Client::createComponent_aidl(
+-        const C2String& name,
+-        const std::shared_ptr<Codec2Client::Listener>& listener,
+-        std::shared_ptr<Codec2Client::Component>* const component) {
+-    std::shared_ptr<Component::AidlListener> aidlListener =
+-            Component::AidlListener::make<Component::AidlListener>();
+-    aidlListener->base = listener;
+-    std::shared_ptr<c2_aidl::IComponent> aidlComponent;
+-    ::ndk::ScopedAStatus transStatus = mAidlBase->createComponent(
+-            name,
+-            aidlListener,
+-            bufferpool2_aidl::implementation::ClientManager::getInstance(),
+-            &aidlComponent);
+-    c2_status_t status = GetC2Status(transStatus, "createComponent");
+-    if (status != C2_OK) {
++    if (mAidlBase) {
++        std::shared_ptr<Component::AidlListener> aidlListener =
++                Component::AidlListener::make<Component::AidlListener>();
++        aidlListener->base = listener;
++        std::shared_ptr<c2_aidl::IComponent> aidlComponent;
++        ::ndk::ScopedAStatus transStatus = mAidlBase->createComponent(
++                name,
++                aidlListener,
++                bufferpool2_aidl::implementation::ClientManager::getInstance(),
++                &aidlComponent);
++        c2_status_t status = GetC2Status(transStatus, "createComponent");
++        if (status != C2_OK) {
++            return status;
++        } else if (!aidlComponent) {
++            LOG(ERROR) << "createComponent(" << name.c_str()
++                       << ") -- null component.";
++            return C2_CORRUPTED;
++        }
++        *component = std::make_shared<Codec2Client::Component>(aidlComponent);
++        status = (*component)->setDeathListener((*component), listener);
++        if (status != C2_OK) {
++            LOG(ERROR) << "createComponent(" << name.c_str()
++                       << ") -- failed to set up death listener: "
++                       << status << ".";
++        }
++        (*component)->mAidlBufferPoolSender->setReceiver(mAidlHostPoolManager);
++        aidlListener->component = *component;
+         return status;
+-    } else if (!aidlComponent) {
+-        LOG(ERROR) << "createComponent(" << name.c_str()
+-                    << ") -- null component.";
+-        return C2_CORRUPTED;
+-    }
+-    *component = std::make_shared<Codec2Client::Component>(aidlComponent);
+-    status = (*component)->setDeathListener((*component), listener);
+-    if (status != C2_OK) {
+-        LOG(ERROR) << "createComponent(" << name.c_str()
+-                    << ") -- failed to set up death listener: "
+-                    << status << ".";
+     }
+-    (*component)->mAidlBufferPoolSender->setReceiver(mAidlHostPoolManager);
+-    aidlListener->component = *component;
+-    return status;
+-}
+ 
+-c2_status_t Codec2Client::createComponent_hidl(
+-        const C2String& name,
+-        const std::shared_ptr<Codec2Client::Listener>& listener,
+-        std::shared_ptr<Codec2Client::Component>* const component) {
+     c2_status_t status;
+     sp<Component::HidlListener> hidlListener = new Component::HidlListener{};
+     hidlListener->base = listener;
+@@ -2411,13 +1593,6 @@ std::vector<std::string> Codec2Client::CacheServiceNames() {
+             return a < b;
+         });
+ 
+-    if (__builtin_available(android 36, *)) {
+-        if (android::media::codec::provider_->in_process_sw_audio_codec_support()
+-                && nullptr != ApexCodec_GetComponentStore()) {
+-            names.push_back("__ApexCodecs__");
+-        }
+-    }
+-
+     // Summarize to logcat.
+     if (names.empty()) {
+         LOG(INFO) << "No Codec2 services declared in the manifest.";
+@@ -2474,13 +1649,7 @@ std::shared_ptr<Codec2Client> Codec2Client::_CreateFromIndex(size_t index) {
+     std::string const& name = GetServiceNames()[index];
+     LOG(VERBOSE) << "Creating a Codec2 client to service \"" << name << "\"";
+ 
+-    if (name == "__ApexCodecs__") {
+-        if (__builtin_available(android 36, *)) {
+-            return std::make_shared<Codec2Client>(ApexCodec_GetComponentStore(), index);
+-        } else {
+-            LOG(FATAL) << "ApexCodecs not supported on Android version older than 36";
+-        }
+-    } else if (c2_aidl::utils::IsSelected()) {
++    if (c2_aidl::utils::IsSelected()) {
+         if (__builtin_available(android __ANDROID_API_S__, *)) {
+             std::string instanceName =
+                 ::android::base::StringPrintf("%s/%s", AidlBase::descriptor, name.c_str());
+@@ -2885,41 +2054,16 @@ Codec2Client::Component::Component(const std::shared_ptr<AidlBase> &base)
+         mGraphicBufferAllocators{std::make_unique<GraphicBufferAllocators>()} {
+ }
+ 
+-Codec2Client::Component::Component(ApexCodec_Component *base, const C2String &name)
+-      : Configurable{[base]() -> ApexCodec_Configurable * {
+-            if (__builtin_available(android 36, *)) {
+-                return ApexCodec_Component_getConfigurable(base);
+-            } else {
+-                return nullptr;
+-            }
+-        }(), name},
+-        mApexBase{base} {
+-}
+-
+ Codec2Client::Component::~Component() {
+     if (mAidlDeathSeq) {
+         GetAidlDeathManager()->unlinkToDeath(*mAidlDeathSeq, mAidlBase);
+     }
+-    if (mApexBase) {
+-        if (__builtin_available(android 36, *)) {
+-            ApexCodec_Component_destroy(mApexBase);
+-        }
+-        mApexBase = nullptr;
+-    }
+ }
+ 
+ c2_status_t Codec2Client::Component::createBlockPool(
+         C2Allocator::id_t id,
+         C2BlockPool::local_id_t* blockPoolId,
+         std::shared_ptr<Codec2Client::Configurable>* configurable) {
+-    if (mApexBase) {
+-        std::shared_ptr<C2BlockPool> blockPool;
+-        CreateCodec2BlockPool(id, nullptr, &blockPool);
+-        *blockPoolId = blockPool->getLocalId();
+-        *configurable = nullptr;
+-        mBlockPools[*blockPoolId] = blockPool;
+-        return C2_OK;
+-    }
+     if (mAidlBase) {
+         c2_aidl::IComponent::BlockPool aidlBlockPool;
+         c2_status_t status = C2_OK;
+@@ -2990,10 +2134,6 @@ c2_status_t Codec2Client::Component::createBlockPool(
+ 
+ c2_status_t Codec2Client::Component::destroyBlockPool(
+         C2BlockPool::local_id_t localId) {
+-    if (mApexBase) {
+-        mBlockPools.erase(localId);
+-        return C2_OK;
+-    }
+     if (mAidlBase) {
+         mGraphicBufferAllocators->remove(localId);
+         ::ndk::ScopedAStatus transStatus = mAidlBase->destroyBlockPool(localId);
+@@ -3010,10 +2150,7 @@ c2_status_t Codec2Client::Component::destroyBlockPool(
+ 
+ void Codec2Client::Component::handleOnWorkDone(
+         const std::list<std::unique_ptr<C2Work>> &workItems) {
+-    if (mApexBase) {
+-        // no-op
+-        return;
+-    } else if (mAidlBase) {
++    if (mAidlBase) {
+         holdIgbaBlocks(workItems);
+     } else {
+         // Output bufferqueue-based blocks' lifetime management
+@@ -3023,10 +2160,6 @@ void Codec2Client::Component::handleOnWorkDone(
+ 
+ c2_status_t Codec2Client::Component::queue(
+         std::list<std::unique_ptr<C2Work>>* const items) {
+-    if (mApexBase) {
+-        mApexHandler->queue(*items);
+-        return C2_OK;
+-    }
+     if (mAidlBase) {
+         c2_aidl::WorkBundle workBundle;
+         if (!c2_aidl::utils::ToAidl(&workBundle, *items, mAidlBufferPoolSender.get())) {
+@@ -3058,13 +2191,6 @@ c2_status_t Codec2Client::Component::flush(
+         C2Component::flush_mode_t mode,
+         std::list<std::unique_ptr<C2Work>>* const flushedWork) {
+     (void)mode; // Flush mode isn't supported in HIDL/AIDL yet.
+-    if (mApexBase) {
+-        if (__builtin_available(android 36, *)) {
+-            return (c2_status_t)ApexCodec_Component_flush(mApexBase);
+-        } else {
+-            return C2_OMITTED;
+-        }
+-    }
+     c2_status_t status = C2_OK;
+     if (mAidlBase) {
+         c2_aidl::WorkBundle workBundle;
+@@ -3124,9 +2250,6 @@ c2_status_t Codec2Client::Component::flush(
+ }
+ 
+ c2_status_t Codec2Client::Component::drain(C2Component::drain_mode_t mode) {
+-    if (mApexBase) {
+-        return C2_OMITTED;
+-    }
+     if (mAidlBase) {
+         ::ndk::ScopedAStatus transStatus = mAidlBase->drain(
+                 mode == C2Component::DRAIN_COMPONENT_WITH_EOS);
+@@ -3147,10 +2270,6 @@ c2_status_t Codec2Client::Component::drain(C2Component::drain_mode_t mode) {
+ }
+ 
+ c2_status_t Codec2Client::Component::start() {
+-    if (mApexBase) {
+-        // no-op
+-        return C2_OK;
+-    }
+     if (mAidlBase) {
+         ::ndk::ScopedAStatus transStatus = mAidlBase->start();
+         return GetC2Status(transStatus, "start");
+@@ -3187,13 +2306,6 @@ c2_status_t Codec2Client::Component::stop() {
+ }
+ 
+ c2_status_t Codec2Client::Component::reset() {
+-    if (mApexBase) {
+-        if (__builtin_available(android 36, *)) {
+-            return (c2_status_t)ApexCodec_Component_reset(mApexBase);
+-        } else {
+-            return C2_OMITTED;
+-        }
+-    }
+     if (mAidlBase) {
+         ::ndk::ScopedAStatus transStatus = mAidlBase->reset();
+         return GetC2Status(transStatus, "reset");
+@@ -3212,13 +2324,6 @@ c2_status_t Codec2Client::Component::reset() {
+ }
+ 
+ c2_status_t Codec2Client::Component::release() {
+-    if (mApexBase) {
+-        if (__builtin_available(android 36, *)) {
+-            return (c2_status_t)ApexCodec_Component_reset(mApexBase);
+-        } else {
+-            return C2_OMITTED;
+-        }
+-    }
+     if (mAidlBase) {
+         ::ndk::ScopedAStatus transStatus = mAidlBase->release();
+         return GetC2Status(transStatus, "release");
+@@ -3240,10 +2345,6 @@ c2_status_t Codec2Client::Component::configureVideoTunnel(
+         uint32_t avSyncHwId,
+         native_handle_t** sidebandHandle) {
+     *sidebandHandle = nullptr;
+-    if (mApexBase) {
+-        // tunneling is not supported in APEX
+-        return C2_OMITTED;
+-    }
+     if (mAidlBase) {
+         ::aidl::android::hardware::common::NativeHandle handle;
+         ::ndk::ScopedAStatus transStatus = mAidlBase->configureVideoTunnel(avSyncHwId, &handle);
+@@ -3515,10 +2616,6 @@ void Codec2Client::Component::holdIgbaBlocks(
+ c2_status_t Codec2Client::Component::connectToInputSurface(
+         const std::shared_ptr<InputSurface>& inputSurface,
+         std::shared_ptr<InputSurfaceConnection>* connection) {
+-    if (mApexBase) {
+-        // FIXME
+-        return C2_OMITTED;
+-    }
+     if (mAidlBase) {
+         // FIXME
+         return C2_OMITTED;
+@@ -3547,10 +2644,6 @@ c2_status_t Codec2Client::Component::connectToOmxInputSurface(
+         const sp<HGraphicBufferProducer1>& producer,
+         const sp<HGraphicBufferSource>& source,
+         std::shared_ptr<InputSurfaceConnection>* connection) {
+-    if (mApexBase) {
+-        LOG(WARNING) << "Connecting to OMX input surface is not supported for AIDL C2 HAL";
+-        return C2_OMITTED;
+-    }
+     if (mAidlBase) {
+         LOG(WARNING) << "Connecting to OMX input surface is not supported for AIDL C2 HAL";
+         return C2_OMITTED;
+@@ -3576,10 +2669,6 @@ c2_status_t Codec2Client::Component::connectToOmxInputSurface(
+ }
+ 
+ c2_status_t Codec2Client::Component::disconnectFromInputSurface() {
+-    if (mApexBase) {
+-        // FIXME
+-        return C2_OMITTED;
+-    }
+     if (mAidlBase) {
+         // FIXME
+         return C2_OMITTED;
+@@ -3604,16 +2693,6 @@ Codec2Client::Component::AidlDeathManager *Codec2Client::Component::GetAidlDeath
+     return sManager;
+ }
+ 
+-c2_status_t Codec2Client::Component::initApexHandler(
+-            const std::shared_ptr<Listener> &listener,
+-            const std::shared_ptr<Component> &comp) {
+-    if (!mApexBase) {
+-        return C2_BAD_STATE;
+-    }
+-    mApexHandler = std::make_unique<ApexHandler>(mApexBase, listener, comp);
+-    return C2_OK;
+-}
+-
+ c2_status_t Codec2Client::Component::setDeathListener(
+         const std::shared_ptr<Component>& component,
+         const std::shared_ptr<Listener>& listener) {
+diff --git a/media/codec2/hal/client/include/codec2/hidl/client.h b/media/codec2/hal/client/include/codec2/hidl/client.h
+index 35c87e0a54..7923f04dbf 100644
+--- a/media/codec2/hal/client/include/codec2/hidl/client.h
++++ b/media/codec2/hal/client/include/codec2/hidl/client.h
+@@ -112,10 +112,6 @@ namespace android::hardware::media::omx::V1_0 {
+ struct IGraphicBufferSource;
+ }  // namespace android::hardware::media::omx::V1_0
+ 
+-struct ApexCodec_ComponentStore;
+-struct ApexCodec_Component;
+-struct ApexCodec_Configurable;
+-
+ namespace android {
+ 
+ // This class is supposed to be called Codec2Client::Configurable, but forward
+@@ -152,7 +148,6 @@ struct Codec2ConfigurableClient {
+ 
+     explicit Codec2ConfigurableClient(const sp<HidlBase> &hidlBase);
+     explicit Codec2ConfigurableClient(const std::shared_ptr<AidlBase> &aidlBase);
+-    Codec2ConfigurableClient(ApexCodec_Configurable *base, const C2String &name);
+ 
+     const C2String& getName() const;
+ 
+@@ -177,7 +172,6 @@ struct Codec2ConfigurableClient {
+ private:
+     struct HidlImpl;
+     struct AidlImpl;
+-    struct ApexImpl;
+ 
+     const std::unique_ptr<ImplBase> mImpl;
+ };
+@@ -288,16 +282,12 @@ struct Codec2Client : public Codec2ConfigurableClient {
+             std::shared_ptr<AidlBase> const& base,
+             std::shared_ptr<Codec2ConfigurableClient::AidlBase> const& configurable,
+             size_t serviceIndex);
+-    Codec2Client(
+-            ApexCodec_ComponentStore* base,
+-            size_t serviceIndex);
+ 
+ protected:
+     sp<HidlBase1_0> mHidlBase1_0;
+     sp<HidlBase1_1> mHidlBase1_1;
+     sp<HidlBase1_2> mHidlBase1_2;
+     std::shared_ptr<AidlBase> mAidlBase;
+-    ApexCodec_ComponentStore* mApexBase{nullptr};
+ 
+     // Finds the first store where the predicate returns C2_OK and returns the
+     // last predicate result. The predicate will be tried on all stores. The
+@@ -335,20 +325,6 @@ protected:
+     std::vector<C2Component::Traits> _listComponents(bool* success) const;
+ 
+     class Cache;
+-
+-private:
+-    c2_status_t createComponent_aidl(
+-            C2String const& name,
+-            std::shared_ptr<Listener> const& listener,
+-            std::shared_ptr<Component>* const component);
+-    c2_status_t createComponent_hidl(
+-            C2String const& name,
+-            std::shared_ptr<Listener> const& listener,
+-            std::shared_ptr<Component>* const component);
+-    c2_status_t createComponent_apex(
+-            C2String const& name,
+-            std::shared_ptr<Listener> const& listener,
+-            std::shared_ptr<Component>* const component);
+ };
+ 
+ struct Codec2Client::Interface : public Codec2Client::Configurable {
+@@ -532,16 +508,11 @@ struct Codec2Client::Component : public Codec2Client::Configurable {
+ 
+     c2_status_t disconnectFromInputSurface();
+ 
+-    c2_status_t initApexHandler(
+-            const std::shared_ptr<Listener> &listener,
+-            const std::shared_ptr<Component> &comp);
+-
+     // base cannot be null.
+     Component(const sp<HidlBase>& base);
+     Component(const sp<HidlBase1_1>& base);
+     Component(const sp<HidlBase1_2>& base);
+     Component(const std::shared_ptr<AidlBase>& base);
+-    Component(ApexCodec_Component* base, const C2String& name);
+ 
+     ~Component();
+ 
+@@ -550,16 +521,12 @@ protected:
+     sp<HidlBase1_1> mHidlBase1_1;
+     sp<HidlBase1_2> mHidlBase1_2;
+     std::shared_ptr<AidlBase> mAidlBase;
+-    ApexCodec_Component *mApexBase{nullptr};
+ 
+     struct HidlBufferPoolSender;
+     struct AidlBufferPoolSender;
+     std::unique_ptr<HidlBufferPoolSender> mHidlBufferPoolSender;
+     std::unique_ptr<AidlBufferPoolSender> mAidlBufferPoolSender;
+ 
+-    class ApexHandler;
+-    std::unique_ptr<ApexHandler> mApexHandler;
+-
+     struct OutputBufferQueue;
+     std::unique_ptr<OutputBufferQueue> mOutputBufferQueue;
+ 
+@@ -580,11 +547,6 @@ protected:
+             const std::shared_ptr<Listener>& listener);
+     sp<::android::hardware::hidl_death_recipient> mDeathRecipient;
+ 
+-    // This is a map of block pools created for APEX components in the client.
+-    // Note that the APEX codec API requires output buffers to be passed from the client,
+-    // so the client creates and keeps track of the block pools here.
+-    std::map<C2BlockPool::local_id_t, std::shared_ptr<C2BlockPool>> mBlockPools;
+-
+     friend struct Codec2Client;
+ 
+     struct HidlListener;
+diff --git a/media/module/libapexcodecs/Android.bp b/media/module/libapexcodecs/Android.bp
+index dbda81b0da..790b7495b5 100644
+--- a/media/module/libapexcodecs/Android.bp
++++ b/media/module/libapexcodecs/Android.bp
+@@ -40,15 +40,6 @@ cc_defaults {
+ 
+ }
+ 
+-cc_library_headers {
+-    name: "libapexcodecs-header",
+-    visibility: [
+-        "//frameworks/av/apex:__subpackages__",
+-        "//frameworks/av/media/codec2/hal/client",
+-    ],
+-    export_include_dirs: ["include"],
+-}
+-
+ cc_library {
+     name: "libapexcodecs-testing",
+     defaults: ["libapexcodecs-defaults"],
+-- 
+2.43.0
+

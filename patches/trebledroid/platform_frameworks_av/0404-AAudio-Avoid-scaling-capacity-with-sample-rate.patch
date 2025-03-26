@@ -1,0 +1,45 @@
+From 9b70ca248b6a12f9747b85ac8445512d07fbb526 Mon Sep 17 00:00:00 2001
+From: Robert Wu <robertwu@google.com>
+Date: Fri, 6 Dec 2024 00:28:03 +0000
+Subject: [PATCH 404/436] AAudio: Avoid scaling capacity with sample rate
+
+When the apps using AAudio explicitly set the capacity, AAudio should
+try its best to respect this capacity set.
+
+This includes streams with sample rate conversion.
+
+This CL prescales capacity by (deviceSampleRate / sampleRate) so that
+when the capacity is scaled by (sampleRate / deviceSampleRate), it
+will work as intended.
+
+Bug: 382715299
+Bug: 382390990
+Test: atest AAudioTests
+Test: OboeTester Test Glitches
+Flag: EXEMPT bugfix
+Change-Id: I427aef8364bb50fe7858aedc27ed7a9834f0940c
+---
+ media/libaaudio/src/client/AudioStreamInternal.cpp | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/media/libaaudio/src/client/AudioStreamInternal.cpp b/media/libaaudio/src/client/AudioStreamInternal.cpp
+index 33f152c6e3..e59f0ec00d 100644
+--- a/media/libaaudio/src/client/AudioStreamInternal.cpp
++++ b/media/libaaudio/src/client/AudioStreamInternal.cpp
+@@ -134,7 +134,12 @@ aaudio_result_t AudioStreamInternal::open(const AudioStreamBuilder &builder) {
+     request.getConfiguration().setInputPreset(getInputPreset());
+     request.getConfiguration().setPrivacySensitive(isPrivacySensitive());
+ 
+-    request.getConfiguration().setBufferCapacity(builder.getBufferCapacity());
++    // When sample rate conversion is needed, we use the device sample rate instead of the
++    // requested sample rate to scale the capacity in configureDataInformation().
++    // Thus, we should scale the capacity here to cancel out the (sampleRate / deviceSampleRate)
++    // scaling there.
++    request.getConfiguration().setBufferCapacity(builder.getBufferCapacity()
++            * 48000 / getSampleRate());
+ 
+     mServiceStreamHandleInfo = mServiceInterface.openStream(request, configurationOutput);
+     if (getServiceHandle() < 0
+-- 
+2.43.0
+

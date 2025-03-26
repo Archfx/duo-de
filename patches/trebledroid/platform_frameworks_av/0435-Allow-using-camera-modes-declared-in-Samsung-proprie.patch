@@ -1,0 +1,108 @@
+From cecc7daeb7e458d392522e528e03afdf70f90a6c Mon Sep 17 00:00:00 2001
+From: Pierre-Hugues Husson <phh@phh.me>
+Date: Sat, 10 Feb 2024 09:30:19 -0500
+Subject: [PATCH 435/436] Allow using camera modes declared in Samsung
+ proprietary values
+
+---
+ .../utils/SessionConfigurationUtils.cpp       | 81 ++++++++++++-------
+ 1 file changed, 54 insertions(+), 27 deletions(-)
+
+diff --git a/services/camera/libcameraservice/utils/SessionConfigurationUtils.cpp b/services/camera/libcameraservice/utils/SessionConfigurationUtils.cpp
+index f41cb852bd..25318dbc10 100644
+--- a/services/camera/libcameraservice/utils/SessionConfigurationUtils.cpp
++++ b/services/camera/libcameraservice/utils/SessionConfigurationUtils.cpp
+@@ -178,36 +178,63 @@ bool roundBufferDimensionNearest(int32_t width, int32_t height,
+                 ::aidl::android::hardware::graphics::common::Dataspace::JPEG_R));
+     bool isHeicUltraHDRDataSpace = (dataSpace == static_cast<android_dataspace_t>(
+                 ::aidl::android::hardware::graphics::common::Dataspace::HEIF_ULTRAHDR));
+-    camera_metadata_ro_entry streamConfigs =
+-            (isJpegRDataSpace) ? info.find(jpegRSizesTag) :
+-            (isHeicUltraHDRDataSpace) ? info.find(heicUltraHDRSizesTag) :
+-            (dataSpace == HAL_DATASPACE_DEPTH) ? info.find(depthSizesTag) :
+-            (dataSpace == static_cast<android_dataspace>(HAL_DATASPACE_HEIF)) ?
+-            info.find(heicSizesTag) :
+-            info.find(scalerSizesTag);
++    bool isDepth = dataSpace == HAL_DATASPACE_DEPTH;
++    bool isHeif = dataSpace == static_cast<android_dataspace>(HAL_DATASPACE_HEIF);
++    int32_t selectedTag = isJpegRDataSpace ? jpegRSizesTag :
++        isHeicUltraHDRDataSpace ? heicUltraHDRSizesTag :
++        isDepth ? depthSizesTag :
++        isHeif ? heicSizesTag : scalerSizesTag;
++
++    std::list<int32_t> tags = { selectedTag };
++    if (selectedTag == scalerSizesTag) {
++        sp<VendorTagDescriptor> vTags;
++        sp<VendorTagDescriptorCache> cache = VendorTagDescriptorCache::getGlobalVendorTagCache();
++        if (cache.get()) {
++            auto vendorId = const_cast<CameraMetadata*>(&info)->getVendorId(); // getVendorId is actually const...
++            cache->getVendorTagDescriptor(vendorId, &vTags);
++        }
++
++        std::list<std::string> vendorTags = {
++            "samsung.android.scaler.availablePictureStreamConfigurations",
++            "samsung.android.scaler.availablePreviewStreamConfigurations",
++            "samsung.android.scaler.availableThumbnailStreamConfigurations",
++        };
++        for(auto tagName: vendorTags) {
++            uint32_t vendorTag;
++            status_t tagStatus = info.getTagFromName(tagName.c_str(), vTags.get(), &vendorTag);
++            //ALOGE("Tag by name %s %d %x", tagName.c_str(), tagStatus, vendorTag);
++            if (tagStatus == OK)
++                tags.push_back(vendorTag);
++        }
++    }
+ 
+     int32_t bestWidth = -1;
+     int32_t bestHeight = -1;
+-
+-    // Iterate through listed stream configurations and find the one with the smallest euclidean
+-    // distance from the given dimensions for the given format.
+-    for (size_t i = 0; i < streamConfigs.count; i += 4) {
+-        int32_t fmt = streamConfigs.data.i32[i];
+-        int32_t w = streamConfigs.data.i32[i + 1];
+-        int32_t h = streamConfigs.data.i32[i + 2];
+-
+-        // Ignore input/output type for now
+-        if (fmt == format) {
+-            if (w == width && h == height) {
+-                bestWidth = width;
+-                bestHeight = height;
+-                break;
+-            } else if (w <= ROUNDING_WIDTH_CAP && (bestWidth == -1 ||
+-                    SessionConfigurationUtils::euclidDistSquare(w, h, width, height) <
+-                    SessionConfigurationUtils::euclidDistSquare(bestWidth, bestHeight, width,
+-                            height))) {
+-                bestWidth = w;
+-                bestHeight = h;
++    for(auto tag: tags) {
++        camera_metadata_ro_entry streamConfigs =
++            info.find(tag);
++
++
++        // Iterate through listed stream configurations and find the one with the smallest euclidean
++        // distance from the given dimensions for the given format.
++        for (size_t i = 0; i < streamConfigs.count; i += 4) {
++            int32_t fmt = streamConfigs.data.i32[i];
++            int32_t w = streamConfigs.data.i32[i + 1];
++            int32_t h = streamConfigs.data.i32[i + 2];
++
++            // Ignore input/output type for now
++            if (fmt == format) {
++                if (w == width && h == height) {
++                    bestWidth = width;
++                    bestHeight = height;
++                    break;
++                } else if (w <= ROUNDING_WIDTH_CAP && (bestWidth == -1 ||
++                        SessionConfigurationUtils::euclidDistSquare(w, h, width, height) <
++                        SessionConfigurationUtils::euclidDistSquare(bestWidth, bestHeight, width,
++                                height))) {
++                    bestWidth = w;
++                    bestHeight = h;
++                }
+             }
+         }
+     }
+-- 
+2.43.0
+

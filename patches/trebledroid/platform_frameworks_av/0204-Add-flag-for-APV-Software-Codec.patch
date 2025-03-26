@@ -1,0 +1,68 @@
+From 06c3a2eaf026d9d27645978e2bb2aa0dfb6c52cc Mon Sep 17 00:00:00 2001
+From: Fyodor Kyslov <kyslov@google.com>
+Date: Fri, 1 Nov 2024 03:39:23 +0000
+Subject: [PATCH 204/436] Add flag for APV Software Codec
+
+Add read-only flag for APV SW codec because we need it to be compatible
+with mainline - hence read-only and in media.swcodec package
+
+Test: m
+Bug: 376770121
+Bug: 363333555
+Change-Id: Iea838601455892ed8a8fbd85a3e3b21d2f569bf0
+---
+ media/aconfig/Android.bp            | 19 +++++++++++++++++++
+ media/aconfig/swcodec_flags.aconfig | 14 ++++++++++++++
+ 2 files changed, 33 insertions(+)
+ create mode 100644 media/aconfig/swcodec_flags.aconfig
+
+diff --git a/media/aconfig/Android.bp b/media/aconfig/Android.bp
+index 16beb285c1..1e5eafb689 100644
+--- a/media/aconfig/Android.bp
++++ b/media/aconfig/Android.bp
+@@ -50,3 +50,22 @@ cc_aconfig_library {
+     ],
+     aconfig_declarations: "aconfig_codec_fwk_flags",
+ }
++
++aconfig_declarations {
++    name: "aconfig_media_swcodec_flags",
++    package: "android.media.swcodec.flags",
++    container: "com.android.media.swcodec",
++    srcs: ["swcodec_flags.aconfig"],
++}
++
++cc_aconfig_library {
++    name: "android.media.swcodec.flags-aconfig-cc",
++    aconfig_declarations: "aconfig_media_swcodec_flags",
++    min_sdk_version: "apex_inherit",
++    vendor_available: true,
++    double_loadable: true,
++    apex_available: [
++        "//apex_available:platform",
++        "com.android.media.swcodec",
++    ],
++}
+diff --git a/media/aconfig/swcodec_flags.aconfig b/media/aconfig/swcodec_flags.aconfig
+new file mode 100644
+index 0000000000..a435a4319a
+--- /dev/null
++++ b/media/aconfig/swcodec_flags.aconfig
+@@ -0,0 +1,14 @@
++# Media SW Codec Flags.
++#
++# !!! Please add flags in alphabetical order. !!!
++package: "android.media.swcodec.flags"
++container: "com.android.media.swcodec"
++
++flag {
++  name: "apv_software_codec"
++  is_exported: true
++  is_fixed_read_only: true
++  namespace: "codec_fwk"
++  description: "Feature flag for APV Software C2 codec"
++  bug: "376770121"
++}
+-- 
+2.43.0
+

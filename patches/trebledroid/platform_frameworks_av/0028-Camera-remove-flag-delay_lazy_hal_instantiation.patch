@@ -1,0 +1,72 @@
+From 940c3b7e2524ca805bcbbcb4d3b405a8f9930724 Mon Sep 17 00:00:00 2001
+From: Avichal Rakesh <arakesh@google.com>
+Date: Wed, 25 Sep 2024 16:30:26 -0700
+Subject: [PATCH 028/436] Camera: remove flag delay_lazy_hal_instantiation
+
+Bug: 365555385
+Test: Builds successfully.
+Flag: EXEMPT flag removal
+Change-Id: I0f3ff596273d96f45dbdd54370eb5042e56e2e45
+---
+ camera/camera_platform.aconfig                         |  7 -------
+ .../libcameraservice/common/CameraProviderManager.cpp  | 10 ++--------
+ .../tests/CameraProviderManagerTest.cpp                |  4 ----
+ 3 files changed, 2 insertions(+), 19 deletions(-)
+
+diff --git a/camera/camera_platform.aconfig b/camera/camera_platform.aconfig
+index bf1520bef3..d3cc7cba55 100644
+--- a/camera/camera_platform.aconfig
++++ b/camera/camera_platform.aconfig
+@@ -77,13 +77,6 @@ flag {
+     bug: "280649914"
+ }
+ 
+-flag {
+-    namespace: "camera_platform"
+-    name: "delay_lazy_hal_instantiation"
+-    description: "Only trigger lazy HAL instantiation when the HAL is needed for an operation."
+-    bug: "319735068"
+-}
+-
+ flag {
+     namespace: "camera_platform"
+     name: "return_buffers_outside_locks"
+diff --git a/services/camera/libcameraservice/common/CameraProviderManager.cpp b/services/camera/libcameraservice/common/CameraProviderManager.cpp
+index 51f06cb013..a7c7cee0cb 100644
+--- a/services/camera/libcameraservice/common/CameraProviderManager.cpp
++++ b/services/camera/libcameraservice/common/CameraProviderManager.cpp
+@@ -2112,14 +2112,8 @@ status_t CameraProviderManager::tryToInitializeAidlProviderLocked(
+         const std::string& providerName, const sp<ProviderInfo>& providerInfo) {
+     using aidl::android::hardware::camera::provider::ICameraProvider;
+ 
+-    std::shared_ptr<ICameraProvider> interface;
+-    if (flags::delay_lazy_hal_instantiation()) {
+-        // Only get remote instance if already running. Lazy Providers will be
+-        // woken up later.
+-        interface = mAidlServiceProxy->tryGetService(providerName);
+-    } else {
+-        interface = mAidlServiceProxy->getService(providerName);
+-    }
++    // Only get remote instance if already running. Lazy Providers will be woken up later.
++    std::shared_ptr<ICameraProvider> interface = mAidlServiceProxy->tryGetService(providerName);
+ 
+     if (interface == nullptr) {
+         ALOGW("%s: AIDL Camera provider HAL '%s' is not actually available", __FUNCTION__,
+diff --git a/services/camera/libcameraservice/tests/CameraProviderManagerTest.cpp b/services/camera/libcameraservice/tests/CameraProviderManagerTest.cpp
+index 939126c7a1..56cacef003 100644
+--- a/services/camera/libcameraservice/tests/CameraProviderManagerTest.cpp
++++ b/services/camera/libcameraservice/tests/CameraProviderManagerTest.cpp
+@@ -445,10 +445,6 @@ struct TestAidlInteractionProxy : public CameraProviderManager::AidlServiceInter
+ 
+     virtual std::shared_ptr<aidl::android::hardware::camera::provider::ICameraProvider>
+             getService(const std::string& serviceName) override {
+-        if (!flags::delay_lazy_hal_instantiation()) {
+-            return mTestAidlCameraProvider;
+-        }
+-
+         // If no provider has been given, fail; in reality, getService would
+         // block for HALs that don't start correctly, so we should never use
+         // getService when we don't have a valid HAL running
+-- 
+2.43.0
+

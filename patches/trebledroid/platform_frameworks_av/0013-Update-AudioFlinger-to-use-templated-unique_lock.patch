@@ -1,0 +1,45 @@
+From f462c6cc052eb099121e712052c2628c40a6a128 Mon Sep 17 00:00:00 2001
+From: Andy Hung <hunga@google.com>
+Date: Mon, 23 Sep 2024 18:42:26 -0700
+Subject: [PATCH 013/436] Update AudioFlinger to use templated unique_lock
+
+Flag: EXEMPT bugfix
+Test: atest audio_mutex_tests
+Test: atest audio_mutex_benchmark
+Bug: 369245010
+Change-Id: I37e82864b5d55bfa12358077fdd0051ab7105733
+---
+ services/audioflinger/IAfThread.h | 2 +-
+ services/audioflinger/Threads.h   | 3 ++-
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/services/audioflinger/IAfThread.h b/services/audioflinger/IAfThread.h
+index 8596acb1f8..abb8f2f34c 100644
+--- a/services/audioflinger/IAfThread.h
++++ b/services/audioflinger/IAfThread.h
+@@ -402,7 +402,7 @@ public:
+     // the Thread is not busy releasing the Tracks, during which the Thread mutex
+     // may be temporarily unlocked.  Some Track methods will use this method to
+     // avoid races.
+-    virtual void waitWhileThreadBusy_l(audio_utils::unique_lock& ul)
++    virtual void waitWhileThreadBusy_l(audio_utils::unique_lock<audio_utils::mutex>& ul)
+             REQUIRES(mutex()) = 0;
+ 
+     // The ThreadloopExecutor is used to defer functors or dtors
+diff --git a/services/audioflinger/Threads.h b/services/audioflinger/Threads.h
+index 4c4939b284..bf37238669 100644
+--- a/services/audioflinger/Threads.h
++++ b/services/audioflinger/Threads.h
+@@ -623,7 +623,8 @@ protected:
+      * ThreadBase_Mutex during this time.  No other mutex is held.
+      */
+ 
+-    void waitWhileThreadBusy_l(audio_utils::unique_lock& ul) final REQUIRES(mutex()) {
++    void waitWhileThreadBusy_l(audio_utils::unique_lock<audio_utils::mutex>& ul)
++            final REQUIRES(mutex()) {
+         // the wait returns immediately if the predicate is satisfied.
+         mThreadBusyCv.wait(ul, [&]{ return mThreadBusy == false;});
+     }
+-- 
+2.43.0
+

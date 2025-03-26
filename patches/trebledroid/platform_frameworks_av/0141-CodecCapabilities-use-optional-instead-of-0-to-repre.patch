@@ -1,0 +1,92 @@
+From 84ad37f5eeb194caf8f76777f81083e033632876 Mon Sep 17 00:00:00 2001
+From: Songyue Han <songyueh@google.com>
+Date: Tue, 8 Oct 2024 20:24:26 +0000
+Subject: [PATCH 141/436] CodecCapabilities: use optional instead of 0 to
+ represent null in supports().
+
+In theory, the sampleRate and channels can be 0. Use optional to differentiate 0 and null.
+
+Bug: 306023029
+Test: MediaCodecCapabilitiesTest
+Change-Id: I2caea767c51dcf6be6632168b167c22673b2e843
+---
+ media/libmedia/AudioCapabilities.cpp          | 25 +++++++++++--------
+ .../include/media/AudioCapabilities.h         |  2 +-
+ 2 files changed, 15 insertions(+), 12 deletions(-)
+
+diff --git a/media/libmedia/AudioCapabilities.cpp b/media/libmedia/AudioCapabilities.cpp
+index e8cf5171f4..908989fd8b 100644
+--- a/media/libmedia/AudioCapabilities.cpp
++++ b/media/libmedia/AudioCapabilities.cpp
+@@ -94,30 +94,31 @@ void AudioCapabilities::initWithPlatformLimits() {
+     mSampleRateRanges.push_back(Range<int>(minSampleRate, maxSampleRate));
+ }
+ 
+-bool AudioCapabilities::supports(int sampleRate, int inputChannels) {
++bool AudioCapabilities::supports(std::optional<int> sampleRate,
++        std::optional<int> inputChannels) {
+     // channels and sample rates are checked orthogonally
+-    if (inputChannels != 0
++    if (inputChannels
+             && !std::any_of(mInputChannelRanges.begin(), mInputChannelRanges.end(),
+-            [inputChannels](const Range<int> &a) { return a.contains(inputChannels); })) {
++            [inputChannels](const Range<int> &a) { return a.contains(inputChannels.value()); })) {
+         return false;
+     }
+-    if (sampleRate != 0
++    if (sampleRate
+             && !std::any_of(mSampleRateRanges.begin(), mSampleRateRanges.end(),
+-            [sampleRate](const Range<int> &a) { return a.contains(sampleRate); })) {
++            [sampleRate](const Range<int> &a) { return a.contains(sampleRate.value()); })) {
+         return false;
+     }
+     return true;
+ }
+ 
+ bool AudioCapabilities::isSampleRateSupported(int sampleRate) {
+-    return supports(sampleRate, 0);
++    return supports(std::make_optional<int>(sampleRate), std::nullopt);
+ }
+ 
+ void AudioCapabilities::limitSampleRates(std::vector<int> rates) {
+     std::vector<Range<int>> sampleRateRanges;
+     std::sort(rates.begin(), rates.end());
+     for (int rate : rates) {
+-        if (supports(rate, 0 /* channels */)) {
++        if (supports(std::make_optional<int>(rate), std::nullopt /* channels */)) {
+             sampleRateRanges.push_back(Range<int>(rate, rate));
+         }
+     }
+@@ -372,10 +373,12 @@ void AudioCapabilities::getDefaultFormat(sp<AMessage> &format) {
+ }
+ 
+ bool AudioCapabilities::supportsFormat(const sp<AMessage> &format) {
+-    int32_t sampleRate;
+-    format->findInt32(KEY_SAMPLE_RATE, &sampleRate);
+-    int32_t channels;
+-    format->findInt32(KEY_CHANNEL_COUNT, &channels);
++    int32_t sampleRateValue;
++    std::optional<int> sampleRate = format->findInt32(KEY_SAMPLE_RATE, &sampleRateValue)
++            ? std::make_optional<int>(sampleRateValue) : std::nullopt;
++    int32_t channelsValue;
++    std::optional<int> channels = format->findInt32(KEY_CHANNEL_COUNT, &channelsValue)
++            ? std::make_optional<int>(channelsValue) : std::nullopt;
+ 
+     if (!supports(sampleRate, channels)) {
+         return false;
+diff --git a/media/libmedia/include/media/AudioCapabilities.h b/media/libmedia/include/media/AudioCapabilities.h
+index 2bc3335514..2cb957ed03 100644
+--- a/media/libmedia/include/media/AudioCapabilities.h
++++ b/media/libmedia/include/media/AudioCapabilities.h
+@@ -121,7 +121,7 @@ private:
+     void init(std::string mediaType, std::vector<ProfileLevel> profLevs,
+             const sp<AMessage> &format);
+     void initWithPlatformLimits();
+-    bool supports(int sampleRate, int inputChannels);
++    bool supports(std::optional<int> sampleRate, std::optional<int> inputChannels);
+     void limitSampleRates(std::vector<int> rates);
+     void createDiscreteSampleRates();
+     void limitSampleRates(std::vector<Range<int>> rateRanges);
+-- 
+2.43.0
+

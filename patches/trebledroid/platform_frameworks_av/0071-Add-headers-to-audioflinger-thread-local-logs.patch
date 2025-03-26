@@ -1,0 +1,222 @@
+From aa3afcbadc146b4560ab7a27b574b998d26d263e Mon Sep 17 00:00:00 2001
+From: Atneya Nair <atneya@google.com>
+Date: Tue, 8 Oct 2024 16:36:19 -0700
+Subject: [PATCH 071/436] Add headers to audioflinger thread local logs
+
+Add thread headers to local log for playback and record tracks for ease
+of debugging.
+
+Test: adb shell dumpsys media.audio_flinger
+Flag: EXEMPT logs only
+Bug: 372070273
+Change-Id: Id32a9155e87b60963c7518967f7ac551c2b38e16
+---
+ services/audioflinger/IAfTrack.h  | 22 ++++++++++++++++++++++
+ services/audioflinger/Threads.cpp | 22 ++++++++++++++++++++++
+ services/audioflinger/Threads.h   | 10 ++++++++++
+ services/audioflinger/Tracks.cpp  | 23 ++++++++---------------
+ 4 files changed, 62 insertions(+), 15 deletions(-)
+
+diff --git a/services/audioflinger/IAfTrack.h b/services/audioflinger/IAfTrack.h
+index ee834d6351..9650f3e2c8 100644
+--- a/services/audioflinger/IAfTrack.h
++++ b/services/audioflinger/IAfTrack.h
+@@ -293,6 +293,16 @@ public:
+             bool isBitPerfect = false,
+             float volume = 0.0f);
+ 
++    static constexpr std::string_view getLogHeader() {
++        using namespace std::literals;
++        return "Type     Id Active Client Session Port Id S  Flags "
++                        "  Format Chn mask  SRate "
++                        "ST Usg CT "
++                        " G db  L dB  R dB  VS dB  PortVol dB "
++                        "  Server FrmCnt  FrmRdy F Underruns  Flushed BitPerfect InternalMute"
++                        "   Latency\n"sv;
++    }
++
+     virtual void pause() = 0;
+     virtual void flush() = 0;
+     virtual audio_stream_type_t streamType() const = 0;
+@@ -468,6 +478,11 @@ public:
+             audio_port_handle_t portId = AUDIO_PORT_HANDLE_NONE,
+             float volume = 0.0f);
+ 
++    static constexpr std::string_view getLogHeader() {
++        using namespace std::literals;
++        return "Client Session Port Id   Format Chn mask  SRate Flags Usg/Src PortVol dB\n"sv;
++    };
++
+     // protected by MMapThread::mLock
+     virtual void setSilenced_l(bool silenced) = 0;
+     // protected by MMapThread::mLock
+@@ -511,6 +526,13 @@ public:
+             audio_port_handle_t portId = AUDIO_PORT_HANDLE_NONE,
+             int32_t startFrames = -1);
+ 
++    static constexpr std::string_view getLogHeader() {
++        using namespace std::literals;
++        return "Active     Id Client Session Port Id  S  Flags  "
++                        " Format Chn mask  SRate Source  "
++                        " Server FrmCnt FrmRdy Sil   Latency\n"sv;
++    }
++
+     // clear the buffer overflow flag
+     virtual void clearOverflow() = 0;
+     // set the buffer overflow flag and return previous value
+diff --git a/services/audioflinger/Threads.cpp b/services/audioflinger/Threads.cpp
+index 8cb19655be..eedf5609ed 100644
+--- a/services/audioflinger/Threads.cpp
++++ b/services/audioflinger/Threads.cpp
+@@ -1058,6 +1058,8 @@ void ThreadBase::dump(int fd, const Vector<String16>& args)
+     }
+ 
+     dprintf(fd, "  Local log:\n");
++    const auto logHeader = this->getLocalLogHeader();
++    write(fd, logHeader.data(), logHeader.length());
+     mLocalLog.dump(fd, "   " /* prefix */, 40 /* lines */);
+ 
+     // --all does the statistics
+@@ -5120,6 +5122,12 @@ void PlaybackThread::toAudioPortConfig(struct audio_port_config* config)
+     }
+ }
+ 
++std::string PlaybackThread::getLocalLogHeader() const {
++    using namespace std::literals;
++    static constexpr auto indent = "                             "
++                                   "                            "sv;
++    return std::string{indent}.append(IAfTrack::getLogHeader());
++}
+ // ----------------------------------------------------------------------------
+ 
+ /* static */
+@@ -10216,6 +10224,13 @@ void RecordThread::toAudioPortConfig(struct audio_port_config* config)
+     }
+ }
+ 
++std::string RecordThread::getLocalLogHeader() const {
++    using namespace std::literals;
++    static constexpr auto indent = "                             "
++                                   "                            "sv;
++    return std::string{indent}.append(IAfRecordTrack::getLogHeader());
++}
++
+ // ----------------------------------------------------------------------------
+ //      Mmap
+ // ----------------------------------------------------------------------------
+@@ -11096,6 +11111,13 @@ void MmapThread::dumpTracks_l(int fd, const Vector<String16>& /* args */)
+     write(fd, result.c_str(), result.size());
+ }
+ 
++std::string MmapThread::getLocalLogHeader() const {
++    using namespace std::literals;
++    static constexpr auto indent = "                             "
++                                   "                            "sv;
++    return std::string{indent}.append(IAfMmapTrack::getLogHeader());
++}
++
+ /* static */
+ sp<IAfMmapPlaybackThread> IAfMmapPlaybackThread::create(
+         const sp<IAfThreadCallback>& afThreadCallback, audio_io_handle_t id,
+diff --git a/services/audioflinger/Threads.h b/services/audioflinger/Threads.h
+index bf37238669..9c6cd5caa4 100644
+--- a/services/audioflinger/Threads.h
++++ b/services/audioflinger/Threads.h
+@@ -576,6 +576,9 @@ public:
+         return mThreadloopExecutor;
+     }
+ 
++    // Used to print the header for the local log on a particular thread type
++    virtual std::string getLocalLogHeader() const { return {}; };
++
+ protected:
+ 
+                 // entry describing an effect being suspended in mSuspendedSessions keyed vector
+@@ -1230,6 +1233,9 @@ public:
+             override EXCLUDES_ThreadBase_Mutex {
+         // Do nothing. It is only used for bit perfect thread
+     }
++
++    std::string getLocalLogHeader() const override;
++
+ protected:
+     // updated by readOutputParameters_l()
+     size_t                          mNormalFrameCount;  // normal mixer and effects
+@@ -2134,6 +2140,8 @@ public:
+                             return !(mInput == nullptr || mInput->stream == nullptr);
+                         }
+ 
++    std::string getLocalLogHeader() const override;
++
+ protected:
+     void dumpInternals_l(int fd, const Vector<String16>& args) override REQUIRES(mutex());
+     void dumpTracks_l(int fd, const Vector<String16>& args) override REQUIRES(mutex());
+@@ -2325,6 +2333,8 @@ class MmapThread : public ThreadBase, public virtual IAfMmapThread
+ 
+     bool isStreamInitialized() const override { return false; }
+ 
++    std::string getLocalLogHeader() const override;
++
+     void setClientSilencedState_l(audio_port_handle_t portId, bool silenced) REQUIRES(mutex()) {
+                                 mClientSilencedStates[portId] = silenced;
+                             }
+diff --git a/services/audioflinger/Tracks.cpp b/services/audioflinger/Tracks.cpp
+index a692773ccb..eab3b44e41 100644
+--- a/services/audioflinger/Tracks.cpp
++++ b/services/audioflinger/Tracks.cpp
+@@ -1000,13 +1000,8 @@ void Track::destroy()
+ 
+ void Track::appendDumpHeader(String8& result) const
+ {
+-    result.appendFormat("Type     Id Active Client Session Port Id S  Flags "
+-                        "  Format Chn mask  SRate "
+-                        "ST Usg CT "
+-                        " G db  L dB  R dB  VS dB  PortVol dB "
+-                        "  Server FrmCnt  FrmRdy F Underruns  Flushed BitPerfect InternalMute"
+-                        "%s\n",
+-                        isServerLatencySupported() ? "   Latency" : "");
++    const auto res = IAfTrack::getLogHeader();
++    result.append(res.data(), res.size());
+ }
+ 
+ void Track::appendDump(String8& result, bool active) const
+@@ -2989,10 +2984,8 @@ void RecordTrack::invalidate()
+ 
+ void RecordTrack::appendDumpHeader(String8& result) const
+ {
+-    result.appendFormat("Active     Id Client Session Port Id  S  Flags  "
+-                        " Format Chn mask  SRate Source  "
+-                        " Server FrmCnt FrmRdy Sil%s\n",
+-                        isServerLatencySupported() ? "   Latency" : "");
++    const auto res = IAfRecordTrack::getLogHeader();
++    result.append(res.data(), res.size());
+ }
+ 
+ void RecordTrack::appendDump(String8& result, bool active) const
+@@ -3648,8 +3641,8 @@ void MmapTrack::processMuteEvent_l(const sp<IAudioManager>& audioManager, mute_s
+ 
+ void MmapTrack::appendDumpHeader(String8& result) const
+ {
+-    result.appendFormat("Client Session Port Id  Format Chn mask  SRate Flags %s  %s\n",
+-                        isOut() ? "Usg CT": "Source", isOut() ? "PortVol dB" : "");
++    const auto res = IAfMmapTrack::getLogHeader();
++    result.append(res.data(), res.size());
+ }
+ 
+ void MmapTrack::appendDump(String8& result, bool active __unused) const
+@@ -3663,10 +3656,10 @@ void MmapTrack::appendDump(String8& result, bool active __unused) const
+             mSampleRate,
+             mAttr.flags);
+     if (isOut()) {
+-        result.appendFormat("%3x %2x", mAttr.usage, mAttr.content_type);
++        result.appendFormat("%4x %2x", mAttr.usage, mAttr.content_type);
+         result.appendFormat("%11.2g", 20.0 * log10(mVolume));
+     } else {
+-        result.appendFormat("%6x", mAttr.source);
++        result.appendFormat("%7x", mAttr.source);
+     }
+     result.append("\n");
+ }
+-- 
+2.43.0
+

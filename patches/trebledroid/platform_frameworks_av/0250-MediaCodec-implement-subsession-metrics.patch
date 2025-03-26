@@ -1,0 +1,280 @@
+From efbef0b0e09192c31688a96eb5cdb2acf90f6486 Mon Sep 17 00:00:00 2001
+From: Lajos Molnar <lajos@google.com>
+Date: Mon, 11 Nov 2024 22:26:45 +0000
+Subject: [PATCH 250/436] MediaCodec: implement subsession metrics
+
+This CL adds support for gatheric separate codec metrics for each
+subsession during MediaCodec execution, which ensures that the metrics
+data is representative of the subsession, and not just the first
+subsession of the codec lifecycle.
+
+A subsession for now is limited to video/image codecs based on the
+resolution.
+
+When a new subsession starts, the current metrics item is flushed and a new
+one is created. The client is notified of the flushed metrics via a callback
+to provide visibility and testability.
+
+The subsession count is tracked and can be used to identify the first or all
+subsessions of a codec lifecycle.
+
+Bug: 5340c036cb
+Flag: android.media.codec.subsession_metrics
+Test: manual verification of subsession metrics submission
+Change-Id: I482bf7fa7540d01a744ac2478b91e7f75187fa7b
+---
+ media/libstagefright/MediaCodec.cpp           | 101 ++++++++++++++++--
+ .../include/media/stagefright/MediaCodec.h    |  10 ++
+ 2 files changed, 103 insertions(+), 8 deletions(-)
+
+diff --git a/media/libstagefright/MediaCodec.cpp b/media/libstagefright/MediaCodec.cpp
+index b17be6b4cd..8d91091ab6 100644
+--- a/media/libstagefright/MediaCodec.cpp
++++ b/media/libstagefright/MediaCodec.cpp
+@@ -1295,7 +1295,12 @@ MediaCodec::~MediaCodec() {
+     CHECK_EQ(mState, UNINITIALIZED);
+     mResourceManagerProxy->removeClient();
+ 
+-    flushMediametrics();
++    flushMediametrics();  // this deletes mMetricsHandle
++    // don't keep the last metrics handle around
++    if (mLastMetricsHandle != 0) {
++        mediametrics_delete(mLastMetricsHandle);
++        mLastMetricsHandle = 0;
++    }
+ 
+     // clean any saved metrics info we stored as part of configure()
+     if (mConfigureMsg != nullptr) {
+@@ -1306,7 +1311,7 @@ MediaCodec::~MediaCodec() {
+     }
+ }
+ 
+-// except for in constructor, called from the looper thread (and therefore mutexed)
++// except for in constructor, called from the looper thread (and therefore not mutexed)
+ void MediaCodec::initMediametrics() {
+     if (mMetricsHandle == 0) {
+         mMetricsHandle = mediametrics_create(kCodecKeyName);
+@@ -1332,6 +1337,7 @@ void MediaCodec::initMediametrics() {
+         mInputBufferCounter = 0;
+     }
+ 
++    mSubsessionCount = 0;
+     mLifetimeStartNs = systemTime(SYSTEM_TIME_MONOTONIC);
+     resetMetricsFields();
+ }
+@@ -1343,6 +1349,17 @@ void MediaCodec::resetMetricsFields() {
+     mReliabilityContextMetrics = ReliabilityContextMetrics();
+ }
+ 
++// always called from the looper thread (and therefore not mutexed)
++void MediaCodec::resetSubsessionMetricsFields() {
++    mBytesEncoded = 0;
++    mFramesEncoded = 0;
++    mFramesInput = 0;
++    mBytesInput = 0;
++    mEarliestEncodedPtsUs = INT64_MAX;
++    mLatestEncodedPtsUs = INT64_MIN;
++}
++
++// always called from the looper thread
+ void MediaCodec::updateMediametrics() {
+     if (mMetricsHandle == 0) {
+         ALOGV("no metrics handle found");
+@@ -1707,6 +1724,7 @@ static void reportToMediaMetricsIfValid(const JudderEvent &e) {
+     }
+ }
+ 
++// except for in destructor, called from the looper thread
+ void MediaCodec::flushMediametrics() {
+     ALOGV("flushMediametrics");
+ 
+@@ -1720,7 +1738,14 @@ void MediaCodec::flushMediametrics() {
+         if (mMetricsToUpload && mediametrics_count(mMetricsHandle) > 0) {
+             mediametrics_selfRecord(mMetricsHandle);
+         }
+-        mediametrics_delete(mMetricsHandle);
++        // keep previous metrics handle for subsequent getMetrics() calls.
++        // NOTE: There could be multiple error events, each flushing the metrics.
++        // We keep the last non-empty metrics handle, so getMetrics() in the
++        // next call will get the latest metrics prior to the errors.
++        if (mLastMetricsHandle != 0) {
++            mediametrics_delete(mLastMetricsHandle);
++        }
++        mLastMetricsHandle = mMetricsHandle;
+         mMetricsHandle = 0;
+     }
+     // we no longer have anything pending upload
+@@ -1885,7 +1910,10 @@ void MediaCodec::statsBufferSent(int64_t presentationUs, const sp<MediaCodecBuff
+         });
+     }
+ 
+-    if (mDomain == DOMAIN_VIDEO && (mFlags & kFlagIsEncoder)) {
++    // NOTE: these were erroneously restricted to video encoders, but we want them for all
++    // codecs.
++    if (android::media::codec::provider_->subsession_metrics()
++            || (mDomain == DOMAIN_VIDEO && (mFlags & kFlagIsEncoder))) {
+         mBytesInput += buffer->size();
+         mFramesInput++;
+     }
+@@ -1907,12 +1935,15 @@ void MediaCodec::statsBufferSent(int64_t presentationUs, const sp<MediaCodecBuff
+     ++mInputBufferCounter;
+ }
+ 
+-// when we get a buffer back from the codec
++// when we get a buffer back from the codec, always called from the looper thread
+ void MediaCodec::statsBufferReceived(int64_t presentationUs, const sp<MediaCodecBuffer> &buffer) {
+ 
+     CHECK_NE(mState, UNINITIALIZED);
+ 
+-    if (mDomain == DOMAIN_VIDEO && (mFlags & kFlagIsEncoder)) {
++    // NOTE: these were erroneously restricted to video encoders, but we want them for all
++    // codecs.
++    if (android::media::codec::provider_->subsession_metrics()
++            || (mDomain == DOMAIN_VIDEO && (mFlags & kFlagIsEncoder))) {
+         int32_t flags = 0;
+         (void) buffer->meta()->findInt32("flags", &flags);
+ 
+@@ -3610,6 +3641,10 @@ void MediaCodec::onGetMetrics(const sp<AMessage>& msg) {
+         updateMediametrics();
+         results = mediametrics_dup(mMetricsHandle);
+         updateEphemeralMediametrics(results);
++    } else if (mLastMetricsHandle != 0) {
++        // After error, mMetricsHandle is cleared, but we keep the last
++        // metrics around so that it can be queried by getMetrics().
++        results = mediametrics_dup(mLastMetricsHandle);
+     } else {
+         results = mediametrics_dup(mMetricsHandle);
+     }
+@@ -3879,6 +3914,7 @@ bool MediaCodec::handleDequeueInputBuffer(const sp<AReplyToken> &replyID, bool n
+     return true;
+ }
+ 
++// always called from the looper thread
+ MediaCodec::DequeueOutputResult MediaCodec::handleDequeueOutputBuffer(
+         const sp<AReplyToken> &replyID, bool newRequest) {
+     if (!isExecuting()) {
+@@ -3934,6 +3970,9 @@ MediaCodec::DequeueOutputResult MediaCodec::handleDequeueOutputBuffer(
+ 
+         response->setInt32("flags", flags);
+ 
++        // NOTE: we must account the stats for an output buffer only after we
++        // already handled a potential output format change that could have
++        // started a new subsession.
+         statsBufferReceived(timeUs, buffer);
+ 
+         response->postReply(replyID);
+@@ -5838,6 +5877,7 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
+     }
+ }
+ 
++// always called from the looper thread
+ void MediaCodec::handleOutputFormatChangeIfNeeded(const sp<MediaCodecBuffer> &buffer) {
+     sp<AMessage> format = buffer->format();
+     if (mOutputFormat == format) {
+@@ -5921,6 +5961,24 @@ void MediaCodec::handleOutputFormatChangeIfNeeded(const sp<MediaCodecBuffer> &bu
+             }
+         }
+     }
++
++    // Update the width and the height.
++    int32_t left = 0, top = 0, right = 0, bottom = 0, width = 0, height = 0;
++    bool newSubsession = false;
++    if (android::media::codec::provider_->subsession_metrics()
++            && mOutputFormat->findInt32("width", &width)
++            && mOutputFormat->findInt32("height", &height)
++            && (width != mWidth || height != mHeight)) {
++        // consider a new subsession if the width or height changes.
++        newSubsession = true;
++    }
++    // TODO: properly detect new audio subsession
++
++    // Only consider a new subsession if we already have output (from a previous subsession).
++    if (newSubsession && mMetricsToUpload && mBytesEncoded > 0) {
++        handleStartingANewSubsession();
++    }
++
+     if (mFlags & kFlagIsAsync) {
+         onOutputFormatChanged();
+     } else {
+@@ -5928,8 +5986,6 @@ void MediaCodec::handleOutputFormatChangeIfNeeded(const sp<MediaCodecBuffer> &bu
+         postActivityNotificationIfPossible();
+     }
+ 
+-    // Update the width and the height.
+-    int32_t left = 0, top = 0, right = 0, bottom = 0, width = 0, height = 0;
+     bool resolutionChanged = false;
+     if (mOutputFormat->findRect("crop", &left, &top, &right, &bottom)) {
+         mWidth = right - left + 1;
+@@ -5956,6 +6012,35 @@ void MediaCodec::handleOutputFormatChangeIfNeeded(const sp<MediaCodecBuffer> &bu
+     updateHdrMetrics(false /* isConfig */);
+ }
+ 
++// always called from the looper thread (and therefore not mutexed)
++void MediaCodec::handleStartingANewSubsession() {
++    // create a new metrics item for the subsession with the new resolution.
++    // TODO: properly account input counts for the previous and the new
++    // subsessions. We only find out that a new subsession started from the
++    // output format, but by that time we already accounted the input counts
++    // to the previous subsession.
++    flushMediametrics(); // this deletes mMetricsHandle, but stores it in mLastMetricsHandle
++
++    // hence mLastMetricsHandle has the metrics item for the previous subsession.
++    if ((mFlags & kFlagIsAsync) && mCallback != nullptr) {
++        sp<AMessage> msg = mCallback->dup();
++        msg->setInt32("callbackID", CB_METRICS_FLUSHED);
++        std::unique_ptr<mediametrics::Item> flushedMetrics(
++                mediametrics::Item::convert(mediametrics_dup(mLastMetricsHandle)));
++        msg->setObject("metrics", new WrapperObject<std::unique_ptr<mediametrics::Item>>(
++                std::move(flushedMetrics)));
++        msg->post();
++    }
++
++    // reuse/continue old metrics item for the new subsession.
++    mMetricsHandle = mediametrics_dup(mLastMetricsHandle);
++    mMetricsToUpload = true;
++    // TODO: configured width/height for the new subsession should be the
++    // previous width/height.
++    mSubsessionCount++;
++    resetSubsessionMetricsFields();
++}
++
+ void MediaCodec::extractCSD(const sp<AMessage> &format) {
+     mCSD.clear();
+ 
+diff --git a/media/libstagefright/include/media/stagefright/MediaCodec.h b/media/libstagefright/include/media/stagefright/MediaCodec.h
+index b4794f17f0..ca2fa3de7a 100644
+--- a/media/libstagefright/include/media/stagefright/MediaCodec.h
++++ b/media/libstagefright/include/media/stagefright/MediaCodec.h
+@@ -491,12 +491,21 @@ private:
+ 
+     Mutex mMetricsLock;
+     mediametrics_handle_t mMetricsHandle = 0;
++    mediametrics_handle_t mLastMetricsHandle = 0; // only accessed from the looper or destructor
+     bool mMetricsToUpload = false;
+     nsecs_t mLifetimeStartNs = 0;
+     void initMediametrics();
+     void updateMediametrics();
+     void flushMediametrics();
+     void resetMetricsFields();
++
++    // Reset the metrics fields for a new subsession.
++    void resetSubsessionMetricsFields();
++
++    // Start a new subsession (for metrics). This includes flushing the current
++    // metrics, notifying the client and resetting the session fields.
++    void handleStartingANewSubsession();
++
+     void updateEphemeralMediametrics(mediametrics_handle_t item);
+     void updateLowLatency(const sp<AMessage> &msg);
+     void updateCodecImportance(const sp<AMessage>& msg);
+@@ -558,6 +567,7 @@ private:
+         int32_t setOutputSurfaceCount;
+         int32_t resolutionChangeCount;
+     } mReliabilityContextMetrics;
++    int32_t mSubsessionCount;
+ 
+     // initial create parameters
+     AString mInitName;
+-- 
+2.43.0
+

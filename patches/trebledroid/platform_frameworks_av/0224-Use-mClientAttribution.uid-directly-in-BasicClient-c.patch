@@ -1,0 +1,34 @@
+From 3216393730ed06dd5ad3de771bdf127f240de965 Mon Sep 17 00:00:00 2001
+From: Austin Borger <borgera@google.com>
+Date: Fri, 25 Oct 2024 13:56:52 -0700
+Subject: [PATCH 224/436] Use mClientAttribution.uid directly in BasicClient
+ constructor.
+
+If getClientUid is overridden, the child class's implementation is
+not invoked in the constructor. While not overridden anywhere currently,
+this could potentially cause confusion in the future.
+
+Bug: 369841571
+Test: CameraPermissionTest
+Flag: EXEMPT minor followup to mechanical refactor
+Change-Id: Ieee8784e0c16c571e3dd8149c1d9ae5bd50c087f
+---
+ services/camera/libcameraservice/CameraService.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/services/camera/libcameraservice/CameraService.cpp b/services/camera/libcameraservice/CameraService.cpp
+index f59ad186d0..bdd7cbcce2 100644
+--- a/services/camera/libcameraservice/CameraService.cpp
++++ b/services/camera/libcameraservice/CameraService.cpp
+@@ -4111,7 +4111,7 @@ CameraService::BasicClient::BasicClient(
+         mAppOpsManager = std::make_unique<AppOpsManager>();
+     }
+ 
+-    mUidIsTrusted = isTrustedCallingUid(getClientUid());
++    mUidIsTrusted = isTrustedCallingUid(mClientAttribution.uid);
+ }
+ 
+ CameraService::BasicClient::~BasicClient() {
+-- 
+2.43.0
+

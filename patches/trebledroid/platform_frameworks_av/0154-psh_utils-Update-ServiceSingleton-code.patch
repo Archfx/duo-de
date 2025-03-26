@@ -1,0 +1,1702 @@
+From d46c87c357e71b96249709f80802bf4219ea3f1b Mon Sep 17 00:00:00 2001
+From: Andy Hung <hunga@google.com>
+Date: Fri, 20 Sep 2024 13:30:42 -0700
+Subject: [PATCH 154/436] psh_utils: Update ServiceSingleton code
+
+The new code handles service death.
+
+Flag: EXEMPT Bugfix
+Test: atest service_singleton_tests
+Test: power stats show when enabled, after stats service killed
+Test: atest powerstats_collector_tests
+Test: atest audio_powerstats_benchmark
+Test: atest audio_token_benchmark
+Test: atest audio_powerstatscollector_benchmark
+Bug: 350114693
+Change-Id: I0783b3c58ed8412b363b613127873f01ef8d6737
+---
+ media/psh_utils/Android.bp                    |   1 +
+ media/psh_utils/HealthStatsProvider.cpp       |   4 +-
+ media/psh_utils/PowerStatsProvider.cpp        |   4 +-
+ media/psh_utils/benchmarks/Android.bp         |  50 +-
+ .../include/psh_utils/ServiceSingleton.h      |  67 ---
+ media/psh_utils/tests/Android.bp              |   2 +
+ media/utils/Android.bp                        |   4 +
+ media/utils/ServiceSingleton.cpp              |  66 +++
+ .../include/mediautils/BinderGenericUtils.h   | 388 +++++++++++++++
+ .../include/mediautils/ServiceSingleton.h     | 464 ++++++++++++++++++
+ media/utils/tests/Android.bp                  |  46 +-
+ media/utils/tests/IServiceSingletonTest.aidl  |  19 +
+ media/utils/tests/service_singleton_tests.cpp | 365 ++++++++++++++
+ 13 files changed, 1372 insertions(+), 108 deletions(-)
+ delete mode 100644 media/psh_utils/include/psh_utils/ServiceSingleton.h
+ create mode 100644 media/utils/ServiceSingleton.cpp
+ create mode 100644 media/utils/include/mediautils/BinderGenericUtils.h
+ create mode 100644 media/utils/include/mediautils/ServiceSingleton.h
+ create mode 100644 media/utils/tests/IServiceSingletonTest.aidl
+ create mode 100644 media/utils/tests/service_singleton_tests.cpp
+
+diff --git a/media/psh_utils/Android.bp b/media/psh_utils/Android.bp
+index dafa63b515..920f6a236f 100644
+--- a/media/psh_utils/Android.bp
++++ b/media/psh_utils/Android.bp
+@@ -32,6 +32,7 @@ cc_library {
+         "com.android.media.audio-aconfig-cc",
+         "libaudioutils",
+         "libbase",
++        "libbinder",
+         "libbinder_ndk",
+         "libcutils",
+         "liblog",
+diff --git a/media/psh_utils/HealthStatsProvider.cpp b/media/psh_utils/HealthStatsProvider.cpp
+index de7246396c..611c4249ac 100644
+--- a/media/psh_utils/HealthStatsProvider.cpp
++++ b/media/psh_utils/HealthStatsProvider.cpp
+@@ -18,7 +18,7 @@
+ #include <aidl/android/hardware/health/IHealth.h>
+ #include <android-base/logging.h>
+ #include <android/binder_manager.h>
+-#include <psh_utils/ServiceSingleton.h>
++#include <mediautils/ServiceSingleton.h>
+ 
+ using ::aidl::android::hardware::health::HealthInfo;
+ using ::aidl::android::hardware::health::IHealth;
+@@ -26,7 +26,7 @@ using ::aidl::android::hardware::health::IHealth;
+ namespace android::media::psh_utils {
+ 
+ static auto getHealthService() {
+-    return getServiceSingleton<IHealth>();
++    return mediautils::getService<IHealth>();
+ }
+ 
+ status_t HealthStatsDataProvider::fill(PowerStats* stat) const {
+diff --git a/media/psh_utils/PowerStatsProvider.cpp b/media/psh_utils/PowerStatsProvider.cpp
+index 112c3236b6..f43b6e9541 100644
+--- a/media/psh_utils/PowerStatsProvider.cpp
++++ b/media/psh_utils/PowerStatsProvider.cpp
+@@ -17,7 +17,7 @@
+ #include "PowerStatsProvider.h"
+ #include <aidl/android/hardware/power/stats/IPowerStats.h>
+ #include <android-base/logging.h>
+-#include <psh_utils/ServiceSingleton.h>
++#include <mediautils/ServiceSingleton.h>
+ #include <unordered_map>
+ 
+ using ::aidl::android::hardware::power::stats::IPowerStats;
+@@ -25,7 +25,7 @@ using ::aidl::android::hardware::power::stats::IPowerStats;
+ namespace android::media::psh_utils {
+ 
+ static auto getPowerStatsService() {
+-    return getServiceSingleton<IPowerStats>();
++    return mediautils::getService<IPowerStats>();
+ }
+ 
+ status_t RailEnergyDataProvider::fill(PowerStats *stat) const {
+diff --git a/media/psh_utils/benchmarks/Android.bp b/media/psh_utils/benchmarks/Android.bp
+index 2382c69663..066771bf7b 100644
+--- a/media/psh_utils/benchmarks/Android.bp
++++ b/media/psh_utils/benchmarks/Android.bp
+@@ -8,10 +8,9 @@ package {
+     default_applicable_licenses: ["frameworks_av_license"],
+ }
+ 
+-cc_benchmark {
+-    name: "audio_powerstats_benchmark",
++cc_defaults {
++    name: "audio_psh_utils_benchmark_defaults",
+ 
+-    srcs: ["audio_powerstats_benchmark.cpp"],
+     cflags: [
+         "-Wall",
+         "-Werror",
+@@ -22,6 +21,7 @@ cc_benchmark {
+     shared_libs: [
+         "libaudioutils",
+         "libbase",
++        "libbinder",
+         "libbinder_ndk",
+         "libcutils",
+         "liblog",
+@@ -30,46 +30,26 @@ cc_benchmark {
+     ],
+ }
+ 
++cc_benchmark {
++    name: "audio_powerstats_benchmark",
++
++    defaults: ["audio_psh_utils_benchmark_defaults"],
++
++    srcs: ["audio_powerstats_benchmark.cpp"],
++}
++
+ cc_benchmark {
+     name: "audio_powerstatscollector_benchmark",
+ 
++    defaults: ["audio_psh_utils_benchmark_defaults"],
++
+     srcs: ["audio_powerstatscollector_benchmark.cpp"],
+-    cflags: [
+-        "-Wall",
+-        "-Werror",
+-    ],
+-    static_libs: [
+-        "libpshutils",
+-    ],
+-    shared_libs: [
+-        "libaudioutils",
+-        "libbase",
+-        "libbinder_ndk",
+-        "libcutils",
+-        "liblog",
+-        "libmediautils",
+-        "libutils",
+-    ],
+ }
+ 
+ cc_benchmark {
+     name: "audio_token_benchmark",
+ 
++    defaults: ["audio_psh_utils_benchmark_defaults"],
++
+     srcs: ["audio_token_benchmark.cpp"],
+-    cflags: [
+-        "-Wall",
+-        "-Werror",
+-    ],
+-    static_libs: [
+-        "libpshutils",
+-    ],
+-    shared_libs: [
+-        "libaudioutils",
+-        "libbase",
+-        "libbinder_ndk",
+-        "libcutils",
+-        "liblog",
+-        "libmediautils",
+-        "libutils",
+-    ],
+ }
+diff --git a/media/psh_utils/include/psh_utils/ServiceSingleton.h b/media/psh_utils/include/psh_utils/ServiceSingleton.h
+deleted file mode 100644
+index d0cd6d2efe..0000000000
+--- a/media/psh_utils/include/psh_utils/ServiceSingleton.h
++++ /dev/null
+@@ -1,67 +0,0 @@
+-/*
+- * Copyright (C) 2024 The Android Open Source Project
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *      http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-#pragma once
+-
+-#include <android/binder_auto_utils.h>
+-#include <android/binder_manager.h>
+-#include <android-base/thread_annotations.h>
+-#include <mutex>
+-#include <utils/Log.h>
+-#include <utils/Timers.h>
+-
+-namespace android::media::psh_utils {
+-
+-struct DefaultServiceTraits {
+-    static constexpr int64_t kThresholdRetryNs = 1'000'000'000;
+-    static constexpr int64_t kMaxRetries = 5;
+-    static constexpr const char* kServiceVersion = "/default";
+-    static constexpr bool kShowLog = true;
+-};
+-
+-template<typename Service, typename ServiceTraits = DefaultServiceTraits>
+-std::shared_ptr<Service> getServiceSingleton() {
+-    [[clang::no_destroy]] static constinit std::mutex m;
+-    [[clang::no_destroy]] static constinit std::shared_ptr<Service> service GUARDED_BY(m);
+-    static int64_t nextTryNs GUARDED_BY(m) = 0;
+-    static int64_t tries GUARDED_BY(m) = 0;
+-
+-    std::lock_guard l(m);
+-    if (service
+-            || tries > ServiceTraits::kMaxRetries  // try too many times
+-            || systemTime(SYSTEM_TIME_BOOTTIME) < nextTryNs) {  // try too frequently.
+-        return service;
+-    }
+-
+-    const auto serviceName = std::string(Service::descriptor)
+-            .append(ServiceTraits::kServiceVersion);
+-    service = Service::fromBinder(
+-            ::ndk::SpAIBinder(AServiceManager_checkService(serviceName.c_str())));
+-
+-    if (!service) {
+-        // If failed, set a time limit before retry.
+-        // No need to log an error, it is already done.
+-        nextTryNs = systemTime(SYSTEM_TIME_BOOTTIME) + ServiceTraits::kThresholdRetryNs;
+-        ALOGV_IF(ServiceTraits::kShowLog, "service:%s  retries:%lld of %lld  nextTryNs:%lld",
+-                Service::descriptor, (long long)tries,
+-                (long long)kMaxRetries, (long long)nextTryNs);
+-        ++tries;
+-    }
+-
+-    return service;
+-}
+-
+-} // namespace android::media::psh_utils
+diff --git a/media/psh_utils/tests/Android.bp b/media/psh_utils/tests/Android.bp
+index 74589f8f6a..64fc97153d 100644
+--- a/media/psh_utils/tests/Android.bp
++++ b/media/psh_utils/tests/Android.bp
+@@ -15,9 +15,11 @@ cc_test {
+     ],
+     shared_libs: [
+         "libbase",
++        "libbinder",
+         "libbinder_ndk",
+         "libcutils",
+         "liblog",
++        "libmediautils",
+         "libutils",
+     ],
+     static_libs: [
+diff --git a/media/utils/Android.bp b/media/utils/Android.bp
+index e340b40f24..762984e64f 100644
+--- a/media/utils/Android.bp
++++ b/media/utils/Android.bp
+@@ -53,6 +53,7 @@ filegroup {
+         "Process.cpp",
+         "ProcessInfo.cpp",
+         "SchedulingPolicyService.cpp",
++        "ServiceSingleton.cpp",
+         "ServiceUtilities.cpp",
+         "ThreadSnapshot.cpp",
+         "TimeCheck.cpp",
+@@ -89,6 +90,7 @@ cc_library {
+         "libaudioutils", // for clock.h, Statistics.h
+         "libbase",
+         "libbinder",
++        "libbinder_ndk",
+         "libcutils",
+         "libhidlbase",
+         "liblog",
+@@ -112,6 +114,8 @@ cc_library {
+     ],
+ 
+     export_shared_lib_headers: [
++        "libaudioutils",
++        "libbinder_ndk",
+         "libpermission",
+         "packagemanager_aidl-cpp",
+     ],
+diff --git a/media/utils/ServiceSingleton.cpp b/media/utils/ServiceSingleton.cpp
+new file mode 100644
+index 0000000000..ade7a3ef0f
+--- /dev/null
++++ b/media/utils/ServiceSingleton.cpp
+@@ -0,0 +1,66 @@
++/*
++ * Copyright (C) 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++//#define LOG_NDEBUG 0
++#define LOG_TAG "ServiceSingleton"
++
++#include <mediautils/ServiceSingleton.h>
++
++namespace android::mediautils {
++
++namespace details {
++
++// To prevent multiple instances in different linkages,
++// we anchor the singleton in a .cpp instead of inlining in the header.
++
++template<typename T>
++requires (std::is_same_v<T, const char*> || std::is_same_v<T, String16>)
++std::shared_ptr<ServiceHandler> ServiceHandler::getInstance(const T& name) {
++    using Key = std::conditional_t<std::is_same_v<T, String16>, String16, std::string>;
++    [[clang::no_destroy]] static constinit std::mutex mutex;
++    [[clang::no_destroy]] static constinit std::shared_ptr<
++            std::map<Key, std::shared_ptr<ServiceHandler>>> map GUARDED_BY(mutex);
++    static constinit bool init GUARDED_BY(mutex) = false;
++
++    std::lock_guard l(mutex);
++    if (!init) {
++        map = std::make_shared<std::map<Key, std::shared_ptr<ServiceHandler>>>();
++        init = true;
++    }
++
++    auto& handler = (*map)[name];
++    if (!handler) {
++        handler = std::make_shared<ServiceHandler>();
++        if constexpr (std::is_same_v<T, String16>) {
++            handler->init_cpp();
++        } else /* constexpr */ {
++            handler->init_ndk();
++        }
++    }
++    return handler;
++}
++
++// Explicit template function instantiation.
++template
++std::shared_ptr<ServiceHandler> ServiceHandler::getInstance<const char*>(const char* const& name);
++
++template
++std::shared_ptr<ServiceHandler> ServiceHandler::getInstance<String16>(const String16& name);
++
++} // details
++
++} // namespace android::mediautils
++
+diff --git a/media/utils/include/mediautils/BinderGenericUtils.h b/media/utils/include/mediautils/BinderGenericUtils.h
+new file mode 100644
+index 0000000000..c2bbde1598
+--- /dev/null
++++ b/media/utils/include/mediautils/BinderGenericUtils.h
+@@ -0,0 +1,388 @@
++/*
++ * Copyright (C) 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#pragma once
++
++#include <android/binder_auto_utils.h>
++#include <android/binder_interface_utils.h>
++#include <android/binder_manager.h>
++#include <binder/IServiceManager.h>
++
++namespace android::mediautils {
++// General Template Binder Utilities.
++//
++// In order to write generic Template methods, we need to have utility methods
++// that provide seamless template overload resolution between NDK and CPP variants.
++//
++
++// Returns true or false based on whether the Interface is a NDK Interface.
++template<typename Interface>
++inline constexpr bool is_ndk = std::derived_from<Interface, ::ndk::ICInterface>;
++
++// Returns the Interface ptr type (shared_ptr or sp) based on the Interface.
++template<typename Interface>
++using InterfaceType =
++        std::conditional_t <is_ndk<Interface>, std::shared_ptr<Interface>, sp<Interface>>;
++
++template<typename Interface>
++using BaseInterfaceType = std::conditional_t <is_ndk<Interface>,
++std::shared_ptr<::ndk::ICInterface>, sp<::android::IInterface>>;
++
++/**
++ * Returns either a sp<IBinder> or an SpAIBinder object
++ * for the AIDL interface given.
++ *
++ * A -cpp interface will return sp<IBinder>.
++ * A -ndk interface will return SpAIBinder
++ */
++template<typename Interface>
++sp<IBinder> binderFromInterface(const sp<Interface> &interface) {
++    return IInterface::asBinder(interface);
++}
++
++template<typename Interface>
++::ndk::SpAIBinder binderFromInterface(const std::shared_ptr<Interface> &interface) {
++    return interface->asBinder();
++}
++
++/**
++ * Returns either a sp<Interface> or a std::shared_ptr<Interface> from a Binder object.
++ *
++ * A -cpp interface will return sp<Interface>.
++ * A -ndk interface will return std::shared_ptr<Interface>
++ */
++template<typename Interface>
++sp<Interface> interfaceFromBinder(const sp<IBinder> &binder) {
++    return interface_cast<Interface>(binder);
++}
++
++template<typename Interface>
++std::shared_ptr<Interface> interfaceFromBinder(const ::ndk::SpAIBinder &binder) {
++    return Interface::fromBinder(binder);
++}
++
++/**
++ * Returns either a sp<Interface> or a std::shared_ptr<Interface> from
++ * the NDK/CPP base interface class.
++ */
++template<typename Interface>
++sp<Interface> interfaceFromBase(const sp<::android::IInterface> &interface) {
++    // this is unvalidated, though could verify getInterfaceDescriptor() == Interface::descriptor
++    return sp<Interface>::cast(interface);
++}
++
++template<typename Interface>
++std::shared_ptr<Interface> interfaceFromBase(
++        const std::shared_ptr<::ndk::ICInterface> &interface) {
++    // this is unvalidated, though could verify
++    // !strcmp(AIBinder_Class_getDescriptor(AIBinder_getClass(...), Interface::descriptor)
++    return std::static_pointer_cast<Interface>(interface);
++}
++
++/**
++ * Returns a fully qualified service name.
++ *
++ * @param name
++ * If name is empty, it returns the name from the Service descriptor.
++ * If name starts with '/', it appends the name as a version to the Service descriptor,
++ * e.g. "/default".
++ * Otherwise the name is assumed to be the full Service name, overriding the
++ * Service descriptor.
++ */
++template<typename Service>
++auto fullyQualifiedServiceName(const char* const name) {
++    using StringType = std::conditional_t<is_ndk<Service>, std::string, String16>;
++    return name == nullptr ? StringType(Service::descriptor)
++            : name[0] != 0 && name[0] != '/' ? StringType(name)
++                    : StringType(Service::descriptor) + StringType(name);
++}
++
++/**
++ * Returns either a std::shared_ptr<Interface> or sp<Interface>
++ * for the AIDL interface given.
++ *
++ * A -cpp interface will return sp<Service>.
++ * A -ndk interface will return std::shared_ptr<Service>
++ *
++ * @param name if non-empty should contain either a suffix if it starts
++ * with a '/' such as "/default", or the full service name.
++ */
++template<typename Service>
++auto checkServicePassThrough(const char *const name = "") {
++    if constexpr(is_ndk<Service>)
++    {
++        const auto serviceName = fullyQualifiedServiceName<Service>(name);
++        return Service::fromBinder(
++                ::ndk::SpAIBinder(AServiceManager_checkService(serviceName.c_str())));
++    } else /* constexpr */ {
++        const auto serviceName = fullyQualifiedServiceName<Service>(name);
++        auto binder = defaultServiceManager()->checkService(serviceName);
++        return interface_cast<Service>(binder);
++    }
++}
++
++template<typename Service>
++void addService(const std::shared_ptr<Service> &service) {
++    AServiceManager_addService(binderFromInterface(service), Service::descriptor);
++}
++
++template<typename Service>
++void addService(const sp<Service> &service) {
++    defaultServiceManager()->addService(Service::descriptor, binderFromInterface(service));
++}
++
++namespace details {
++
++// Use the APIs below, not the details here.
++
++/**
++ * RequestServiceManagerCallback(Cpp|Ndk) is a RAII class that
++ * requests a ServiceManager callback.
++ *
++ * Note the ServiceManager is a single threaded "apartment" and only one
++ * transaction is active, hence:
++ *
++ * 1) After the RequestServiceManagerCallback object is destroyed no
++ *    calls to the onBinder function is pending or will occur.
++ * 2) To prevent deadlock, do not construct or destroy the class with
++ *    a lock held that the onService function also requires.
++ */
++template<typename Service>
++class RequestServiceManagerCallbackCpp {
++public:
++    explicit RequestServiceManagerCallbackCpp(
++            std::function<void(const sp<Service> &)> &&onService,
++            const char *const serviceName = ""
++    )
++            : mServiceName{fullyQualifiedServiceName<Service>(serviceName)},
++              mWaiter{sp<Waiter>::make(std::move(onService))},
++              mStatus{defaultServiceManager()->registerForNotifications(mServiceName,
++                                                                        mWaiter)} {
++    }
++
++    ~RequestServiceManagerCallbackCpp() {
++        if (mStatus == OK) {
++            defaultServiceManager()->unregisterForNotifications(mServiceName, mWaiter);
++        }
++    }
++
++    status_t getStatus() const {
++        return mStatus;
++    }
++
++private:
++    const String16 mServiceName;
++    const sp<IServiceManager::LocalRegistrationCallback> mWaiter;
++    const status_t mStatus;
++
++    // With some work here, we could make this a singleton to improve
++    // performance and reduce binder clutter.
++    class Waiter : public IServiceManager::LocalRegistrationCallback {
++    public:
++        explicit Waiter(std::function<void(const sp<Service> &)> &&onService)
++                : mOnService{std::move(onService)} {}
++
++    private:
++        void onServiceRegistration(
++                const String16 & /*name*/, const sp<IBinder> &binder) final {
++            mOnService(interface_cast<Service>(binder));
++        }
++
++        const std::function<void(const sp<Service> &)> mOnService;
++    };
++};
++
++template<typename Service>
++class RequestServiceManagerCallbackNdk {
++public:
++    explicit RequestServiceManagerCallbackNdk(
++            std::function<void(const std::shared_ptr<Service> &)> &&onService,
++            const char *const serviceName = ""
++    )
++            : mServiceName{fullyQualifiedServiceName<Service>(serviceName)},
++              mOnService{std::move(onService)},
++              mWaiter{AServiceManager_registerForServiceNotifications(
++                      mServiceName.c_str(),
++                      onRegister, this)}  // must be registered after mOnService.
++    {}
++
++    ~RequestServiceManagerCallbackNdk() {
++        if (mWaiter) {
++            AServiceManager_NotificationRegistration_delete(mWaiter);
++        }
++    }
++
++    status_t getStatus() const {
++        return mWaiter != nullptr ? OK : INVALID_OPERATION;
++    }
++
++private:
++    const std::string mServiceName;  // must keep a local copy.
++    const std::function<void(const std::shared_ptr<Service> &)> mOnService;
++    AServiceManager_NotificationRegistration *const mWaiter;  // last.
++
++    static void onRegister(const char *instance, AIBinder *registered, void *cookie) {
++        (void) instance;
++        auto *callbackHandler = static_cast<RequestServiceManagerCallbackNdk<Service> *>(cookie);
++        callbackHandler->mOnService(Service::fromBinder(::ndk::SpAIBinder(registered)));
++    }
++};
++
++/**
++ * RequestDeathNotification(Cpp|Ndk) is a RAII class that
++ * requests a death notification.
++ *
++ * Note the ServiceManager is a single threaded "apartment" and only one
++ * transaction is active, hence:
++ *
++ * 1) After the RequestDeathNotification object is destroyed no
++ *    calls to the onBinder function is pending or will occur.
++ * 2) To prevent deadlock, do not construct or destroy the class with
++ *    a lock held that the onBinderDied function also requires.
++ */
++
++class RequestDeathNotificationCpp {
++    class DeathRecipientHelper : public IBinder::DeathRecipient {
++    public:
++        explicit DeathRecipientHelper(std::function<void()> &&onBinderDied)
++                : mOnBinderDied{std::move(onBinderDied)} {
++        }
++
++        void binderDied(const wp<IBinder> &weakBinder) final {
++            (void) weakBinder;
++            mOnBinderDied();
++        }
++
++    private:
++        const std::function<void()> mOnBinderDied;
++    };
++
++public:
++    RequestDeathNotificationCpp(const sp<IBinder> &binder,
++                                std::function<void()> &&onBinderDied)
++            : mHelper{sp<DeathRecipientHelper>::make(std::move(onBinderDied))},
++              mWeakBinder{binder}, mStatus{binder->linkToDeath(mHelper)} {
++        ALOGW_IF(mStatus != OK, "%s: linkToDeath status:%d", __func__, mStatus);
++    }
++
++    ~RequestDeathNotificationCpp() {
++        if (mStatus == OK) {
++            const auto binder = mWeakBinder.promote();
++            if (binder) binder->unlinkToDeath(mHelper);
++        }
++    }
++
++    status_t getStatus() const {
++        return mStatus;
++    }
++
++private:
++    const sp<DeathRecipientHelper> mHelper;
++    const wp<IBinder> mWeakBinder;
++    const status_t mStatus;
++};
++
++class RequestDeathNotificationNdk {
++public:
++    RequestDeathNotificationNdk(
++            const ::ndk::SpAIBinder &binder, std::function<void()> &&onBinderDied)
++            : mOnBinderDied(std::move(onBinderDied)),
++              mRecipient(::AIBinder_DeathRecipient_new(OnBinderDiedStatic),
++                         &AIBinder_DeathRecipient_delete), mStatus{AIBinder_linkToDeath(
++                    binder.get(), mRecipient.get(), /* cookie */ this)} {
++        ALOGW_IF(mStatus != OK, "%s: AIBinder_linkToDeath status:%d", __func__, mStatus);
++        // We do not use AIBinder_DeathRecipient_setOnUnlinked() to do resource deallocation
++        // as the functor mOnBinderDied is kept alive by this class.
++    }
++
++    ~RequestDeathNotificationNdk() {
++        // The AIBinder_DeathRecipient dtor automatically unlinks all registered notifications,
++        // so AIBinder_unlinkToDeath() is not needed here (elsewise we need to maintain a
++        // AIBinder_Weak here).
++    }
++
++    status_t getStatus() const {
++        return mStatus;
++    }
++
++private:
++    void onBinderDied() {
++        mOnBinderDied();
++    }
++
++    static void OnBinderDiedStatic(void *cookie) {
++        reinterpret_cast<RequestDeathNotificationNdk *>(cookie)->onBinderDied();
++    }
++
++    const std::function<void()> mOnBinderDied;
++    const std::unique_ptr<AIBinder_DeathRecipient, decltype(
++            &AIBinder_DeathRecipient_delete)>
++            mRecipient;
++    const status_t mStatus;  // binder_status_t is a limited subset of status_t
++};
++
++} // details
++
++/**
++ * Requests a notification that service is available.
++ *
++ * An opaque handle is returned - after clearing it is guaranteed that
++ * no callback will occur.
++ *
++ * The callback will be of form:
++ *     onService(const sp<Service>& service);
++ *     onService(const std::shared_ptr<Service>& service);
++ */
++template<typename Service, typename F>
++std::shared_ptr<void> requestServiceNotification(
++        F onService, const char *const serviceName = "") {
++    // the following are used for callbacks but placed here for invalidate.
++    using RequestServiceManagerCallback = std::conditional_t<is_ndk<Service>,
++            details::RequestServiceManagerCallbackNdk<Service>,
++            details::RequestServiceManagerCallbackCpp<Service>>;
++    const auto ptr = std::make_shared<RequestServiceManagerCallback>(
++            onService, serviceName);
++    const auto status = ptr->getStatus();
++    return status == OK ? ptr : nullptr;
++}
++
++/**
++ * Requests a death notification.
++ *
++ * An opaque handle is returned - after clearing it is guaranteed that
++ * no notification will occur.
++ *
++ * The callback will be of form void onBinderDied();
++ */
++template<typename Service>
++std::shared_ptr<void> requestDeathNotification(
++        const sp<Service> &service, std::function<void()> &&onBinderDied) {
++    const auto ptr = std::make_shared<details::RequestDeathNotificationCpp>(
++            binderFromInterface(service), std::move(onBinderDied));
++    const auto status = ptr->getStatus();
++    return status == OK ? ptr : nullptr;
++}
++
++template<typename Service>
++std::shared_ptr<void> requestDeathNotification(
++        const std::shared_ptr<Service> &service, std::function<void()> &&onBinderDied) {
++    const auto ptr = std::make_shared<details::RequestDeathNotificationNdk>(
++            binderFromInterface(service), std::move(onBinderDied));
++    const auto status = ptr->getStatus();
++    return status == OK ? ptr : nullptr;
++}
++
++} // namespace android::mediautils
+diff --git a/media/utils/include/mediautils/ServiceSingleton.h b/media/utils/include/mediautils/ServiceSingleton.h
+new file mode 100644
+index 0000000000..644d9cd54c
+--- /dev/null
++++ b/media/utils/include/mediautils/ServiceSingleton.h
+@@ -0,0 +1,464 @@
++/*
++ * Copyright (C) 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#pragma once
++
++#include "BinderGenericUtils.h"
++
++#include <android-base/thread_annotations.h>
++#include <audio_utils/mutex.h>
++#include <chrono>
++#include <map>
++#include <mutex>
++#include <utils/Log.h>
++#include <utils/Timers.h>
++
++/**
++ * ServiceSingleton provides a non-blocking NDK/CPP compatible service cache.
++ *
++ * This is a specialized cache that allows per-service configuration.
++ *
++ * Features:
++ *
++ * 1) Seamless compatibility with NDK and CPP based interfaces.
++ * 2) Time-out based service acquisition.
++ *    Set the maximum time to wait for any service.
++ * 3) Service prefetch:
++ *    Reduce start-up by prefetching service in advance (not on demand).
++ *    Prefetch is automatically installed by getService().
++ * 4) Manual interface setting for test and non-service manager acquisition support.
++ *
++ * If both NDK and CPP interfaces are available, we prefer the CPP version
++ * for the following reasons:
++ * 1) Established sp<> reference counting avoids mistakes. NDK tends to be error-prone.
++ * 2) Possible reduced binder object clutter by a singleton notification binder object.
++ *    Fewer binder objects are more efficient for the binder driver and ServiceManager.
++ *    For example, fewer binder deaths means less ServiceManager (linear time) cleanup.
++ *    A single binder object also offers binder access serialization.
++ * 3) CPP offers slightly better efficiency as it is closer to the
++ *    actual implementation, a minor detail and effect.
++ *
++ * We use a per-service ServiceHandler object to collect methods and implementation details.
++ * Currently this is separate for NDK and CPP interfaces to the same service;
++ * unification is possible by using ibinder_internals.h.
++ */
++namespace android::mediautils {
++
++enum ServiceOptions {
++    kNone = 0,
++    kNonNull = (1 << 0),  // don't return a null interface unless disabled.
++                          // partially implemented and experimental.
++};
++
++// Traits may come through a constexpr static function collection.
++// This participates in small buffer optimization SBO in std::function impl.
++template <typename Service>
++struct DefaultServiceTraits {
++    // getServiceName() returns the name associated with Service.
++    //
++    // If name is empty, it returns the name from the Service descriptor.
++    // If name starts with '/', it appends the name as a version to the Service descriptor,
++    // e.g. "/default".
++    // Otherwise the name is assumed to be the Service name.
++    static constexpr const char* getServiceName() { return "/default"; }
++
++    // This callback is called when a new service is received.
++    // The callback requires at least one thread in the Binder threadpool.
++    static constexpr void onNewService(const InterfaceType<Service>&) {}
++
++    // This callback is called if the service has died.
++    // The callback requires at least one thread in the Binder threadpool.
++    static constexpr void onServiceDied(const InterfaceType<Service>&) {}
++
++    // ServiceOptions configured for the Service.
++    static constexpr ServiceOptions options() { return ServiceOptions::kNone; }
++};
++
++// We store the traits as functors.
++template <typename Service>
++struct FunctionalServiceTraits {
++    template <typename ServiceTraits>
++    explicit FunctionalServiceTraits(const ServiceTraits& serviceTraits)
++        : getServiceName{serviceTraits.getServiceName}
++        , onNewService{serviceTraits.onNewService}
++        , onServiceDied{serviceTraits.onServiceDied}
++        , options{serviceTraits.options} {
++    }
++    std::function<const char*()> getServiceName;
++    std::function<void(const InterfaceType<Service>& service)> onNewService;
++    std::function<void(const InterfaceType<Service>& service)> onServiceDied;
++    std::function<ServiceOptions()> options;
++};
++
++namespace details {
++
++class ServiceHandler
++{
++public:
++    /**
++     * Returns a ServiceHandler, templated type T is String16 for the native type
++     * of the CPP service descriptors and const char* for the native type of the NDK
++     * service descriptors.
++     */
++    template<typename T>
++    requires (std::is_same_v<T, const char*> || std::is_same_v<T, String16>)
++    static std::shared_ptr<ServiceHandler> getInstance(const T& name);
++
++    /**
++     * Initializes the service handler with new service traits
++     * (methods that are triggered on service events).
++     *
++     * This is optional.  Default construction of traits is allowed for
++     * services that do not require special handling.
++     *
++     * @param serviceTraits
++     * @return true if the service handler had been previously initialized.
++     */
++    template<typename Service, typename ServiceTraits>
++    bool init(const ServiceTraits& serviceTraits) {
++        auto traits = std::make_shared<FunctionalServiceTraits<Service>>(serviceTraits);
++        std::shared_ptr<void> oldTraits;
++        std::lock_guard l(mMutex);
++        std::swap(oldTraits, mTraits);
++        const bool existing = oldTraits != nullptr;
++        mTraits = std::move(traits);
++        mSkip = false;
++        return existing;
++    }
++
++    /**
++     * Returns the service based on a timeout.
++     *
++     * @param waitNs the time to wait, internally clamped to (0, INT64_MAX / 2) to
++     *       avoid numeric overflow.
++     * @param useCallback installs a callback instead of polling.
++     *       the Callback persists if the call timeouts.  A Callback requires
++     *       at least one thread in the threadpool.
++     * @return Service interface.
++     */
++    template <typename Service>
++    auto get(std::chrono::nanoseconds waitNs, bool useCallback) {
++        audio_utils::unique_lock ul(mMutex);
++        auto& service = std::get<BaseInterfaceType<Service>>(mService);
++
++        if (mSkip || (service && mValid)) return service;  // early check.
++
++        // clamp to avoid numeric overflow.  INT64_MAX / 2 is effectively forever for a device.
++        std::chrono::nanoseconds kWaitLimitNs(
++                std::numeric_limits<decltype(waitNs.count())>::max() / 2);
++        waitNs = std::clamp(waitNs, decltype(waitNs)(0), kWaitLimitNs);
++        const auto end = std::chrono::steady_clock::now() + waitNs;
++
++        for (bool first = true; true; first = false) {
++            // we may have released mMutex, so see if service has been obtained.
++            if (mSkip || (service && mValid))  return service;
++
++            const auto traits = getTraits_l<Service>();
++
++            // first time or not using callback, check the service.
++            if (first || !useCallback) {
++                auto service_new = checkServicePassThrough<Service>(
++                        traits->getServiceName());
++                if (service_new) {
++                    mValid = true;
++                    service = std::move(service_new);
++                    setDeathNotifier_l<Service>();
++                    auto service_fixed = service;  // we're releasing the mutex.
++                    ul.unlock();
++                    traits->onNewService(interfaceFromBase<Service>(service_fixed));
++                    mCv.notify_all();
++                    return service_fixed;
++                }
++            }
++
++            // install service callback if needed.
++            if (useCallback && !mServiceNotificationHandle) {
++                setServiceNotifier_l<Service>();
++            }
++
++            // check time expiration.
++            const auto now = std::chrono::steady_clock::now();
++            if (now >= end
++                && (service || !(traits->options() & ServiceOptions::kNonNull))) {
++                return service;
++            }
++
++            // compute time to wait, then wait.
++            if (mServiceNotificationHandle) {
++                mCv.wait_until(ul, end);
++            } else {
++                const auto target = now + kPollTime;
++                mCv.wait_until(ul, std::min(target, end));
++            }
++            // loop back to see if we have any state change.
++        }
++    }
++
++    /**
++     * Sets an externally provided service override.
++     *
++     * @param Service
++     * @param service_new
++     */
++    template<typename Service>
++    void set(const InterfaceType<Service>& service_new) {
++        audio_utils::unique_lock ul(mMutex);
++        auto& service = std::get<BaseInterfaceType<Service>>(mService);
++        const auto traits = getTraits_l<Service>();
++        if (service) {
++            auto orig_service = service;
++            invalidateService_l<Service>();
++            ul.unlock();
++            traits->onServiceDied(interfaceFromBase<Service>(orig_service));
++        }
++        service = service_new;
++        ul.unlock();
++        // should we set the death notifier?  It could be a local service.
++        if (service_new) traits->onNewService(service_new);
++        mCv.notify_all();
++    }
++
++    /**
++     * Disables cache management in the ServiceHandler.  init() needs to be
++     * called to restart.
++     *
++     * All notifiers removed.
++     * Service pointer is released.
++     */
++    template<typename Service>
++    void skip() {
++        audio_utils::unique_lock ul(mMutex);
++        mSkip = true;
++        // remove notifiers.  OK to hold lock as presuming notifications one-way
++        // or manually triggered outside of lock.
++        mDeathNotificationHandle.reset();
++        mServiceNotificationHandle.reset();
++        auto& service = std::get<BaseInterfaceType<Service>>(mService);
++        const auto traits = getTraits_l<Service>();
++        std::shared_ptr<void> oldTraits;
++        std::swap(oldTraits, mTraits);  // destroyed outside of lock.
++        if (service) {
++            auto orig_service = service;  // keep reference to service to manually notify death.
++            invalidateService_l<Service>();  // sets service to nullptr
++            ul.unlock();
++            traits->onServiceDied(interfaceFromBase<Service>(orig_service));
++        } else {
++            ul.unlock();
++        }
++        mCv.notify_all();
++    }
++
++private:
++
++    // invalidateService_l is called to remove the old death notifier,
++    // invalidate the service, and optionally clear the service pointer.
++    template <typename Service>
++    void invalidateService_l() REQUIRES(mMutex) {
++        mDeathNotificationHandle.reset();
++        const auto traits = getTraits_l<Service>();
++        mValid = false;
++        if (!(traits->options() & ServiceOptions::kNonNull) || mSkip) {
++            auto &service = std::get<BaseInterfaceType<Service>>(mService);
++            service = nullptr;
++        }
++    }
++
++    // gets the traits set by init(), initializes with default if init() not called.
++    template <typename Service>
++    std::shared_ptr<FunctionalServiceTraits<Service>> getTraits_l() REQUIRES(mMutex) {
++        if (!mTraits) {
++            mTraits = std::make_shared<FunctionalServiceTraits<Service>>(
++                    DefaultServiceTraits<Service>{});
++        }
++        return std::static_pointer_cast<FunctionalServiceTraits<Service>>(mTraits);
++    }
++
++    // sets the service notification
++    template <typename Service>
++    void setServiceNotifier_l() REQUIRES(mMutex) {
++        const auto traits = getTraits_l<Service>();
++        mServiceNotificationHandle = requestServiceNotification<Service>(
++                [traits, this](const InterfaceType<Service>& service) {
++                    audio_utils::unique_lock ul(mMutex);
++                    auto originalService = std::get<BaseInterfaceType<Service>>(mService);
++                    if (originalService != service) {
++                        mService = service;
++                        mValid = true;
++                        setDeathNotifier_l<Service>();
++                        traits->onNewService(service);
++                    }
++                    ul.unlock();
++                    mCv.notify_all();
++                }, traits->getServiceName());
++        ALOGW_IF(!mServiceNotificationHandle, "%s: cannot register service notification %s"
++                                              " (do we have permission?)",
++                __func__, toString(Service::descriptor).c_str());
++    }
++
++    // sets the death notifier for mService (mService must be non-null).
++    template <typename Service>
++    void setDeathNotifier_l() REQUIRES(mMutex) {
++        auto base = std::get<BaseInterfaceType<Service>>(mService);
++        auto service = interfaceFromBase<Service>(base);
++        const auto binder = binderFromInterface(service);
++        if (binder.get()) {
++            auto traits = getTraits_l<Service>();
++            mDeathNotificationHandle = requestDeathNotification(
++                    base, [traits, service, this]() {
++                        // as only one death notification is dispatched,
++                        // we do not need to generation count.
++                        {
++                            std::lock_guard l(mMutex);
++                            invalidateService_l<Service>();
++                        }
++                        traits->onServiceDied(service);
++                    });
++            ALOGW_IF(!mDeathNotificationHandle, "%s: cannot register death notification %s"
++                                                " (already died?)",
++                    __func__, toString(Service::descriptor).c_str());
++        }
++    }
++
++    // initializes the variant for NDK use (called on first creation in the cache map).
++    void init_ndk() EXCLUDES(mMutex) {
++        std::lock_guard l(mMutex);
++        mService = std::shared_ptr<::ndk::ICInterface>{};
++    }
++
++    // initializes the variant for CPP use (called on first creation in the cache map).
++    void init_cpp() EXCLUDES(mMutex) {
++        std::lock_guard l(mMutex);
++        mService = sp<::android::IInterface>{};
++    }
++
++    static std::string toString(const std::string& s) { return s; }
++    static std::string toString(const String16& s) { return String8(s).c_str(); }
++
++    mutable std::mutex mMutex;
++    std::condition_variable mCv;
++    static constexpr auto kPollTime = std::chrono::seconds(1);
++
++    std::variant<std::shared_ptr<::ndk::ICInterface>,
++            sp<::android::IInterface>> mService GUARDED_BY(mMutex);
++    // aesthetically we place these last, but a ServiceHandler is never deleted in
++    // current operation, so there is no deadlock on destruction.
++    std::shared_ptr<void> mDeathNotificationHandle GUARDED_BY(mMutex);
++    std::shared_ptr<void> mServiceNotificationHandle GUARDED_BY(mMutex);
++    std::shared_ptr<void> mTraits GUARDED_BY(mMutex);
++
++    // mValid is true iff the service is non-null and alive.
++    bool mValid GUARDED_BY(mMutex) = false;
++
++    // mSkip indicates that the service is not cached.
++    bool mSkip GUARDED_BY(mMutex) = false;
++};
++
++} // details
++
++//----------------------------------
++// ServiceSingleton API
++//
++
++/*
++ * Implementation detail:
++ *
++ * Each CPP or NDK service interface has a unique ServiceHandler that
++ * is stored in a singleton cache.  The cache key is based on the service descriptor string
++ * so only one version can be chosen.  (The particular version may be changed using
++ * ServiceTraits.getName()).
++ */
++
++/**
++ * Sets the service trait parameters for acquiring the Service interface.
++ *
++ * If this is not set before the first service fetch, then default service traits are used.
++ *
++ * @return true if there is a preexisting (including prior default set) traits.
++ */
++template<typename Service, typename ServiceTraits>
++bool initService(const ServiceTraits& serviceTraits = {}) {
++    const auto serviceHandler = details::ServiceHandler::getInstance(Service::descriptor);
++    return serviceHandler->template init<Service>(serviceTraits);
++}
++
++/**
++ * Returns either a std::shared_ptr<Interface> or sp<Interface>
++ * for the AIDL service.  If the service is not available within waitNs,
++ * the method will return nullptr
++ * (or the previous invalidated service if Service.options() & kNonNull).
++ *
++ * This method installs a callback to obtain the service, so with waitNs == 0, it may be used to
++ * prefetch the service before it is actually needed.
++ *
++ * @param waitNs wait time for the service to become available.
++ * @return
++ *    a sp<> for a CPP interface
++ *    a std::shared_ptr<> for a NDK interface
++ *
++ */
++template<typename Service>
++auto getService(std::chrono::nanoseconds waitNs = {}) {
++    const auto serviceHandler = details::ServiceHandler::getInstance(Service::descriptor);
++    return interfaceFromBase<Service>(serviceHandler->template get<Service>(
++            waitNs, true /* useCallback */));
++}
++
++/**
++ * Returns either a std::shared_ptr<Interface> or sp<Interface>
++ * for the AIDL service.  If the service is not available within waitNs,
++ * the method will return nullptr
++ * (or the previous invalidated service if Service.options() & kNonNull).
++ *
++ * This method polls to obtain the service, which
++ * is useful if the service is restricted due to permissions or
++ * one is concerned about ThreadPool starvation.
++ *
++ * @param waitNs wait time for the service to become available.
++ * @return
++ *    a sp<> for a CPP interface
++ *    a std::shared_ptr<> for a NDK interface
++ */
++template<typename Service>
++auto checkService(std::chrono::nanoseconds waitNs = {}) {
++    const auto serviceHandler = details::ServiceHandler::getInstance(Service::descriptor);
++    return interfaceFromBase<Service>(serviceHandler->template get<Service>(
++            waitNs, false /* useCallback */));
++}
++
++/**
++ * Sets a service implementation override, replacing any fetched service from ServiceManager.
++ *
++ * An empty service clears the cache.
++ */
++template<typename Service>
++void setService(const InterfaceType<Service>& service) {
++    const auto serviceHandler = details::ServiceHandler::getInstance(Service::descriptor);
++    serviceHandler->template set<Service>(service);
++}
++
++/**
++ * Disables the service cache.
++ *
++ * This releases any service and notification callbacks.  After this,
++ * another initService() can be called seamlessly.
++ */
++template<typename Service>
++void skipService() {
++    const auto serviceHandler = details::ServiceHandler::getInstance(Service::descriptor);
++    serviceHandler->template skip<Service>();
++}
++
++} // namespace android::mediautils
+diff --git a/media/utils/tests/Android.bp b/media/utils/tests/Android.bp
+index ff11b42620..4456df23e7 100644
+--- a/media/utils/tests/Android.bp
++++ b/media/utils/tests/Android.bp
+@@ -12,8 +12,6 @@ package {
+ cc_defaults {
+     name: "libmediautils_tests_config",
+ 
+-    host_supported: true,
+-
+     cflags: [
+         "-Wall",
+         "-Werror",
+@@ -67,6 +65,22 @@ cc_defaults {
+     ],
+ }
+ 
++aidl_interface {
++    name: "ServiceSingletonTestInterface",
++    unstable: true,
++    srcs: [
++        "IServiceSingletonTest.aidl",
++    ],
++    backend: {
++        cpp: {
++            enabled: true,
++        },
++        ndk: {
++            enabled: true,
++        },
++    },
++}
++
+ cc_test_library {
+     name: "libsharedtest",
+ 
+@@ -177,6 +191,34 @@ cc_test {
+     ],
+ }
+ 
++cc_test {
++    name: "service_singleton_tests",
++
++    defaults: ["libmediautils_tests_config"],
++
++    // to add and get services, we need to be root.
++    require_root: true,
++    host_supported: false,
++
++    srcs: [
++        "service_singleton_tests.cpp",
++    ],
++
++    shared_libs: [
++        "libaudioutils",
++        "libbinder",
++        "libbinder_ndk",
++        "liblog",
++        "libmediautils",
++        "libutils",
++    ],
++
++    static_libs: [
++        "ServiceSingletonTestInterface-cpp",
++        "ServiceSingletonTestInterface-ndk",
++    ],
++}
++
+ cc_test {
+     name: "static_string_tests",
+ 
+diff --git a/media/utils/tests/IServiceSingletonTest.aidl b/media/utils/tests/IServiceSingletonTest.aidl
+new file mode 100644
+index 0000000000..9f889a666d
+--- /dev/null
++++ b/media/utils/tests/IServiceSingletonTest.aidl
+@@ -0,0 +1,19 @@
++/*
++ * Copyright (C) 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++interface IServiceSingletonTest {
++    int inc();
++}
+diff --git a/media/utils/tests/service_singleton_tests.cpp b/media/utils/tests/service_singleton_tests.cpp
+new file mode 100644
+index 0000000000..8656a20b47
+--- /dev/null
++++ b/media/utils/tests/service_singleton_tests.cpp
+@@ -0,0 +1,365 @@
++/*
++ * Copyright (C) 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#define LOG_TAG "service_singleton_tests"
++
++#include <mediautils/ServiceSingleton.h>
++
++#include "BnServiceSingletonTest.h"
++#include "aidl/BnServiceSingletonTest.h"
++#include <audio_utils/RunRemote.h>
++#include <binder/IPCThreadState.h>
++#include <binder/ProcessState.h>
++#include <gtest/gtest.h>
++#include <utils/Log.h>
++
++using namespace android;
++
++/**
++ * Service Singleton Test uses a worker process to spawn new binder services.
++ *
++ * A worker process is required since we cannot fork after registering
++ * with the binder driver.
++ *
++ * Test Process -> Worker_Process -> Service Process(1)
++ *                                -> Service Process(2)
++ *                                -> ....
++ */
++
++// Service implementation.
++class ServiceSingletonTestCpp : public BnServiceSingletonTest {
++public:
++    binder::Status inc(int32_t* _aidl_return) final {
++        *_aidl_return = ++mValue;
++        return binder::Status::ok();
++    }
++    std::atomic_int32_t mValue = 0;
++};
++
++// The service traits increment static atomic counters, which
++// validates that the trait callbacks are invoked.
++static std::atomic_int32_t sNewService = 0;
++static std::atomic_int32_t sServiceDied = 0;
++
++template <typename Service>
++struct TestServiceTraits : public mediautils::DefaultServiceTraits<Service> {
++    static constexpr const char* getServiceName() { return ""; }
++    static constexpr void onNewService(const mediautils::InterfaceType<Service>&) {
++        ++sNewService;
++    }
++    static constexpr void onServiceDied(const mediautils::InterfaceType<Service>&) {
++        ++sServiceDied;
++    }
++};
++
++// Here we have an alternative set of service traits,
++// used to validate that we can switch traits for the service singleton.
++static std::atomic_int32_t sNewService2 = 0;
++static std::atomic_int32_t sServiceDied2 = 0;
++
++template <typename Service>
++struct TestServiceTraits2 : public mediautils::DefaultServiceTraits<Service> {
++    static constexpr const char* getServiceName() { return ""; }
++    static constexpr void onNewService(const mediautils::InterfaceType<Service>&) {
++        ++sNewService2;
++    }
++    static constexpr void onServiceDied(const mediautils::InterfaceType<Service>&) {
++        ++sServiceDied2;
++    }
++};
++
++/*
++ * ServiceThreads run in a remote process.
++ *
++ * The WorkerThread is used to launch and kill the ServiceThread in a remote process.
++ */
++static void ServiceThread(audio_utils::RunRemote& runRemote) {
++    int c = runRemote.getc();  // requires any character to launch
++    auto service = sp<IServiceSingletonTest>::cast(sp<ServiceSingletonTestCpp>::make());
++    mediautils::addService(service);
++    ProcessState::self()->startThreadPool();
++    runRemote.putc(c);  // echo character.
++    IPCThreadState::self()->joinThreadPool();
++}
++
++/*
++ * The WorkerThread is run in a remote process from the test.  It communicates with
++ * the test process through pipes.
++ */
++static void WorkerThread(audio_utils::RunRemote& runRemote) {
++    std::shared_ptr<audio_utils::RunRemote> remoteService;
++    while (true) {
++        const int c = runRemote.getc();
++        switch (c) {
++            case 'a':  // launch a new service.
++                // if the old service isn't destroyed, it will be destroyed here
++                // when the RunRemote is replaced.
++                remoteService = std::make_shared<audio_utils::RunRemote>(ServiceThread);
++                remoteService->run();
++                remoteService->putc('a');  // create service.
++                (void)remoteService->getc(); // ensure it is created.
++                runRemote.putc(c);  // echo
++                break;
++            case 'b':  // destroys the old service.
++                remoteService.reset();  // this kills the service.
++                runRemote.putc(c);  // echo
++                break;
++            default:  // respond that we don't know what happened!
++                runRemote.putc('?');
++                break;
++        }
++    }
++}
++
++// This is a monolithic test.
++TEST(service_singleton_tests, one_and_only) {
++    std::atomic_int32_t listenerServiceCreated = 0;
++    std::atomic_int32_t listenerServiceDied = 0;
++
++    // initialize the service cache with a custom handler.
++    mediautils::initService<
++        IServiceSingletonTest, TestServiceTraits<IServiceSingletonTest>>({});
++    mediautils::initService<
++        aidl::IServiceSingletonTest, TestServiceTraits<aidl::IServiceSingletonTest>>({});
++
++    // start the worker thread that spawns the services.
++    auto remoteWorker = std::make_shared<audio_utils::RunRemote>(WorkerThread);
++    remoteWorker->run();
++
++    // now we are ready for binder.
++    ProcessState::self()->startThreadPool();
++
++    // check that our service isn't preexisting.
++    {
++        auto service = mediautils::checkServicePassThrough<IServiceSingletonTest>();
++        EXPECT_FALSE(service);
++
++        auto service2 = mediautils::checkServicePassThrough<aidl::IServiceSingletonTest>();
++        EXPECT_FALSE(service2);
++    }
++    EXPECT_EQ(0, sNewService);
++    EXPECT_EQ(0, sServiceDied);
++
++    {
++        auto service = mediautils::checkService<IServiceSingletonTest>();
++        EXPECT_FALSE(service);
++
++        auto service2 = mediautils::checkService<aidl::IServiceSingletonTest>();
++        EXPECT_FALSE(service2);
++    }
++    EXPECT_EQ(0, sNewService);
++    EXPECT_EQ(0, sServiceDied);
++
++    // getService will register a notification handler that fetches the
++    // service in the background.
++    {
++        auto service = mediautils::getService<IServiceSingletonTest>();
++        EXPECT_FALSE(service);
++
++        auto service2 = mediautils::getService<aidl::IServiceSingletonTest>();
++        EXPECT_FALSE(service2);
++    }
++    EXPECT_EQ(0, sNewService);
++    EXPECT_EQ(0, sServiceDied);
++
++    // now spawn the service.
++    remoteWorker->putc('a');
++    EXPECT_EQ('a', remoteWorker->getc());
++
++    sleep(1);  // In the background, 2 services were fetched.
++
++    EXPECT_EQ(2, sNewService);
++    EXPECT_EQ(0, sServiceDied);
++
++    // we repeat the prior checks, but the service is cached now.
++    {
++        auto service = mediautils::checkServicePassThrough<IServiceSingletonTest>();
++        EXPECT_TRUE(service);
++
++        auto service2 = mediautils::checkServicePassThrough<aidl::IServiceSingletonTest>();
++        EXPECT_TRUE(service2);
++    }
++    EXPECT_EQ(2, sNewService);
++    EXPECT_EQ(0, sServiceDied);
++
++    {
++        auto service = mediautils::checkService<IServiceSingletonTest>();
++        EXPECT_TRUE(service);
++
++        auto service2 = mediautils::checkService<aidl::IServiceSingletonTest>();
++        EXPECT_TRUE(service2);
++    }
++    EXPECT_EQ(2, sNewService);
++    EXPECT_EQ(0, sServiceDied);
++
++    {
++        auto service = mediautils::getService<IServiceSingletonTest>();
++        EXPECT_TRUE(service);
++
++        auto service2 = mediautils::getService<aidl::IServiceSingletonTest>();
++        EXPECT_TRUE(service2);
++    }
++    EXPECT_EQ(2, sNewService);
++    EXPECT_EQ(0, sServiceDied);
++
++    // destroy the service.
++    remoteWorker->putc('b');
++    EXPECT_EQ('b', remoteWorker->getc());
++
++    sleep(1);
++
++    // We expect the died callbacks.
++    EXPECT_EQ(2, sNewService);
++    EXPECT_EQ(2, sServiceDied);
++
++    // we can also manually check whether there is a new service by
++    // requesting service notifications.  This is outside of the service singleton
++    // traits.
++    auto handle1 = mediautils::requestServiceNotification<IServiceSingletonTest>(
++            [&](const sp<IServiceSingletonTest>&) { ++listenerServiceCreated; });
++    auto handle2 = mediautils::requestServiceNotification<aidl::IServiceSingletonTest>(
++            [&](const std::shared_ptr<aidl::IServiceSingletonTest>&) {
++                ++listenerServiceCreated; });
++
++    // Spawn the service again.
++    remoteWorker->putc('a');
++    EXPECT_EQ('a', remoteWorker->getc());
++
++    sleep(1);  // In the background, 2 services were fetched.
++
++    EXPECT_EQ(4, sNewService);
++    EXPECT_EQ(2, sServiceDied);
++
++    EXPECT_EQ(2, listenerServiceCreated);  // our listener picked up the service creation.
++
++    std::shared_ptr<void> handle3, handle4;
++    std::shared_ptr<aidl::IServiceSingletonTest> keepAlive;  // NDK Workaround!
++    {
++        auto service = mediautils::getService<IServiceSingletonTest>();
++        EXPECT_TRUE(service);
++
++        auto service2 = mediautils::getService<aidl::IServiceSingletonTest>();
++        EXPECT_TRUE(service2);
++
++        keepAlive = service2;
++
++        // we can also request our own death notifications (outside of the service traits).
++        handle3 = mediautils::requestDeathNotification(service, [&] { ++listenerServiceDied; });
++        handle4 = mediautils::requestDeathNotification(service2, [&] { ++listenerServiceDied; });
++    }
++
++    EXPECT_EQ(4, sNewService);
++    EXPECT_EQ(2, sServiceDied);
++
++    // destroy the service.
++
++    remoteWorker->putc('b');
++    EXPECT_EQ('b', remoteWorker->getc());
++
++    sleep(1);
++
++    // We expect the died callbacks.
++    EXPECT_EQ(4, sNewService);
++    EXPECT_EQ(4, sServiceDied);
++
++    EXPECT_EQ(2, listenerServiceCreated);
++    EXPECT_EQ(2, listenerServiceDied);  // NDK Workaround - without keepAlive, this is 1.
++                                        // the death notification is invalidated without a
++                                        // pointer to the binder object.
++
++    keepAlive.reset();
++
++    // Cancel the singleton cache.
++    mediautils::skipService<IServiceSingletonTest>();
++    mediautils::skipService<aidl::IServiceSingletonTest>();
++
++    // Spawn the service again.
++    remoteWorker->putc('a');
++    EXPECT_EQ('a', remoteWorker->getc());
++
++    sleep(1);
++
++    // We expect no change from the service traits (service not cached).
++    EXPECT_EQ(4, sNewService);
++    EXPECT_EQ(4, sServiceDied);
++    EXPECT_EQ(4, listenerServiceCreated);  // our listener picks it up.
++
++    // remove service
++    remoteWorker->putc('b');
++    EXPECT_EQ('b', remoteWorker->getc());
++
++    sleep(1);
++
++    // We expect no change from the service traits (service not cached).
++    EXPECT_EQ(4, sNewService);
++    EXPECT_EQ(4, sServiceDied);
++    EXPECT_EQ(4, listenerServiceCreated);
++    EXPECT_EQ(2, listenerServiceDied);  // binder died is associated with the actual handle.
++
++    // replace the service traits.
++    {
++        auto previous = mediautils::initService<
++                IServiceSingletonTest, TestServiceTraits2<IServiceSingletonTest>>({});
++        auto previous2 = mediautils::initService<
++                aidl::IServiceSingletonTest, TestServiceTraits2<aidl::IServiceSingletonTest>>({});
++
++        EXPECT_FALSE(previous);
++        EXPECT_FALSE(previous2);
++    }
++
++    // We expect no change with old counters.
++    EXPECT_EQ(4, sNewService);
++    EXPECT_EQ(4, sServiceDied);
++    EXPECT_EQ(0, sNewService2);
++    EXPECT_EQ(0, sServiceDied2);
++
++    {
++        auto service = mediautils::getService<IServiceSingletonTest>();
++        EXPECT_FALSE(service);
++
++        auto service2 = mediautils::getService<aidl::IServiceSingletonTest>();
++        EXPECT_FALSE(service2);
++    }
++
++    EXPECT_EQ(4, sNewService);
++    EXPECT_EQ(4, sServiceDied);
++    EXPECT_EQ(0, sNewService2);
++    EXPECT_EQ(0, sServiceDied2);
++
++    // Spawn the service again.
++    remoteWorker->putc('a');
++    EXPECT_EQ('a', remoteWorker->getc());
++
++    sleep(1);
++
++    EXPECT_EQ(4, sNewService);   // old counters do not change.
++    EXPECT_EQ(4, sServiceDied);
++    EXPECT_EQ(2, sNewService2);  // new counters change
++    EXPECT_EQ(0, sServiceDied2);
++
++    EXPECT_EQ(6, listenerServiceCreated);  // listener associated with service name picks up info.
++
++    // Release the service.
++    remoteWorker->putc('b');
++    EXPECT_EQ('b', remoteWorker->getc());
++
++    sleep(1);
++
++    EXPECT_EQ(4, sNewService);    // old counters do not change.
++    EXPECT_EQ(4, sServiceDied);
++    EXPECT_EQ(2, sNewService2);   // new counters change
++    EXPECT_EQ(2, sServiceDied2);
++}
+-- 
+2.43.0
+

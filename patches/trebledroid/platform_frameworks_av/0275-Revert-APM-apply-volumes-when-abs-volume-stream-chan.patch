@@ -1,0 +1,57 @@
+From 7af15130467877bdcbafea5e51dba409754d3610 Mon Sep 17 00:00:00 2001
+From: Neha Jain <jainne@google.com>
+Date: Sat, 16 Nov 2024 00:47:18 +0000
+Subject: [PATCH 275/436] Revert "APM: apply volumes when abs volume stream
+ changes"
+
+This reverts commit fb0af7ca7188a12350bce059b5d443255b16aad4.
+
+Reason for revert: b/379009970
+
+Change-Id: I0ef4f7029be6d2c9914f89b43536df726bd2553c
+---
+ .../managerdefault/AudioPolicyManager.cpp     | 23 +++++++------------
+ 1 file changed, 8 insertions(+), 15 deletions(-)
+
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index 000b5717e8..54ef5d504c 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -3564,26 +3564,19 @@ status_t AudioPolicyManager::setDeviceAbsoluteVolumeEnabled(audio_devices_t devi
+     ALOGI("%s: deviceType 0x%X, enabled %d, streamToDriveAbs %d", __func__, deviceType, enabled,
+           streamToDriveAbs);
+ 
+-    audio_attributes_t attributesToDriveAbs = mEngine->getAttributesForStreamType(streamToDriveAbs);
+-    if (enabled) {
+-        if (attributesToDriveAbs == AUDIO_ATTRIBUTES_INITIALIZER) {
+-            ALOGW("%s: no attributes for stream %s, bailing out", __func__,
+-                  toString(streamToDriveAbs).c_str());
+-            return BAD_VALUE;
+-        }
+-
+-        mAbsoluteVolumeDrivingStreams[deviceType] = attributesToDriveAbs;
+-    } else {
++    if (!enabled) {
+         mAbsoluteVolumeDrivingStreams.erase(deviceType);
++        return NO_ERROR;
+     }
+ 
+-    // apply the stream volumes regarding the new absolute mode to all the outputs
+-    for (size_t i = 0; i < mOutputs.size(); i++) {
+-        sp<SwAudioOutputDescriptor> desc = mOutputs.valueAt(i);
+-        ALOGV("%s: apply stream volumes for portId %d", __func__, desc->getId());
+-        applyStreamVolumes(desc, {deviceType}, static_cast<int>(desc->latency()) * 2);
++    audio_attributes_t attributesToDriveAbs = mEngine->getAttributesForStreamType(streamToDriveAbs);
++    if (attributesToDriveAbs == AUDIO_ATTRIBUTES_INITIALIZER) {
++        ALOGW("%s: no attributes for stream %s, bailing out", __func__,
++              toString(streamToDriveAbs).c_str());
++        return BAD_VALUE;
+     }
+ 
++    mAbsoluteVolumeDrivingStreams[deviceType] = attributesToDriveAbs;
+     return NO_ERROR;
+ }
+ 
+-- 
+2.43.0
+

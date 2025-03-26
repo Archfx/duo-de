@@ -1,0 +1,51 @@
+From c2f9e9d20fc2b8fc5ff62385df3b988ebfc78819 Mon Sep 17 00:00:00 2001
+From: Suyog Pawar <suyog.pawar@ittiam.com>
+Date: Wed, 16 Oct 2024 21:18:34 +0530
+Subject: [PATCH 109/436] C2SoftMpeg2Dec: Fix KEEP_THREADS_ACTIVE issue
+
+Ensures proper handling of threads and mutex locks
+
+Bug: 343793479
+Test: atest MctsMediaV2TestCases
+      atest MctsMediaDecoderTestCases
+      atest MctsMediaCodecTestCases
+      atest VtsHalMediaC2V1_0TargetVideoDecTest
+
+Change-Id: I80a5d57b8942ac3a5d968de6df9e983191fa221d
+---
+ .../components/mpeg2/C2SoftMpeg2Dec.cpp       | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/media/codec2/components/mpeg2/C2SoftMpeg2Dec.cpp b/media/codec2/components/mpeg2/C2SoftMpeg2Dec.cpp
+index 562dcf5177..52920c24b5 100644
+--- a/media/codec2/components/mpeg2/C2SoftMpeg2Dec.cpp
++++ b/media/codec2/components/mpeg2/C2SoftMpeg2Dec.cpp
+@@ -743,6 +743,25 @@ void C2SoftMpeg2Dec::resetPlugin() {
+ }
+ 
+ status_t C2SoftMpeg2Dec::deleteDecoder() {
++    // API call to IV_CMD_RETRIEVE_MEMREC not only retrieves the memory records
++    // but also joins active threads and destroys conditional thread variables and
++    // mutex locks for each thread.
++    iv_retrieve_mem_rec_ip_t s_retrieve_mem_ip;
++    iv_retrieve_mem_rec_op_t s_retrieve_mem_op;
++
++    s_retrieve_mem_ip.pv_mem_rec_location = (iv_mem_rec_t *)mMemRecords;
++    s_retrieve_mem_ip.e_cmd = IV_CMD_RETRIEVE_MEMREC;
++    s_retrieve_mem_ip.u4_size = sizeof(iv_retrieve_mem_rec_ip_t);
++    s_retrieve_mem_op.u4_size = sizeof(iv_retrieve_mem_rec_op_t);
++
++    IV_API_CALL_STATUS_T status = ivdec_api_function(mDecHandle,
++                                                    &s_retrieve_mem_ip,
++                                                    &s_retrieve_mem_op);
++    if (IV_SUCCESS != status) {
++        ALOGE("error in %s: 0x%x", __func__, s_retrieve_mem_op.u4_error_code);
++        return UNKNOWN_ERROR;
++    }
++
+     if (mMemRecords) {
+         iv_mem_rec_t *ps_mem_rec = mMemRecords;
+ 
+-- 
+2.43.0
+

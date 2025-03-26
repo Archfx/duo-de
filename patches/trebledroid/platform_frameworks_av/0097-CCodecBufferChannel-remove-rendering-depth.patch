@@ -1,0 +1,80 @@
+From c556d80322f3791bd8eae3823abf0a7b223f0e34 Mon Sep 17 00:00:00 2001
+From: Wonsik Kim <wonsik@google.com>
+Date: Tue, 15 Oct 2024 21:42:25 +0000
+Subject: [PATCH 097/436] CCodecBufferChannel: remove rendering depth
+
+Bug: 275527219
+Test: presubmit
+Change-Id: Ib30733ef0da92d7078ced7328f5f741f400e0eff
+---
+ media/aconfig/codec_fwk.aconfig               |  7 +++++++
+ media/codec2/sfplugin/Android.bp              |  1 +
+ media/codec2/sfplugin/CCodecBufferChannel.cpp | 15 +++++++++++++--
+ 3 files changed, 21 insertions(+), 2 deletions(-)
+
+diff --git a/media/aconfig/codec_fwk.aconfig b/media/aconfig/codec_fwk.aconfig
+index 2bf53f9e05..c0ebcd5f05 100644
+--- a/media/aconfig/codec_fwk.aconfig
++++ b/media/aconfig/codec_fwk.aconfig
+@@ -107,6 +107,13 @@ flag {
+   bug: "325549730"
+ }
+ 
++flag {
++  name: "rendering_depth_removal"
++  namespace: "codec_fwk"
++  description: "Feature flag for removing rendering depth"
++  bug: "275527219"
++}
++
+ flag {
+   name: "secure_codecs_require_crypto"
+   namespace: "codec_fwk"
+diff --git a/media/codec2/sfplugin/Android.bp b/media/codec2/sfplugin/Android.bp
+index 3c8c1b758e..4f6fe51654 100644
+--- a/media/codec2/sfplugin/Android.bp
++++ b/media/codec2/sfplugin/Android.bp
+@@ -46,6 +46,7 @@ cc_library_shared {
+     ],
+ 
+     static_libs: [
++        "libPlatformProperties",
+         "libSurfaceFlingerProperties",
+         "aconfig_mediacodec_flags_c_lib",
+         "android.media.codec-aconfig-cc",
+diff --git a/media/codec2/sfplugin/CCodecBufferChannel.cpp b/media/codec2/sfplugin/CCodecBufferChannel.cpp
+index 1cbfc75bc9..f90363bb9a 100644
+--- a/media/codec2/sfplugin/CCodecBufferChannel.cpp
++++ b/media/codec2/sfplugin/CCodecBufferChannel.cpp
+@@ -38,6 +38,7 @@
+ 
+ #include <android/hardware/cas/native/1.0/IDescrambler.h>
+ #include <android/hardware/drm/1.0/types.h>
++#include <android/sysprop/MediaProperties.sysprop.h>
+ #include <android-base/parseint.h>
+ #include <android-base/properties.h>
+ #include <android-base/stringprintf.h>
+@@ -207,8 +208,18 @@ CCodecBufferChannel::CCodecBufferChannel(
+         Mutexed<BlockPools>::Locked pools(mBlockPools);
+         pools->outputPoolId = C2BlockPool::BASIC_LINEAR;
+     }
+-    std::string value = GetServerConfigurableFlag("media_native", "ccodec_rendering_depth", "3");
+-    android::base::ParseInt(value, &mRenderingDepth);
++    if (android::media::codec::provider_->rendering_depth_removal()) {
++        constexpr int kAndroidApi202404 = 202404;
++        int vendorVersion = ::android::base::GetIntProperty("ro.vendor.api_level", -1);
++        using ::android::sysprop::MediaProperties::codec2_remove_rendering_depth;
++        if (vendorVersion > kAndroidApi202404 || codec2_remove_rendering_depth().value_or(false)) {
++            mRenderingDepth = 0;
++        }
++    } else {
++        std::string value = GetServerConfigurableFlag(
++                "media_native", "ccodec_rendering_depth", "3");
++        android::base::ParseInt(value, &mRenderingDepth);
++    }
+     mOutputSurface.lock()->maxDequeueBuffers = kSmoothnessFactor + mRenderingDepth;
+ }
+ 
+-- 
+2.43.0
+

@@ -1,0 +1,57 @@
+From 16e5e0c932164d57d4a8da584929b188053a617d Mon Sep 17 00:00:00 2001
+From: "Priyanka Advani (xWF)" <padvani@google.com>
+Date: Tue, 8 Oct 2024 18:54:37 +0000
+Subject: [PATCH 069/436] Revert "Update libprocessgroup dependencies"
+
+Revert submission 3212512
+
+Reason for revert: Droidmonitor created revert due to b/372273614. Will be verifying through ABTD before submission.
+
+Reverted changes: /q/submissionid:3212512
+
+Change-Id: I27ac4aff5f91575dd69a82a2d667a1f2c4d55c7b
+---
+ media/libaaudio/fuzzer/Android.bp           | 1 -
+ media/libaudioclient/aidl/fuzzer/Android.bp | 1 -
+ media/libaudioclient/fuzzer/Android.bp      | 1 -
+ 3 files changed, 3 deletions(-)
+
+diff --git a/media/libaaudio/fuzzer/Android.bp b/media/libaaudio/fuzzer/Android.bp
+index f56de76922..fc8ad777de 100644
+--- a/media/libaaudio/fuzzer/Android.bp
++++ b/media/libaaudio/fuzzer/Android.bp
+@@ -65,7 +65,6 @@ cc_fuzz {
+         "libmedia_helper",
+         "libmediametrics",
+         "libprocessgroup",
+-        "libprocessgroup_util",
+         "mediametricsservice-aidl-cpp",
+         "shared-file-region-aidl-cpp",
+     ],
+diff --git a/media/libaudioclient/aidl/fuzzer/Android.bp b/media/libaudioclient/aidl/fuzzer/Android.bp
+index ff0704c230..bb06bffdb7 100644
+--- a/media/libaudioclient/aidl/fuzzer/Android.bp
++++ b/media/libaudioclient/aidl/fuzzer/Android.bp
+@@ -29,7 +29,6 @@ cc_defaults {
+         "libjsoncpp",
+         "libmediametricsservice",
+         "libprocessgroup",
+-        "libprocessgroup_util",
+         "shared-file-region-aidl-cpp",
+     ],
+     shared_libs: [
+diff --git a/media/libaudioclient/fuzzer/Android.bp b/media/libaudioclient/fuzzer/Android.bp
+index 8bca8dfebf..a95c700c00 100644
+--- a/media/libaudioclient/fuzzer/Android.bp
++++ b/media/libaudioclient/fuzzer/Android.bp
+@@ -46,7 +46,6 @@ cc_fuzz {
+         "libmediametrics",
+         "libmediametricsservice",
+         "libprocessgroup",
+-        "libprocessgroup_util",
+         "shared-file-region-aidl-cpp",
+     ],
+     shared_libs: [
+-- 
+2.43.0
+

@@ -1,0 +1,81 @@
+From 7110a22f8d24607b715166e39dd1afe678cd72a8 Mon Sep 17 00:00:00 2001
+From: Sham Rathod <shamrathod@google.com>
+Date: Tue, 19 Nov 2024 12:56:18 +0000
+Subject: [PATCH 302/436] Set missing CSD for APV codec in Muxer
+
+As CSD for APV codec was not set, checkCodecSpecificData
+was returning ERROR_MALFORMED which resulted in stopping muxer in
+further writing output file.
+
+Bug: 379061702
+Test: atest CtsMediaMuxerTestCases
+Change-Id: Id86c966b4c07a83c118d68d808e3a64864116d09
+---
+ media/libstagefright/Android.bp |  2 ++
+ media/libstagefright/Utils.cpp  | 16 ++++++++++++++++
+ 2 files changed, 18 insertions(+)
+
+diff --git a/media/libstagefright/Android.bp b/media/libstagefright/Android.bp
+index d084f10590..9ed5343784 100644
+--- a/media/libstagefright/Android.bp
++++ b/media/libstagefright/Android.bp
+@@ -99,6 +99,7 @@ cc_library_static {
+ 
+     static_libs: [
+         "libstagefright_esds",
++        "android.media.extractor.flags-aconfig-cc",
+     ],
+ 
+     export_include_dirs: [
+@@ -321,6 +322,7 @@ cc_library {
+ 
+     static_libs: [
+         "android.media.codec-aconfig-cc",
++        "android.media.extractor.flags-aconfig-cc",
+         "com.android.media.flags.editing-aconfig-cc",
+         "libstagefright_esds",
+         "libstagefright_color_conversion",
+diff --git a/media/libstagefright/Utils.cpp b/media/libstagefright/Utils.cpp
+index 86741a616d..50eeb628b6 100644
+--- a/media/libstagefright/Utils.cpp
++++ b/media/libstagefright/Utils.cpp
+@@ -44,6 +44,8 @@
+ #include <media/AudioParameter.h>
+ #include <system/audio.h>
+ 
++#include <com_android_media_extractor_flags.h>
++
+ // TODO : Remove the defines once mainline media is built against NDK >= 31.
+ // The mp4 extractor is part of mainline and builds against NDK 29 as of
+ // writing. These keys are available only from NDK 31:
+@@ -1443,6 +1445,17 @@ status_t convertMetaDataToMessage(
+         buffer->meta()->setInt64("timeUs", 0);
+         msg->setBuffer("csd-0", buffer);
+         parseAV1ProfileLevelFromCsd(buffer, msg);
++    } else if (com::android::media::extractor::flags::extractor_mp4_enable_apv() &&
++               meta->findData(kKeyAPVC, &type, &data, &size)) {
++        sp<ABuffer> buffer = new (std::nothrow) ABuffer(size);
++        if (buffer.get() == NULL || buffer->base() == NULL) {
++            return NO_MEMORY;
++        }
++        memcpy(buffer->data(), data, size);
++
++        buffer->meta()->setInt32("csd", true);
++        buffer->meta()->setInt64("timeUs", 0);
++        msg->setBuffer("csd-0", buffer);
+     } else if (meta->findData(kKeyESDS, &type, &data, &size)) {
+         ESDS esds((const char *)data, size);
+         if (esds.InitCheck() != (status_t)OK) {
+@@ -2091,6 +2104,9 @@ status_t convertMessageToMetaData(const sp<AMessage> &msg, sp<MetaData> &meta) {
+         } else if (mime == MEDIA_MIMETYPE_VIDEO_AV1 ||
+                    mime == MEDIA_MIMETYPE_IMAGE_AVIF) {
+             meta->setData(kKeyAV1C, 0, csd0->data(), csd0->size());
++        } else if (com::android::media::extractor::flags::extractor_mp4_enable_apv() &&
++                   mime == MEDIA_MIMETYPE_VIDEO_APV) {
++            meta->setData(kKeyAPVC, 0, csd0->data(), csd0->size());
+         } else if (mime == MEDIA_MIMETYPE_VIDEO_DOLBY_VISION) {
+             int32_t profile = -1;
+             uint8_t blCompatibilityId = -1;
+-- 
+2.43.0
+

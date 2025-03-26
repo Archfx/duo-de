@@ -1,0 +1,43 @@
+From 499a6c8b18d0c6c2f14462b87432968873f98695 Mon Sep 17 00:00:00 2001
+From: Eric Laurent <elaurent@google.com>
+Date: Mon, 2 Dec 2024 13:42:18 +0000
+Subject: [PATCH 366/436] audio policy manager: fix crash in verbose log
+ message
+
+fix crash in connectTelephonyRxAudioSource() if mCallRxSourceClient
+is null.
+
+Test: make
+Flag: EXEMPT bug fix
+Change-Id: I4390b20a859dcabea3129b8a50a6722743a671ed
+---
+ services/audiopolicy/managerdefault/AudioPolicyManager.cpp | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index c635feb051..73b574ccfa 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -696,7 +696,7 @@ DeviceVector AudioPolicyManager::selectBestRxSinkDevicesForCall(bool fromCache)
+         // RX Telephony and Rx sink devices are declared by Primary Audio HAL
+         if (isPrimaryModule(telephonyRxModule) && (telephonyRxModule->getHalVersionMajor() >= 3) &&
+                 telephonyRxModule->supportsPatch(rxSourceDevice, rxSinkDevice)) {
+-            ALOGW("%s() device %s using HW Bridge", __func__, rxSinkDevice->toString().c_str());
++            ALOGI("%s() device %s using HW Bridge", __func__, rxSinkDevice->toString().c_str());
+             return DeviceVector(rxSinkDevice);
+         }
+     }
+@@ -862,8 +862,8 @@ void AudioPolicyManager::connectTelephonyRxAudioSource(uint32_t delayMs)
+                                        true /*internal*/, true /*isCallRx*/, delayMs);
+     ALOGE_IF(status != OK, "%s: failed to start audio source (%d)", __func__, status);
+     mCallRxSourceClient = mAudioSources.valueFor(portId);
+-    ALOGV("%s portdID %d between source %s and sink %s", __func__, portId,
+-        mCallRxSourceClient->srcDevice()->toString().c_str(),
++    ALOGV_IF(mCallRxSourceClient != nullptr, "%s portdID %d between source %s and sink %s",
++        __func__, portId, mCallRxSourceClient->srcDevice()->toString().c_str(),
+         mCallRxSourceClient->sinkDevice()->toString().c_str());
+     ALOGE_IF(mCallRxSourceClient == nullptr,
+              "%s failed to start Telephony Rx AudioSource", __func__);
+-- 
+2.43.0
+

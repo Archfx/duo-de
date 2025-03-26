@@ -1,0 +1,187 @@
+From 2a60f057a44006abd0be1966b897b2c09ad3542b Mon Sep 17 00:00:00 2001
+From: Sham Rathod <shamrathod@google.com>
+Date: Thu, 24 Oct 2024 08:30:32 +0000
+Subject: [PATCH 201/436] Add APV codec support to Platform extractor
+
+Bug: 370061501
+Test: atest MediaExtractorTest
+Change-Id: Idf25b5b7d89959e122347cee7dfc3211668eda22
+---
+ media/module/extractors/extractor.aconfig     |  9 ++++++++
+ media/module/extractors/fuzzers/Android.bp    |  6 ++++++
+ media/module/extractors/mp4/Android.bp        |  6 ++++++
+ .../module/extractors/mp4/MPEG4Extractor.cpp  | 21 +++++++++++++++++++
+ media/module/extractors/tests/Android.bp      |  4 ++++
+ 5 files changed, 46 insertions(+)
+
+diff --git a/media/module/extractors/extractor.aconfig b/media/module/extractors/extractor.aconfig
+index 7bf8bc1d9c..a7d33978f0 100644
+--- a/media/module/extractors/extractor.aconfig
++++ b/media/module/extractors/extractor.aconfig
+@@ -12,3 +12,12 @@ flag {
+     description: "Enable SniffMidi optimizations."
+     bug: "359920208"
+ }
++
++flag {
++    name: "extractor_mp4_enable_apv"
++    is_exported: true
++    is_fixed_read_only: true
++    namespace: "media_solutions"
++    description: "Enable APV support in mp4 extractor."
++    bug: "370061501"
++}
+diff --git a/media/module/extractors/fuzzers/Android.bp b/media/module/extractors/fuzzers/Android.bp
+index 3da158933c..f3da389d24 100644
+--- a/media/module/extractors/fuzzers/Android.bp
++++ b/media/module/extractors/fuzzers/Android.bp
+@@ -129,12 +129,18 @@ cc_fuzz {
+     ],
+ 
+     static_libs: [
++        "android.media.extractor.flags-aconfig-cc",
++        "libaconfig_storage_read_api_cc",
+         "libstagefright_id3",
+         "libstagefright_esds",
+         "libmp4extractor",
+         "libstagefright_metadatautils",
+     ],
+ 
++    shared_libs: [
++        "server_configurable_flags",
++    ],
++
+     dictionary: "mp4_extractor_fuzzer.dict",
+ 
+     corpus: ["corpus_mp4/*"],
+diff --git a/media/module/extractors/mp4/Android.bp b/media/module/extractors/mp4/Android.bp
+index 807200208c..effd24a0e0 100644
+--- a/media/module/extractors/mp4/Android.bp
++++ b/media/module/extractors/mp4/Android.bp
+@@ -42,12 +42,18 @@ cc_library {
+     ],
+ 
+     static_libs: [
++        "android.media.extractor.flags-aconfig-cc",
++        "libaconfig_storage_read_api_cc",
+         "libstagefright_esds",
+         "libstagefright_foundation",
+         "libstagefright_id3",
+         "libutils",
+     ],
+ 
++    shared_libs: [
++        "server_configurable_flags",
++    ],
++
+     host_supported: true,
+ 
+     target: {
+diff --git a/media/module/extractors/mp4/MPEG4Extractor.cpp b/media/module/extractors/mp4/MPEG4Extractor.cpp
+index 12c0aaf17f..f062491975 100644
+--- a/media/module/extractors/mp4/MPEG4Extractor.cpp
++++ b/media/module/extractors/mp4/MPEG4Extractor.cpp
+@@ -33,6 +33,7 @@
+ #include "SampleTable.h"
+ #include "ItemTable.h"
+ 
++#include <com_android_media_extractor_flags.h>
+ #include <media/esds/ESDS.h>
+ #include <ID3.h>
+ #include <media/stagefright/DataSourceBase.h>
+@@ -147,6 +148,7 @@ private:
+ 
+     bool mIsAVC;
+     bool mIsHEVC;
++    bool mIsAPV;
+     bool mIsDolbyVision;
+     bool mIsAC4;
+     bool mIsMpegH = false;
+@@ -366,6 +368,13 @@ static const char *FourCC2MIME(uint32_t fourcc) {
+         case FOURCC("hev1"):
+             return MEDIA_MIMETYPE_VIDEO_HEVC;
+ 
++        case FOURCC("apv1"):
++            if (!com::android::media::extractor::flags::extractor_mp4_enable_apv()) {
++                ALOGV("APV support not enabled");
++                return "application/octet-stream";
++            }
++            return MEDIA_MIMETYPE_VIDEO_APV;
++
+         case FOURCC("dvav"):
+         case FOURCC("dva1"):
+         case FOURCC("dvhe"):
+@@ -2106,6 +2115,7 @@ status_t MPEG4Extractor::parseChunk(off64_t *offset, int depth) {
+         case FOURCC("dav1"):
+         case FOURCC("av01"):
+         case FOURCC("vp09"):
++        case FOURCC("apv1"):
+         {
+             uint8_t buffer[78];
+             if (chunk_data_size < (ssize_t)sizeof(buffer)) {
+@@ -2623,8 +2633,16 @@ status_t MPEG4Extractor::parseChunk(off64_t *offset, int depth) {
+             break;
+         }
+ 
++        case FOURCC("apvC"):
+         case FOURCC("av1C"):
+         {
++            if (!com::android::media::extractor::flags::extractor_mp4_enable_apv() &&
++                chunk_type == FOURCC("apvC")) {
++                ALOGV("APV support not enabled");
++                *offset += chunk_size;
++                break;
++            }
++
+             auto buffer = heapbuffer<uint8_t>(chunk_data_size);
+ 
+             if (buffer.get() == NULL) {
+@@ -5145,6 +5163,7 @@ MPEG4Source::MPEG4Source(
+       mCurrentSampleInfoOffsets(NULL),
+       mIsAVC(false),
+       mIsHEVC(false),
++      mIsAPV(false),
+       mIsDolbyVision(false),
+       mIsAC4(false),
+       mIsPcm(false),
+@@ -5187,6 +5206,8 @@ MPEG4Source::MPEG4Source(
+     mIsAVC = !strcasecmp(mime, MEDIA_MIMETYPE_VIDEO_AVC);
+     mIsHEVC = !strcasecmp(mime, MEDIA_MIMETYPE_VIDEO_HEVC) ||
+               !strcasecmp(mime, MEDIA_MIMETYPE_IMAGE_ANDROID_HEIC);
++    mIsAPV = com::android::media::extractor::flags::extractor_mp4_enable_apv() &&
++             !strcasecmp(mime, MEDIA_MIMETYPE_VIDEO_APV);
+     mIsAC4 = !strcasecmp(mime, MEDIA_MIMETYPE_AUDIO_AC4);
+     mIsDolbyVision = !strcasecmp(mime, MEDIA_MIMETYPE_VIDEO_DOLBY_VISION);
+     mIsHeif = !strcasecmp(mime, MEDIA_MIMETYPE_IMAGE_ANDROID_HEIC) && mItemTable != NULL;
+diff --git a/media/module/extractors/tests/Android.bp b/media/module/extractors/tests/Android.bp
+index d6e79c7e8b..5f0f4fa0f3 100644
+--- a/media/module/extractors/tests/Android.bp
++++ b/media/module/extractors/tests/Android.bp
+@@ -21,6 +21,7 @@ package {
+     // to get the below license kinds:
+     //   SPDX-license-identifier-Apache-2.0
+     default_applicable_licenses: ["frameworks_av_license"],
++    default_team: "trendy_team_android_media_solutions_playback",
+ }
+ 
+ cc_test {
+@@ -31,6 +32,8 @@ cc_test {
+     srcs: ["ExtractorUnitTest.cpp"],
+ 
+     static_libs: [
++        "android.media.extractor.flags-aconfig-cc",
++        "libaconfig_storage_read_api_cc",
+         "libaacextractor",
+         "libamrextractor",
+         "libmp3extractor",
+@@ -77,6 +80,7 @@ cc_test {
+         "libhidlmemory",
+         "libhidlbase",
+         "libbase",
++        "server_configurable_flags",
+     ],
+ 
+     compile_multilib: "first",
+-- 
+2.43.0
+

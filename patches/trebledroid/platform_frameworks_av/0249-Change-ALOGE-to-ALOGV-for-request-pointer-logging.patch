@@ -1,0 +1,35 @@
+From e87575773710a431123f7f633b0be74d9202fbcb Mon Sep 17 00:00:00 2001
+From: Avichal Rakesh <arakesh@google.com>
+Date: Mon, 11 Nov 2024 21:22:51 +0000
+Subject: [PATCH 249/436] Change ALOGE to ALOGV for request pointer logging.
+
+Vendor implementation of ACameraDevice was incorrectly logging debug
+log with an ALOGE. This CL changes it to ALOGV instead which should
+be compiled out of release builds.
+
+Bug: 362556086
+Test: N/A Logging changes only.
+Flag: EXEMPT. Logging only change.
+Change-Id: Ib2c394137b6a607024c026624aba7b7ae28c5974
+---
+ camera/ndk/ndk_vendor/impl/ACameraDevice.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/camera/ndk/ndk_vendor/impl/ACameraDevice.cpp b/camera/ndk/ndk_vendor/impl/ACameraDevice.cpp
+index 3325da6c63..9ed8197938 100644
+--- a/camera/ndk/ndk_vendor/impl/ACameraDevice.cpp
++++ b/camera/ndk/ndk_vendor/impl/ACameraDevice.cpp
+@@ -1684,8 +1684,9 @@ ndk::ScopedAStatus CameraDevice::ServiceCallback::onCaptureStarted(
+                     __FUNCTION__, burstId, cbh.mRequests.size());
+             dev->setCameraDeviceErrorLocked(ACAMERA_ERROR_CAMERA_SERVICE);
+         }
++
+         sp<CaptureRequest> request = cbh.mRequests[burstId];
+-        ALOGE("%s: request = %p", __FUNCTION__, request.get());
++        ALOGV("%s: request = %p", __FUNCTION__, request.get());
+         sp<AMessage> msg = nullptr;
+         if (v2Callback) {
+             msg = new AMessage(kWhatCaptureStart2, dev->mHandler);
+-- 
+2.43.0
+

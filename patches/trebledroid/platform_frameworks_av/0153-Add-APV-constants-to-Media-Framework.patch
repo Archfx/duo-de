@@ -1,0 +1,385 @@
+From c615b05473dd42967dd13cdfc7cac483f57b9b79 Mon Sep 17 00:00:00 2001
+From: Fyodor Kyslov <kyslov@google.com>
+Date: Tue, 22 Oct 2024 02:32:54 +0000
+Subject: [PATCH 153/436] Add APV constants to Media Framework
+
+Add APV-related constants to Media Framework
+
+Bug: 363333555
+Bug: 372951015
+Bug: 375464302
+
+Test: CodecInfoTest#testCodecProfileSupport passes for C2 SW APV codec
+Change-Id: I3c174720e9d70dfd3266128b21aefebac5ab834d
+---
+ media/codec2/sfplugin/utils/Codec2Mapper.cpp  | 117 +++++++++++++++
+ .../media/stagefright/MediaCodecConstants.h   | 136 ++++++++++++++++++
+ media/libstagefright/omx/OMXUtils.cpp         |   2 +
+ media/module/foundation/MediaDefs.cpp         |   1 +
+ .../media/stagefright/foundation/MediaDefs.h  |   1 +
+ 5 files changed, 257 insertions(+)
+
+diff --git a/media/codec2/sfplugin/utils/Codec2Mapper.cpp b/media/codec2/sfplugin/utils/Codec2Mapper.cpp
+index 9297520f1d..3841831d2b 100644
+--- a/media/codec2/sfplugin/utils/Codec2Mapper.cpp
++++ b/media/codec2/sfplugin/utils/Codec2Mapper.cpp
+@@ -436,6 +436,86 @@ ALookup<C2Config::hdr_format_t, int32_t> sAv1HdrFormats = {
+     { C2Config::hdr_format_t::HDR10_PLUS, AV1ProfileMain10HDR10Plus },
+ };
+ 
++// APV
++ALookup<C2Config::profile_t, int32_t> sApvProfiles = {
++    { C2Config::PROFILE_APV_422_10, APVProfile422_10 },
++    { C2Config::PROFILE_APV_422_10, APVProfile422_10HDR10 },
++    { C2Config::PROFILE_APV_422_10, APVProfile422_10HDR10Plus },
++};
++
++ALookup<C2Config::profile_t, int32_t> sApvHdrProfiles = {
++    { C2Config::PROFILE_APV_422_10, APVProfile422_10HDR10 },
++};
++
++ALookup<C2Config::profile_t, int32_t> sApvHdr10PlusProfiles = {
++    { C2Config::PROFILE_APV_422_10, APVProfile422_10HDR10Plus },
++};
++
++ALookup<C2Config::level_t, int32_t> sApvLevels = {
++    { C2Config::LEVEL_APV_1_BAND_0, APVLevel1Band0 },
++    { C2Config::LEVEL_APV_1_BAND_1, APVLevel1Band1 },
++    { C2Config::LEVEL_APV_1_BAND_2, APVLevel1Band2 },
++    { C2Config::LEVEL_APV_1_BAND_3, APVLevel1Band3 },
++    { C2Config::LEVEL_APV_1_1_BAND_0, APVLevel11Band0 },
++    { C2Config::LEVEL_APV_1_1_BAND_1, APVLevel11Band1 },
++    { C2Config::LEVEL_APV_1_1_BAND_2, APVLevel11Band2 },
++    { C2Config::LEVEL_APV_1_1_BAND_3, APVLevel11Band3 },
++    { C2Config::LEVEL_APV_2_BAND_0, APVLevel2Band0 },
++    { C2Config::LEVEL_APV_2_BAND_1, APVLevel2Band1 },
++    { C2Config::LEVEL_APV_2_BAND_2, APVLevel2Band2 },
++    { C2Config::LEVEL_APV_2_BAND_3, APVLevel2Band3 },
++    { C2Config::LEVEL_APV_2_1_BAND_0, APVLevel21Band0 },
++    { C2Config::LEVEL_APV_2_1_BAND_1, APVLevel21Band1 },
++    { C2Config::LEVEL_APV_2_1_BAND_2, APVLevel21Band2 },
++    { C2Config::LEVEL_APV_2_1_BAND_3, APVLevel21Band3 },
++    { C2Config::LEVEL_APV_3_BAND_0, APVLevel3Band0 },
++    { C2Config::LEVEL_APV_3_BAND_1, APVLevel3Band1 },
++    { C2Config::LEVEL_APV_3_BAND_2, APVLevel3Band2 },
++    { C2Config::LEVEL_APV_3_BAND_3, APVLevel3Band3 },
++    { C2Config::LEVEL_APV_3_1_BAND_0, APVLevel31Band0 },
++    { C2Config::LEVEL_APV_3_1_BAND_1, APVLevel31Band1 },
++    { C2Config::LEVEL_APV_3_1_BAND_2, APVLevel31Band2 },
++    { C2Config::LEVEL_APV_3_1_BAND_3, APVLevel31Band3 },
++    { C2Config::LEVEL_APV_4_BAND_0, APVLevel4Band0 },
++    { C2Config::LEVEL_APV_4_BAND_1, APVLevel4Band1 },
++    { C2Config::LEVEL_APV_4_BAND_2, APVLevel4Band2 },
++    { C2Config::LEVEL_APV_4_BAND_3, APVLevel4Band3 },
++    { C2Config::LEVEL_APV_4_1_BAND_0, APVLevel41Band0 },
++    { C2Config::LEVEL_APV_4_1_BAND_1, APVLevel41Band1 },
++    { C2Config::LEVEL_APV_4_1_BAND_2, APVLevel41Band2 },
++    { C2Config::LEVEL_APV_4_1_BAND_3, APVLevel41Band3 },
++    { C2Config::LEVEL_APV_5_BAND_0, APVLevel5Band0 },
++    { C2Config::LEVEL_APV_5_BAND_1, APVLevel5Band1 },
++    { C2Config::LEVEL_APV_5_BAND_2, APVLevel5Band2 },
++    { C2Config::LEVEL_APV_5_BAND_3, APVLevel5Band3 },
++    { C2Config::LEVEL_APV_5_1_BAND_0, APVLevel51Band0 },
++    { C2Config::LEVEL_APV_5_1_BAND_1, APVLevel51Band1 },
++    { C2Config::LEVEL_APV_5_1_BAND_2, APVLevel51Band2 },
++    { C2Config::LEVEL_APV_5_1_BAND_3, APVLevel51Band3 },
++    { C2Config::LEVEL_APV_6_BAND_0, APVLevel6Band0 },
++    { C2Config::LEVEL_APV_6_BAND_1, APVLevel6Band1 },
++    { C2Config::LEVEL_APV_6_BAND_2, APVLevel6Band2 },
++    { C2Config::LEVEL_APV_6_BAND_3, APVLevel6Band3 },
++    { C2Config::LEVEL_APV_6_1_BAND_0, APVLevel61Band0 },
++    { C2Config::LEVEL_APV_6_1_BAND_1, APVLevel61Band1 },
++    { C2Config::LEVEL_APV_6_1_BAND_2, APVLevel61Band2 },
++    { C2Config::LEVEL_APV_6_1_BAND_3, APVLevel61Band3 },
++    { C2Config::LEVEL_APV_7_BAND_0, APVLevel7Band0 },
++    { C2Config::LEVEL_APV_7_BAND_1, APVLevel7Band1 },
++    { C2Config::LEVEL_APV_7_BAND_2, APVLevel7Band2 },
++    { C2Config::LEVEL_APV_7_BAND_3, APVLevel7Band3 },
++    { C2Config::LEVEL_APV_7_1_BAND_0, APVLevel71Band0 },
++    { C2Config::LEVEL_APV_7_1_BAND_1, APVLevel71Band1 },
++    { C2Config::LEVEL_APV_7_1_BAND_2, APVLevel71Band2 },
++    { C2Config::LEVEL_APV_7_1_BAND_3, APVLevel71Band3 },
++};
++
++ALookup<C2Config::hdr_format_t, int32_t> sApvHdrFormats = {
++    { C2Config::hdr_format_t::HLG, APVProfile422_10 },
++    { C2Config::hdr_format_t::HDR10, APVProfile422_10HDR10 },
++    { C2Config::hdr_format_t::HDR10_PLUS, APVProfile422_10HDR10Plus },
++};
++
+ // HAL_PIXEL_FORMAT_* -> COLOR_Format*
+ ALookup<uint32_t, int32_t> sPixelFormats = {
+     { HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED, COLOR_FormatSurface },
+@@ -720,6 +800,37 @@ private:
+     int32_t mBitDepth;
+ };
+ 
++// APV
++struct ApvProfileLevelMapper : ProfileLevelMapperHelper {
++    ApvProfileLevelMapper(bool isHdr = false, bool isHdr10Plus = false) :
++        ProfileLevelMapperHelper(),
++        mIsHdr(isHdr), mIsHdr10Plus(isHdr10Plus) {}
++
++    virtual bool simpleMap(C2Config::level_t from, int32_t *to) {
++        return sApvLevels.map(from, to);
++    }
++    virtual bool simpleMap(int32_t from, C2Config::level_t *to) {
++        return sApvLevels.map(from, to);
++    }
++    virtual bool simpleMap(C2Config::profile_t from, int32_t *to) {
++        return mIsHdr10Plus ? sApvHdr10PlusProfiles.map(from, to) :
++                     mIsHdr ? sApvHdrProfiles.map(from, to) :
++                              sApvProfiles.map(from, to);
++    }
++    virtual bool simpleMap(int32_t from, C2Config::profile_t *to) {
++        return mIsHdr10Plus ? sApvHdr10PlusProfiles.map(from, to) :
++                     mIsHdr ? sApvHdrProfiles.map(from, to) :
++                              sApvProfiles.map(from, to);
++    }
++    virtual bool mapHdrFormat(int32_t from, C2Config::hdr_format_t *to) override {
++        return sApvHdrFormats.map(from, to);
++    }
++
++private:
++    bool mIsHdr;
++    bool mIsHdr10Plus;
++};
++
+ } // namespace
+ 
+ // the default mapper is used for media types that do not support HDR
+@@ -753,6 +864,8 @@ C2Mapper::GetProfileLevelMapper(std::string mediaType) {
+         return std::make_shared<Vp9ProfileLevelMapper>();
+     } else if (mediaType == MIMETYPE_VIDEO_AV1) {
+         return std::make_shared<Av1ProfileLevelMapper>();
++    } else if (mediaType == MIMETYPE_VIDEO_APV) {
++        return std::make_shared<ApvProfileLevelMapper>();
+     }
+     return nullptr;
+ }
+@@ -767,6 +880,8 @@ C2Mapper::GetHdrProfileLevelMapper(std::string mediaType, bool isHdr10Plus) {
+         return std::make_shared<Vp9ProfileLevelMapper>(true, isHdr10Plus);
+     } else if (mediaType == MIMETYPE_VIDEO_AV1) {
+         return std::make_shared<Av1ProfileLevelMapper>(true, isHdr10Plus);
++    } else if (mediaType == MIMETYPE_VIDEO_APV) {
++        return std::make_shared<ApvProfileLevelMapper>(true, isHdr10Plus);
+     }
+     return nullptr;
+ }
+@@ -779,6 +894,8 @@ C2Mapper::GetBitDepthProfileLevelMapper(std::string mediaType, int32_t bitDepth)
+         return GetProfileLevelMapper(mediaType);
+     } else if (mediaType == MIMETYPE_VIDEO_AV1 && bitDepth == 10) {
+         return std::make_shared<Av1ProfileLevelMapper>(false, false, bitDepth);
++    } else if (mediaType == MIMETYPE_VIDEO_APV) {
++        return std::make_shared<ApvProfileLevelMapper>();
+     }
+     return nullptr;
+ }
+diff --git a/media/libstagefright/include/media/stagefright/MediaCodecConstants.h b/media/libstagefright/include/media/stagefright/MediaCodecConstants.h
+index b1cf66570a..c9e0a97735 100644
+--- a/media/libstagefright/include/media/stagefright/MediaCodecConstants.h
++++ b/media/libstagefright/include/media/stagefright/MediaCodecConstants.h
+@@ -586,6 +586,139 @@ inline static const char *asString_Dts_UHDProfile(int32_t i, const char *def = "
+     }
+ }
+ 
++// APV ProfileLevel
++inline constexpr int32_t APVProfile422_10           = 0x01;
++inline constexpr int32_t APVProfile422_10HDR10      = 0x1000;
++inline constexpr int32_t APVProfile422_10HDR10Plus  = 0x2000;
++
++inline static const char *asString_APVProfile(int32_t i, const char *def = "??") {
++    switch (i) {
++        case APVProfile422_10:           return "APVProfile422_10";
++        case APVProfile422_10HDR10:      return "APVProfile422_10HDR10";
++        case APVProfile422_10HDR10Plus:  return "APVProfile422_10HDR10Plus";
++        default:                        return def;
++    }
++}
++
++inline constexpr int32_t APVLevel1Band0 = 0x101;
++inline constexpr int32_t APVLevel1Band1 = 0x102;
++inline constexpr int32_t APVLevel1Band2 = 0x104;
++inline constexpr int32_t APVLevel1Band3 = 0x108;
++inline constexpr int32_t APVLevel11Band0 = 0x201;
++inline constexpr int32_t APVLevel11Band1 = 0x202;
++inline constexpr int32_t APVLevel11Band2 = 0x204;
++inline constexpr int32_t APVLevel11Band3 = 0x208;
++inline constexpr int32_t APVLevel2Band0 = 0x401;
++inline constexpr int32_t APVLevel2Band1 = 0x402;
++inline constexpr int32_t APVLevel2Band2 = 0x404;
++inline constexpr int32_t APVLevel2Band3 = 0x408;
++inline constexpr int32_t APVLevel21Band0 = 0x801;
++inline constexpr int32_t APVLevel21Band1 = 0x802;
++inline constexpr int32_t APVLevel21Band2 = 0x804;
++inline constexpr int32_t APVLevel21Band3 = 0x808;
++inline constexpr int32_t APVLevel3Band0 = 0x1001;
++inline constexpr int32_t APVLevel3Band1 = 0x1002;
++inline constexpr int32_t APVLevel3Band2 = 0x1004;
++inline constexpr int32_t APVLevel3Band3 = 0x1008;
++inline constexpr int32_t APVLevel31Band0 = 0x2001;
++inline constexpr int32_t APVLevel31Band1 = 0x2002;
++inline constexpr int32_t APVLevel31Band2 = 0x2004;
++inline constexpr int32_t APVLevel31Band3 = 0x2008;
++inline constexpr int32_t APVLevel4Band0 = 0x4001;
++inline constexpr int32_t APVLevel4Band1 = 0x4002;
++inline constexpr int32_t APVLevel4Band2 = 0x4004;
++inline constexpr int32_t APVLevel4Band3 = 0x4008;
++inline constexpr int32_t APVLevel41Band0 = 0x8001;
++inline constexpr int32_t APVLevel41Band1 = 0x8002;
++inline constexpr int32_t APVLevel41Band2 = 0x8004;
++inline constexpr int32_t APVLevel41Band3 = 0x8008;
++inline constexpr int32_t APVLevel5Band0 = 0x10001;
++inline constexpr int32_t APVLevel5Band1 = 0x10002;
++inline constexpr int32_t APVLevel5Band2 = 0x10004;
++inline constexpr int32_t APVLevel5Band3 = 0x10008;
++inline constexpr int32_t APVLevel51Band0 = 0x20001;
++inline constexpr int32_t APVLevel51Band1 = 0x20002;
++inline constexpr int32_t APVLevel51Band2 = 0x20004;
++inline constexpr int32_t APVLevel51Band3 = 0x20008;
++inline constexpr int32_t APVLevel6Band0 = 0x40001;
++inline constexpr int32_t APVLevel6Band1 = 0x40002;
++inline constexpr int32_t APVLevel6Band2 = 0x40004;
++inline constexpr int32_t APVLevel6Band3 = 0x40008;
++inline constexpr int32_t APVLevel61Band0 = 0x80001;
++inline constexpr int32_t APVLevel61Band1 = 0x80002;
++inline constexpr int32_t APVLevel61Band2 = 0x80004;
++inline constexpr int32_t APVLevel61Band3 = 0x80008;
++inline constexpr int32_t APVLevel7Band0 = 0x100001;
++inline constexpr int32_t APVLevel7Band1 = 0x100002;
++inline constexpr int32_t APVLevel7Band2 = 0x100004;
++inline constexpr int32_t APVLevel7Band3 = 0x100008;
++inline constexpr int32_t APVLevel71Band0 = 0x200001;
++inline constexpr int32_t APVLevel71Band1 = 0x200002;
++inline constexpr int32_t APVLevel71Band2 = 0x200004;
++inline constexpr int32_t APVLevel71Band3 = 0x200008;
++
++inline static const char *asString_APVBandLevel(int32_t i, const char *def = "??") {
++    switch (i) {
++        case APVLevel1Band0:     return "Level 1, Band 0";
++        case APVLevel1Band1:     return "Level 1, Band 1";
++        case APVLevel1Band2:     return "Level 1, Band 2";
++        case APVLevel1Band3:     return "Level 1, Band 3";
++        case APVLevel11Band0:     return "Level 1.1, Band 0";
++        case APVLevel11Band1:     return "Level 1.1, Band 1";
++        case APVLevel11Band2:     return "Level 1.1, Band 2";
++        case APVLevel11Band3:     return "Level 1.1, Band 3";
++        case APVLevel2Band0:     return "Level 2, Band 0";
++        case APVLevel2Band1:     return "Level 2, Band 1";
++        case APVLevel2Band2:     return "Level 2, Band 2";
++        case APVLevel2Band3:     return "Level 2, Band 3";
++        case APVLevel21Band0:     return "Level 2.1, Band 0";
++        case APVLevel21Band1:     return "Level 2.1, Band 1";
++        case APVLevel21Band2:     return "Level 2.1, Band 2";
++        case APVLevel21Band3:     return "Level 2.1, Band 3";
++        case APVLevel3Band0:     return "Level 3, Band 0";
++        case APVLevel3Band1:     return "Level 3, Band 1";
++        case APVLevel3Band2:     return "Level 3, Band 2";
++        case APVLevel3Band3:     return "Level 3, Band 3";
++        case APVLevel31Band0:     return "Level 3.1, Band 0";
++        case APVLevel31Band1:     return "Level 3.1, Band 1";
++        case APVLevel31Band2:     return "Level 3.1, Band 2";
++        case APVLevel31Band3:     return "Level 3.1, Band 3";
++        case APVLevel4Band0:     return "Level 4, Band 0";
++        case APVLevel4Band1:     return "Level 4, Band 1";
++        case APVLevel4Band2:     return "Level 4, Band 2";
++        case APVLevel4Band3:     return "Level 4, Band 3";
++        case APVLevel41Band0:     return "Level 4.1, Band 0";
++        case APVLevel41Band1:     return "Level 4.1, Band 1";
++        case APVLevel41Band2:     return "Level 4.1, Band 2";
++        case APVLevel41Band3:     return "Level 4.1, Band 3";
++        case APVLevel5Band0:     return "Level 5, Band 0";
++        case APVLevel5Band1:     return "Level 5, Band 1";
++        case APVLevel5Band2:     return "Level 5, Band 2";
++        case APVLevel5Band3:     return "Level 5, Band 3";
++        case APVLevel51Band0:     return "Level 5.1, Band 0";
++        case APVLevel51Band1:     return "Level 5.1, Band 1";
++        case APVLevel51Band2:     return "Level 5.1, Band 2";
++        case APVLevel51Band3:     return "Level 5.1, Band 3";
++        case APVLevel6Band0:     return "Level 6, Band 0";
++        case APVLevel6Band1:     return "Level 6, Band 1";
++        case APVLevel6Band2:     return "Level 6, Band 2";
++        case APVLevel6Band3:     return "Level 6, Band 3";
++        case APVLevel61Band0:     return "Level 6.1, Band 0";
++        case APVLevel61Band1:     return "Level 6.1, Band 1";
++        case APVLevel61Band2:     return "Level 6.1, Band 2";
++        case APVLevel61Band3:     return "Level 6.1, Band 3";
++        case APVLevel7Band0:     return "Level 7, Band 0";
++        case APVLevel7Band1:     return "Level 7, Band 1";
++        case APVLevel7Band2:     return "Level 7, Band 2";
++        case APVLevel7Band3:     return "Level 7, Band 3";
++        case APVLevel71Band0:     return "Level 7.1, Band 0";
++        case APVLevel71Band1:     return "Level 7.1, Band 1";
++        case APVLevel71Band2:     return "Level 7.1, Band 2";
++        case APVLevel71Band3:     return "Level 7.1, Band 3";
++        default:                return def;
++    }
++}
++
+ inline constexpr int32_t BITRATE_MODE_CBR = 2;
+ inline constexpr int32_t BITRATE_MODE_CBR_FD = 3;
+ inline constexpr int32_t BITRATE_MODE_CQ = 0;
+@@ -654,6 +787,7 @@ inline constexpr int32_t COLOR_FormatYUV422SemiPlanar        = 24;
+ inline constexpr int32_t COLOR_FormatYUV444Flexible          = 0x7F444888;
+ inline constexpr int32_t COLOR_FormatYUV444Interleaved       = 29;
+ inline constexpr int32_t COLOR_FormatYUVP010                 = 54;
++inline constexpr int32_t COLOR_FormatYUVP210                 = 60;
+ inline constexpr int32_t COLOR_QCOM_FormatYUV420SemiPlanar   = 0x7fa30c00;
+ inline constexpr int32_t COLOR_TI_FormatYUV420PackedSemiPlanar = 0x7f000100;
+ 
+@@ -712,6 +846,7 @@ inline static const char *asString_ColorFormat(int32_t i, const char *def = "??"
+         case COLOR_FormatYUV444Flexible:            return "YUV444Flexible";
+         case COLOR_FormatYUV444Interleaved:         return "YUV444Interleaved";
+         case COLOR_FormatYUVP010:                   return "YUVP010";
++        case COLOR_FormatYUVP210:                   return "YUVP210";
+         case COLOR_QCOM_FormatYUV420SemiPlanar:     return "QCOM_YUV420SemiPlanar";
+         case COLOR_TI_FormatYUV420PackedSemiPlanar: return "TI_YUV420PackedSemiPlanar";
+         default:                                    return def;
+@@ -731,6 +866,7 @@ inline constexpr char FEATURE_TunneledPlayback[]       = "tunneled-playback";
+ inline constexpr char MIMETYPE_VIDEO_VP8[] = "video/x-vnd.on2.vp8";
+ inline constexpr char MIMETYPE_VIDEO_VP9[] = "video/x-vnd.on2.vp9";
+ inline constexpr char MIMETYPE_VIDEO_AV1[] = "video/av01";
++inline constexpr char MIMETYPE_VIDEO_APV[] = "video/apv";
+ inline constexpr char MIMETYPE_VIDEO_AVC[] = "video/avc";
+ inline constexpr char MIMETYPE_VIDEO_HEVC[] = "video/hevc";
+ inline constexpr char MIMETYPE_VIDEO_MPEG4[] = "video/mp4v-es";
+diff --git a/media/libstagefright/omx/OMXUtils.cpp b/media/libstagefright/omx/OMXUtils.cpp
+index 49b2dec80e..d62e1edfcd 100644
+--- a/media/libstagefright/omx/OMXUtils.cpp
++++ b/media/libstagefright/omx/OMXUtils.cpp
+@@ -140,6 +140,8 @@ const char *GetComponentRole(bool isEncoder, const char *mime) {
+             "audio_decoder.g711alaw", "audio_encoder.g711alaw" },
+         { MEDIA_MIMETYPE_VIDEO_AVC,
+             "video_decoder.avc", "video_encoder.avc" },
++        { MEDIA_MIMETYPE_VIDEO_APV,
++            "video_decoder.apv", "video_encoder.apv" },
+         { MEDIA_MIMETYPE_VIDEO_HEVC,
+             "video_decoder.hevc", "video_encoder.hevc" },
+         { MEDIA_MIMETYPE_VIDEO_MPEG4,
+diff --git a/media/module/foundation/MediaDefs.cpp b/media/module/foundation/MediaDefs.cpp
+index 7abab63010..a89069649f 100644
+--- a/media/module/foundation/MediaDefs.cpp
++++ b/media/module/foundation/MediaDefs.cpp
+@@ -25,6 +25,7 @@ const char *MEDIA_MIMETYPE_IMAGE_AVIF = "image/avif";
+ const char *MEDIA_MIMETYPE_VIDEO_VP8 = "video/x-vnd.on2.vp8";
+ const char *MEDIA_MIMETYPE_VIDEO_VP9 = "video/x-vnd.on2.vp9";
+ const char *MEDIA_MIMETYPE_VIDEO_AV1 = "video/av01";
++const char *MEDIA_MIMETYPE_VIDEO_APV = "video/apv";
+ const char *MEDIA_MIMETYPE_VIDEO_AVC = "video/avc";
+ const char *MEDIA_MIMETYPE_VIDEO_HEVC = "video/hevc";
+ const char *MEDIA_MIMETYPE_VIDEO_MPEG4 = "video/mp4v-es";
+diff --git a/media/module/foundation/include/media/stagefright/foundation/MediaDefs.h b/media/module/foundation/include/media/stagefright/foundation/MediaDefs.h
+index 05ee7fcbcd..2b3f4464b5 100644
+--- a/media/module/foundation/include/media/stagefright/foundation/MediaDefs.h
++++ b/media/module/foundation/include/media/stagefright/foundation/MediaDefs.h
+@@ -27,6 +27,7 @@ extern const char *MEDIA_MIMETYPE_IMAGE_AVIF;
+ extern const char *MEDIA_MIMETYPE_VIDEO_VP8;
+ extern const char *MEDIA_MIMETYPE_VIDEO_VP9;
+ extern const char *MEDIA_MIMETYPE_VIDEO_AV1;
++extern const char *MEDIA_MIMETYPE_VIDEO_APV;
+ extern const char *MEDIA_MIMETYPE_VIDEO_AVC;
+ extern const char *MEDIA_MIMETYPE_VIDEO_HEVC;
+ extern const char *MEDIA_MIMETYPE_VIDEO_MPEG4;
+-- 
+2.43.0
+

@@ -1,0 +1,3154 @@
+From dd7d59930d8c0d627fa694e9b25f8a3b25c78981 Mon Sep 17 00:00:00 2001
+From: Fyodor Kyslov <kyslov@google.com>
+Date: Tue, 5 Nov 2024 21:40:16 +0000
+Subject: [PATCH 213/436] Bringing up APV SW codec
+
+Bug: 376770121
+Test: CodecEncoderTest, CodecDecoderTest
+
+Change-Id: Iafd5ea4e1aa9f8f7b3f77dfc7fbac6917ebefed1
+---
+ media/codec2/components/apv/Android.bp        |   58 +
+ media/codec2/components/apv/C2SoftApvCommon.h |  169 +++
+ media/codec2/components/apv/C2SoftApvDec.cpp  | 1240 ++++++++++++++++
+ media/codec2/components/apv/C2SoftApvDec.h    |  134 ++
+ media/codec2/components/apv/C2SoftApvEnc.cpp  | 1276 +++++++++++++++++
+ media/codec2/components/apv/C2SoftApvEnc.h    |  115 ++
+ media/codec2/vndk/C2Store.cpp                 |    3 +-
+ .../data/media_codecs_google_c2_video.xml     |   16 +
+ media/libstagefright/data/media_codecs_sw.xml |   17 +
+ .../module/codecserviceregistrant/Android.bp  |    2 +
+ 10 files changed, 3029 insertions(+), 1 deletion(-)
+ create mode 100644 media/codec2/components/apv/Android.bp
+ create mode 100644 media/codec2/components/apv/C2SoftApvCommon.h
+ create mode 100644 media/codec2/components/apv/C2SoftApvDec.cpp
+ create mode 100644 media/codec2/components/apv/C2SoftApvDec.h
+ create mode 100644 media/codec2/components/apv/C2SoftApvEnc.cpp
+ create mode 100644 media/codec2/components/apv/C2SoftApvEnc.h
+
+diff --git a/media/codec2/components/apv/Android.bp b/media/codec2/components/apv/Android.bp
+new file mode 100644
+index 0000000000..f565978cb0
+--- /dev/null
++++ b/media/codec2/components/apv/Android.bp
+@@ -0,0 +1,58 @@
++package {
++    // See: http://go/android-license-faq
++    // A large-scale-change added 'default_applicable_licenses' to import
++    // all of the 'license_kinds' from "frameworks_av_license"
++    // to get the below license kinds:
++    //   SPDX-license-identifier-Apache-2.0
++    default_applicable_licenses: ["frameworks_av_license"],
++}
++
++cc_library {
++    enabled: true,
++    name: "libcodec2_soft_apvenc",
++    defaults: [
++        "libcodec2_soft-defaults",
++        "libcodec2_soft_sanitize_signed-defaults",
++        "libcodec2_soft_sanitize_cfi-defaults",
++    ],
++
++    static_libs: [
++        "libopenapv",
++        "android.media.swcodec.flags-aconfig-cc",
++    ],
++
++    srcs: ["C2SoftApvEnc.cpp"],
++
++    cflags: [
++        "-DOAPV_STATIC_DEFINE",
++        "-Wno-unused-variable",
++        "-Wno-unused-parameter",
++        "-Wno-unused-function",
++        "-Wno-reorder-ctor",
++    ],
++}
++
++cc_library {
++    enabled: true,
++    name: "libcodec2_soft_apvdec",
++    defaults: [
++        "libcodec2_soft-defaults",
++        "libcodec2_soft_sanitize_signed-defaults",
++        "libcodec2_soft_sanitize_cfi-defaults",
++    ],
++
++    static_libs: [
++        "libopenapv",
++        "android.media.swcodec.flags-aconfig-cc",
++    ],
++
++    srcs: ["C2SoftApvDec.cpp"],
++
++    cflags: [
++        "-DOAPV_STATIC_DEFINE",
++        "-Wno-unused-variable",
++        "-Wno-unused-parameter",
++        "-Wno-unused-function",
++        "-Wno-reorder-ctor",
++    ],
++}
+diff --git a/media/codec2/components/apv/C2SoftApvCommon.h b/media/codec2/components/apv/C2SoftApvCommon.h
+new file mode 100644
+index 0000000000..9325f28885
+--- /dev/null
++++ b/media/codec2/components/apv/C2SoftApvCommon.h
+@@ -0,0 +1,169 @@
++/*
++ * Copyright 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#ifndef ANDROID_C2_SOFT_APV_COMMON_H__
++#define ANDROID_C2_SOFT_APV_COMMON_H__
++
++typedef enum {
++    PIX_CHROMA_NA = 0xFFFFFFFF,
++    PIX_YUV_420P = 0x1,
++    PIX_YUV_422P = 0x2,
++    PIX_420_UV_INTL = 0x3,
++    PIX_YUV_422IBE = 0x4,
++    PIX_YUV_422ILE = 0x5,
++    PIX_YUV_444P = 0x6,
++    PIX_YUV_411P = 0x7,
++    PIX_GRAY = 0x8,
++    PIX_RGB_565 = 0x9,
++    PIX_RGB_24 = 0xa,
++    PIX_YUV_420SP_UV = 0xb,
++    PIX_YUV_420SP_VU = 0xc,
++    PIX_YUV_422SP_UV = 0xd,
++    PIX_YUV_422SP_VU = 0xe
++} PIX_COLOR_FORMAT_T;
++
++#define CLIP_VAL(n, min, max) (((n) > (max)) ? (max) : (((n) < (min)) ? (min) : (n)))
++#define ALIGN_VAL(val, align) ((((val) + (align) - 1) / (align)) * (align))
++
++static int atomic_inc(volatile int* pcnt) {
++    int ret;
++    ret = *pcnt;
++    ret++;
++    *pcnt = ret;
++    return ret;
++}
++
++static int atomic_dec(volatile int* pcnt) {
++    int ret;
++    ret = *pcnt;
++    ret--;
++    *pcnt = ret;
++    return ret;
++}
++
++/* Function to allocate memory for picture buffer:
++   This function might need to modify according to O/S or CPU platform
++*/
++static void* picbuf_alloc(int size) {
++    return malloc(size);
++}
++
++/* Function to free memory allocated for picture buffer:
++   This function might need to modify according to O/S or CPU platform
++*/
++static void picbuf_free(void* p) {
++    if (p) {
++        free(p);
++    }
++}
++
++static int imgb_addref(oapv_imgb_t* imgb) {
++    return atomic_inc(&imgb->refcnt);
++}
++
++static int imgb_getref(oapv_imgb_t* imgb) {
++    return imgb->refcnt;
++}
++
++static int imgb_release(oapv_imgb_t* imgb) {
++    int refcnt, i;
++    refcnt = atomic_dec(&imgb->refcnt);
++    if (refcnt == 0) {
++        for (i = 0; i < OAPV_MAX_CC; i++) {
++            if (imgb->baddr[i]) picbuf_free(imgb->baddr[i]);
++        }
++        free(imgb);
++    }
++    return refcnt;
++}
++
++static oapv_imgb_t* imgb_create(int w, int h, int cs) {
++    int i, bd;
++    oapv_imgb_t* imgb;
++
++    imgb = (oapv_imgb_t*)malloc(sizeof(oapv_imgb_t));
++    if (imgb == NULL) goto ERR;
++    memset(imgb, 0, sizeof(oapv_imgb_t));
++
++    bd = OAPV_CS_GET_BYTE_DEPTH(cs); /* byte unit */
++
++    imgb->w[0] = w;
++    imgb->h[0] = h;
++    switch (OAPV_CS_GET_FORMAT(cs)) {
++        case OAPV_CF_YCBCR400:
++            imgb->w[1] = imgb->w[2] = w;
++            imgb->h[1] = imgb->h[2] = h;
++            imgb->np = 1;
++            break;
++        case OAPV_CF_YCBCR420:
++            imgb->w[1] = imgb->w[2] = (w + 1) >> 1;
++            imgb->h[1] = imgb->h[2] = (h + 1) >> 1;
++            imgb->np = 3;
++            break;
++        case OAPV_CF_YCBCR422:
++            imgb->w[1] = imgb->w[2] = (w + 1) >> 1;
++            imgb->h[1] = imgb->h[2] = h;
++            imgb->np = 3;
++            break;
++        case OAPV_CF_YCBCR444:
++            imgb->w[1] = imgb->w[2] = w;
++            imgb->h[1] = imgb->h[2] = h;
++            imgb->np = 3;
++            break;
++        case OAPV_CF_YCBCR4444:
++            imgb->w[1] = imgb->w[2] = imgb->w[3] = w;
++            imgb->h[1] = imgb->h[2] = imgb->h[3] = h;
++            imgb->np = 4;
++            break;
++        case OAPV_CF_PLANAR2:
++            imgb->w[1] = w;
++            imgb->h[1] = h;
++            imgb->np = 2;
++            break;
++        default:
++            goto ERR;
++    }
++
++    for (i = 0; i < imgb->np; i++) {
++        // width and height need to be aligned to macroblock size
++        imgb->aw[i] = ALIGN_VAL(imgb->w[i], OAPV_MB_W);
++        imgb->s[i] = imgb->aw[i] * bd;
++        imgb->ah[i] = ALIGN_VAL(imgb->h[i], OAPV_MB_H);
++        imgb->e[i] = imgb->ah[i];
++
++        imgb->bsize[i] = imgb->s[i] * imgb->e[i];
++        imgb->a[i] = imgb->baddr[i] = picbuf_alloc(imgb->bsize[i]);
++        memset(imgb->a[i], 0, imgb->bsize[i]);
++    }
++    imgb->cs = cs;
++    imgb->addref = imgb_addref;
++    imgb->getref = imgb_getref;
++    imgb->release = imgb_release;
++
++    imgb->addref(imgb); /* increase reference count */
++    return imgb;
++
++ERR:
++    if (imgb) {
++        for (int i = 0; i < OAPV_MAX_CC; i++) {
++            if (imgb->a[i]) picbuf_free(imgb->a[i]);
++        }
++        free(imgb);
++    }
++    return NULL;
++}
++
++#endif  // ANDROID_C2_SOFT_APV_COMMON_H__
+\ No newline at end of file
+diff --git a/media/codec2/components/apv/C2SoftApvDec.cpp b/media/codec2/components/apv/C2SoftApvDec.cpp
+new file mode 100644
+index 0000000000..6e92b6f03a
+--- /dev/null
++++ b/media/codec2/components/apv/C2SoftApvDec.cpp
+@@ -0,0 +1,1240 @@
++/*
++ * Copyright (C) 2018 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++//#define LOG_NDEBUG 0
++#define LOG_TAG "C2SoftApvDec"
++#include <log/log.h>
++
++#include <android_media_swcodec_flags.h>
++
++#include <media/stagefright/foundation/AUtils.h>
++#include <media/stagefright/foundation/MediaDefs.h>
++
++#include <C2Debug.h>
++#include <C2PlatformSupport.h>
++#include <Codec2BufferUtils.h>
++#include <Codec2CommonUtils.h>
++#include <Codec2Mapper.h>
++#include <SimpleC2Interface.h>
++#include "C2SoftApvDec.h"
++
++#include <cutils/properties.h>
++
++const char* MEDIA_MIMETYPE_VIDEO_APV = "video/apv";
++
++#define MAX_NUM_FRMS (1)  // supports only 1-frame output
++#define FRM_IDX (0)       // supports only 1-frame output
++// check generic frame or not
++#define IS_NON_AUX_FRM(frm)                              \
++    (((frm)->pbu_type == OAPV_PBU_TYPE_PRIMARY_FRAME) || \
++     ((frm)->pbu_type == OAPV_PBU_TYPE_NON_PRIMARY_FRAME))
++// check auxiliary frame or not
++#define IS_AUX_FRM(frm) (!(IS_NON_AUX_FRM(frm)))
++#define OUTPUT_CSP_NATIVE (0)
++#define OUTPUT_CSP_P210 (1)
++
++namespace android {
++namespace {
++constexpr char COMPONENT_NAME[] = "c2.android.apv.decoder";
++constexpr uint32_t kDefaultOutputDelay = 8;
++constexpr uint32_t kMaxOutputDelay = 16;
++constexpr size_t kMinInputBufferSize = 2 * 1024 * 1024;
++}  // namespace
++
++class C2SoftApvDec::IntfImpl : public SimpleInterface<void>::BaseParams {
++  public:
++    explicit IntfImpl(const std::shared_ptr<C2ReflectorHelper>& helper)
++        : SimpleInterface<void>::BaseParams(helper, COMPONENT_NAME, C2Component::KIND_DECODER,
++                                            C2Component::DOMAIN_VIDEO, MEDIA_MIMETYPE_VIDEO_APV) {
++        noPrivateBuffers();  // TODO: account for our buffers here.
++        noInputReferences();
++        noOutputReferences();
++        noInputLatency();
++        noTimeStretch();
++
++        addParameter(DefineParam(mAttrib, C2_PARAMKEY_COMPONENT_ATTRIBUTES)
++                             .withConstValue(new C2ComponentAttributesSetting(
++                                     C2Component::ATTRIB_IS_TEMPORAL))
++                             .build());
++
++        addParameter(DefineParam(mSize, C2_PARAMKEY_PICTURE_SIZE)
++                             .withDefault(new C2StreamPictureSizeInfo::output(0u, 320, 240))
++                             .withFields({
++                                     C2F(mSize, width).inRange(2, 4096),
++                                     C2F(mSize, height).inRange(2, 4096),
++                             })
++                             .withSetter(SizeSetter)
++                             .build());
++
++        addParameter(
++                DefineParam(mProfileLevel, C2_PARAMKEY_PROFILE_LEVEL)
++                        .withDefault(new C2StreamProfileLevelInfo::input(
++                                0u, C2Config::PROFILE_APV_422_10))
++                        .withFields(
++                                {C2F(mProfileLevel, profile).oneOf({C2Config::PROFILE_APV_422_10}),
++                                 C2F(mProfileLevel, level)
++                                         .oneOf({
++                                                C2Config::LEVEL_APV_1_BAND_0,
++                                                C2Config::LEVEL_APV_1_1_BAND_0,
++                                                C2Config::LEVEL_APV_2_BAND_0,
++                                                C2Config::LEVEL_APV_2_1_BAND_0,
++                                                C2Config::LEVEL_APV_3_BAND_0,
++                                                C2Config::LEVEL_APV_3_1_BAND_0,
++                                                C2Config::LEVEL_APV_4_BAND_0,
++                                                C2Config::LEVEL_APV_4_1_BAND_0,
++                                                C2Config::LEVEL_APV_5_BAND_0,
++                                                C2Config::LEVEL_APV_5_1_BAND_0,
++                                                C2Config::LEVEL_APV_6_BAND_0,
++                                                C2Config::LEVEL_APV_6_1_BAND_0,
++                                                C2Config::LEVEL_APV_7_BAND_0,
++                                                C2Config::LEVEL_APV_7_1_BAND_0,
++                                                C2Config::LEVEL_APV_1_BAND_1,
++                                                C2Config::LEVEL_APV_1_1_BAND_1,
++                                                C2Config::LEVEL_APV_2_BAND_1,
++                                                C2Config::LEVEL_APV_2_1_BAND_1,
++                                                C2Config::LEVEL_APV_3_BAND_1,
++                                                C2Config::LEVEL_APV_3_1_BAND_1,
++                                                C2Config::LEVEL_APV_4_BAND_1,
++                                                C2Config::LEVEL_APV_4_1_BAND_1,
++                                                C2Config::LEVEL_APV_5_BAND_1,
++                                                C2Config::LEVEL_APV_5_1_BAND_1,
++                                                C2Config::LEVEL_APV_6_BAND_1,
++                                                C2Config::LEVEL_APV_6_1_BAND_1,
++                                                C2Config::LEVEL_APV_7_BAND_1,
++                                                C2Config::LEVEL_APV_7_1_BAND_1,
++                                                C2Config::LEVEL_APV_1_BAND_2,
++                                                C2Config::LEVEL_APV_1_1_BAND_2,
++                                                C2Config::LEVEL_APV_2_BAND_2,
++                                                C2Config::LEVEL_APV_2_1_BAND_2,
++                                                C2Config::LEVEL_APV_3_BAND_2,
++                                                C2Config::LEVEL_APV_3_1_BAND_2,
++                                                C2Config::LEVEL_APV_4_BAND_2,
++                                                C2Config::LEVEL_APV_4_1_BAND_2,
++                                                C2Config::LEVEL_APV_5_BAND_2,
++                                                C2Config::LEVEL_APV_5_1_BAND_2,
++                                                C2Config::LEVEL_APV_6_BAND_2,
++                                                C2Config::LEVEL_APV_6_1_BAND_2,
++                                                C2Config::LEVEL_APV_7_BAND_2,
++                                                C2Config::LEVEL_APV_7_1_BAND_2,
++                                                C2Config::LEVEL_APV_1_BAND_3,
++                                                C2Config::LEVEL_APV_1_1_BAND_3,
++                                                C2Config::LEVEL_APV_2_BAND_3,
++                                                C2Config::LEVEL_APV_2_1_BAND_3,
++                                                C2Config::LEVEL_APV_3_BAND_3,
++                                                C2Config::LEVEL_APV_3_1_BAND_3,
++                                                C2Config::LEVEL_APV_4_BAND_3,
++                                                C2Config::LEVEL_APV_4_1_BAND_3,
++                                                C2Config::LEVEL_APV_5_BAND_3,
++                                                C2Config::LEVEL_APV_5_1_BAND_3,
++                                                C2Config::LEVEL_APV_6_BAND_3,
++                                                C2Config::LEVEL_APV_6_1_BAND_3,
++                                                C2Config::LEVEL_APV_7_BAND_3,
++                                                C2Config::LEVEL_APV_7_1_BAND_3,
++                                                 })})
++                        .withSetter(ProfileLevelSetter, mSize)
++                        .build());
++
++        mHdr10PlusInfoInput = C2StreamHdr10PlusInfo::input::AllocShared(0);
++        addParameter(DefineParam(mHdr10PlusInfoInput, C2_PARAMKEY_INPUT_HDR10_PLUS_INFO)
++                             .withDefault(mHdr10PlusInfoInput)
++                             .withFields({
++                                     C2F(mHdr10PlusInfoInput, m.value).any(),
++                             })
++                             .withSetter(Hdr10PlusInfoInputSetter)
++                             .build());
++
++        mHdr10PlusInfoOutput = C2StreamHdr10PlusInfo::output::AllocShared(0);
++        addParameter(DefineParam(mHdr10PlusInfoOutput, C2_PARAMKEY_OUTPUT_HDR10_PLUS_INFO)
++                             .withDefault(mHdr10PlusInfoOutput)
++                             .withFields({
++                                     C2F(mHdr10PlusInfoOutput, m.value).any(),
++                             })
++                             .withSetter(Hdr10PlusInfoOutputSetter)
++                             .build());
++
++        // default static info
++        C2HdrStaticMetadataStruct defaultStaticInfo{};
++        helper->addStructDescriptors<C2MasteringDisplayColorVolumeStruct, C2ColorXyStruct>();
++        addParameter(
++                DefineParam(mHdrStaticInfo, C2_PARAMKEY_HDR_STATIC_INFO)
++                        .withDefault(new C2StreamHdrStaticInfo::output(0u, defaultStaticInfo))
++                        .withFields({C2F(mHdrStaticInfo, mastering.red.x).inRange(0, 1),
++                                     C2F(mHdrStaticInfo, mastering.red.y).inRange(0, 1),
++                                     C2F(mHdrStaticInfo, mastering.green.x).inRange(0, 1),
++                                     C2F(mHdrStaticInfo, mastering.green.y).inRange(0, 1),
++                                     C2F(mHdrStaticInfo, mastering.blue.x).inRange(0, 1),
++                                     C2F(mHdrStaticInfo, mastering.blue.y).inRange(0, 1),
++                                     C2F(mHdrStaticInfo, mastering.white.x).inRange(0, 1),
++                                     C2F(mHdrStaticInfo, mastering.white.x).inRange(0, 1),
++                                     C2F(mHdrStaticInfo, mastering.maxLuminance).inRange(0, 65535),
++                                     C2F(mHdrStaticInfo, mastering.minLuminance).inRange(0, 6.5535),
++                                     C2F(mHdrStaticInfo, maxCll).inRange(0, 0XFFFF),
++                                     C2F(mHdrStaticInfo, maxFall).inRange(0, 0XFFFF)})
++                        .withSetter(HdrStaticInfoSetter)
++                        .build());
++
++        addParameter(DefineParam(mMaxSize, C2_PARAMKEY_MAX_PICTURE_SIZE)
++                             .withDefault(new C2StreamMaxPictureSizeTuning::output(0u, 320, 240))
++                             .withFields({
++                                     C2F(mSize, width).inRange(2, 4096, 2),
++                                     C2F(mSize, height).inRange(2, 4096, 2),
++                             })
++                             .withSetter(MaxPictureSizeSetter, mSize)
++                             .build());
++
++        addParameter(
++                DefineParam(mMaxInputSize, C2_PARAMKEY_INPUT_MAX_BUFFER_SIZE)
++                        .withDefault(new C2StreamMaxBufferSizeInfo::input(0u, kMinInputBufferSize))
++                        .withFields({
++                                C2F(mMaxInputSize, value).any(),
++                        })
++                        .calculatedAs(MaxInputSizeSetter, mMaxSize)
++                        .build());
++
++        C2ChromaOffsetStruct locations[1] = {C2ChromaOffsetStruct::ITU_YUV_420_0()};
++        std::shared_ptr<C2StreamColorInfo::output> defaultColorInfo =
++                C2StreamColorInfo::output::AllocShared(1u, 0u, 8u /* bitDepth */, C2Color::YUV_420);
++        memcpy(defaultColorInfo->m.locations, locations, sizeof(locations));
++
++        defaultColorInfo = C2StreamColorInfo::output::AllocShared(
++                {C2ChromaOffsetStruct::ITU_YUV_420_0()}, 0u, 8u /* bitDepth */, C2Color::YUV_420);
++        helper->addStructDescriptors<C2ChromaOffsetStruct>();
++        addParameter(DefineParam(mColorInfo, C2_PARAMKEY_CODED_COLOR_INFO)
++                             .withConstValue(defaultColorInfo)
++                             .build());
++
++        addParameter(DefineParam(mDefaultColorAspects, C2_PARAMKEY_DEFAULT_COLOR_ASPECTS)
++                             .withDefault(new C2StreamColorAspectsTuning::output(
++                                     0u, C2Color::RANGE_UNSPECIFIED, C2Color::PRIMARIES_UNSPECIFIED,
++                                     C2Color::TRANSFER_UNSPECIFIED, C2Color::MATRIX_UNSPECIFIED))
++                             .withFields({C2F(mDefaultColorAspects, range)
++                                                  .inRange(C2Color::RANGE_UNSPECIFIED,
++                                                           C2Color::RANGE_OTHER),
++                                          C2F(mDefaultColorAspects, primaries)
++                                                  .inRange(C2Color::PRIMARIES_UNSPECIFIED,
++                                                           C2Color::PRIMARIES_OTHER),
++                                          C2F(mDefaultColorAspects, transfer)
++                                                  .inRange(C2Color::TRANSFER_UNSPECIFIED,
++                                                           C2Color::TRANSFER_OTHER),
++                                          C2F(mDefaultColorAspects, matrix)
++                                                  .inRange(C2Color::MATRIX_UNSPECIFIED,
++                                                           C2Color::MATRIX_OTHER)})
++                             .withSetter(DefaultColorAspectsSetter)
++                             .build());
++
++        addParameter(DefineParam(mCodedColorAspects, C2_PARAMKEY_VUI_COLOR_ASPECTS)
++                             .withDefault(new C2StreamColorAspectsInfo::input(
++                                     0u, C2Color::RANGE_LIMITED, C2Color::PRIMARIES_UNSPECIFIED,
++                                     C2Color::TRANSFER_UNSPECIFIED, C2Color::MATRIX_UNSPECIFIED))
++                             .withFields({C2F(mCodedColorAspects, range)
++                                                  .inRange(C2Color::RANGE_UNSPECIFIED,
++                                                           C2Color::RANGE_OTHER),
++                                          C2F(mCodedColorAspects, primaries)
++                                                  .inRange(C2Color::PRIMARIES_UNSPECIFIED,
++                                                           C2Color::PRIMARIES_OTHER),
++                                          C2F(mCodedColorAspects, transfer)
++                                                  .inRange(C2Color::TRANSFER_UNSPECIFIED,
++                                                           C2Color::TRANSFER_OTHER),
++                                          C2F(mCodedColorAspects, matrix)
++                                                  .inRange(C2Color::MATRIX_UNSPECIFIED,
++                                                           C2Color::MATRIX_OTHER)})
++                             .withSetter(CodedColorAspectsSetter)
++                             .build());
++
++        addParameter(
++                DefineParam(mColorAspects, C2_PARAMKEY_COLOR_ASPECTS)
++                        .withDefault(new C2StreamColorAspectsInfo::output(
++                                0u, C2Color::RANGE_UNSPECIFIED, C2Color::PRIMARIES_UNSPECIFIED,
++                                C2Color::TRANSFER_UNSPECIFIED, C2Color::MATRIX_UNSPECIFIED))
++                        .withFields(
++                                {C2F(mColorAspects, range)
++                                         .inRange(C2Color::RANGE_UNSPECIFIED, C2Color::RANGE_OTHER),
++                                 C2F(mColorAspects, primaries)
++                                         .inRange(C2Color::PRIMARIES_UNSPECIFIED,
++                                                  C2Color::PRIMARIES_OTHER),
++                                 C2F(mColorAspects, transfer)
++                                         .inRange(C2Color::TRANSFER_UNSPECIFIED,
++                                                  C2Color::TRANSFER_OTHER),
++                                 C2F(mColorAspects, matrix)
++                                         .inRange(C2Color::MATRIX_UNSPECIFIED,
++                                                  C2Color::MATRIX_OTHER)})
++                        .withSetter(ColorAspectsSetter, mDefaultColorAspects, mCodedColorAspects)
++                        .build());
++
++        // TODO: support more formats?
++        std::vector<uint32_t> pixelFormats = {HAL_PIXEL_FORMAT_YCBCR_420_888};
++        if (isHalPixelFormatSupported((AHardwareBuffer_Format)HAL_PIXEL_FORMAT_YCBCR_P010)) {
++            pixelFormats.push_back(HAL_PIXEL_FORMAT_YCBCR_P010);
++        }
++        // If color format surface isn't added to supported formats, there is no way to know
++        // when the color-format is configured to surface. This is necessary to be able to
++        // choose 10-bit format while decoding 10-bit clips in surface mode.
++        pixelFormats.push_back(HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED);
++        addParameter(DefineParam(mPixelFormat, C2_PARAMKEY_PIXEL_FORMAT)
++                             .withDefault(new C2StreamPixelFormatInfo::output(
++                                     0u, HAL_PIXEL_FORMAT_YCBCR_420_888))
++                             .withFields({C2F(mPixelFormat, value).oneOf(pixelFormats)})
++                             .withSetter((Setter<decltype(*mPixelFormat)>::StrictValueWithNoDeps))
++                             .build());
++    }
++
++    static C2R SizeSetter(bool mayBlock, const C2P<C2StreamPictureSizeInfo::output>& oldMe,
++                          C2P<C2StreamPictureSizeInfo::output>& me) {
++        (void)mayBlock;
++        ALOGV("%s - %d x %d", __FUNCTION__, me.v.width, me.v.height);
++        C2R res = C2R::Ok();
++        if (!me.F(me.v.width).supportsAtAll(me.v.width)) {
++            res = res.plus(C2SettingResultBuilder::BadValue(me.F(me.v.width)));
++            me.set().width = oldMe.v.width;
++        }
++        if (!me.F(me.v.height).supportsAtAll(me.v.height)) {
++            res = res.plus(C2SettingResultBuilder::BadValue(me.F(me.v.height)));
++            me.set().height = oldMe.v.height;
++        }
++        return res;
++    }
++
++    static C2R MaxPictureSizeSetter(bool mayBlock, C2P<C2StreamMaxPictureSizeTuning::output>& me,
++                                    const C2P<C2StreamPictureSizeInfo::output>& size) {
++        (void)mayBlock;
++        ALOGV("%s - %d x %d", __FUNCTION__, me.v.width, me.v.height);
++        // TODO: get max width/height from the size's field helpers vs.
++        // hardcoding
++        me.set().width = c2_min(c2_max(me.v.width, size.v.width), 4096u);
++        me.set().height = c2_min(c2_max(me.v.height, size.v.height), 4096u);
++        return C2R::Ok();
++    }
++
++    static C2R MaxInputSizeSetter(bool mayBlock, C2P<C2StreamMaxBufferSizeInfo::input>& me,
++                                  const C2P<C2StreamMaxPictureSizeTuning::output>& maxSize) {
++        (void)mayBlock;
++        ALOGV("%s", __FUNCTION__);
++        // assume compression ratio of 2, but enforce a floor
++        me.set().value =
++                c2_max((((maxSize.v.width + 63) / 64) * ((maxSize.v.height + 63) / 64) * 3072),
++                       kMinInputBufferSize);
++        return C2R::Ok();
++    }
++
++    static C2R DefaultColorAspectsSetter(bool mayBlock,
++                                         C2P<C2StreamColorAspectsTuning::output>& me) {
++        (void)mayBlock;
++        ALOGV("%s - range: %u, primary: %u, transfer: %u, matrix: %u", __FUNCTION__, me.v.range,
++              me.v.primaries, me.v.transfer, me.v.matrix);
++        if (me.v.range > C2Color::RANGE_OTHER) {
++            me.set().range = C2Color::RANGE_OTHER;
++        }
++        if (me.v.primaries > C2Color::PRIMARIES_OTHER) {
++            me.set().primaries = C2Color::PRIMARIES_OTHER;
++        }
++        if (me.v.transfer > C2Color::TRANSFER_OTHER) {
++            me.set().transfer = C2Color::TRANSFER_OTHER;
++        }
++        if (me.v.matrix > C2Color::MATRIX_OTHER) {
++            me.set().matrix = C2Color::MATRIX_OTHER;
++        }
++        return C2R::Ok();
++    }
++
++    static C2R CodedColorAspectsSetter(bool mayBlock, C2P<C2StreamColorAspectsInfo::input>& me) {
++        (void)mayBlock;
++        ALOGV("%s - range: %u, primaries: %u, transfer: %u, matrix: %u", __func__, me.v.range,
++              me.v.primaries, me.v.transfer, me.v.matrix);
++        if (me.v.range > C2Color::RANGE_OTHER) {
++            me.set().range = C2Color::RANGE_OTHER;
++        }
++        if (me.v.primaries > C2Color::PRIMARIES_OTHER) {
++            me.set().primaries = C2Color::PRIMARIES_OTHER;
++        }
++        if (me.v.transfer > C2Color::TRANSFER_OTHER) {
++            me.set().transfer = C2Color::TRANSFER_OTHER;
++        }
++        if (me.v.matrix > C2Color::MATRIX_OTHER) {
++            me.set().matrix = C2Color::MATRIX_OTHER;
++        }
++        return C2R::Ok();
++    }
++
++    static C2R ColorAspectsSetter(bool mayBlock, C2P<C2StreamColorAspectsInfo::output>& me,
++                                  const C2P<C2StreamColorAspectsTuning::output>& def,
++                                  const C2P<C2StreamColorAspectsInfo::input>& coded) {
++        (void)mayBlock;
++        ALOGV("%s", __FUNCTION__);
++        // take default values for all unspecified fields, and coded values for specified ones
++        me.set().range = coded.v.range == RANGE_UNSPECIFIED ? def.v.range : coded.v.range;
++        me.set().primaries =
++                coded.v.primaries == PRIMARIES_UNSPECIFIED ? def.v.primaries : coded.v.primaries;
++        me.set().transfer =
++                coded.v.transfer == TRANSFER_UNSPECIFIED ? def.v.transfer : coded.v.transfer;
++        me.set().matrix = coded.v.matrix == MATRIX_UNSPECIFIED ? def.v.matrix : coded.v.matrix;
++        ALOGV("%s - me.v.range = %u, me.v.primaries = %u, me.v.transfer = %u, me.v.matrix = %u",
++              __func__, me.v.range, me.v.primaries, me.v.transfer, me.v.matrix);
++        return C2R::Ok();
++    }
++
++    static C2R ProfileLevelSetter(bool mayBlock, C2P<C2StreamProfileLevelInfo::input>& me,
++                                  const C2P<C2StreamPictureSizeInfo::output>& size) {
++        (void)mayBlock;
++        ALOGV("%s", __FUNCTION__);
++        (void)size;
++        (void)me;  // TODO: validate
++        return C2R::Ok();
++    }
++
++    std::shared_ptr<C2StreamColorAspectsTuning::output> getDefaultColorAspects_l() {
++        ALOGV("%s - mDefaultColorAspects: %u", __FUNCTION__, mDefaultColorAspects->primaries);
++        return mDefaultColorAspects;
++    }
++
++    std::shared_ptr<C2StreamColorAspectsInfo::output> getColorAspects_l() {
++        ALOGV("%s - mColorAspects: %u", __FUNCTION__, mColorAspects->primaries);
++        return mColorAspects;
++    }
++
++    static C2R Hdr10PlusInfoInputSetter(bool mayBlock, C2P<C2StreamHdr10PlusInfo::input>& me) {
++        (void)mayBlock;
++        ALOGV("%s", __FUNCTION__);
++        (void)me;  // TODO: validate
++        return C2R::Ok();
++    }
++
++    static C2R Hdr10PlusInfoOutputSetter(bool mayBlock, C2P<C2StreamHdr10PlusInfo::output>& me) {
++        (void)mayBlock;
++        ALOGV("%s", __FUNCTION__);
++        (void)me;  // TODO: validate
++        return C2R::Ok();
++    }
++
++    // unsafe getters
++    std::shared_ptr<C2StreamPixelFormatInfo::output> getPixelFormat_l() const {
++        return mPixelFormat;
++    }
++
++    static C2R HdrStaticInfoSetter(bool mayBlock, C2P<C2StreamHdrStaticInfo::output>& me) {
++        (void)mayBlock;
++        ALOGV("%s", __FUNCTION__);
++        if (me.v.mastering.red.x > 1) {
++            me.set().mastering.red.x = 1;
++        }
++        if (me.v.mastering.red.y > 1) {
++            me.set().mastering.red.y = 1;
++        }
++        if (me.v.mastering.green.x > 1) {
++            me.set().mastering.green.x = 1;
++        }
++        if (me.v.mastering.green.y > 1) {
++            me.set().mastering.green.y = 1;
++        }
++        if (me.v.mastering.blue.x > 1) {
++            me.set().mastering.blue.x = 1;
++        }
++        if (me.v.mastering.blue.y > 1) {
++            me.set().mastering.blue.y = 1;
++        }
++        if (me.v.mastering.white.x > 1) {
++            me.set().mastering.white.x = 1;
++        }
++        if (me.v.mastering.white.y > 1) {
++            me.set().mastering.white.y = 1;
++        }
++        if (me.v.mastering.maxLuminance > 65535.0) {
++            me.set().mastering.maxLuminance = 65535.0;
++        }
++        if (me.v.mastering.minLuminance > 6.5535) {
++            me.set().mastering.minLuminance = 6.5535;
++        }
++        if (me.v.maxCll > 65535.0) {
++            me.set().maxCll = 65535.0;
++        }
++        if (me.v.maxFall > 65535.0) {
++            me.set().maxFall = 65535.0;
++        }
++        return C2R::Ok();
++    }
++
++  private:
++    std::shared_ptr<C2StreamProfileLevelInfo::input> mProfileLevel;
++    std::shared_ptr<C2StreamPictureSizeInfo::output> mSize;
++    std::shared_ptr<C2StreamMaxPictureSizeTuning::output> mMaxSize;
++    std::shared_ptr<C2StreamMaxBufferSizeInfo::input> mMaxInputSize;
++    std::shared_ptr<C2StreamColorInfo::output> mColorInfo;
++    std::shared_ptr<C2StreamPixelFormatInfo::output> mPixelFormat;
++    std::shared_ptr<C2StreamColorAspectsTuning::output> mDefaultColorAspects;
++    std::shared_ptr<C2StreamColorAspectsInfo::input> mCodedColorAspects;
++    std::shared_ptr<C2StreamColorAspectsInfo::output> mColorAspects;
++    std::shared_ptr<C2StreamHdr10PlusInfo::input> mHdr10PlusInfoInput;
++    std::shared_ptr<C2StreamHdr10PlusInfo::output> mHdr10PlusInfoOutput;
++    std::shared_ptr<C2StreamHdrStaticInfo::output> mHdrStaticInfo;
++};
++
++static void ivd_aligned_free(void* ctxt, void* mem) {
++    (void)ctxt;
++    free(mem);
++}
++
++C2SoftApvDec::C2SoftApvDec(const char* name, c2_node_id_t id,
++                           const std::shared_ptr<IntfImpl>& intfImpl)
++    : SimpleC2Component(std::make_shared<SimpleInterface<IntfImpl>>(name, id, intfImpl)),
++      mIntf(intfImpl),
++      mDecHandle(nullptr),
++      mOutBufferFlush(nullptr),
++      mIvColorformat(IV_YUV_420P),
++      mOutputDelay(kDefaultOutputDelay),
++      mWidth(320),
++      mHeight(240),
++      mHeaderDecoded(false),
++      mOutIndex(0u) {
++    oapvdHandle = NULL;
++    oapvmHandle = NULL;
++    outputCsp = OUTPUT_CSP_NATIVE;
++}
++
++C2SoftApvDec::~C2SoftApvDec() {
++    onRelease();
++}
++
++c2_status_t C2SoftApvDec::onInit() {
++    ALOGV("%s", __FUNCTION__);
++    status_t err = initDecoder();
++    return err == OK ? C2_OK : C2_CORRUPTED;
++}
++
++c2_status_t C2SoftApvDec::onStop() {
++    ALOGV("%s", __FUNCTION__);
++    if (OK != resetDecoder()) return C2_CORRUPTED;
++    resetPlugin();
++    return C2_OK;
++}
++
++void C2SoftApvDec::onReset() {
++    ALOGV("%s", __FUNCTION__);
++    (void)onStop();
++}
++
++status_t C2SoftApvDec::deleteDecoder() {
++    ALOGV("%s", __FUNCTION__);
++    if (oapvdHandle) {
++        oapvd_delete(oapvdHandle);
++        oapvdHandle = NULL;
++    }
++    if (oapvmHandle) {
++        oapvm_delete(oapvmHandle);
++        oapvmHandle = NULL;
++    }
++    for (int i = 0; i < ofrms.num_frms; i++) {
++        if (ofrms.frm[i].imgb != NULL) {
++            ofrms.frm[i].imgb->release(ofrms.frm[i].imgb);
++            ofrms.frm[i].imgb = NULL;
++        }
++    }
++    return OK;
++}
++
++void C2SoftApvDec::onRelease() {
++    ALOGV("%s", __FUNCTION__);
++    (void)deleteDecoder();
++    if (mOutBufferFlush) {
++        ivd_aligned_free(nullptr, mOutBufferFlush);
++        mOutBufferFlush = nullptr;
++    }
++    if (mOutBlock) {
++        mOutBlock.reset();
++    }
++}
++
++c2_status_t C2SoftApvDec::onFlush_sm() {
++    ALOGV("%s", __FUNCTION__);
++    mSignalledError = false;
++    mSignalledOutputEos = false;
++    return C2_OK;
++}
++
++status_t C2SoftApvDec::createDecoder() {
++    ALOGV("%s", __FUNCTION__);
++    return OK;
++}
++
++status_t C2SoftApvDec::initDecoder() {
++    int ret;
++    mSignalledError = false;
++    mSignalledOutputEos = false;
++
++    mHalPixelFormat = HAL_PIXEL_FORMAT_YV12;
++    {
++        IntfImpl::Lock lock = mIntf->lock();
++        mPixelFormatInfo = mIntf->getPixelFormat_l();
++        ALOGW("Hal pixel format = %d", mPixelFormatInfo->value);
++    }
++    memset(&cdesc, 0, sizeof(oapvd_cdesc_t));
++
++    cdesc.threads = 1;  // default
++    oapvdHandle = oapvd_create(&cdesc, &ret);
++    if (oapvdHandle == NULL) {
++        ALOGE("ERROR: cannot create APV decoder (err=%d)\n", ret);
++        return C2_NO_INIT;
++    }
++
++    memset(&ofrms, 0, sizeof(oapv_frms_t));
++
++    oapvmHandle = oapvm_create(&ret);
++    if (OAPV_FAILED(ret)) {
++        ALOGE("oapvm create failed");
++        oapvd_delete(oapvdHandle);
++        oapvdHandle = NULL;
++        return C2_NO_INIT;
++    }
++
++    ALOGV("oapvd init done");
++    return OK;
++}
++
++status_t C2SoftApvDec::setFlushMode() {
++    ALOGV("%s", __FUNCTION__);
++    return OK;
++}
++
++status_t C2SoftApvDec::resetDecoder() {
++    ALOGV("%s", __FUNCTION__);
++    return OK;
++}
++
++void C2SoftApvDec::resetPlugin() {
++    ALOGV("%s", __FUNCTION__);
++    mSignalledOutputEos = false;
++    if (mOutBlock) {
++        mOutBlock.reset();
++    }
++}
++
++void fillEmptyWork(const std::unique_ptr<C2Work>& work) {
++    uint32_t flags = 0;
++    if (work->input.flags & C2FrameData::FLAG_END_OF_STREAM) {
++        flags |= C2FrameData::FLAG_END_OF_STREAM;
++        ALOGV("signalling eos");
++    }
++    work->worklets.front()->output.flags = (C2FrameData::flags_t)flags;
++    work->worklets.front()->output.buffers.clear();
++    work->worklets.front()->output.ordinal = work->input.ordinal;
++    work->workletsProcessed = 1u;
++}
++
++void C2SoftApvDec::finishWork(uint64_t index, const std::unique_ptr<C2Work>& work,
++                              const std::shared_ptr<C2GraphicBlock>& block) {
++    std::shared_ptr<C2Buffer> buffer = createGraphicBuffer(block, C2Rect(mWidth, mHeight));
++
++    {
++        IntfImpl::Lock lock = mIntf->lock();
++        buffer->setInfo(mIntf->getColorAspects_l());
++    }
++
++    class FillWork {
++      public:
++        FillWork(uint32_t flags, C2WorkOrdinalStruct ordinal,
++                 const std::shared_ptr<C2Buffer>& buffer)
++            : mFlags(flags), mOrdinal(ordinal), mBuffer(buffer) {}
++        ~FillWork() = default;
++
++        void operator()(const std::unique_ptr<C2Work>& work) {
++            work->worklets.front()->output.flags = (C2FrameData::flags_t)mFlags;
++            work->worklets.front()->output.buffers.clear();
++            work->worklets.front()->output.ordinal = mOrdinal;
++            work->workletsProcessed = 1u;
++            work->result = C2_OK;
++            if (mBuffer) {
++                work->worklets.front()->output.buffers.push_back(mBuffer);
++            }
++            ALOGV("timestamp = %lld, index = %lld, w/%s buffer", mOrdinal.timestamp.peekll(),
++                  mOrdinal.frameIndex.peekll(), mBuffer ? "" : "o");
++        }
++
++      private:
++        const uint32_t mFlags;
++        const C2WorkOrdinalStruct mOrdinal;
++        const std::shared_ptr<C2Buffer> mBuffer;
++    };
++
++    auto fillWork = [buffer](const std::unique_ptr<C2Work>& work) {
++        work->worklets.front()->output.flags = (C2FrameData::flags_t)0;
++        work->worklets.front()->output.buffers.clear();
++        work->worklets.front()->output.buffers.push_back(buffer);
++        work->worklets.front()->output.ordinal = work->input.ordinal;
++        work->workletsProcessed = 1u;
++    };
++
++    if (work && c2_cntr64_t(index) == work->input.ordinal.frameIndex) {
++        bool eos = ((work->input.flags & C2FrameData::FLAG_END_OF_STREAM) != 0);
++        // TODO: Check if cloneAndSend can be avoided by tracking number of frames remaining
++        if (eos) {
++            if (buffer) {
++                mOutIndex = index;
++                C2WorkOrdinalStruct outOrdinal = work->input.ordinal;
++                cloneAndSend(mOutIndex, work,
++                             FillWork(C2FrameData::FLAG_INCOMPLETE, outOrdinal, buffer));
++                buffer.reset();
++            }
++        } else {
++            fillWork(work);
++        }
++    } else {
++        finish(index, fillWork);
++    }
++}
++
++static void copyBufferFromYUV420ToYV12(uint8_t* dstY, uint8_t* dstU, uint8_t* dstV,
++                                       const uint8_t* srcY, const uint8_t* srcU,
++                                       const uint8_t* srcV, size_t srcYStride, size_t srcUStride,
++                                       size_t srcVStride, size_t dstYStride, size_t dstUStride,
++                                       size_t dstVStride, uint32_t width, uint32_t height) {
++    for (size_t i = 0; i < height; ++i) {
++        memcpy(dstY, srcY, width);
++        srcY += srcYStride;
++        dstY += dstYStride;
++    }
++
++    for (size_t i = 0; i < height / 2; ++i) {
++        memcpy(dstU, srcU, width / 2);
++        memcpy(dstV, srcV, width / 2);
++        dstU += dstUStride;
++        srcU += srcUStride;
++        dstV += dstVStride;
++        srcV += srcVStride;
++    }
++}
++
++static void copyBufferFromYUV422ToYV12(uint8_t* dstY, uint8_t* dstU, uint8_t* dstV,
++                                       const uint8_t* srcY, const uint8_t* srcU,
++                                       const uint8_t* srcV, size_t srcYStride, size_t srcUStride,
++                                       size_t srcVStride, size_t dstYStride, size_t dstUStride,
++                                       size_t dstVStride, uint32_t width, uint32_t height) {
++    for (size_t i = 0; i < height; ++i) {
++        memcpy(dstY, srcY, width);
++        srcY += srcYStride;
++        dstY += dstYStride;
++    }
++
++    for (size_t i = 0; i < height / 2; ++i) {
++        memcpy(dstU, srcU, width / 2);
++        memcpy(dstV, srcV, width / 2);
++        dstU += dstUStride;
++        srcU += srcUStride * 2;
++        dstV += dstVStride;
++        srcV += srcVStride * 2;
++    }
++}
++
++static void copyBufferFromYUV42010bitToP010(uint16_t* dstY, uint16_t* dstUV, const uint16_t* srcY,
++                                            const uint16_t* srcU, const uint16_t* srcV,
++                                            size_t srcYStride, size_t srcUStride, size_t srcVStride,
++                                            size_t dstYStride, size_t dstUVStride, size_t width,
++                                            size_t height) {
++    for (size_t y = 0; y < height; ++y) {
++        for (size_t x = 0; x < width; ++x) {
++            dstY[x] = srcY[x] << 6;
++        }
++        srcY += srcYStride;
++        dstY += dstYStride;
++    }
++
++    for (size_t y = 0; y < height / 2; ++y) {
++        for (size_t x = 0; x < width / 2; ++x) {
++            dstUV[2 * x] = srcU[x] << 6;
++            dstUV[2 * x + 1] = srcV[x] << 6;
++        }
++        srcU += srcUStride;
++        srcV += srcVStride;
++        dstUV += dstUVStride;
++    }
++}
++
++static void copyBufferFromYUV42210bitToP010(uint16_t* dstY, uint16_t* dstUV, const uint16_t* srcY,
++                                            const uint16_t* srcU, const uint16_t* srcV,
++                                            size_t srcYStride, size_t srcUStride, size_t srcVStride,
++                                            size_t dstYStride, size_t dstUVStride, size_t width,
++                                            size_t height) {
++    for (size_t y = 0; y < height; ++y) {
++        for (size_t x = 0; x < width; ++x) {
++            dstY[x] = srcY[x] << 6;
++        }
++        srcY += srcYStride;
++        dstY += dstYStride;
++    }
++
++    for (size_t y = 0; y < height / 2; ++y) {
++        for (size_t x = 0; x < width / 2; ++x) {
++            dstUV[2 * x] = srcU[x] << 6;
++            dstUV[2 * x + 1] = srcV[x] << 6;
++        }
++        srcU += srcUStride * 2;
++        srcV += srcVStride * 2;
++        dstUV += dstUVStride;
++    }
++}
++
++static void copyBufferFromP210ToP010(uint16_t* dstY, uint16_t* dstUV, const uint16_t* srcY,
++                                     const uint16_t* srcUV, size_t srcYStride, size_t srcUVStride,
++                                     size_t dstYStride, size_t dstUVStride, size_t width,
++                                     size_t height) {
++    for (size_t y = 0; y < height; ++y) {
++        memcpy(dstY, srcY, width * sizeof(uint16_t));
++        srcY += srcYStride;
++        dstY += dstYStride;
++    }
++
++    for (size_t y = 0; y < height / 2; ++y) {
++        memcpy(dstUV, srcUV, width * 2);
++        srcUV += srcUVStride * 2;
++        dstUV += dstUVStride;
++    }
++}
++
++static void copyBufferFromYUV42010bitToYV12(uint8_t* dstY, uint8_t* dstU, uint8_t* dstV,
++                                            const uint16_t* srcY, const uint16_t* srcU,
++                                            const uint16_t* srcV, size_t srcYStride,
++                                            size_t srcUStride, size_t srcVStride, size_t dstYStride,
++                                            size_t dstUStride, size_t dstVStride, uint32_t width,
++                                            uint32_t height) {
++    for (size_t i = 0; i < height; ++i) {
++        for (size_t j = 0; j < width; ++j) {
++            dstY[i * dstYStride + j] = (srcY[i * srcYStride + j] >> 2) & 0xFF;
++        }
++    }
++
++    for (size_t i = 0; i < height / 2; ++i) {
++        for (size_t j = 0; j < width / 2; ++j) {
++            dstU[i * dstUStride + j] = (srcU[i * srcUStride + j] >> 2) & 0xFF;
++        }
++    }
++
++    for (size_t i = 0; i < height / 2; ++i) {
++        for (size_t j = 0; j < width / 2; ++j) {
++            dstV[i * dstVStride + j] = (srcV[i * srcVStride + j] >> 2) & 0xFF;
++        }
++    }
++}
++
++static void copyBufferFromYUV42210bitToYV12(uint8_t* dstY, uint8_t* dstU, uint8_t* dstV,
++                                            const uint16_t* srcY, const uint16_t* srcU,
++                                            const uint16_t* srcV, size_t srcYStride,
++                                            size_t srcUStride, size_t srcVStride, size_t dstYStride,
++                                            size_t dstUStride, size_t dstVStride, uint32_t width,
++                                            uint32_t height) {
++    for (size_t i = 0; i < height; ++i) {
++        for (size_t j = 0; j < width; ++j) {
++            dstY[i * dstYStride + j] = (srcY[i * srcYStride + j] >> 2) & 0xFF;
++        }
++    }
++
++    for (size_t i = 0; i < height / 2; ++i) {
++        for (size_t j = 0; j < width / 2; ++j) {
++            dstU[i * dstUStride + j] = (srcU[i * srcUStride * 2 + j] >> 2) & 0xFF;
++        }
++    }
++
++    for (size_t i = 0; i < height / 2; ++i) {
++        for (size_t j = 0; j < width / 2; ++j) {
++            dstV[i * dstVStride + j] = (srcV[i * srcVStride * 2 + j] >> 2) & 0xFF;
++        }
++    }
++}
++
++static void copyBufferFromP210ToYV12(uint8_t* dstY, uint8_t* dstU, uint8_t* dstV,
++                                     const uint16_t* srcY, const uint16_t* srcUV, size_t srcYStride,
++                                     size_t srcUVStride, size_t dstYStride, size_t dstUStride,
++                                     size_t dstVStride, size_t width, size_t height) {
++    for (size_t i = 0; i < height; ++i) {
++        for (size_t j = 0; j < width; ++j) {
++            dstY[i * dstYStride + j] = (srcY[i * srcYStride + j] >> 8) & 0xFF;
++        }
++    }
++
++    for (size_t i = 0; i < height / 2; ++i) {
++        for (size_t j = 0; j < width / 2; ++j) {
++            dstV[i * dstVStride + j] = (srcUV[i * srcUVStride * 2 + j * 2] >> 8) & 0xFF;
++            dstU[i * dstUStride + j] = (srcUV[i * srcUVStride * 2 + j * 2 + 1] >> 8) & 0xFF;
++        }
++    }
++}
++
++void C2SoftApvDec::process(const std::unique_ptr<C2Work>& work,
++                           const std::shared_ptr<C2BlockPool>& pool) {
++    // Initialize output work
++    work->result = C2_OK;
++    work->workletsProcessed = 0u;
++    work->worklets.front()->output.configUpdate.clear();
++    work->worklets.front()->output.flags = work->input.flags;
++    if (mSignalledError || mSignalledOutputEos) {
++        work->result = C2_BAD_VALUE;
++        return;
++    }
++
++    int ret = 0;
++    size_t inOffset = 0u;
++    size_t inSize = 0u;
++    C2ReadView rView = mDummyReadView;
++    if (!work->input.buffers.empty()) {
++        rView = work->input.buffers[0]->data().linearBlocks().front().map().get();
++        inSize = rView.capacity();
++        if (inSize && rView.error()) {
++            ALOGE("read view map failed %d", rView.error());
++            work->result = C2_CORRUPTED;
++            return;
++        }
++    }
++
++    bool codecConfig = ((work->input.flags & C2FrameData::FLAG_CODEC_CONFIG) != 0);
++    bool eos = ((work->input.flags & C2FrameData::FLAG_END_OF_STREAM) != 0);
++
++    ALOGV("in buffer attr. size %zu timestamp %llu frameindex %d, flags %x", inSize,
++          work->input.ordinal.timestamp.peekull(), (int)work->input.ordinal.frameIndex.peeku(),
++          work->input.flags);
++
++    if (codecConfig) {
++        fillEmptyWork(work);
++        return;
++    }
++
++    if (inSize > 0) {
++        uint8_t* bitstream = const_cast<uint8_t*>(rView.data() + inOffset);
++        oapv_au_info_t aui;
++        oapv_bitb_t bitb;
++        bitb.addr = bitstream + 4;  // skip au
++        bitb.ssize = inSize - 4;
++
++        if (OAPV_FAILED(oapvd_info(bitb.addr, bitb.ssize, &aui))) {
++            ALOGE("cannot get information from bitstream");
++            return;
++        }
++
++        /* create decoding frame buffers */
++        ofrms.num_frms = aui.num_frms;
++        if (ofrms.num_frms <= 0) {
++            ALOGE("Parse error - no output frame(%d)", ofrms.num_frms);
++            fillEmptyWork(work);
++            return;
++        }
++        for (int i = 0; i < ofrms.num_frms; i++) {
++            oapv_frm_info_t* finfo = &aui.frm_info[FRM_IDX];
++            oapv_frm_t* frm = &ofrms.frm[i];
++
++            if (mWidth != finfo->w || mHeight != finfo->w) {
++                mWidth = finfo->w;
++                mHeight = finfo->h;
++            }
++
++            if (frm->imgb != NULL && (frm->imgb->w[0] != finfo->w || frm->imgb->h[0] != finfo->h)) {
++                frm->imgb->release(frm->imgb);
++                frm->imgb = NULL;
++            }
++
++            if (frm->imgb == NULL) {
++                if (outputCsp == OUTPUT_CSP_P210) {
++                    frm->imgb = imgb_create(finfo->w, finfo->h, OAPV_CS_P210);
++                } else {
++                    frm->imgb = imgb_create(finfo->w, finfo->h, finfo->cs);
++                }
++                if (frm->imgb == NULL) {
++                    ALOGE("cannot allocate image buffer (w:%d, h:%d, cs:%d)", finfo->w, finfo->h,
++                          finfo->cs);
++                    fillEmptyWork(work);
++                    return;
++                }
++            }
++        }
++
++        oapvd_stat_t stat;
++        ret = oapvd_decode(oapvdHandle, &bitb, &ofrms, oapvmHandle, &stat);
++        if (bitb.ssize != stat.read) {
++            ALOGW("decode done, input size: %d, processed size: %d", bitb.ssize, stat.read);
++        }
++
++        if (OAPV_FAILED(ret)) {
++            ALOGE("failed to decode bitstream\n");
++            fillEmptyWork(work);
++            return;
++        }
++
++        status_t err = outputBuffer(pool, work);
++        if (err == NOT_ENOUGH_DATA) {
++            if (inSize > 0) {
++                ALOGV("Maybe non-display frame at %lld.", work->input.ordinal.frameIndex.peekll());
++                // send the work back with empty buffer.
++                inSize = 0;
++            }
++        } else if (err != OK) {
++            ALOGD("Error while getting the output frame out");
++            // work->result would be already filled; do fillEmptyWork() below to
++            // send the work back.
++            inSize = 0;
++        }
++    }
++
++    if (eos) {
++        drainInternal(DRAIN_COMPONENT_WITH_EOS, pool, work);
++        mSignalledOutputEos = true;
++    } else if (!inSize) {
++        fillEmptyWork(work);
++    }
++}
++
++status_t C2SoftApvDec::outputBuffer(const std::shared_ptr<C2BlockPool>& pool,
++                                    const std::unique_ptr<C2Work>& work) {
++    if (!(work && pool)) return BAD_VALUE;
++
++    oapv_imgb_t* imgbOutput;
++    std::shared_ptr<C2GraphicBlock> block;
++
++    if (ofrms.num_frms > 0) {
++        oapv_frm_t* frm = &ofrms.frm[0];
++        imgbOutput = frm->imgb;
++    } else {
++        ALOGW("No output frames");
++        return false;
++    }
++    bool isMonochrome = OAPV_CS_GET_FORMAT(imgbOutput->cs) == OAPV_CS_YCBCR400;
++
++    uint32_t format = HAL_PIXEL_FORMAT_YV12;
++    std::shared_ptr<C2StreamColorAspectsInfo::output> codedColorAspects;
++    if (OAPV_CS_GET_BIT_DEPTH(imgbOutput->cs) == 10 &&
++        mPixelFormatInfo->value != HAL_PIXEL_FORMAT_YCBCR_420_888) {
++        IntfImpl::Lock lock = mIntf->lock();
++        codedColorAspects = mIntf->getColorAspects_l();
++        bool allowRGBA1010102 = false;
++        if (codedColorAspects->primaries == C2Color::PRIMARIES_BT2020 &&
++            codedColorAspects->matrix == C2Color::MATRIX_BT2020 &&
++            codedColorAspects->transfer == C2Color::TRANSFER_ST2084) {
++            allowRGBA1010102 = true;
++        }
++        format = getHalPixelFormatForBitDepth10(allowRGBA1010102);
++    }
++
++    if (mHalPixelFormat != format) {
++        C2StreamPixelFormatInfo::output pixelFormat(0u, format);
++        std::vector<std::unique_ptr<C2SettingResult>> failures;
++        c2_status_t err = mIntf->config({&pixelFormat}, C2_MAY_BLOCK, &failures);
++        if (err == C2_OK) {
++            work->worklets.front()->output.configUpdate.push_back(C2Param::Copy(pixelFormat));
++        } else {
++            ALOGE("Config update pixelFormat failed");
++            mSignalledError = true;
++            work->workletsProcessed = 1u;
++            work->result = C2_CORRUPTED;
++            return UNKNOWN_ERROR;
++        }
++        mHalPixelFormat = format;
++    }
++    ALOGV("mHalPixelFormat: %u, format: %d", mHalPixelFormat, format);
++
++    C2MemoryUsage usage = {C2MemoryUsage::CPU_READ, C2MemoryUsage::CPU_WRITE};
++
++    // check. align height to 2 times does not work.
++    c2_status_t err =
++            pool->fetchGraphicBlock(align(mWidth, 16), align(mHeight, 16), format, usage, &block);
++
++    if (err != C2_OK) {
++        ALOGE("fetchGraphicBlock for Output failed with status %d", err);
++        work->result = err;
++        return false;
++    }
++
++    C2GraphicView wView = block->map().get();
++    if (wView.error()) {
++        ALOGE("graphic view map failed %d", wView.error());
++        work->result = C2_CORRUPTED;
++        return false;
++    }
++
++    ALOGV("provided (%dx%d) required (%dx%d)", block->width(), block->height(), mWidth, mHeight);
++
++    uint8_t* dstY = const_cast<uint8_t*>(wView.data()[C2PlanarLayout::PLANE_Y]);
++    uint8_t* dstU = const_cast<uint8_t*>(wView.data()[C2PlanarLayout::PLANE_U]);
++    uint8_t* dstV = const_cast<uint8_t*>(wView.data()[C2PlanarLayout::PLANE_V]);
++
++    C2PlanarLayout layout = wView.layout();
++    size_t dstYStride = layout.planes[C2PlanarLayout::PLANE_Y].rowInc;
++    size_t dstUStride = layout.planes[C2PlanarLayout::PLANE_U].rowInc;
++    size_t dstVStride = layout.planes[C2PlanarLayout::PLANE_V].rowInc;
++
++    if (format == HAL_PIXEL_FORMAT_YCBCR_P010) {
++        if (OAPV_CS_GET_BIT_DEPTH(imgbOutput->cs) == 10) {
++            const uint16_t* srcY = (const uint16_t*)imgbOutput->a[0];
++            const uint16_t* srcU = (const uint16_t*)imgbOutput->a[1];
++            const uint16_t* srcV = (const uint16_t*)imgbOutput->a[2];
++            size_t srcYStride = imgbOutput->s[0] / 2;
++            size_t srcUStride = imgbOutput->s[1] / 2;
++            size_t srcVStride = imgbOutput->s[2] / 2;
++            dstYStride /= 2;
++            dstUStride /= 2;
++            dstVStride /= 2;
++            if (OAPV_CS_GET_FORMAT(imgbOutput->cs) == OAPV_CF_YCBCR420) {
++                ALOGV("OAPV_CS_YUV420 10bit to P010");
++                copyBufferFromYUV42010bitToP010((uint16_t*)dstY, (uint16_t*)dstU, srcY, srcU, srcV,
++                                                srcYStride, srcUStride, srcVStride, dstYStride,
++                                                dstUStride, mWidth, mHeight);
++            } else if (OAPV_CS_GET_FORMAT(imgbOutput->cs) == OAPV_CF_YCBCR422) {
++                ALOGV("OAPV_CS_YUV422 10bit to P010");
++                copyBufferFromYUV42210bitToP010((uint16_t*)dstY, (uint16_t*)dstU, srcY, srcU, srcV,
++                                                srcYStride, srcUStride, srcVStride, dstYStride,
++                                                dstUStride, mWidth, mHeight);
++            } else if (OAPV_CS_GET_FORMAT(imgbOutput->cs) == OAPV_CF_PLANAR2) {
++                ALOGV("OAPV_CS_P210 to P010");
++                copyBufferFromP210ToP010((uint16_t*)dstY, (uint16_t*)dstU, srcY, srcU, srcYStride,
++                                         srcUStride, dstYStride, dstUStride, mWidth, mHeight);
++            } else {
++                ALOGE("Not supported convert format : %d", OAPV_CS_GET_FORMAT(imgbOutput->cs));
++            }
++        } else {
++            ALOGE("Not supported convder from bd:%d, format: %d(%s), to format: %d(%s)",
++                  OAPV_CS_GET_BIT_DEPTH(imgbOutput->cs), OAPV_CS_GET_FORMAT(imgbOutput->cs),
++                  OAPV_CS_GET_FORMAT(imgbOutput->cs) == OAPV_CF_YCBCR420
++                          ? "YUV420"
++                          : (OAPV_CS_GET_FORMAT(imgbOutput->cs) == OAPV_CF_YCBCR422 ? "YUV422"
++                                                                                    : "UNKNOWN"),
++                  format,
++                  format == HAL_PIXEL_FORMAT_YCBCR_P010
++                          ? "P010"
++                          : (format == HAL_PIXEL_FORMAT_YCBCR_420_888
++                                     ? "YUV420"
++                                     : (format == HAL_PIXEL_FORMAT_YV12 ? "YV12" : "UNKNOWN")));
++        }
++    } else {  // HAL_PIXEL_FORMAT_YV12
++        if (OAPV_CS_GET_BIT_DEPTH(imgbOutput->cs) == 10) {
++            const uint16_t* srcY = (const uint16_t*)imgbOutput->a[0];
++            const uint16_t* srcV = (const uint16_t*)imgbOutput->a[1];
++            const uint16_t* srcU = (const uint16_t*)imgbOutput->a[2];
++            size_t srcYStride = imgbOutput->s[0] / 2;
++            size_t srcVStride = imgbOutput->s[1] / 2;
++            size_t srcUStride = imgbOutput->s[2] / 2;
++            if (OAPV_CS_GET_FORMAT(imgbOutput->cs) == OAPV_CF_YCBCR420) {
++                ALOGV("OAPV_CS_YUV420 10bit to YV12");
++                copyBufferFromYUV42010bitToYV12(dstY, dstU, dstV, srcY, srcU, srcV, srcYStride,
++                                                srcUStride, srcVStride, dstYStride, dstUStride,
++                                                dstVStride, mWidth, mHeight);
++            } else if (OAPV_CS_GET_FORMAT(imgbOutput->cs) == OAPV_CF_YCBCR422) {
++                ALOGV("OAPV_CS_YUV422 10bit to YV12");
++                copyBufferFromYUV42210bitToYV12(dstY, dstU, dstV, srcY, srcU, srcV, srcYStride,
++                                                srcUStride, srcVStride, dstYStride, dstUStride,
++                                                dstVStride, mWidth, mHeight);
++            } else if (OAPV_CS_GET_FORMAT(imgbOutput->cs) == OAPV_CF_PLANAR2) {
++                ALOGV("OAPV_CS_P210 to YV12");
++                copyBufferFromP210ToYV12(dstY, dstU, dstV, srcY, srcV, srcYStride, srcVStride,
++                                         dstYStride, dstUStride, dstVStride, mWidth, mHeight);
++            } else {
++                ALOGE("Not supported convert format : %d", OAPV_CS_GET_FORMAT(imgbOutput->cs));
++            }
++        } else if (OAPV_CS_GET_BIT_DEPTH(imgbOutput->cs) == 8) {
++            const uint8_t* srcY = (const uint8_t*)imgbOutput->a[0];
++            const uint8_t* srcV = (const uint8_t*)imgbOutput->a[1];
++            const uint8_t* srcU = (const uint8_t*)imgbOutput->a[2];
++            size_t srcYStride = imgbOutput->s[0];
++            size_t srcVStride = imgbOutput->s[1];
++            size_t srcUStride = imgbOutput->s[2];
++            if (OAPV_CS_GET_FORMAT(imgbOutput->cs) == OAPV_CF_YCBCR420) {
++                ALOGV("OAPV_CS_YUV420 to YV12");
++                copyBufferFromYUV420ToYV12(dstY, dstU, dstV, srcY, srcU, srcV, srcYStride,
++                                           srcUStride, srcVStride, dstYStride, dstUStride,
++                                           dstVStride, mWidth, mHeight);
++            } else if (OAPV_CS_GET_FORMAT(imgbOutput->cs) == OAPV_CF_YCBCR422) {
++                ALOGV("OAPV_CS_YUV422 to YV12");
++                copyBufferFromYUV422ToYV12(dstY, dstU, dstV, srcY, srcU, srcV, srcYStride,
++                                           srcUStride, srcVStride, dstYStride, dstUStride,
++                                           dstVStride, mWidth, mHeight);
++            } else {
++                ALOGE("Not supported convert format : %d", OAPV_CS_GET_FORMAT(imgbOutput->cs));
++            }
++        } else {
++            ALOGE("Not supported convert from bd:%d, format: %d(%s), to format: %d(%s)",
++                  OAPV_CS_GET_BIT_DEPTH(imgbOutput->cs), OAPV_CS_GET_FORMAT(imgbOutput->cs),
++                  OAPV_CS_GET_FORMAT(imgbOutput->cs) == OAPV_CF_YCBCR420
++                          ? "YUV420"
++                          : (OAPV_CS_GET_FORMAT(imgbOutput->cs) == OAPV_CF_YCBCR422 ? "YUV422"
++                                                                                    : "UNKNOWN"),
++                  format,
++                  format == HAL_PIXEL_FORMAT_YCBCR_P010
++                          ? "P010"
++                          : (format == HAL_PIXEL_FORMAT_YCBCR_420_888
++                                     ? "YUV420"
++                                     : (format == HAL_PIXEL_FORMAT_YV12 ? "YV12" : "UNKNOWN")));
++        }
++    }
++
++    finishWork(work->input.ordinal.frameIndex.peekll(), work, std::move(block));
++    return OK;
++}
++
++c2_status_t C2SoftApvDec::drainInternal(uint32_t drainMode,
++                                        const std::shared_ptr<C2BlockPool>& pool,
++                                        const std::unique_ptr<C2Work>& work) {
++    if (drainMode == NO_DRAIN) {
++        ALOGW("drain with NO_DRAIN: no-op");
++        return C2_OK;
++    }
++    if (drainMode == DRAIN_CHAIN) {
++        ALOGW("DRAIN_CHAIN not supported");
++        return C2_OMITTED;
++    }
++
++    if (drainMode == DRAIN_COMPONENT_WITH_EOS && work && work->workletsProcessed == 0u) {
++        fillEmptyWork(work);
++    }
++    return C2_OK;
++}
++
++c2_status_t C2SoftApvDec::drain(uint32_t drainMode, const std::shared_ptr<C2BlockPool>& pool) {
++    return drainInternal(drainMode, pool, nullptr);
++}
++
++class C2SoftApvDecFactory : public C2ComponentFactory {
++  public:
++    C2SoftApvDecFactory()
++        : mHelper(std::static_pointer_cast<C2ReflectorHelper>(
++                  GetCodec2PlatformComponentStore()->getParamReflector())) {}
++
++    virtual c2_status_t createComponent(c2_node_id_t id,
++                                        std::shared_ptr<C2Component>* const component,
++                                        std::function<void(C2Component*)> deleter) override {
++        *component = std::shared_ptr<C2Component>(
++                new C2SoftApvDec(COMPONENT_NAME, id,
++                                 std::make_shared<C2SoftApvDec::IntfImpl>(mHelper)),
++                deleter);
++        return C2_OK;
++    }
++
++    virtual c2_status_t createInterface(
++            c2_node_id_t id, std::shared_ptr<C2ComponentInterface>* const interface,
++            std::function<void(C2ComponentInterface*)> deleter) override {
++        *interface = std::shared_ptr<C2ComponentInterface>(
++                new SimpleInterface<C2SoftApvDec::IntfImpl>(
++                        COMPONENT_NAME, id, std::make_shared<C2SoftApvDec::IntfImpl>(mHelper)),
++                deleter);
++        return C2_OK;
++    }
++
++    virtual ~C2SoftApvDecFactory() override = default;
++
++  private:
++    std::shared_ptr<C2ReflectorHelper> mHelper;
++};
++
++}  // namespace android
++
++__attribute__((cfi_canonical_jump_table)) extern "C" ::C2ComponentFactory* CreateCodec2Factory() {
++    return new ::android::C2SoftApvDecFactory();
++}
++
++__attribute__((cfi_canonical_jump_table)) extern "C" void DestroyCodec2Factory(
++        ::C2ComponentFactory* factory) {
++    delete factory;
++}
+diff --git a/media/codec2/components/apv/C2SoftApvDec.h b/media/codec2/components/apv/C2SoftApvDec.h
+new file mode 100644
+index 0000000000..22bfcffe2a
+--- /dev/null
++++ b/media/codec2/components/apv/C2SoftApvDec.h
+@@ -0,0 +1,134 @@
++/*
++ * Copyright (C) 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#ifndef ANDROID_C2_SOFT_APV_DEC_H_
++#define ANDROID_C2_SOFT_APV_DEC_H_
++
++#include <media/stagefright/foundation/ColorUtils.h>
++
++#include <SimpleC2Component.h>
++#include <inttypes.h>
++#include <atomic>
++
++#include "oapv.h"
++#include <C2SoftApvCommon.h>
++
++typedef unsigned int UWORD32;
++
++typedef enum {
++    IV_CHROMA_NA = 0xFFFFFFFF,
++    IV_YUV_420P = 0x1,
++    IV_YUV_422P = 0x2,
++    IV_420_UV_INTL = 0x3,
++    IV_YUV_422IBE = 0x4,
++    IV_YUV_422ILE = 0x5,
++    IV_YUV_444P = 0x6,
++    IV_YUV_411P = 0x7,
++    IV_GRAY = 0x8,
++    IV_RGB_565 = 0x9,
++    IV_RGB_24 = 0xa,
++    IV_YUV_420SP_UV = 0xb,
++    IV_YUV_420SP_VU = 0xc,
++    IV_YUV_422SP_UV = 0xd,
++    IV_YUV_422SP_VU = 0xe
++
++} IV_COLOR_FORMAT_T;
++
++typedef struct {
++    /**
++     * u4_size of the structure
++     */
++    UWORD32 u4_size;
++
++    /**
++     * Pointer to the API function pointer table of the codec
++     */
++    void* pv_fxns;
++
++    /**
++     * Pointer to the handle of the codec
++     */
++    void* pv_codec_handle;
++} iv_obj_t;
++
++namespace android {
++
++struct C2SoftApvDec : public SimpleC2Component {
++    class IntfImpl;
++
++    C2SoftApvDec(const char* name, c2_node_id_t id, const std::shared_ptr<IntfImpl>& intfImpl);
++    virtual ~C2SoftApvDec();
++
++    // From SimpleC2Component
++    c2_status_t onInit() override;
++    c2_status_t onStop() override;
++    void onReset() override;
++    void onRelease() override;
++    c2_status_t onFlush_sm() override;
++    void process(const std::unique_ptr<C2Work>& work,
++                 const std::shared_ptr<C2BlockPool>& pool) override;
++    c2_status_t drain(uint32_t drainMode, const std::shared_ptr<C2BlockPool>& pool) override;
++
++  private:
++    status_t createDecoder();
++    status_t initDecoder();
++    bool isConfigured() const;
++    void drainDecoder();
++    status_t setFlushMode();
++    status_t resetDecoder();
++    void resetPlugin();
++    status_t deleteDecoder();
++    void finishWork(uint64_t index, const std::unique_ptr<C2Work>& work,
++                    const std::shared_ptr<C2GraphicBlock>& block);
++    void drainRingBuffer(const std::unique_ptr<C2Work>& work,
++                         const std::shared_ptr<C2BlockPool>& pool, bool eos);
++    c2_status_t drainInternal(uint32_t drainMode, const std::shared_ptr<C2BlockPool>& pool,
++                              const std::unique_ptr<C2Work>& work);
++
++    status_t outputBuffer(const std::shared_ptr<C2BlockPool>& pool,
++                          const std::unique_ptr<C2Work>& work);
++
++    std::shared_ptr<IntfImpl> mIntf;
++    iv_obj_t* mDecHandle;
++    uint8_t* mOutBufferFlush;
++    IV_COLOR_FORMAT_T mIvColorformat;
++    uint32_t mOutputDelay;
++    bool mHeaderDecoded;
++    std::atomic_uint64_t mOutIndex;
++    std::shared_ptr<C2GraphicBlock> mOutBlock;
++
++    std::shared_ptr<C2StreamPixelFormatInfo::output> mPixelFormatInfo;
++
++    std::shared_ptr<C2StreamPictureSizeInfo::input> mSize;
++    uint32_t mHalPixelFormat;
++    uint32_t mWidth;
++    uint32_t mHeight;
++    bool mSignalledOutputEos;
++    bool mSignalledError;
++
++    oapvd_t oapvdHandle;
++    oapvm_t oapvmHandle;
++    oapvd_cdesc_t cdesc;
++    oapv_frms_t ofrms;
++
++    int outputCsp;
++
++    C2_DO_NOT_COPY(C2SoftApvDec);
++};
++
++}  // namespace android
++
++#endif
+diff --git a/media/codec2/components/apv/C2SoftApvEnc.cpp b/media/codec2/components/apv/C2SoftApvEnc.cpp
+new file mode 100644
+index 0000000000..c395e20df3
+--- /dev/null
++++ b/media/codec2/components/apv/C2SoftApvEnc.cpp
+@@ -0,0 +1,1276 @@
++/*
++ * Copyright (C) 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++//#define LOG_NDEBUG 0
++#define LOG_TAG "C2SoftApvEnc"
++#include <log/log.h>
++
++#include <media/hardware/VideoAPI.h>
++#include <media/stagefright/MediaDefs.h>
++#include <media/stagefright/MediaErrors.h>
++#include <media/stagefright/MetaData.h>
++#include <media/stagefright/foundation/AUtils.h>
++
++#include <C2Debug.h>
++#include <C2PlatformSupport.h>
++#include <Codec2BufferUtils.h>
++#include <Codec2CommonUtils.h>
++#include <Codec2Mapper.h>
++#include <SimpleC2Interface.h>
++#include <media/stagefright/foundation/ABitReader.h>
++#include <util/C2InterfaceHelper.h>
++#include <cmath>
++#include "C2SoftApvEnc.h"
++
++namespace android {
++
++namespace {
++
++constexpr char COMPONENT_NAME[] = "c2.android.apv.encoder";
++constexpr uint32_t kMinOutBufferSize = 524288;
++constexpr uint32_t kMaxBitstreamBufSize = 16 * 1024 * 1024;
++constexpr int32_t kApvQpMin = 0;
++constexpr int32_t kApvQpMax = 51;
++constexpr int32_t kApvDefaultQP = 32;
++
++#define PROFILE_APV_DEFAULT 0
++#define LEVEL_APV_DEFAULT 0
++#define MAX_NUM_FRMS (1)  // supports only 1-frame input
++
++}  // namespace
++
++class C2SoftApvEnc::IntfImpl : public SimpleInterface<void>::BaseParams {
++  public:
++    explicit IntfImpl(const std::shared_ptr<C2ReflectorHelper>& helper)
++        : SimpleInterface<void>::BaseParams(helper, COMPONENT_NAME, C2Component::KIND_ENCODER,
++                                            C2Component::DOMAIN_VIDEO, MEDIA_MIMETYPE_VIDEO_APV) {
++        noPrivateBuffers();
++        noInputReferences();
++        noOutputReferences();
++        noTimeStretch();
++        setDerivedInstance(this);
++
++        addParameter(DefineParam(mAttrib, C2_PARAMKEY_COMPONENT_ATTRIBUTES)
++                             .withConstValue(new C2ComponentAttributesSetting(
++                                     C2Component::ATTRIB_IS_TEMPORAL))
++                             .build());
++
++        addParameter(DefineParam(mUsage, C2_PARAMKEY_INPUT_STREAM_USAGE)
++                             .withConstValue(new C2StreamUsageTuning::input(
++                                     0u, (uint64_t)C2MemoryUsage::CPU_READ))
++                             .build());
++
++        // matches size limits in codec library
++        addParameter(DefineParam(mSize, C2_PARAMKEY_PICTURE_SIZE)
++                             .withDefault(new C2StreamPictureSizeInfo::input(0u, 320, 240))
++                             .withFields({
++                                     C2F(mSize, width).inRange(2, 4096, 2),
++                                     C2F(mSize, height).inRange(2, 4096, 2),
++                             })
++                             .withSetter(SizeSetter)
++                             .build());
++
++        // matches limits in codec library
++        addParameter(DefineParam(mBitrateMode, C2_PARAMKEY_BITRATE_MODE)
++                             .withDefault(new C2StreamBitrateModeTuning::output(
++                                     0u, C2Config::BITRATE_VARIABLE))
++                             .withFields({C2F(mBitrateMode, value)
++                                                  .oneOf({C2Config::BITRATE_CONST,
++                                                          C2Config::BITRATE_VARIABLE,
++                                                          C2Config::BITRATE_IGNORE})})
++                             .withSetter(Setter<decltype(*mBitrateMode)>::StrictValueWithNoDeps)
++                             .build());
++
++        addParameter(DefineParam(mBitrate, C2_PARAMKEY_BITRATE)
++                             .withDefault(new C2StreamBitrateInfo::output(0u, 512000))
++                             .withFields({C2F(mBitrate, value).inRange(512000, 240000000)})
++                             .withSetter(BitrateSetter)
++                             .build());
++
++        addParameter(DefineParam(mFrameRate, C2_PARAMKEY_FRAME_RATE)
++                             .withDefault(new C2StreamFrameRateInfo::output(0u, 15.))
++                             .withFields({C2F(mFrameRate, value).greaterThan(0.)})
++                             .withSetter(Setter<decltype(*mFrameRate)>::StrictValueWithNoDeps)
++                             .build());
++
++        addParameter(DefineParam(mQuality, C2_PARAMKEY_QUALITY)
++                             .withDefault(new C2StreamQualityTuning::output(0u, 40))
++                             .withFields({C2F(mQuality, value).inRange(0, 100)})
++                             .withSetter(Setter<decltype(*mQuality)>::NonStrictValueWithNoDeps)
++                             .build());
++
++        addParameter(
++                DefineParam(mProfileLevel, C2_PARAMKEY_PROFILE_LEVEL)
++                        .withDefault(new C2StreamProfileLevelInfo::output(
++                                0u, C2Config::PROFILE_APV_422_10, LEVEL_APV_1_BAND_0))
++                        .withFields({
++                                C2F(mProfileLevel, profile).oneOf({C2Config::PROFILE_APV_422_10}),
++                                C2F(mProfileLevel, level)
++                                        .oneOf({
++                                                C2Config::LEVEL_APV_1_BAND_0,
++                                                C2Config::LEVEL_APV_1_1_BAND_0,
++                                                C2Config::LEVEL_APV_2_BAND_0,
++                                                C2Config::LEVEL_APV_2_1_BAND_0,
++                                                C2Config::LEVEL_APV_3_BAND_0,
++                                                C2Config::LEVEL_APV_3_1_BAND_0,
++                                                C2Config::LEVEL_APV_4_BAND_0,
++                                                C2Config::LEVEL_APV_4_1_BAND_0,
++                                                C2Config::LEVEL_APV_5_BAND_0,
++                                                C2Config::LEVEL_APV_5_1_BAND_0,
++                                                C2Config::LEVEL_APV_6_BAND_0,
++                                                C2Config::LEVEL_APV_6_1_BAND_0,
++                                                C2Config::LEVEL_APV_7_BAND_0,
++                                                C2Config::LEVEL_APV_7_1_BAND_0,
++                                                C2Config::LEVEL_APV_1_BAND_1,
++                                                C2Config::LEVEL_APV_1_1_BAND_1,
++                                                C2Config::LEVEL_APV_2_BAND_1,
++                                                C2Config::LEVEL_APV_2_1_BAND_1,
++                                                C2Config::LEVEL_APV_3_BAND_1,
++                                                C2Config::LEVEL_APV_3_1_BAND_1,
++                                                C2Config::LEVEL_APV_4_BAND_1,
++                                                C2Config::LEVEL_APV_4_1_BAND_1,
++                                                C2Config::LEVEL_APV_5_BAND_1,
++                                                C2Config::LEVEL_APV_5_1_BAND_1,
++                                                C2Config::LEVEL_APV_6_BAND_1,
++                                                C2Config::LEVEL_APV_6_1_BAND_1,
++                                                C2Config::LEVEL_APV_7_BAND_1,
++                                                C2Config::LEVEL_APV_7_1_BAND_1,
++                                                C2Config::LEVEL_APV_1_BAND_2,
++                                                C2Config::LEVEL_APV_1_1_BAND_2,
++                                                C2Config::LEVEL_APV_2_BAND_2,
++                                                C2Config::LEVEL_APV_2_1_BAND_2,
++                                                C2Config::LEVEL_APV_3_BAND_2,
++                                                C2Config::LEVEL_APV_3_1_BAND_2,
++                                                C2Config::LEVEL_APV_4_BAND_2,
++                                                C2Config::LEVEL_APV_4_1_BAND_2,
++                                                C2Config::LEVEL_APV_5_BAND_2,
++                                                C2Config::LEVEL_APV_5_1_BAND_2,
++                                                C2Config::LEVEL_APV_6_BAND_2,
++                                                C2Config::LEVEL_APV_6_1_BAND_2,
++                                                C2Config::LEVEL_APV_7_BAND_2,
++                                                C2Config::LEVEL_APV_7_1_BAND_2,
++                                                C2Config::LEVEL_APV_1_BAND_3,
++                                                C2Config::LEVEL_APV_1_1_BAND_3,
++                                                C2Config::LEVEL_APV_2_BAND_3,
++                                                C2Config::LEVEL_APV_2_1_BAND_3,
++                                                C2Config::LEVEL_APV_3_BAND_3,
++                                                C2Config::LEVEL_APV_3_1_BAND_3,
++                                                C2Config::LEVEL_APV_4_BAND_3,
++                                                C2Config::LEVEL_APV_4_1_BAND_3,
++                                                C2Config::LEVEL_APV_5_BAND_3,
++                                                C2Config::LEVEL_APV_5_1_BAND_3,
++                                                C2Config::LEVEL_APV_6_BAND_3,
++                                                C2Config::LEVEL_APV_6_1_BAND_3,
++                                                C2Config::LEVEL_APV_7_BAND_3,
++                                                C2Config::LEVEL_APV_7_1_BAND_3,
++                                        }),
++                        })
++                        .withSetter(ProfileLevelSetter, mSize, mFrameRate, mBitrate)
++                        .build());
++
++        addParameter(DefineParam(mColorAspects, C2_PARAMKEY_COLOR_ASPECTS)
++                             .withDefault(new C2StreamColorAspectsInfo::input(
++                                     0u, C2Color::RANGE_UNSPECIFIED, C2Color::PRIMARIES_UNSPECIFIED,
++                                     C2Color::TRANSFER_UNSPECIFIED, C2Color::MATRIX_UNSPECIFIED))
++                             .withFields({C2F(mColorAspects, range)
++                                                  .inRange(C2Color::RANGE_UNSPECIFIED,
++                                                           C2Color::RANGE_OTHER),
++                                          C2F(mColorAspects, primaries)
++                                                  .inRange(C2Color::PRIMARIES_UNSPECIFIED,
++                                                           C2Color::PRIMARIES_OTHER),
++                                          C2F(mColorAspects, transfer)
++                                                  .inRange(C2Color::TRANSFER_UNSPECIFIED,
++                                                           C2Color::TRANSFER_OTHER),
++                                          C2F(mColorAspects, matrix)
++                                                  .inRange(C2Color::MATRIX_UNSPECIFIED,
++                                                           C2Color::MATRIX_OTHER)})
++                             .withSetter(ColorAspectsSetter)
++                             .build());
++
++        addParameter(DefineParam(mCodedColorAspects, C2_PARAMKEY_VUI_COLOR_ASPECTS)
++                             .withDefault(new C2StreamColorAspectsInfo::output(
++                                     0u, C2Color::RANGE_LIMITED, C2Color::PRIMARIES_UNSPECIFIED,
++                                     C2Color::TRANSFER_UNSPECIFIED, C2Color::MATRIX_UNSPECIFIED))
++                             .withFields({C2F(mCodedColorAspects, range)
++                                                  .inRange(C2Color::RANGE_UNSPECIFIED,
++                                                           C2Color::RANGE_OTHER),
++                                          C2F(mCodedColorAspects, primaries)
++                                                  .inRange(C2Color::PRIMARIES_UNSPECIFIED,
++                                                           C2Color::PRIMARIES_OTHER),
++                                          C2F(mCodedColorAspects, transfer)
++                                                  .inRange(C2Color::TRANSFER_UNSPECIFIED,
++                                                           C2Color::TRANSFER_OTHER),
++                                          C2F(mCodedColorAspects, matrix)
++                                                  .inRange(C2Color::MATRIX_UNSPECIFIED,
++                                                           C2Color::MATRIX_OTHER)})
++                             .withSetter(CodedColorAspectsSetter, mColorAspects)
++                             .build());
++        std::vector<uint32_t> pixelFormats = {
++                HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED,
++        };
++        if (isHalPixelFormatSupported((AHardwareBuffer_Format)HAL_PIXEL_FORMAT_YCBCR_P010)) {
++            pixelFormats.push_back(HAL_PIXEL_FORMAT_YCBCR_P010);
++        }
++        addParameter(DefineParam(mPixelFormat, C2_PARAMKEY_PIXEL_FORMAT)
++                             .withDefault(new C2StreamPixelFormatInfo::input(
++                                     0u, HAL_PIXEL_FORMAT_YCBCR_P010))
++                             .withFields({C2F(mPixelFormat, value).oneOf({pixelFormats})})
++                             .withSetter((Setter<decltype(*mPixelFormat)>::StrictValueWithNoDeps))
++                             .build());
++    }
++
++    static C2R BitrateSetter(bool mayBlock, C2P<C2StreamBitrateInfo::output>& me) {
++        (void)mayBlock;
++        C2R res = C2R::Ok();
++        if (me.v.value < 1000000) {
++            me.set().value = 1000000;
++        }
++        return res;
++    }
++
++    static C2R SizeSetter(bool mayBlock, const C2P<C2StreamPictureSizeInfo::input>& oldMe,
++                          C2P<C2StreamPictureSizeInfo::input>& me) {
++        (void)mayBlock;
++        C2R res = C2R::Ok();
++        if (!me.F(me.v.width).supportsAtAll(me.v.width)) {
++            res = res.plus(C2SettingResultBuilder::BadValue(me.F(me.v.width)));
++            me.set().width = oldMe.v.width;
++        }
++        if (!me.F(me.v.height).supportsAtAll(me.v.height)) {
++            res = res.plus(C2SettingResultBuilder::BadValue(me.F(me.v.height)));
++            me.set().height = oldMe.v.height;
++        }
++        return res;
++    }
++
++    static C2R ProfileLevelSetter(bool mayBlock, C2P<C2StreamProfileLevelInfo::output>& me,
++                                  const C2P<C2StreamPictureSizeInfo::input>& size,
++                                  const C2P<C2StreamFrameRateInfo::output>& frameRate,
++                                  const C2P<C2StreamBitrateInfo::output>& bitrate) {
++        (void)mayBlock;
++        if (!me.F(me.v.profile).supportsAtAll(me.v.profile)) {
++            me.set().profile = C2Config::PROFILE_APV_422_10;
++        }
++        if (!me.F(me.v.level).supportsAtAll(me.v.level)) {
++            me.set().level = LEVEL_APV_1_BAND_0;
++        }
++        return C2R::Ok();
++    }
++
++    static C2R ColorAspectsSetter(bool mayBlock, C2P<C2StreamColorAspectsInfo::input>& me) {
++        (void)mayBlock;
++        if (me.v.range > C2Color::RANGE_OTHER) {
++            me.set().range = C2Color::RANGE_OTHER;
++        }
++        if (me.v.primaries > C2Color::PRIMARIES_OTHER) {
++            me.set().primaries = C2Color::PRIMARIES_OTHER;
++        }
++        if (me.v.transfer > C2Color::TRANSFER_OTHER) {
++            me.set().transfer = C2Color::TRANSFER_OTHER;
++        }
++        if (me.v.matrix > C2Color::MATRIX_OTHER) {
++            me.set().matrix = C2Color::MATRIX_OTHER;
++        }
++        return C2R::Ok();
++    }
++
++    static C2R CodedColorAspectsSetter(bool mayBlock, C2P<C2StreamColorAspectsInfo::output>& me,
++                                       const C2P<C2StreamColorAspectsInfo::input>& coded) {
++        (void)mayBlock;
++        me.set().range = coded.v.range;
++        me.set().primaries = coded.v.primaries;
++        me.set().transfer = coded.v.transfer;
++        me.set().matrix = coded.v.matrix;
++        return C2R::Ok();
++    }
++
++    uint32_t getProfile_l() const {
++        int32_t profile = PROFILE_UNUSED;
++
++        switch (mProfileLevel->profile) {
++            case C2Config::PROFILE_APV_422_10:
++                profile = 33;
++                break;
++            case C2Config::PROFILE_APV_422_12:
++                profile = 44;
++                break;
++            case C2Config::PROFILE_APV_444_10:
++                profile = 55;
++                break;
++            case C2Config::PROFILE_APV_444_12:
++                profile = 66;
++                break;
++            case C2Config::PROFILE_APV_4444_10:
++                profile = 77;
++                break;
++            case C2Config::PROFILE_APV_4444_12:
++                profile = 88;
++                break;
++            case C2Config::PROFILE_APV_400_10:
++                profile = 99;
++                break;
++            default:
++                ALOGD("Unrecognized profile: %x", mProfileLevel->profile);
++        }
++        return profile;
++    }
++
++    uint32_t getLevel_l() const {
++        int32_t level = LEVEL_UNUSED;
++
++        // TODO: Add Band settings
++        switch (mProfileLevel->level) {
++            case C2Config::LEVEL_APV_1_BAND_0:
++                level = 10;
++                break;
++            case C2Config::LEVEL_APV_1_1_BAND_0:
++                level = 11;
++                break;
++            case C2Config::LEVEL_APV_2_BAND_0:
++                level = 20;
++                break;
++            case C2Config::LEVEL_APV_2_1_BAND_0:
++                level = 21;
++                break;
++            case C2Config::LEVEL_APV_3_BAND_0:
++                level = 30;
++                break;
++            case C2Config::LEVEL_APV_3_1_BAND_0:
++                level = 31;
++                break;
++            case C2Config::LEVEL_APV_4_BAND_0:
++                level = 40;
++                break;
++            case C2Config::LEVEL_APV_4_1_BAND_0:
++                level = 41;
++                break;
++            case C2Config::LEVEL_APV_5_BAND_0:
++                level = 50;
++                break;
++            case C2Config::LEVEL_APV_5_1_BAND_0:
++                level = 51;
++                break;
++            case C2Config::LEVEL_APV_6_BAND_0:
++                level = 60;
++                break;
++            case C2Config::LEVEL_APV_6_1_BAND_0:
++                level = 61;
++                break;
++            case C2Config::LEVEL_APV_7_BAND_0:
++                level = 70;
++                break;
++            case C2Config::LEVEL_APV_7_1_BAND_0:
++                level = 71;
++                break;
++            default:
++                ALOGD("Unrecognized level: %x", mProfileLevel->level);
++        }
++        // Convert to APV level_idc according to APV spec
++        return level * 3;
++    }
++
++    int32_t getBitrateMode_l() const {
++        int32_t bitrateMode = C2Config::BITRATE_CONST;
++
++        switch (mBitrateMode->value) {
++            case C2Config::BITRATE_CONST:
++                bitrateMode = OAPV_RC_CQP;
++                break;
++            case C2Config::BITRATE_VARIABLE:
++                bitrateMode = OAPV_RC_ABR;
++                break;
++            case C2Config::BITRATE_IGNORE:
++                bitrateMode = 0;
++                break;
++            default:
++                ALOGE("Unrecognized bitrate mode: %x", mBitrateMode->value);
++        }
++        return bitrateMode;
++    }
++
++    std::shared_ptr<C2StreamPictureSizeInfo::input> getSize_l() const { return mSize; }
++    std::shared_ptr<C2StreamFrameRateInfo::output> getFrameRate_l() const { return mFrameRate; }
++    std::shared_ptr<C2StreamBitrateInfo::output> getBitrate_l() const { return mBitrate; }
++    std::shared_ptr<C2StreamQualityTuning::output> getQuality_l() const { return mQuality; }
++    std::shared_ptr<C2StreamColorAspectsInfo::input> getColorAspects_l() const {
++        return mColorAspects;
++    }
++    std::shared_ptr<C2StreamColorAspectsInfo::output> getCodedColorAspects_l() const {
++        return mCodedColorAspects;
++    }
++    std::shared_ptr<C2StreamPictureQuantizationTuning::output> getPictureQuantization_l() const {
++        return mPictureQuantization;
++    }
++    std::shared_ptr<C2StreamProfileLevelInfo::output> getProfileLevel_l() const {
++        return mProfileLevel;
++    }
++    std::shared_ptr<C2StreamPixelFormatInfo::input> getPixelFormat_l() const {
++        return mPixelFormat;
++    }
++
++  private:
++    std::shared_ptr<C2StreamProfileLevelInfo::output> mProfileLevel;
++    std::shared_ptr<C2StreamUsageTuning::input> mUsage;
++    std::shared_ptr<C2StreamPictureSizeInfo::input> mSize;
++    std::shared_ptr<C2StreamFrameRateInfo::output> mFrameRate;
++    std::shared_ptr<C2StreamBitrateInfo::output> mBitrate;
++    std::shared_ptr<C2StreamBitrateModeTuning::output> mBitrateMode;
++    std::shared_ptr<C2StreamQualityTuning::output> mQuality;
++    std::shared_ptr<C2StreamColorAspectsInfo::input> mColorAspects;
++    std::shared_ptr<C2StreamColorAspectsInfo::output> mCodedColorAspects;
++    std::shared_ptr<C2StreamPictureQuantizationTuning::output> mPictureQuantization;
++    std::shared_ptr<C2StreamColorInfo::input> mColorFormat;
++    std::shared_ptr<C2StreamPixelFormatInfo::input> mPixelFormat;
++};
++
++C2SoftApvEnc::C2SoftApvEnc(const char* name, c2_node_id_t id,
++                           const std::shared_ptr<IntfImpl>& intfImpl)
++    : SimpleC2Component(std::make_shared<SimpleInterface<IntfImpl>>(name, id, intfImpl)),
++      mIntf(intfImpl),
++      mColorFormat(OAPV_CF_PLANAR2),
++      mStarted(false),
++      mSignalledEos(false),
++      mSignalledError(false),
++      mOutBlock(nullptr) {
++    reset();
++}
++
++C2SoftApvEnc::~C2SoftApvEnc() {
++    onRelease();
++}
++
++c2_status_t C2SoftApvEnc::onInit() {
++    return C2_OK;
++}
++
++c2_status_t C2SoftApvEnc::onStop() {
++    return C2_OK;
++}
++
++void C2SoftApvEnc::onReset() {
++    releaseEncoder();
++    reset();
++}
++
++void C2SoftApvEnc::onRelease() {
++    releaseEncoder();
++}
++
++c2_status_t C2SoftApvEnc::onFlush_sm() {
++    return C2_OK;
++}
++
++static void fillEmptyWork(const std::unique_ptr<C2Work>& work) {
++    uint32_t flags = 0;
++    if (work->input.flags & C2FrameData::FLAG_END_OF_STREAM) {
++        flags |= C2FrameData::FLAG_END_OF_STREAM;
++        ALOGV("Signalling EOS");
++    }
++    work->worklets.front()->output.flags = (C2FrameData::flags_t)flags;
++    work->worklets.front()->output.buffers.clear();
++    work->worklets.front()->output.ordinal = work->input.ordinal;
++    work->workletsProcessed = 1u;
++}
++
++int32_t C2SoftApvEnc::getQpFromQuality(int32_t quality) {
++    int32_t qp = ((kApvQpMin - kApvQpMax) * quality / 100) + kApvQpMax;
++    qp = std::min(qp, (int)kApvQpMax);
++    qp = std::max(qp, (int)kApvQpMin);
++    return qp;
++}
++
++c2_status_t C2SoftApvEnc::reset() {
++    ALOGV("reset");
++    mInitEncoder = false;
++    mStarted = false;
++    mSignalledEos = false;
++    mSignalledError = false;
++    mBitDepth = 10;
++    mMaxFrames = MAX_NUM_FRMS;
++    mReceivedFrames = 0;
++    mReceivedFirstFrame = false;
++    mColorFormat = OAPV_CF_PLANAR2;
++    return C2_OK;
++}
++
++c2_status_t C2SoftApvEnc::releaseEncoder() {
++    for (int32_t i = 0; i < MAX_NUM_FRMS; i++) {
++        if (mInputFrames.frm[i].imgb != nullptr) {
++            imgb_release(mInputFrames.frm[i].imgb);
++        }
++    }
++
++    if (mBitstreamBuf) {
++        std::free(mBitstreamBuf);
++        mBitstreamBuf = nullptr;
++    }
++    return C2_OK;
++}
++
++c2_status_t C2SoftApvEnc::drain(uint32_t drainMode, const std::shared_ptr<C2BlockPool>& pool) {
++    return drainInternal(drainMode, pool, nullptr);
++}
++
++void C2SoftApvEnc::showEncoderParams(oapve_cdesc_t* cdsc) {
++    std::string title = "APV encoder params:";
++    ALOGD("%s width = %d, height = %d", title.c_str(), cdsc->param[0].w, cdsc->param[0].h);
++    ALOGD("%s FrameRate = %f", title.c_str(),
++          (double)cdsc->param[0].fps_num / cdsc->param[0].fps_den);
++    ALOGD("%s BitRate = %d Kbps", title.c_str(), cdsc->param[0].bitrate);
++    ALOGD("%s QP = %d", title.c_str(), cdsc->param[0].qp);
++    ALOGD("%s profile_idc = %d, level_idc = %d, band_idc = %d", title.c_str(),
++          cdsc->param[0].profile_idc, cdsc->param[0].level_idc / 3, cdsc->param[0].band_idc);
++    ALOGD("%s Bitrate Mode: %d", title.c_str(), cdsc->param[0].rc_type);
++    ALOGD("%s mColorAspects primaries: %d, transfer: %d, matrix: %d, range: %d", title.c_str(),
++          mColorAspects->primaries, mColorAspects->transfer, mColorAspects->matrix,
++          mColorAspects->range);
++    ALOGD("%s mCodedColorAspects primaries: %d, transfer: %d, matrix: %d, range: %d", title.c_str(),
++          mCodedColorAspects->primaries, mCodedColorAspects->transfer, mCodedColorAspects->matrix,
++          mCodedColorAspects->range);
++    ALOGD("%s Input color format: %s", title.c_str(),
++          mColorFormat == OAPV_CF_YCBCR422 ? "YUV422P10LE" : "P210");
++    ALOGD("%s max_num_frms: %d", title.c_str(), cdsc->max_num_frms);
++}
++
++c2_status_t C2SoftApvEnc::initEncoder() {
++    if (mInitEncoder) {
++        return C2_OK;
++    }
++    ALOGV("initEncoder");
++
++    mSize = mIntf->getSize_l();
++    mFrameRate = mIntf->getFrameRate_l();
++    mBitrate = mIntf->getBitrate_l();
++    mQuality = mIntf->getQuality_l();
++    mColorAspects = mIntf->getColorAspects_l();
++    mCodedColorAspects = mIntf->getCodedColorAspects_l();
++    mProfileLevel = mIntf->getProfileLevel_l();
++    mPixelFormat = mIntf->getPixelFormat_l();
++
++    mCodecDesc = std::make_unique<oapve_cdesc_t>();
++    if (mCodecDesc == nullptr) {
++        ALOGE("Allocate ctx failed");
++        return C2_NO_INIT;
++    }
++    mCodecDesc->max_bs_buf_size = kMaxBitstreamBufSize;
++    mCodecDesc->max_num_frms = MAX_NUM_FRMS;
++    // TODO: Bound parameters to CPU count
++    mCodecDesc->threads = 4;
++
++    int32_t ret = C2_OK;
++    /* set params */
++    for (int32_t i = 0; i < mMaxFrames; i++) {
++        oapve_param_t* param = &mCodecDesc->param[i];
++        ret = oapve_param_default(param);
++        if (OAPV_FAILED(ret)) {
++            ALOGE("cannot set default parameter");
++            return C2_NO_INIT;
++        }
++        setParams(*param);
++    }
++
++    showEncoderParams(mCodecDesc.get());
++
++    /* create encoder */
++    mEncoderId = oapve_create(mCodecDesc.get(), NULL);
++    if (mEncoderId == NULL) {
++        ALOGE("cannot create APV encoder");
++        return C2_CORRUPTED;
++    }
++
++    /* create metadata */
++    mMetaId = oapvm_create(&ret);
++    if (mMetaId == NULL) {
++        ALOGE("cannot create APV encoder");
++        return C2_NO_MEMORY;
++    }
++
++    /* create image buffers */
++    for (int32_t i = 0; i < mMaxFrames; i++) {
++        if (mBitDepth == 10) {
++            mInputFrames.frm[i].imgb = imgb_create(mCodecDesc->param[0].w, mCodecDesc->param[0].h,
++                                                  OAPV_CS_SET(mColorFormat, mBitDepth, 0));
++            mReconFrames.frm[i].imgb = nullptr;
++        } else {
++            mInputFrames.frm[i].imgb = imgb_create(mCodecDesc->param[0].w, mCodecDesc->param[0].h,
++                                                  OAPV_CS_SET(mColorFormat, 10, 0));
++            mReconFrames.frm[i].imgb = nullptr;
++        }
++    }
++
++    /* allocate bitstream buffer */
++    mBitstreamBuf = new unsigned char[kMaxBitstreamBufSize];
++    if (mBitstreamBuf == nullptr) {
++        ALOGE("cannot allocate bitstream buffer, size= %d", kMaxBitstreamBufSize);
++        return C2_NO_MEMORY;
++    }
++
++    /* Calculate SDR to HDR mapping values */
++    mSdrToHdrMapping.clear();
++    for (int32_t i = 0; i < 256; i++) {
++        mSdrToHdrMapping.push_back((uint16_t)(i * 1023 / 255 + 0.5));
++    }
++
++    mStarted = true;
++    mInitEncoder = true;
++    return C2_OK;
++}
++
++void C2SoftApvEnc::setParams(oapve_param_t& param) {
++    param.w = mSize->width;
++    param.h = mSize->height;
++    param.fps_num = (int)(mFrameRate->value * 100);
++    param.fps_den = 100;
++    param.bitrate = mBitrate->value / 1000;
++    param.rc_type = mIntf->getBitrateMode_l();
++
++    int ApvQP = kApvDefaultQP;
++    if (param.rc_type == OAPV_RC_CQP) {
++        ApvQP = getQpFromQuality(mQuality->value);
++        ALOGI("Bitrate mode is CQ, so QP value is derived from Quality. Quality is %d, QP is %d",
++              mQuality->value, ApvQP);
++    }
++    param.qp = ApvQP;
++    param.band_idc = 0;  // TODO: Get from the Level setting
++    param.profile_idc = mIntf->getProfile_l();
++    C2Config::level_t level = decisionApvLevel(
++            param.w, param.h, (int)(param.fps_num / param.fps_den), param.bitrate, param.band_idc);
++    if (mProfileLevel->level != level) {
++        mProfileLevel->level = level;
++        ALOGI("Need to update level to %d", mIntf->getLevel_l());
++    }
++    param.level_idc = mIntf->getLevel_l();
++}
++
++c2_status_t C2SoftApvEnc::setEncodeArgs(oapv_frms_t* inputFrames, const C2GraphicView* const input,
++                                        uint64_t workIndex) {
++    if (input->width() < mSize->width || input->height() < mSize->height) {
++        /* Expect width height to be configured */
++        ALOGW("unexpected Capacity Aspect %d(%d) x %d(%d)", input->width(), mSize->width,
++              input->height(), mSize->height);
++        return C2_BAD_VALUE;
++    }
++    const C2PlanarLayout& layout = input->layout();
++    uint8_t* yPlane = const_cast<uint8_t*>(input->data()[C2PlanarLayout::PLANE_Y]);
++    uint8_t* uPlane = const_cast<uint8_t*>(input->data()[C2PlanarLayout::PLANE_U]);
++    uint8_t* vPlane = const_cast<uint8_t*>(input->data()[C2PlanarLayout::PLANE_V]);
++    int32_t yStride = layout.planes[C2PlanarLayout::PLANE_Y].rowInc;
++    int32_t uStride = layout.planes[C2PlanarLayout::PLANE_U].rowInc;
++    int32_t vStride = layout.planes[C2PlanarLayout::PLANE_V].rowInc;
++
++    uint32_t width = mSize->width;
++    uint32_t height = mSize->height;
++
++    /* width and height must be even */
++    if (width & 1u || height & 1u) {
++        ALOGW("height(%u) and width(%u) must both be even", height, width);
++        return C2_BAD_VALUE;
++    }
++
++    /* Set num frames */
++    inputFrames->num_frms = MAX_NUM_FRMS;
++    inputFrames->frm[mReceivedFrames].group_id = 1;
++    inputFrames->frm[mReceivedFrames].pbu_type = OAPV_PBU_TYPE_PRIMARY_FRAME;
++
++    switch (layout.type) {
++        case C2PlanarLayout::TYPE_RGB:
++            [[fallthrough]];
++        case C2PlanarLayout::TYPE_RGBA: {
++            // TODO: Add RGBA1010102 support
++            ALOGE("Not supported RGB color format");
++            return C2_BAD_VALUE;
++        }
++        case C2PlanarLayout::TYPE_YUV: {
++            if (IsP010(*input)) {
++                if (mColorFormat == OAPV_CF_YCBCR422) {
++                    ColorConvertP010ToYUV422P10le(input, inputFrames->frm[0].imgb);
++                } else if (mColorFormat == OAPV_CF_PLANAR2) {
++                    ColorConvertP010ToP210(input, inputFrames->frm[0].imgb);
++                } else {
++                    ALOGE("Not supported color format. %d", mColorFormat);
++                    return C2_BAD_VALUE;
++                }
++            } else if (IsNV12(*input)) {
++                ColorConvertNv12ToP210(input, inputFrames->frm[0].imgb);
++            } else if (IsNV21(*input)) {
++                ColorConvertNv12ToP210(input, inputFrames->frm[0].imgb);
++            } else if (IsYUV420(*input)) {
++                return C2_BAD_VALUE;
++            } else if (IsI420(*input)) {
++                return C2_BAD_VALUE;
++            } else {
++                ALOGE("Not supported color format. %d", mColorFormat);
++                return C2_BAD_VALUE;
++            }
++            break;
++        }
++
++        default:
++            ALOGE("Unrecognized plane type: %d", layout.type);
++            return C2_BAD_VALUE;
++    }
++
++    return C2_OK;
++}
++
++void C2SoftApvEnc::ColorConvertNv12ToP210(const C2GraphicView* const input, oapv_imgb_t* imgb) {
++    auto width = input->width();
++    auto height = input->height();
++
++    auto* yPlane = (uint8_t*)input->data()[0];
++    auto* uvPlane = (uint8_t*)input->data()[1];
++
++    auto* dst = (uint16_t*)imgb->a[0];
++    int32_t lumaOffset = 0;
++    for (int32_t y = 0; y < height; ++y) {
++        for (int32_t x = 0; x < width; ++x) {
++            lumaOffset = y * width + x;
++            dst[lumaOffset] = (mSdrToHdrMapping[yPlane[lumaOffset]] << 6) |
++                              ((mSdrToHdrMapping[yPlane[lumaOffset]] & 0x300) >> 3);
++        }
++    }
++
++    auto* dst_uv = (uint16_t*)imgb->a[1];
++    uint32_t uvDstStride = width;
++    int32_t srcOffset = 0;
++    int32_t dstOffset1 = 0, dstOffset2 = 0;
++    int32_t tmp1 = 0, tmp2 = 0;
++    for (int32_t y = 0; y < height / 2; ++y) {
++        for (int32_t x = 0; x < width; x += 2) {
++            srcOffset = y * width + x;
++            dstOffset1 = (y * 2) * width + x;
++            dstOffset2 = ((y * 2) + 1) * width + x;
++
++            tmp1 = (mSdrToHdrMapping[uvPlane[srcOffset]] << 6) |
++                   ((mSdrToHdrMapping[uvPlane[srcOffset]] & 0x300) >> 3);
++            tmp2 = (mSdrToHdrMapping[uvPlane[srcOffset + 1]] << 6) |
++                   ((mSdrToHdrMapping[uvPlane[srcOffset + 1]] & 0x300) >> 3);
++            dst_uv[dstOffset1] = (uint16_t)tmp1;
++            dst_uv[dstOffset1 + 1] = (uint16_t)tmp2;
++            dst_uv[dstOffset2] = (uint16_t)tmp1;
++            dst_uv[dstOffset2 + 1] = (uint16_t)tmp2;
++        }
++    }
++}
++
++C2Config::level_t C2SoftApvEnc::decisionApvLevel(int32_t width, int32_t height, int32_t fps,
++                                                 int32_t bitrate, int32_t band) {
++    C2Config::level_t level = C2Config::LEVEL_APV_1_BAND_0;
++
++    struct LevelLimits {
++        C2Config::level_t level;
++        uint64_t samplesPerSec;
++        uint32_t bitratesOfBand;
++    };
++
++    constexpr LevelLimits kLimitsBand0[] = {
++            {LEVEL_APV_1_BAND_0, 3'041'280, 7'000},
++            {LEVEL_APV_1_1_BAND_0, 6'082'560, 14'000},
++            {LEVEL_APV_2_BAND_0, 15'667'200, 36'000},
++            {LEVEL_APV_2_1_BAND_0, 31'334'400, 71'000},
++            {LEVEL_APV_3_BAND_0, 66'846'720, 101'000},
++            {LEVEL_APV_3_1_BAND_0, 133'693'440, 201'000},
++            {LEVEL_APV_4_BAND_0, 265'420'800, 401'000},
++            {LEVEL_APV_4_1_BAND_0, 530'841'600, 780'000},
++            {LEVEL_APV_5_BAND_0, 1'061'683'200, 1'560'000},
++            {LEVEL_APV_5_1_BAND_0, 2'123'366'400, 3'324'000},
++            {LEVEL_APV_6_BAND_0, 4'777'574'400, 6'648'000},
++            {LEVEL_APV_6_1_BAND_0, 8'493'465'600, 13'296'000},
++            {LEVEL_APV_7_BAND_0, 16'986'931'200, 26'592'000},
++            {LEVEL_APV_7_1_BAND_0, 33'973'862'400, 53'184'000},
++    };
++
++    constexpr LevelLimits kLimitsBand1[] = {
++            {LEVEL_APV_1_BAND_1, 3'041'280, 11'000},
++            {LEVEL_APV_1_1_BAND_1, 6'082'560, 21'000},
++            {LEVEL_APV_2_BAND_1, 15'667'200, 53'000},
++            {LEVEL_APV_2_1_BAND_1, 31'334'400, 106'00},
++            {LEVEL_APV_3_BAND_1, 66'846'720, 151'000},
++            {LEVEL_APV_3_1_BAND_1, 133'693'440, 301'000},
++            {LEVEL_APV_4_BAND_1, 265'420'800, 602'000},
++            {LEVEL_APV_4_1_BAND_1, 530'841'600, 1'170'000},
++            {LEVEL_APV_5_BAND_1, 1'061'683'200, 2'340'000},
++            {LEVEL_APV_5_1_BAND_1, 2'123'366'400, 4'986'000},
++            {LEVEL_APV_6_BAND_1, 4'777'574'400, 9'972'000},
++            {LEVEL_APV_6_1_BAND_1, 8'493'465'600, 19'944'000},
++            {LEVEL_APV_7_BAND_1, 16'986'931'200, 39'888'000},
++            {LEVEL_APV_7_1_BAND_1, 33'973'862'400, 79'776'000},
++    };
++
++    constexpr LevelLimits kLimitsBand2[] = {
++            {LEVEL_APV_1_BAND_2, 3'041'280, 14'000},
++            {LEVEL_APV_1_1_BAND_2, 6'082'560, 28'000},
++            {LEVEL_APV_2_BAND_2, 15'667'200, 71'000},
++            {LEVEL_APV_2_1_BAND_2, 31'334'400, 141'000},
++            {LEVEL_APV_3_BAND_2, 66'846'720, 201'000},
++            {LEVEL_APV_3_1_BAND_2, 133'693'440, 401'000},
++            {LEVEL_APV_4_BAND_2, 265'420'800, 780'000},
++            {LEVEL_APV_4_1_BAND_2, 530'841'600, 1'560'000},
++            {LEVEL_APV_5_BAND_2, 1'061'683'200, 3'324'000},
++            {LEVEL_APV_5_1_BAND_2, 2'123'366'400, 6'648'000},
++            {LEVEL_APV_6_BAND_2, 4'777'574'400, 13'296'000},
++            {LEVEL_APV_6_1_BAND_2, 8'493'465'600, 26'592'000},
++            {LEVEL_APV_7_BAND_2, 16'986'931'200, 53'184'000},
++            {LEVEL_APV_7_1_BAND_2, 33'973'862'400, 106'368'000},
++    };
++
++    constexpr LevelLimits kLimitsBand3[] = {
++            {LEVEL_APV_1_BAND_3, 3'041'280, 21'000},
++            {LEVEL_APV_1_1_BAND_3, 6'082'560, 42'000},
++            {LEVEL_APV_2_BAND_3, 15'667'200, 106'000},
++            {LEVEL_APV_2_1_BAND_3, 31'334'400, 212'000},
++            {LEVEL_APV_3_BAND_3, 66'846'720, 301'000},
++            {LEVEL_APV_3_1_BAND_3, 133'693'440, 602'000},
++            {LEVEL_APV_4_BAND_3, 265'420'800, 1'170'000},
++            {LEVEL_APV_4_1_BAND_3, 530'841'600, 2'340'000},
++            {LEVEL_APV_5_BAND_3, 1'061'683'200, 4'986'000},
++            {LEVEL_APV_5_1_BAND_3, 2'123'366'400, 9'972'000},
++            {LEVEL_APV_6_BAND_3, 4'777'574'400, 19'944'000},
++            {LEVEL_APV_6_1_BAND_3, 8'493'465'600, 39'888'000},
++            {LEVEL_APV_7_BAND_3, 16'986'931'200, 79'776'000},
++            {LEVEL_APV_7_1_BAND_3, 33'973'862'400, 159'552'000},
++    };
++
++    uint64_t samplesPerSec = width * height * fps;
++    if (band == 0) {
++        for (const LevelLimits& limit : kLimitsBand0) {
++            if (samplesPerSec <= limit.samplesPerSec && bitrate <= limit.bitratesOfBand) {
++                level = limit.level;
++                break;
++            }
++        }
++    } else if (band == 1) {
++        for (const LevelLimits& limit : kLimitsBand1) {
++            if (samplesPerSec <= limit.samplesPerSec && bitrate <= limit.bitratesOfBand) {
++                level = limit.level;
++                break;
++            }
++        }
++    } else if (band == 2) {
++        for (const LevelLimits& limit : kLimitsBand2) {
++            if (samplesPerSec <= limit.samplesPerSec && bitrate <= limit.bitratesOfBand) {
++                level = limit.level;
++                break;
++            }
++        }
++    } else if (band == 3) {
++        for (const LevelLimits& limit : kLimitsBand3) {
++            if (samplesPerSec <= limit.samplesPerSec && bitrate <= limit.bitratesOfBand) {
++                level = limit.level;
++                break;
++            }
++        }
++    } else {
++        ALOGE("Invalid band_idc on calculte level");
++    }
++
++    return level;
++}
++
++void C2SoftApvEnc::ColorConvertP010ToP210(const C2GraphicView* const input, oapv_imgb_t* imgb) {
++    auto width = input->width();
++    auto height = input->height();
++
++    auto* yPlane = (uint8_t*)input->data()[0];
++    auto* uvPlane = (uint8_t*)input->data()[1];
++    uint32_t uvStride = width * 2;
++
++    auto* src = yPlane;
++    auto* dst = (uint8_t*)imgb->a[0];
++    std::memcpy(dst, src, width * height * 2);
++
++    auto* dst_uv = (uint8_t*)imgb->a[1];
++    int32_t offset1 = 0, offset2 = 0;
++    for (int32_t y = 0; y < height / 2; ++y) {
++        offset1 = (y * 2) * uvStride;
++        offset2 = (y * 2 + 1) * uvStride;
++        src = uvPlane + (y * uvStride);
++
++        std::memcpy(dst_uv + offset1, src, uvStride);
++        std::memcpy(dst_uv + offset2, src, uvStride);
++    }
++}
++
++void C2SoftApvEnc::ColorConvertP010ToYUV422P10le(const C2GraphicView* const input,
++                                                 oapv_imgb_t* imgb) {
++    uint32_t width = input->width();
++    uint32_t height = input->height();
++
++    uint8_t* yPlane = (uint8_t*)input->data()[0];
++    auto* uvPlane = (uint8_t*)input->data()[1];
++    uint32_t stride[3];
++    stride[0] = width * 2;
++    stride[1] = stride[2] = width;
++
++    uint8_t *dst, *src;
++    uint16_t tmp;
++    for (int32_t y = 0; y < height; ++y) {
++        src = yPlane + y * stride[0];
++        dst = (uint8_t*)imgb->a[0] + y * stride[0];
++        for (int32_t x = 0; x < stride[0]; x += 2) {
++            tmp = (src[x + 1] << 2) | (src[x] >> 6);
++            dst[x] = tmp & 0xFF;
++            dst[x + 1] = tmp >> 8;
++        }
++    }
++
++    uint8_t *dst_u, *dst_v;
++    for (int32_t y = 0; y < height / 2; ++y) {
++        src = uvPlane + y * stride[1] * 2;
++        dst_u = (uint8_t*)imgb->a[1] + (y * 2) * stride[1];
++        dst_v = (uint8_t*)imgb->a[2] + (y * 2) * stride[2];
++        for (int32_t x = 0; x < stride[1] * 2; x += 4) {
++            tmp = (src[x + 1] << 2) | (src[x] >> 6);  // cb
++            dst_u[x / 2] = tmp & 0xFF;
++            dst_u[x / 2 + 1] = tmp >> 8;
++            dst_u[x / 2 + stride[1]] = dst_u[x / 2];
++            dst_u[x / 2 + stride[1] + 1] = dst_u[x / 2 + 1];
++
++            tmp = (src[x + 3] << 2) | (src[x + 2] >> 6);  // cr
++            dst_v[x / 2] = tmp & 0xFF;
++            dst_v[x / 2 + 1] = tmp >> 8;
++            dst_v[x / 2 + stride[2]] = dst_v[x / 2];
++            dst_v[x / 2 + stride[2] + 1] = dst_v[x / 2 + 1];
++        }
++    }
++}
++
++void C2SoftApvEnc::finishWork(uint64_t workIndex, const std::unique_ptr<C2Work>& work,
++                              const std::shared_ptr<C2BlockPool>& pool, oapv_bitb_t* bitb,
++                              oapve_stat_t* stat) {
++    std::shared_ptr<C2LinearBlock> block;
++    C2MemoryUsage usage = {C2MemoryUsage::CPU_READ, C2MemoryUsage::CPU_WRITE};
++    c2_status_t status = pool->fetchLinearBlock(stat->write, usage, &block);
++    if (C2_OK != status) {
++        ALOGE("fetchLinearBlock for Output failed with status 0x%x", status);
++        mSignalledError = true;
++        work->result = status;
++        work->workletsProcessed = 1u;
++        return;
++    }
++
++    C2WriteView wView = block->map().get();
++    if (C2_OK != wView.error()) {
++        ALOGE("write view map failed with status 0x%x", wView.error());
++        mSignalledError = true;
++        work->result = wView.error();
++        work->workletsProcessed = 1u;
++        return;
++    }
++    if ((!mReceivedFirstFrame)) {
++        createCsdData(work, bitb, stat->write);
++        mReceivedFirstFrame = true;
++    }
++
++    memcpy(wView.data(), bitb->addr, stat->write);
++    std::shared_ptr<C2Buffer> buffer = createLinearBuffer(block, 0, stat->write);
++
++    /* All frames are SYNC FRAME */
++    buffer->setInfo(std::make_shared<C2StreamPictureTypeMaskInfo::output>(0u /* stream id */,
++                                                                          C2Config::SYNC_FRAME));
++
++    auto fillWork = [buffer](const std::unique_ptr<C2Work>& work) {
++        work->worklets.front()->output.flags = (C2FrameData::flags_t)0;
++        work->worklets.front()->output.buffers.clear();
++        work->worklets.front()->output.buffers.push_back(buffer);
++        work->worklets.front()->output.ordinal = work->input.ordinal;
++        work->workletsProcessed = 1u;
++    };
++    if (work && c2_cntr64_t(workIndex) == work->input.ordinal.frameIndex) {
++        fillWork(work);
++        if (mSignalledEos) {
++            work->worklets.front()->output.flags = C2FrameData::FLAG_END_OF_STREAM;
++        }
++    } else {
++        finish(workIndex, fillWork);
++    }
++}
++void C2SoftApvEnc::createCsdData(const std::unique_ptr<C2Work>& work, oapv_bitb_t* bitb,
++                                 uint32_t encodedSize) {
++    uint32_t csdStart = 0, csdEnd = 0;
++    uint32_t bitOffset = 0;
++    uint8_t* buf = (uint8_t*)bitb->addr + csdStart;
++
++    if (encodedSize == 0) {
++        ALOGE("the first frame size is zero, so no csd data will be created.");
++        return;
++    }
++    ABitReader reader(buf, encodedSize);
++
++    /* pbu_header() */
++    reader.skipBits(32);
++    bitOffset += 32;  // pbu_size
++    reader.skipBits(32);
++    bitOffset += 32;  // currReadSize
++    csdStart = bitOffset / 8;
++
++    int32_t pbu_type = reader.getBits(8);
++    bitOffset += 8;  // pbu_type
++    reader.skipBits(16);
++    bitOffset += 16;  // group_id
++    reader.skipBits(8);
++    bitOffset += 8;  // reserved_zero_8bits
++
++    /* frame info() */
++    int32_t profile_idc = reader.getBits(8);
++    bitOffset += 8;  // profile_idc
++    int32_t level_idc = reader.getBits(8);
++    bitOffset += 8;  // level_idc
++    int32_t band_idc = reader.getBits(3);
++    bitOffset += 3;  // band_idc
++    reader.skipBits(5);
++    bitOffset += 5;  // reserved_zero_5bits
++    int32_t width = reader.getBits(32);
++    bitOffset += 32;  // width
++    int32_t height = reader.getBits(32);
++    bitOffset += 32;  // height
++    int32_t chroma_idc = reader.getBits(4);
++    bitOffset += 4;  // chroma_format_idc
++    reader.skipBits(4);
++    bitOffset += 4;  // bit_depth
++    reader.skipBits(8);
++    bitOffset += 8;  // capture_time_distance
++    reader.skipBits(8);
++    bitOffset += 8;  // reserved_zero_8bits
++
++    /* frame header() */
++    reader.skipBits(8);
++    bitOffset += 8;  // reserved_zero_8bit
++    bool color_description_present_flag = reader.getBits(1);
++    bitOffset += 1;  // color_description_present_flag
++    if (color_description_present_flag) {
++        reader.skipBits(8);
++        bitOffset += 8;  // color_primaries
++        reader.skipBits(8);
++        bitOffset += 8;  // transfer_characteristics
++        reader.skipBits(8);
++        bitOffset += 8;  // matrix_coefficients
++    }
++    bool use_q_matrix = reader.getBits(1);
++    bitOffset += 1;  // use_q_matrix
++    if (use_q_matrix) {
++        /* quantization_matrix() */
++        int32_t numComp = chroma_idc == 0   ? 1
++                          : chroma_idc == 2 ? 3
++                          : chroma_idc == 3 ? 3
++                          : chroma_idc == 4 ? 4
++                                            : -1;
++        int32_t needBitsForQ = 64 * 8 * numComp;
++        reader.skipBits(needBitsForQ);
++        bitOffset += needBitsForQ;
++    }
++
++    /* tile_info() */
++    int32_t tile_width_in_mbs_minus1 = reader.getBits(28);
++    bitOffset += 28;
++    int32_t tile_height_in_mbs_minus1 = reader.getBits(28);
++    bitOffset += 28;
++    bool tile_size_present_in_fh_flag = reader.getBits(1);
++    bitOffset += 1;
++    if (tile_size_present_in_fh_flag) {
++        int32_t numTiles = ceil((double)width / (double)tile_width_in_mbs_minus1) *
++                           ceil((double)height / (double)tile_height_in_mbs_minus1);
++        reader.skipBits(32 * numTiles);
++        bitOffset += (32 * numTiles);
++    }
++
++    reader.skipBits(8);
++    bitOffset += 8;  // reserved_zero_8bits
++
++    /* byte_alignmenet() */
++    while (bitOffset % 8) {
++        reader.skipBits(1);
++        bitOffset += 1;
++    }
++    csdEnd = bitOffset / 8;
++    int32_t csdSize = csdEnd - csdStart + 1;
++
++    std::unique_ptr<C2StreamInitDataInfo::output> csd =
++            C2StreamInitDataInfo::output::AllocUnique(csdSize, 0u);
++    if (!csd) {
++        ALOGE("CSD allocation failed");
++        mSignalledError = true;
++        work->result = C2_NO_MEMORY;
++        work->workletsProcessed = 1u;
++        return;
++    }
++
++    buf = buf + csdStart;
++    memcpy(csd->m.value, buf, csdSize);
++    work->worklets.front()->output.configUpdate.push_back(std::move(csd));
++}
++c2_status_t C2SoftApvEnc::drainInternal(uint32_t drainMode,
++                                        const std::shared_ptr<C2BlockPool>& pool,
++                                        const std::unique_ptr<C2Work>& work) {
++    fillEmptyWork(work);
++    return C2_OK;
++}
++
++void C2SoftApvEnc::process(const std::unique_ptr<C2Work>& work,
++                           const std::shared_ptr<C2BlockPool>& pool) {
++    c2_status_t error;
++    work->result = C2_OK;
++    work->workletsProcessed = 0u;
++    work->worklets.front()->output.flags = work->input.flags;
++
++    nsecs_t timeDelay = 0;
++    uint64_t workIndex = work->input.ordinal.frameIndex.peekull();
++
++    mSignalledEos = false;
++    mOutBlock = nullptr;
++
++    if (work->input.flags & C2FrameData::FLAG_END_OF_STREAM) {
++        ALOGV("Got FLAG_END_OF_STREAM");
++        mSignalledEos = true;
++    }
++
++    /* Initialize encoder if not already initialized */
++    if (initEncoder() != C2_OK) {
++        ALOGE("Failed to initialize encoder");
++        mSignalledError = true;
++        work->result = C2_CORRUPTED;
++        work->workletsProcessed = 1u;
++        ALOGE("[%s] Failed to make Codec context", __func__);
++        return;
++    }
++    if (mSignalledError) {
++        ALOGE("[%s] Received signalled error", __func__);
++        return;
++    }
++
++    if (mSignalledEos) {
++        drainInternal(DRAIN_COMPONENT_WITH_EOS, pool, work);
++        return;
++    }
++
++    if (work->input.buffers.empty()) {
++        return;
++    }
++
++    std::shared_ptr<C2GraphicView> view;
++    std::shared_ptr<C2Buffer> inputBuffer = nullptr;
++    if (!work->input.buffers.empty()) {
++        inputBuffer = work->input.buffers[0];
++        view = std::make_shared<C2GraphicView>(
++                inputBuffer->data().graphicBlocks().front().map().get());
++        if (view->error() != C2_OK) {
++            ALOGE("graphic view map err = %d", view->error());
++            work->workletsProcessed = 1u;
++            return;
++        }
++    }
++    if (!inputBuffer) {
++        fillEmptyWork(work);
++        return;
++    }
++
++    oapve_stat_t stat;
++    auto outBufferSize =
++            mCodecDesc->param[mReceivedFrames].w * mCodecDesc->param[mReceivedFrames].h * 4;
++    if (!mOutBlock) {
++        C2MemoryUsage usage = {C2MemoryUsage::CPU_READ, C2MemoryUsage::CPU_WRITE};
++        c2_status_t err = pool->fetchLinearBlock(outBufferSize, usage, &mOutBlock);
++        if (err != C2_OK) {
++            work->result = err;
++            work->workletsProcessed = 1u;
++            ALOGE("fetchLinearBlock has failed. err = %d", err);
++            return;
++        }
++    }
++
++    C2WriteView wView = mOutBlock->map().get();
++    if (wView.error() != C2_OK) {
++        work->result = wView.error();
++        work->workletsProcessed = 1u;
++        return;
++    }
++
++    error = setEncodeArgs(&mInputFrames, view.get(), workIndex);
++    if (error != C2_OK) {
++        mSignalledError = true;
++        work->result = error;
++        work->workletsProcessed = 1u;
++        return;
++    }
++
++    if (++mReceivedFrames < mMaxFrames) {
++        return;
++    }
++    mReceivedFrames = 0;
++
++    std::shared_ptr<oapv_bitb_t> bits = std::make_shared<oapv_bitb_t>();
++    std::memset(mBitstreamBuf, 0, kMaxBitstreamBufSize);
++    bits->addr = mBitstreamBuf;
++    bits->bsize = kMaxBitstreamBufSize;
++    bits->err = C2_OK;
++
++    if (mInputFrames.frm[0].imgb) {
++        int32_t status =
++                oapve_encode(mEncoderId, &mInputFrames, mMetaId, bits.get(), &stat, &mReconFrames);
++        if (status != C2_OK) {
++            mSignalledError = true;
++            work->result = C2_CORRUPTED;
++            work->workletsProcessed = 1u;
++            return;
++        }
++    } else if (!mSignalledEos) {
++        fillEmptyWork(work);
++    }
++    finishWork(workIndex, work, pool, bits.get(), &stat);
++}
++
++class C2SoftApvEncFactory : public C2ComponentFactory {
++  public:
++    C2SoftApvEncFactory()
++        : mHelper(std::static_pointer_cast<C2ReflectorHelper>(
++                  GetCodec2PlatformComponentStore()->getParamReflector())) {}
++
++    virtual c2_status_t createComponent(c2_node_id_t id,
++                                        std::shared_ptr<C2Component>* const component,
++                                        std::function<void(C2Component*)> deleter) override {
++        *component = std::shared_ptr<C2Component>(
++                new C2SoftApvEnc(COMPONENT_NAME, id,
++                                 std::make_shared<C2SoftApvEnc::IntfImpl>(mHelper)),
++                deleter);
++        return C2_OK;
++    }
++
++    c2_status_t createInterface(c2_node_id_t id,
++                                std::shared_ptr<C2ComponentInterface>* const interface,
++                                std::function<void(C2ComponentInterface*)> deleter) override {
++        *interface = std::shared_ptr<C2ComponentInterface>(
++                new SimpleInterface<C2SoftApvEnc::IntfImpl>(
++                        COMPONENT_NAME, id, std::make_shared<C2SoftApvEnc::IntfImpl>(mHelper)),
++                deleter);
++        return C2_OK;
++    }
++
++    ~C2SoftApvEncFactory() override = default;
++
++  private:
++    std::shared_ptr<C2ReflectorHelper> mHelper;
++};
++
++}  // namespace android
++
++__attribute__((cfi_canonical_jump_table)) extern "C" ::C2ComponentFactory* CreateCodec2Factory() {
++    return new ::android::C2SoftApvEncFactory();
++}
++
++__attribute__((cfi_canonical_jump_table)) extern "C" void DestroyCodec2Factory(
++        ::C2ComponentFactory* factory) {
++    delete factory;
++}
+diff --git a/media/codec2/components/apv/C2SoftApvEnc.h b/media/codec2/components/apv/C2SoftApvEnc.h
+new file mode 100644
+index 0000000000..445b042b20
+--- /dev/null
++++ b/media/codec2/components/apv/C2SoftApvEnc.h
+@@ -0,0 +1,115 @@
++/*
++ * Copyright 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#ifndef ANDROID_C2_SOFT_APV_ENC_H_
++#define ANDROID_C2_SOFT_APV_ENC_H_
++
++#include <SimpleC2Component.h>
++#include <utils/Vector.h>
++#include <map>
++#include "oapv.h"
++
++#include <C2SoftApvCommon.h>
++
++namespace android {
++
++#define CODEC_MAX_CORES 4
++
++#define APV_QP_MIN 1
++#define APV_QP_MAX 51
++
++struct C2SoftApvEnc : public SimpleC2Component {
++    class IntfImpl;
++
++    C2SoftApvEnc(const char* name, c2_node_id_t id, const std::shared_ptr<IntfImpl>& intfImpl);
++    ~C2SoftApvEnc();
++
++    // From SimpleC2Component
++    c2_status_t onInit() override;
++    c2_status_t onStop() override;
++    void onReset() override;
++    void onRelease() override;
++    c2_status_t onFlush_sm() override;
++    void process(const std::unique_ptr<C2Work>& work,
++                 const std::shared_ptr<C2BlockPool>& pool) override;
++    c2_status_t drain(uint32_t drainMode, const std::shared_ptr<C2BlockPool>& pool) override;
++
++  private:
++    c2_status_t reset();
++    c2_status_t initEncoder();
++    c2_status_t releaseEncoder();
++    c2_status_t setEncodeArgs(oapv_frms_t* imgb_inp, const C2GraphicView* const input,
++                              uint64_t workIndex);
++    void finishWork(uint64_t workIndex, const std::unique_ptr<C2Work>& work,
++                    const std::shared_ptr<C2BlockPool>& pool, oapv_bitb_t* bitb,
++                    oapve_stat_t* stat);
++    c2_status_t drainInternal(uint32_t drainMode, const std::shared_ptr<C2BlockPool>& pool,
++                              const std::unique_ptr<C2Work>& work);
++    void setParams(oapve_param_t& param);
++    int32_t getQpFromQuality(int quality);
++    C2Config::level_t decisionApvLevel(int32_t width, int32_t height, int32_t fps, int32_t bitrate,
++                                       int32_t band);
++
++    void showEncoderParams(oapve_cdesc_t* cdsc);
++
++    void ColorConvertNv12ToP210(const C2GraphicView* const input, oapv_imgb_t* imgb);
++    void ColorConvertP010ToYUV422P10le(const C2GraphicView* const input, oapv_imgb_t* imgb);
++    void ColorConvertP010ToP210(const C2GraphicView* const input, oapv_imgb_t* imgb);
++
++    void createCsdData(const std::unique_ptr<C2Work>& work, oapv_bitb_t* bitb,
++                       uint32_t encodedSize);
++
++    std::shared_ptr<IntfImpl> mIntf;
++    int32_t mBitDepth;
++    int32_t mColorFormat;
++
++    bool mStarted;
++    bool mSignalledEos;
++    bool mSignalledError;
++
++    std::shared_ptr<C2StreamBitrateInfo::output> mBitrate;
++    std::shared_ptr<C2StreamPictureSizeInfo::input> mSize;
++    std::shared_ptr<C2StreamFrameRateInfo::output> mFrameRate;
++    std::shared_ptr<C2StreamProfileLevelInfo::output> mProfileLevel;
++    std::shared_ptr<C2StreamColorAspectsInfo::input> mColorAspects;
++    std::shared_ptr<C2StreamColorAspectsInfo::output> mCodedColorAspects;
++    std::shared_ptr<C2StreamPictureQuantizationTuning::output> mPictureQuantization;
++    std::shared_ptr<C2StreamQualityTuning::output> mQuality;
++    std::shared_ptr<C2StreamBitrateModeTuning::output> mBitrateMode;
++    std::shared_ptr<C2LinearBlock> mOutBlock;
++    std::shared_ptr<C2StreamComplexityTuning::output> mComplexity;
++    std::shared_ptr<C2StreamPixelFormatInfo::input> mPixelFormat;
++
++    std::map<const void*, std::shared_ptr<C2Buffer>> mBuffers;
++    MemoryBlockPool mConversionBuffers;
++    std::map<const void*, MemoryBlock> mConversionBuffersInUse;
++
++    bool mInitEncoder;
++    int32_t mMaxFrames;
++    int32_t mReceivedFrames;
++    std::unique_ptr<oapve_cdesc_t> mCodecDesc;
++    oapv_frms_t mInputFrames;
++    oapv_frms_t mReconFrames;
++    oapve_t mEncoderId;
++    oapvm_t mMetaId;
++    uint8_t* mBitstreamBuf = nullptr;
++    std::vector<uint16_t> mSdrToHdrMapping;
++    bool mReceivedFirstFrame = false;
++    C2_DO_NOT_COPY(C2SoftApvEnc);
++};
++}  // namespace android
++
++#endif  // ANDROID_C2_SOFT_APV_ENC_H_
+diff --git a/media/codec2/vndk/C2Store.cpp b/media/codec2/vndk/C2Store.cpp
+index 0987da2845..6ec9d6b873 100644
+--- a/media/codec2/vndk/C2Store.cpp
++++ b/media/codec2/vndk/C2Store.cpp
+@@ -1206,7 +1206,8 @@ C2PlatformComponentStore::C2PlatformComponentStore()
+     emplace("libcodec2_soft_vp8enc.so");
+     emplace("libcodec2_soft_vp9dec.so");
+     emplace("libcodec2_soft_vp9enc.so");
+-
++    emplace("libcodec2_soft_apvenc.so");
++    emplace("libcodec2_soft_apvdec.so");
+ }
+ 
+ // For testing only
+diff --git a/media/libstagefright/data/media_codecs_google_c2_video.xml b/media/libstagefright/data/media_codecs_google_c2_video.xml
+index 137b28228d..fc0a5e9081 100644
+--- a/media/libstagefright/data/media_codecs_google_c2_video.xml
++++ b/media/libstagefright/data/media_codecs_google_c2_video.xml
+@@ -95,6 +95,14 @@
+             <Feature name="adaptive-playback" />
+             <Attribute name="software-codec" />
+         </MediaCodec>
++        <MediaCodec name="c2.android.apv.decoder" type="video/apv">
++            <Limit name="size" min="16x16" max="1920x1920"/>
++            <Limit name="alignment" value="2x2"/>
++            <Limit name="bitrate" range="1-240000000"/>
++            <Limit name="block-size" value="16x16" />
++            <Limit name="block-count" range="1-32768" /> <!-- max 4096x2048 equivalent -->
++            <Attribute name="software-codec"/>
++         </MediaCodec>
+     </Decoders>
+ 
+     <Encoders>
+@@ -160,5 +168,13 @@
+             <Limit name="bitrate" range="1-40000000" />
+             <Feature name="bitrate-modes" value="VBR,CBR" />
+         </MediaCodec>
++        <MediaCodec name="c2.android.apv.encoder" type="video/apv">
++            <Limit name="size" min="2x2" max="1920x1920" />
++            <Limit name="alignment" value="2x2" />
++            <Limit name="block-size" value="16x16" />
++            <Limit name="block-count" range="1-32768" /> <!-- max 4096x2048 equivalent -->
++            <Limit name="bitrate" range="1-240000000" />
++            <Feature name="bitrate-modes" value="VBR,CBR" />
++        </MediaCodec>
+     </Encoders>
+ </Included>
+diff --git a/media/libstagefright/data/media_codecs_sw.xml b/media/libstagefright/data/media_codecs_sw.xml
+index c18ab94e21..61b7198a2a 100644
+--- a/media/libstagefright/data/media_codecs_sw.xml
++++ b/media/libstagefright/data/media_codecs_sw.xml
+@@ -255,6 +255,14 @@
+             <Feature name="adaptive-playback" />
+             <Attribute name="software-codec" />
+         </MediaCodec>
++        <MediaCodec name="c2.android.apv.decoder" type="video/apv">
++            <Limit name="size" min="16x16" max="1920x1920"/>
++            <Limit name="alignment" value="2x2"/>
++            <Limit name="bitrate" range="1-240000000"/>
++            <Limit name="block-size" value="16x16" />
++            <Limit name="block-count" range="1-32768" /> <!-- max 4096x2048 equivalent -->
++            <Attribute name="software-codec"/>
++        </MediaCodec>
+     </Decoders>
+     <Encoders>
+         <MediaCodec name="c2.android.aac.encoder" type="audio/mp4a-latm">
+@@ -409,5 +417,14 @@
+             <Feature name="qp-bounds" />
+             <Attribute name="software-codec" />
+         </MediaCodec>
++        <MediaCodec name="c2.android.apv.encoder" type="video/apv" variant="!slow-cpu">
++            <Limit name="size" min="2x2" max="1920x1920" />
++            <Limit name="alignment" value="2x2" />
++            <Limit name="block-size" value="16x16" />
++            <Limit name="block-count" range="1-32768" /> <!-- max 4096x2048 equivalent -->
++            <Limit name="bitrate" range="1-240000000" />
++            <Feature name="bitrate-modes" value="VBR,CBR" />
++            <Attribute name="software-codec" />
++        </MediaCodec>
+     </Encoders>
+ </MediaCodecs>
+diff --git a/media/module/codecserviceregistrant/Android.bp b/media/module/codecserviceregistrant/Android.bp
+index 56cd8b8e5e..1d1dd714a7 100644
+--- a/media/module/codecserviceregistrant/Android.bp
++++ b/media/module/codecserviceregistrant/Android.bp
+@@ -43,6 +43,8 @@ cc_defaults {
+         "libcodec2_soft_flacdec",
+         "libcodec2_soft_flacenc",
+         "libcodec2_soft_gsmdec",
++        "libcodec2_soft_apvenc",
++        "libcodec2_soft_apvdec",
+     ],
+ }
+ 
+-- 
+2.43.0
+

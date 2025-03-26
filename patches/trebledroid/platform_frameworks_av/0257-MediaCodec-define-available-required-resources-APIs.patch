@@ -1,0 +1,227 @@
+From 2408881df9eb6b3646efccb23112f36424c8751a Mon Sep 17 00:00:00 2001
+From: Girish <girishshetty@google.com>
+Date: Mon, 4 Nov 2024 23:01:02 +0000
+Subject: [PATCH 257/436] MediaCodec: define available/required resources APIs
+
+This CL defines:
+- APIs for querying available and required resources
+- Callback to notify change in codec resource requirements
+
+The implementation is not complete as the integration
+with component store and interface happens in follow up
+changes.
+
+Bug: 363282971
+Test: none
+Flag: android.media.codec.codec_availability
+Change-Id: Id4afb251e5014f488137db7ae186175744c9837b
+---
+ media/libstagefright/MediaCodec.cpp           | 50 +++++++++++
+ .../include/media/stagefright/MediaCodec.h    | 88 +++++++++++++++++++
+ 2 files changed, 138 insertions(+)
+
+diff --git a/media/libstagefright/MediaCodec.cpp b/media/libstagefright/MediaCodec.cpp
+index 8d91091ab6..8cb1674cc8 100644
+--- a/media/libstagefright/MediaCodec.cpp
++++ b/media/libstagefright/MediaCodec.cpp
+@@ -1189,6 +1189,19 @@ sp<PersistentSurface> MediaCodec::CreatePersistentInputSurface() {
+     return new PersistentSurface(bufferProducer, bufferSource);
+ }
+ 
++//static
++status_t MediaCodec::getGloballyAvailableResources(std::vector<GlobalResourceInfo>& resources) {
++    resources.clear();
++    // Make sure codec availability feature is on.
++    if (!android::media::codec::codec_availability()) {
++        return ERROR_UNSUPPORTED;
++    }
++    // TODO: For now this is just an empty function.
++    // The actual implementation should use component store to query the
++    // available resources from hal, and fill in resources with the same.
++    return ERROR_UNSUPPORTED;
++}
++
+ // GenerateCodecId generates a 64bit Random ID for each codec that is created.
+ // The Codec ID is generated as:
+ //   - A process-unique random high 32bits
+@@ -2553,6 +2566,31 @@ status_t MediaCodec::configure(
+     return err;
+ }
+ 
++status_t MediaCodec::getRequiredResources(std::vector<InstanceResourceInfo>& resources) {
++    resources.clear();
++    // Make sure codec availability feature is on.
++    if (!android::media::codec::codec_availability()) {
++        return ERROR_UNSUPPORTED;
++    }
++    // Make sure that the codec was configured already.
++    if (mState != CONFIGURED && mState != STARTING && mState != STARTED &&
++        mState != FLUSHING && mState != FLUSHED) {
++        ALOGE("Codec wasn't configured yet!");
++        return INVALID_OPERATION;
++    }
++
++    if (!mRequiredResourceInfo.empty()) {
++        resources = mRequiredResourceInfo;
++        return OK;
++    }
++
++    // TODO: For now this is just an empty function.
++    // The actual implementation should use component interface
++    // (for example, through mCodec->getRequiredDeviceResources) to query the
++    // the required resources for this configuration, and fill in resources with the same.
++    return ERROR_UNSUPPORTED;
++}
++
+ // Media Format Shaping support
+ //
+ 
+@@ -7041,6 +7079,18 @@ void MediaCodec::onOutputFormatChanged() {
+     }
+ }
+ 
++void MediaCodec::onRequiredResourcesChanged(
++        const std::vector<InstanceResourceInfo>& resourceInfo) {
++    mRequiredResourceInfo = resourceInfo;
++    // Make sure codec availability feature is on.
++    if (mCallback != nullptr && android::media::codec::codec_availability()) {
++        // Post the callback
++        sp<AMessage> msg = mCallback->dup();
++        msg->setInt32("callbackID", CB_REQUIRED_RESOURCES_CHANGED);
++        msg->post();
++    }
++}
++
+ void MediaCodec::postActivityNotificationIfPossible() {
+     if (mActivityNotify == NULL) {
+         return;
+diff --git a/media/libstagefright/include/media/stagefright/MediaCodec.h b/media/libstagefright/include/media/stagefright/MediaCodec.h
+index ca2fa3de7a..df1ebd79a2 100644
+--- a/media/libstagefright/include/media/stagefright/MediaCodec.h
++++ b/media/libstagefright/include/media/stagefright/MediaCodec.h
+@@ -130,6 +130,11 @@ struct MediaCodec : public AHandler {
+          * Object at the "metrics" key.
+          */
+         CB_METRICS_FLUSHED = 8,
++
++        /** Callback ID to notify the change in resource requirement
++         * for the codec component.
++         */
++        CB_REQUIRED_RESOURCES_CHANGED = 9,
+     };
+ 
+     static const pid_t kNoPid = -1;
+@@ -149,6 +154,73 @@ struct MediaCodec : public AHandler {
+ 
+     static sp<PersistentSurface> CreatePersistentInputSurface();
+ 
++    /**
++     * Abstraction for the Global Codec resources.
++     * This encapsulates all the available codec resources on the device.
++     */
++    struct GlobalResourceInfo {
++        /**
++         * Name of the Resource type.
++         */
++        std::string mName;
++        /**
++         * Total count/capacity of resources of this type.
++         */
++        int mCapacity;
++        /**
++         * Available count of this resource type.
++         */
++        int mAvailable;
++
++        GlobalResourceInfo(const std::string& name, int capacity, int available) :
++                mName(name),
++                mCapacity(capacity),
++                mAvailable(available) {}
++
++        GlobalResourceInfo(const GlobalResourceInfo& info) :
++                mName(info.mName),
++                mCapacity(info.mCapacity),
++                mAvailable(info.mAvailable) {}
++    };
++
++    /**
++     * Abstraction for the resources associated with a codec instance.
++     * This encapsulates the required codec resources for a configured codec instance.
++     */
++    struct InstanceResourceInfo {
++        /**
++         * Name of the Resource type.
++         */
++        std::string mName;
++        /**
++         * Required resource count of this type.
++         */
++        int mStaticCount;
++        /**
++         * Per frame resource requirement of this resource type.
++         */
++        int mPerFrameCount;
++
++        InstanceResourceInfo(const std::string& name, int staticCount, int perFrameCount) :
++                mName(name),
++                mStaticCount(staticCount),
++                mPerFrameCount(perFrameCount) {}
++
++        InstanceResourceInfo(const InstanceResourceInfo& info) :
++                mName(info.mName),
++                mStaticCount(info.mStaticCount),
++                mPerFrameCount(info.mPerFrameCount) {}
++    };
++
++    /**
++     * Get a list of Globally available device codec resources.
++     *
++     * It will return INVALID_OPERATION if:
++     *  - HAL does not implement codec availability API
++     *  - codec_availability feature flag isn't defined.
++     */
++    static status_t getGloballyAvailableResources(std::vector<GlobalResourceInfo>& resources);
++
+     status_t configure(
+             const sp<AMessage> &format,
+             const sp<Surface> &nativeWindow,
+@@ -162,6 +234,19 @@ struct MediaCodec : public AHandler {
+             const sp<IDescrambler> &descrambler,
+             uint32_t flags);
+ 
++    /**
++     * Get a list of required codec resources.
++     *
++     * This may only be called after configuring the codec.
++     *
++     * Calling this while the codec wasn't configured, will result in
++     * returning INVALID_OPERATION error code.
++     * It will also return INVALID_OPERATION if:
++     *  - HAL does not implement codec availability API
++     *  - codec_availability feature flag isn't defined.
++     */
++    status_t getRequiredResources(std::vector<InstanceResourceInfo>& resources);
++
+     status_t releaseCrypto();
+ 
+     status_t setCallback(const sp<AMessage> &callback);
+@@ -688,6 +773,7 @@ private:
+     void onCryptoError(const sp<AMessage> &msg);
+     void onError(status_t err, int32_t actionCode, const char *detail = NULL);
+     void onOutputFormatChanged();
++    void onRequiredResourcesChanged(const std::vector<InstanceResourceInfo>& resourceInfo);
+ 
+     status_t onSetParameters(const sp<AMessage> &params);
+ 
+@@ -787,6 +873,8 @@ private:
+     friend class MediaTestHelper;
+ 
+     CodecErrorLog mErrorLog;
++    // Required resource info for this codec.
++    std::vector<InstanceResourceInfo> mRequiredResourceInfo;
+ 
+     DISALLOW_EVIL_CONSTRUCTORS(MediaCodec);
+ };
+-- 
+2.43.0
+

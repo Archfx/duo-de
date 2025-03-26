@@ -1,0 +1,560 @@
+From a034e2437f114c9c27a4ffb552779cca17243d75 Mon Sep 17 00:00:00 2001
+From: Songyue Han <songyueh@google.com>
+Date: Thu, 25 Apr 2024 23:31:56 +0000
+Subject: [PATCH 288/436] CodecCapabilities: Port EncoderCapabilities from Java
+ to Native.
+
+Test: atest EncoderCapsAacTest EncdoerCapsFlacTest EncoderCapsHevcTest
+Bug: b/306023029
+Change-Id: I9a29bb08b02a50d0456371c3265caf30f9ffe2ac
+---
+ media/libmedia/Android.bp                     |   1 +
+ media/libmedia/EncoderCapabilities.cpp        | 205 ++++++++++++++++++
+ .../include/media/CodecCapabilities.h         |   4 +-
+ .../include/media/CodecCapabilitiesUtils.h    |  15 ++
+ .../include/media/EncoderCapabilities.h       | 105 +++++++++
+ .../CodecCapabilitiesTest.cpp                 | 144 ++++++++++++
+ 6 files changed, 473 insertions(+), 1 deletion(-)
+ create mode 100644 media/libmedia/EncoderCapabilities.cpp
+ create mode 100644 media/libmedia/include/media/EncoderCapabilities.h
+
+diff --git a/media/libmedia/Android.bp b/media/libmedia/Android.bp
+index ac9bf91340..ee6ad00ded 100644
+--- a/media/libmedia/Android.bp
++++ b/media/libmedia/Android.bp
+@@ -260,6 +260,7 @@ cc_library_shared {
+     srcs: [
+         "AudioCapabilities.cpp",
+         "CodecCapabilities.cpp",
++        "EncoderCapabilities.cpp",
+         "VideoCapabilities.cpp",
+         "CodecCapabilitiesUtils.cpp",
+     ],
+diff --git a/media/libmedia/EncoderCapabilities.cpp b/media/libmedia/EncoderCapabilities.cpp
+new file mode 100644
+index 0000000000..a840220812
+--- /dev/null
++++ b/media/libmedia/EncoderCapabilities.cpp
+@@ -0,0 +1,205 @@
++/*
++ * Copyright 2024, The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++//#define LOG_NDEBUG 0
++#define LOG_TAG "EncoderCapabilities"
++
++#include <android-base/strings.h>
++
++#include <media/CodecCapabilities.h>
++#include <media/EncoderCapabilities.h>
++#include <media/stagefright/MediaCodecConstants.h>
++
++namespace android {
++
++const Range<int>& EncoderCapabilities::getQualityRange() {
++    return mQualityRange;
++}
++
++const Range<int>& EncoderCapabilities::getComplexityRange() {
++    return mComplexityRange;
++}
++
++// static
++int EncoderCapabilities::ParseBitrateMode(std::string mode) {
++    for (Feature feat: sBitrateModes) {
++        if (base::EqualsIgnoreCase(feat.mName, mode)) {
++            return feat.mValue;
++        }
++    }
++    return 0;
++}
++
++bool EncoderCapabilities::isBitrateModeSupported(int mode) {
++    for (Feature feat : sBitrateModes) {
++        if (mode == feat.mValue) {
++            return (mBitControl & (1 << mode)) != 0;
++        }
++    }
++    return false;
++}
++
++// static
++std::shared_ptr<EncoderCapabilities> EncoderCapabilities::Create(std::string mediaType,
++        std::vector<ProfileLevel> profLevs, const sp<AMessage> &format) {
++    std::shared_ptr<EncoderCapabilities> caps(new EncoderCapabilities());
++    caps->init(mediaType, profLevs, format);
++    return caps;
++}
++
++void EncoderCapabilities::init(std::string mediaType, std::vector<ProfileLevel> profLevs,
++        const sp<AMessage> &format) {
++    // no support for complexity or quality yet
++    mMediaType = mediaType;
++    mProfileLevels = profLevs;
++    mComplexityRange = Range(0, 0);
++    mQualityRange = Range(0, 0);
++    mBitControl = (1 << BITRATE_MODE_VBR);
++
++    applyLevelLimits();
++    parseFromInfo(format);
++}
++
++void EncoderCapabilities::applyLevelLimits() {
++    if (base::EqualsIgnoreCase(mMediaType, MIMETYPE_AUDIO_FLAC)) {
++        mComplexityRange = Range(0, 8);
++        mBitControl = (1 << BITRATE_MODE_CQ);
++    } else if (base::EqualsIgnoreCase(mMediaType, MIMETYPE_AUDIO_AMR_NB)
++            || base::EqualsIgnoreCase(mMediaType, MIMETYPE_AUDIO_AMR_WB)
++            || base::EqualsIgnoreCase(mMediaType, MIMETYPE_AUDIO_G711_ALAW)
++            || base::EqualsIgnoreCase(mMediaType, MIMETYPE_AUDIO_G711_MLAW)
++            || base::EqualsIgnoreCase(mMediaType, MIMETYPE_AUDIO_MSGSM)) {
++        mBitControl = (1 << BITRATE_MODE_CBR);
++    }
++}
++
++void EncoderCapabilities::parseFromInfo(const sp<AMessage> &format) {
++    AString complexityRangeAStr;
++    if (format->findString("complexity-range", &complexityRangeAStr)) {
++        std::optional<Range<int>> complexityRangeOpt
++                = Range<int32_t>::Parse(std::string(complexityRangeAStr.c_str()));
++        mComplexityRange = complexityRangeOpt.value_or(mComplexityRange);
++        // TODO should we limit this to level limits?
++    }
++    AString qualityRangeAStr;
++    if (format->findString("quality-range", &qualityRangeAStr)) {
++        std::optional<Range<int>> qualityRangeOpt
++                = Range<int32_t>::Parse(std::string(qualityRangeAStr.c_str()));
++        mQualityRange = qualityRangeOpt.value_or(mQualityRange);
++    }
++    AString bitrateModesAStr;
++    if (format->findString("feature-bitrate-modes", &bitrateModesAStr)) {
++        mBitControl = 0;
++        for (std::string mode: base::Split(std::string(bitrateModesAStr.c_str()), ",")) {
++            mBitControl |= (1 << ParseBitrateMode(mode));
++        }
++    }
++    format->findInt32("complexity-default", &mDefaultComplexity);
++    format->findInt32("quality-default", &mDefaultQuality);
++    AString qualityScaleAStr;
++    if (format->findString("quality-scale", &qualityScaleAStr)) {
++        mQualityScale = std::string(qualityScaleAStr.c_str());
++    }
++}
++
++bool EncoderCapabilities::supports(
++        std::optional<int> complexity, std::optional<int> quality, std::optional<int> profile) {
++    bool ok = true;
++    if (complexity) {
++        ok &= mComplexityRange.contains(complexity.value());
++    }
++    if (quality) {
++        ok &= mQualityRange.contains(quality.value());
++    }
++    if (profile) {
++        ok &= std::any_of(mProfileLevels.begin(), mProfileLevels.end(),
++                [&profile](ProfileLevel pl){ return pl.mProfile == profile.value(); });
++    }
++    return ok;
++}
++
++void EncoderCapabilities::getDefaultFormat(sp<AMessage> &format) {
++    // don't list trivial quality/complexity as default for now
++    if (mQualityRange.upper() != mQualityRange.lower()
++            && mDefaultQuality != 0) {
++        format->setInt32(KEY_QUALITY, mDefaultQuality);
++    }
++    if (mComplexityRange.upper() != mComplexityRange.lower()
++            && mDefaultComplexity != 0) {
++        format->setInt32(KEY_COMPLEXITY, mDefaultComplexity);
++    }
++    // bitrates are listed in order of preference
++    for (Feature feat : sBitrateModes) {
++        if ((mBitControl & (1 << feat.mValue)) != 0) {
++            format->setInt32(KEY_BITRATE_MODE, feat.mValue);
++            break;
++        }
++    }
++}
++
++bool EncoderCapabilities::supportsFormat(const sp<AMessage> &format) {
++    int32_t mode;
++    if (format->findInt32(KEY_BITRATE_MODE, &mode) && !isBitrateModeSupported(mode)) {
++        return false;
++    }
++
++    int tmp;
++    std::optional<int> complexity = std::nullopt;
++    if (format->findInt32(KEY_COMPLEXITY, &tmp)) {
++        complexity = tmp;
++    }
++
++    if (base::EqualsIgnoreCase(mMediaType, MIMETYPE_AUDIO_FLAC)) {
++        int flacComplexity;
++        if (format->findInt32(KEY_FLAC_COMPRESSION_LEVEL, &flacComplexity)) {
++            if (!complexity) {
++                complexity = flacComplexity;
++            } else if (flacComplexity != complexity.value()) {
++                ALOGE("Conflicting values for complexity and flac-compression-level,"
++                        " which are %d and %d", complexity.value(), flacComplexity);
++                return false;
++            }
++        }
++    }
++
++    // other audio parameters
++    std::optional<int> profile = std::nullopt;
++    if (format->findInt32(KEY_PROFILE, &tmp)) {
++        profile = tmp;
++    }
++
++    if (base::EqualsIgnoreCase(mMediaType, MIMETYPE_AUDIO_AAC)) {
++        int aacProfile;
++        if (format->findInt32(KEY_AAC_PROFILE, &aacProfile)) {
++            if (!profile) {
++                profile = aacProfile;
++            } else if (aacProfile != profile.value()) {
++                ALOGE("Conflicting values for profile and aac-profile, which are %d and %d",
++                        profile.value(), aacProfile);
++                return false;
++            }
++        }
++    }
++
++    std::optional<int> quality = std::nullopt;
++    if (format->findInt32(KEY_QUALITY, &tmp)) {
++        quality = tmp;
++    }
++
++    return supports(complexity, quality, profile);
++}
++
++}  // namespace android
+\ No newline at end of file
+diff --git a/media/libmedia/include/media/CodecCapabilities.h b/media/libmedia/include/media/CodecCapabilities.h
+index 700373a4eb..7c631d1a2b 100644
+--- a/media/libmedia/include/media/CodecCapabilities.h
++++ b/media/libmedia/include/media/CodecCapabilities.h
+@@ -19,8 +19,9 @@
+ #define CODEC_CAPABILITIES_H_
+ 
+ #include <media/AudioCapabilities.h>
+-#include <media/VideoCapabilities.h>
+ #include <media/CodecCapabilitiesUtils.h>
++#include <media/EncoderCapabilities.h>
++#include <media/VideoCapabilities.h>
+ #include <media/stagefright/foundation/ABase.h>
+ #include <media/stagefright/foundation/AMessage.h>
+ #include <media/stagefright/foundation/AString.h>
+@@ -54,6 +55,7 @@ private:
+ 
+     std::shared_ptr<AudioCapabilities> mAudioCaps;
+     std::shared_ptr<VideoCapabilities> mVideoCaps;
++    std::shared_ptr<EncoderCapabilities> mEncoderCaps;
+ };
+ 
+ }  // namespace android
+diff --git a/media/libmedia/include/media/CodecCapabilitiesUtils.h b/media/libmedia/include/media/CodecCapabilitiesUtils.h
+index 7ca536ac98..eb62bf916f 100644
+--- a/media/libmedia/include/media/CodecCapabilitiesUtils.h
++++ b/media/libmedia/include/media/CodecCapabilitiesUtils.h
+@@ -42,6 +42,21 @@ struct ProfileLevel {
+     }
+ };
+ 
++struct Feature {
++    std::string mName;
++    int mValue;
++    bool mDefault;
++    bool mInternal;
++    Feature(std::string name, int value, bool def, bool internal) {
++        mName = name;
++        mValue = value;
++        mDefault = def;
++        mInternal = internal;
++    }
++    Feature(std::string name, int value, bool def) :
++        Feature(name, value, def, false /* internal */) {}
++};
++
+ /**
+  * Immutable class for describing the range of two numeric values.
+  *
+diff --git a/media/libmedia/include/media/EncoderCapabilities.h b/media/libmedia/include/media/EncoderCapabilities.h
+new file mode 100644
+index 0000000000..a9654bb8a8
+--- /dev/null
++++ b/media/libmedia/include/media/EncoderCapabilities.h
+@@ -0,0 +1,105 @@
++/*
++ * Copyright 2024, The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#ifndef ENCODER_CAPABILITIES_H_
++
++#define ENCODER_CAPABILITIES_H_
++
++#include <media/CodecCapabilitiesUtils.h>
++#include <media/stagefright/foundation/AMessage.h>
++
++#include <utils/StrongPointer.h>
++
++namespace android {
++
++/**
++ * A class that supports querying the encoding capabilities of a codec.
++ */
++struct EncoderCapabilities {
++    /**
++    * Returns the supported range of quality values.
++    *
++    * Quality is implementation-specific. As a general rule, a higher quality
++    * setting results in a better image quality and a lower compression ratio.
++    */
++    const Range<int>& getQualityRange();
++
++    /**
++     * Returns the supported range of encoder complexity values.
++     * <p>
++     * Some codecs may support multiple complexity levels, where higher
++     * complexity values use more encoder tools (e.g. perform more
++     * intensive calculations) to improve the quality or the compression
++     * ratio.  Use a lower value to save power and/or time.
++     */
++    const Range<int>& getComplexityRange();
++
++    /** Constant quality mode */
++    inline static constexpr int BITRATE_MODE_CQ = 0;
++    /** Variable bitrate mode */
++    inline static constexpr int BITRATE_MODE_VBR = 1;
++    /** Constant bitrate mode */
++    inline static constexpr int BITRATE_MODE_CBR = 2;
++    /** Constant bitrate mode with frame drops */
++    inline static constexpr int BITRATE_MODE_CBR_FD =  3;
++
++    /**
++     * Query whether a bitrate mode is supported.
++     */
++    bool isBitrateModeSupported(int mode);
++
++    /** @hide */
++    static std::shared_ptr<EncoderCapabilities> Create(std::string mediaType,
++            std::vector<ProfileLevel> profLevs, const sp<AMessage> &format);
++
++    /** @hide */
++    void getDefaultFormat(sp<AMessage> &format);
++
++    /** @hide */
++    bool supportsFormat(const sp<AMessage> &format);
++
++private:
++    inline static const Feature sBitrateModes[] = {
++        Feature("VBR", BITRATE_MODE_VBR, true),
++        Feature("CBR", BITRATE_MODE_CBR, false),
++        Feature("CQ",  BITRATE_MODE_CQ,  false),
++        Feature("CBR-FD", BITRATE_MODE_CBR_FD, false)
++    };
++    static int ParseBitrateMode(std::string mode);
++
++    std::string mMediaType;
++    std::vector<ProfileLevel> mProfileLevels;
++
++    Range<int> mQualityRange;
++    Range<int> mComplexityRange;
++    int mBitControl;
++    int mDefaultComplexity;
++    int mDefaultQuality;
++    std::string mQualityScale;
++
++    /* no public constructor */
++    EncoderCapabilities() {}
++    void init(std::string mediaType, std::vector<ProfileLevel> profLevs,
++            const sp<AMessage> &format);
++    void applyLevelLimits();
++    void parseFromInfo(const sp<AMessage> &format);
++    bool supports(std::optional<int> complexity, std::optional<int> quality,
++            std::optional<int> profile);
++};
++
++}  // namespace android
++
++#endif // ENCODER_CAPABILITIES_H_
+\ No newline at end of file
+diff --git a/media/libmedia/tests/codeccapabilities/CodecCapabilitiesTest.cpp b/media/libmedia/tests/codeccapabilities/CodecCapabilitiesTest.cpp
+index c1bd65ab55..e59d4d6eb5 100644
+--- a/media/libmedia/tests/codeccapabilities/CodecCapabilitiesTest.cpp
++++ b/media/libmedia/tests/codeccapabilities/CodecCapabilitiesTest.cpp
+@@ -227,3 +227,147 @@ TEST_F(VideoCapsHevcTest, VideoCaps_HEVC_AchievableFrameRates) {
+     EXPECT_EQ(achievableFR1080p.value().lower(), 569);
+     EXPECT_EQ(achievableFR1080p.value().upper(), 572);
+ }
++
++class EncoderCapsAacTest : public testing::Test {
++protected:
++    EncoderCapsAacTest() {
++        std::string mediaType = MIMETYPE_AUDIO_AAC;
++
++        sp<AMessage> details = new AMessage;
++        details->setString("bitrate-range", "8000-960000");
++        details->setString("max-channel-count", "6");
++        details->setString("sample-rate-ranges",
++                "8000,11025,12000,16000,22050,24000,32000,44100,48000");
++
++        std::vector<ProfileLevel> profileLevel{
++            ProfileLevel(2, 0),
++            ProfileLevel(5, 0),
++            ProfileLevel(29, 0),
++            ProfileLevel(23, 0),
++            ProfileLevel(39, 0),
++        };
++
++        encoderCaps = EncoderCapabilities::Create(mediaType, profileLevel, details);
++    }
++
++    std::shared_ptr<EncoderCapabilities> encoderCaps;
++};
++
++
++TEST_F(EncoderCapsAacTest, EncoderCaps_AAC_ComplexityRange) {
++    const Range<int>& complexityRange = encoderCaps->getComplexityRange();
++    EXPECT_EQ(complexityRange.lower(), 0);
++    EXPECT_EQ(complexityRange.upper(), 0);
++}
++
++TEST_F(EncoderCapsAacTest, EncoderCaps_AAC_QualityRange) {
++    const Range<int>& qualityRange = encoderCaps->getQualityRange();
++    EXPECT_EQ(qualityRange.lower(), 0);
++    EXPECT_EQ(qualityRange.upper(), 0);
++}
++
++TEST_F(EncoderCapsAacTest, EncoderCaps_AAC_SupportedBitrateMode) {
++    EXPECT_FALSE(encoderCaps->isBitrateModeSupported(BITRATE_MODE_CBR));
++    EXPECT_TRUE(encoderCaps->isBitrateModeSupported(BITRATE_MODE_VBR));
++    EXPECT_FALSE(encoderCaps->isBitrateModeSupported(BITRATE_MODE_CQ));
++    EXPECT_FALSE(encoderCaps->isBitrateModeSupported(BITRATE_MODE_CBR_FD));
++}
++
++class EncoderCapsFlacTest : public testing::Test {
++protected:
++    EncoderCapsFlacTest() {
++        std::string mediaType = MIMETYPE_AUDIO_FLAC;
++
++        sp<AMessage> details = new AMessage;
++        details->setString("bitrate-range", "1-21000000");
++        details->setString("complexity-default", "5");
++        details->setString("complexity-range", "0-8");
++        details->setString("feature-bitrate-modes", "CQ");
++        details->setString("max-channel-count", "2");
++        details->setString("sample-rate-ranges", "1-655350");
++
++        std::vector<ProfileLevel> profileLevel;
++
++        encoderCaps = EncoderCapabilities::Create(mediaType, profileLevel, details);
++    }
++
++    std::shared_ptr<EncoderCapabilities> encoderCaps;
++};
++
++TEST_F(EncoderCapsFlacTest, EncoderCaps_FLAC_ComplexityRange) {
++    const Range<int>& complexityRange = encoderCaps->getComplexityRange();
++    EXPECT_EQ(complexityRange.lower(), 0);
++    EXPECT_EQ(complexityRange.upper(), 8);
++}
++
++TEST_F(EncoderCapsFlacTest, EncoderCaps_FLAC_QualityRange) {
++    const Range<int>& qualityRange = encoderCaps->getQualityRange();
++    EXPECT_EQ(qualityRange.lower(), 0);
++    EXPECT_EQ(qualityRange.upper(), 0);
++}
++
++TEST_F(EncoderCapsFlacTest, EncoderCaps_FLAC_SupportedBitrateMode) {
++    EXPECT_FALSE(encoderCaps->isBitrateModeSupported(BITRATE_MODE_CBR));
++    EXPECT_FALSE(encoderCaps->isBitrateModeSupported(BITRATE_MODE_VBR));
++    EXPECT_TRUE(encoderCaps->isBitrateModeSupported(BITRATE_MODE_CQ));
++    EXPECT_FALSE(encoderCaps->isBitrateModeSupported(BITRATE_MODE_CBR_FD));
++}
++
++class EncoderCapsHevcTest : public testing::Test {
++protected:
++    EncoderCapsHevcTest() {
++        std::string mediaType = MIMETYPE_VIDEO_HEVC;
++
++        sp<AMessage> details = new AMessage;
++        details->setString("alignment", "2x2");
++        details->setString("bitrate-range", "1-120000000");
++        details->setString("block-count-range", "1-8160");
++        details->setString("block-size", "32x32");
++        details->setString("blocks-per-second-range", "1-979200");
++        details->setString("feature-bitrate-modes", "VBR,CBR,CQ,CBR-FD");
++        details->setInt32("feature-can-swap-width-height", 1);
++        details->setInt32("feature-qp-bounds", 0);
++        details->setInt32("feature-vq-minimum-quality", 0);
++        details->setString("max-concurrent-instances", "16");
++        details->setString("measured-frame-rate-1280x720-range", "154-198");
++        details->setString("measured-frame-rate-1920x1080-range", "46-97");
++        details->setString("measured-frame-rate-320x240-range", "371-553");
++        details->setString("measured-frame-rate-720x480-range", "214-305");
++        details->setString("performance-point-1280x720-range", "240");
++        details->setString("performance-point-3840x2160-range", "120");
++        details->setString("quality-default", "57");
++        details->setString("quality-range", "0-100");
++        details->setString("quality-scale", "linear");
++        details->setString("size-range", "64x64-3840x2176");
++
++        std::vector<ProfileLevel> profileLevel{
++            ProfileLevel(1, 2097152),
++            ProfileLevel(2, 2097152),
++            ProfileLevel(4096, 2097152),
++            ProfileLevel(8192, 2097152),
++        };
++
++        encoderCaps = EncoderCapabilities::Create(mediaType, profileLevel, details);
++    }
++
++    std::shared_ptr<EncoderCapabilities> encoderCaps;
++};
++
++TEST_F(EncoderCapsHevcTest, EncoderCaps_HEVC_ComplexityRange) {
++    const Range<int>& complexityRange = encoderCaps->getComplexityRange();
++    EXPECT_EQ(complexityRange.lower(), 0);
++    EXPECT_EQ(complexityRange.upper(), 0);
++}
++
++TEST_F(EncoderCapsHevcTest, EncoderCaps_HEVC_QualityRange) {
++    const Range<int>& qualityRange = encoderCaps->getQualityRange();
++    EXPECT_EQ(qualityRange.lower(), 0);
++    EXPECT_EQ(qualityRange.upper(), 100);
++}
++
++TEST_F(EncoderCapsHevcTest, EncoderCaps_HEVC_SupportedBitrateMode) {
++    EXPECT_TRUE(encoderCaps->isBitrateModeSupported(BITRATE_MODE_CBR));
++    EXPECT_TRUE(encoderCaps->isBitrateModeSupported(BITRATE_MODE_VBR));
++    EXPECT_TRUE(encoderCaps->isBitrateModeSupported(BITRATE_MODE_CQ));
++    EXPECT_TRUE(encoderCaps->isBitrateModeSupported(BITRATE_MODE_CBR_FD));
++}
+-- 
+2.43.0
+

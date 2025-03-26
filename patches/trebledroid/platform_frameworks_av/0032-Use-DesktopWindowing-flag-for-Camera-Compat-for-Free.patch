@@ -1,0 +1,44 @@
+From d19814ae608b3720fd4b6e3b3cb3e99a83c62ceb Mon Sep 17 00:00:00 2001
+From: Mina Granic <minagranic@google.com>
+Date: Tue, 18 Jun 2024 10:08:58 +0000
+Subject: [PATCH 032/436] Use DesktopWindowing flag for Camera Compat for
+ Freeform.
+
+Flag: com.android.window.flags.enable_camera_compat_for_desktop_windowing
+Fixes: 344567658
+Test: Desktop mode on large screen device
+Change-Id: Idbbc039bd20db782b7006cfbdfc105b00bf727ee
+---
+ services/camera/libcameraservice/common/Camera2ClientBase.cpp   | 2 +-
+ .../camera/libcameraservice/common/CameraProviderManager.cpp    | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/services/camera/libcameraservice/common/Camera2ClientBase.cpp b/services/camera/libcameraservice/common/Camera2ClientBase.cpp
+index 352c6f8782..18069fe257 100644
+--- a/services/camera/libcameraservice/common/Camera2ClientBase.cpp
++++ b/services/camera/libcameraservice/common/Camera2ClientBase.cpp
+@@ -358,7 +358,7 @@ void Camera2ClientBase<TClientBase>::notifyPhysicalCameraChange(const std::strin
+         bool landscapeSensor =  (orientation == 0 || orientation == 180);
+         if (((TClientBase::mRotationOverride ==
+                 ICameraService::ROTATION_OVERRIDE_OVERRIDE_TO_PORTRAIT) && landscapeSensor) ||
+-                        ((wm_flags::camera_compat_for_freeform() &&
++                        ((wm_flags::enable_camera_compat_for_desktop_windowing() &&
+                                 TClientBase::mRotationOverride ==
+                                 ICameraService::ROTATION_OVERRIDE_ROTATION_ONLY)
+                                 && !landscapeSensor)) {
+diff --git a/services/camera/libcameraservice/common/CameraProviderManager.cpp b/services/camera/libcameraservice/common/CameraProviderManager.cpp
+index a7c7cee0cb..a03d199344 100644
+--- a/services/camera/libcameraservice/common/CameraProviderManager.cpp
++++ b/services/camera/libcameraservice/common/CameraProviderManager.cpp
+@@ -2800,7 +2800,7 @@ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::getCameraInfo(
+         hardware::CameraInfo *info) const {
+     if (info == nullptr) return BAD_VALUE;
+ 
+-    bool freeform_compat_enabled = wm_flags::camera_compat_for_freeform();
++    bool freeform_compat_enabled = wm_flags::enable_camera_compat_for_desktop_windowing();
+     if (!freeform_compat_enabled &&
+             rotationOverride > hardware::ICameraService::ROTATION_OVERRIDE_OVERRIDE_TO_PORTRAIT) {
+         ALOGW("Camera compat freeform flag disabled but rotation override is %d", rotationOverride);
+-- 
+2.43.0
+

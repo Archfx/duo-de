@@ -1,0 +1,109 @@
+From 970dc0d8d234b72e2bd7a3907de2019a63093ef8 Mon Sep 17 00:00:00 2001
+From: Atneya Nair <atneya@google.com>
+Date: Tue, 8 Oct 2024 21:57:17 -0700
+Subject: [PATCH 080/436] Add timing info to audioflinger dumpsys
+
+Print start time, current time and startup time in dumpsys.
+
+Test: adb shell dumpsys media.audio_flinger
+Flag: EXEMPT logs only
+Bug: 372070273
+Change-Id: I92d26db90b22a403d5681ac3cfe33cf3bb983dc0
+---
+ media/audioserver/main_audioserver.cpp |  1 +
+ services/audioflinger/AudioFlinger.cpp | 20 ++++++++++++++++++++
+ services/audioflinger/AudioFlinger.h   | 14 ++++++++++++++
+ 3 files changed, 35 insertions(+)
+
+diff --git a/media/audioserver/main_audioserver.cpp b/media/audioserver/main_audioserver.cpp
+index 5d7daa4b2a..d55932dac1 100644
+--- a/media/audioserver/main_audioserver.cpp
++++ b/media/audioserver/main_audioserver.cpp
+@@ -205,6 +205,7 @@ int main(int argc __unused, char **argv)
+                   __func__, status, policyInfos.size());
+         }
+         const auto endTime = std::chrono::steady_clock::now();
++        af->startupFinished();
+         using FloatMillis = std::chrono::duration<float, std::milli>;
+         const float timeTaken = std::chrono::duration_cast<FloatMillis>(
+                 endTime - startTime).count();
+diff --git a/services/audioflinger/AudioFlinger.cpp b/services/audioflinger/AudioFlinger.cpp
+index b9dbbad698..eb85420bd9 100644
+--- a/services/audioflinger/AudioFlinger.cpp
++++ b/services/audioflinger/AudioFlinger.cpp
+@@ -905,6 +905,26 @@ status_t AudioFlinger::dump(int fd, const Vector<String16>& args)
+         // Unknown arg silently ignored
+     }
+ 
++    {
++        std::string res;
++        res.reserve(100);
++        res += "Start begin: ";
++        const auto startTimeStr = audio_utils_time_string_from_ns(mStartTime);
++        res += startTimeStr.time;
++        const auto startFinishedTime = getStartupFinishedTime();
++        if (startFinishedTime != 0) {
++            res += "\nStart end:   ";
++            const auto startEndStr = audio_utils_time_string_from_ns(startFinishedTime);
++            res += startEndStr.time;
++        } else {
++            res += "\nStartup not yet finished!";
++        }
++        const auto nowTimeStr = audio_utils_time_string_from_ns(audio_utils_get_real_time_ns());
++        res += "\nNow:         ";
++        res += nowTimeStr.time;
++        res += "\n";
++        writeStr(fd, res);
++    }
+     // get state of hardware lock
+     {
+         FallibleLockGuard l{hardwareMutex()};
+diff --git a/services/audioflinger/AudioFlinger.h b/services/audioflinger/AudioFlinger.h
+index 2bc18ee686..b331e2e560 100644
+--- a/services/audioflinger/AudioFlinger.h
++++ b/services/audioflinger/AudioFlinger.h
+@@ -27,6 +27,7 @@
+ #include "IAfTrack.h"
+ #include "MelReporter.h"
+ #include "PatchCommandThread.h"
++#include "audio_utils/clock.h"
+ 
+ // External classes
+ #include <audio_utils/mutex.h>
+@@ -65,6 +66,11 @@ public:
+ 
+     status_t resetReferencesForTest();
+ 
++    // Called by main when startup finished -- for logging purposes only
++    void startupFinished() {
++        mStartupFinishedTime.store(audio_utils_get_real_time_ns(), std::memory_order_release);
++    }
++
+ private:
+ 
+     // ---- begin IAudioFlinger interface
+@@ -420,6 +426,10 @@ private:
+ 
+     sp<EffectsFactoryHalInterface> getEffectsFactory();
+ 
++    int64_t getStartupFinishedTime() {
++        return mStartupFinishedTime.load(std::memory_order_acquire);
++    }
++
+ public:
+     // TODO(b/292281786): Remove this when Oboeservice can get access to
+     // openMmapStream through an IAudioFlinger handle directly.
+@@ -803,6 +813,10 @@ private:
+ 
+     // Local interface to AudioPolicyService, late inited, but logically const
+     mediautils::atomic_sp<media::IAudioPolicyServiceLocal> mAudioPolicyServiceLocal;
++
++    const int64_t mStartTime = audio_utils_get_real_time_ns();
++    // Late-inited from main()
++    std::atomic<int64_t> mStartupFinishedTime {};
+ };
+ 
+ // ----------------------------------------------------------------------------
+-- 
+2.43.0
+

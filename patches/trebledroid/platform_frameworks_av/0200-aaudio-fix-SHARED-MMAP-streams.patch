@@ -1,0 +1,50 @@
+From ed89641f29af1a0e69b84b2d6af7bfb7bfaabaed Mon Sep 17 00:00:00 2001
+From: Phil Burk <philburk@google.com>
+Date: Tue, 5 Nov 2024 06:23:06 +0000
+Subject: [PATCH 200/436] aaudio: fix SHARED MMAP streams
+
+The HAL can return INVALID_OPERATION when the position is UNKNOWN.
+That can cause SHARED MMAP to break. So coerce it to NOT_ENOUGH_DATA.
+That will get converted to AAUDIO_ERROR_UNAVAILABLE,
+which is ignored because it is OK if the DSP position
+is temporarily unavailable.
+
+Bug: 376467258
+Test: Launch OboeTester
+Test: Press TEST OUTPUT
+Test: Disable "Exclusive"
+Test: Press OPEN then START
+Test: You should hear a sine wave.
+Test: Also run the Data Path tests.
+Flag: EXEMPT bugfix
+Change-Id: Id46de86a6083dec50db93fb94c9c9cb34a7d8274
+---
+ services/oboeservice/AAudioServiceEndpointMMAP.cpp | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/services/oboeservice/AAudioServiceEndpointMMAP.cpp b/services/oboeservice/AAudioServiceEndpointMMAP.cpp
+index d663f37fbc..a864c7a380 100644
+--- a/services/oboeservice/AAudioServiceEndpointMMAP.cpp
++++ b/services/oboeservice/AAudioServiceEndpointMMAP.cpp
+@@ -422,9 +422,17 @@ aaudio_result_t AAudioServiceEndpointMMAP::getFreeRunningPosition(int64_t *posit
+         return AAUDIO_ERROR_NULL;
+     }
+     struct audio_mmap_position position;
+-    const status_t status = mMmapStream->getMmapPosition(&position);
++    status_t status = mMmapStream->getMmapPosition(&position);
+     ALOGV("%s() status= %d, pos = %d, nanos = %lld\n",
+           __func__, status, position.position_frames, (long long) position.time_nanoseconds);
++    if (status == INVALID_OPERATION) {
++        // The HAL can return INVALID_OPERATION when the position is UNKNOWN.
++        // That can cause SHARED MMAP to break. So coerce it to NOT_ENOUGH_DATA.
++        // That will get converted to AAUDIO_ERROR_UNAVAILABLE.
++        ALOGW("%s(): change INVALID_OPERATION to NOT_ENOUGH_DATA", __func__);
++        status = NOT_ENOUGH_DATA; // see b/376467258
++    }
++
+     const aaudio_result_t result = AAudioConvert_androidToAAudioResult(status);
+     if (result == AAUDIO_ERROR_UNAVAILABLE) {
+         ALOGW("%s(): getMmapPosition() has no position data available", __func__);
+-- 
+2.43.0
+

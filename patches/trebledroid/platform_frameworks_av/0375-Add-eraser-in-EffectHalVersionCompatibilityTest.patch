@@ -1,0 +1,47 @@
+From f8b99061a4f43f3bffffccf5dbfa17144cc5a15b Mon Sep 17 00:00:00 2001
+From: Shunkai Yao <yaoshunkai@google.com>
+Date: Thu, 17 Oct 2024 02:32:53 +0000
+Subject: [PATCH 375/436] Add eraser in EffectHalVersionCompatibilityTest
+
+Flag: EXEMPT HAL interface change
+Bug: 370943234
+Test: m
+Test: atest EffectHalVersionCompatibilityTest
+
+Change-Id: I1352e59dcfaab9e799a42f68d23108a8ecf4a8b8
+Merged-In: I1352e59dcfaab9e799a42f68d23108a8ecf4a8b8
+---
+ media/libaudiohal/tests/EffectHalVersionCompatibility_test.cpp | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/media/libaudiohal/tests/EffectHalVersionCompatibility_test.cpp b/media/libaudiohal/tests/EffectHalVersionCompatibility_test.cpp
+index e8731eaf81..c11f90833d 100644
+--- a/media/libaudiohal/tests/EffectHalVersionCompatibility_test.cpp
++++ b/media/libaudiohal/tests/EffectHalVersionCompatibility_test.cpp
+@@ -83,6 +83,7 @@ static const std::unordered_map<Parameter::Id::Tag, int /* version */> kParamIdE
+         {Parameter::Id::visualizerTag, 1},
+         {Parameter::Id::volumeTag, 1},
+         {Parameter::Id::spatializerTag, 2},
++        {Parameter::Id::eraserTag, 3},
+ };
+ // Tags defined Parameter::Specific union.
+ static const std::unordered_map<Parameter::Specific::Tag, int /* version */>
+@@ -104,6 +105,7 @@ static const std::unordered_map<Parameter::Specific::Tag, int /* version */>
+                 {Parameter::Specific::visualizer, 1},
+                 {Parameter::Specific::volume, 1},
+                 {Parameter::Specific::spatializer, 2},
++                {Parameter::Specific::eraser, 3},
+ };
+ 
+ class MockFactory : public IFactory {
+@@ -223,6 +225,7 @@ class MockEffect : public IEffect {
+             case Parameter::Id::virtualizerTag:
+             case Parameter::Id::visualizerTag:
+             case Parameter::Id::volumeTag:
++            case Parameter::Id::eraserTag:
+                 FALLTHROUGH_INTENDED;
+             case Parameter::Id::spatializerTag: {
+                 if (kParamIdEffectVersionMap.find(idTag) != kParamIdEffectVersionMap.end() &&
+-- 
+2.43.0
+

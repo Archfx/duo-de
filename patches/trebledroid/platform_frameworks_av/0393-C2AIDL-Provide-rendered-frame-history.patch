@@ -1,0 +1,115 @@
+From 5b9dfbdb8e1583e3e35b614827ce37f8f811bcd0 Mon Sep 17 00:00:00 2001
+From: Sungtak Lee <taklee@google.com>
+Date: Tue, 3 Dec 2024 19:42:24 +0000
+Subject: [PATCH 393/436] C2AIDL: Provide rendered frame history
+
+Bug: 362409150
+Test: presubmit
+Change-Id: Ib65f46096efdc69f8a0977ac423f5b43c91d15b5
+---
+ media/codec2/hal/client/GraphicBufferAllocator.cpp  |  4 ++++
+ media/codec2/hal/client/GraphicsTracker.cpp         | 13 +++++++++++++
+ media/codec2/hal/client/client.cpp                  |  6 +++++-
+ .../include/codec2/aidl/GraphicBufferAllocator.h    |  5 +++++
+ .../client/include/codec2/aidl/GraphicsTracker.h    |  6 ++++++
+ 5 files changed, 33 insertions(+), 1 deletion(-)
+
+diff --git a/media/codec2/hal/client/GraphicBufferAllocator.cpp b/media/codec2/hal/client/GraphicBufferAllocator.cpp
+index 6a6da0ff4e..45069735bd 100644
+--- a/media/codec2/hal/client/GraphicBufferAllocator.cpp
++++ b/media/codec2/hal/client/GraphicBufferAllocator.cpp
+@@ -96,6 +96,10 @@ void GraphicBufferAllocator::onBufferAttached(uint32_t generation) {
+     mGraphicsTracker->onAttached(generation);
+ }
+ 
++void GraphicBufferAllocator::pollForRenderedFrames(FrameEventHistoryDelta* delta) {
++    mGraphicsTracker->pollForRenderedFrames(delta);
++}
++
+ c2_status_t GraphicBufferAllocator::allocate(
+         uint32_t width, uint32_t height, ::android::PixelFormat format, uint64_t usage,
+         AHardwareBuffer **buf, ::android::sp<::android::Fence> *fence) {
+diff --git a/media/codec2/hal/client/GraphicsTracker.cpp b/media/codec2/hal/client/GraphicsTracker.cpp
+index bdfc409d31..2fa1b1199c 100644
+--- a/media/codec2/hal/client/GraphicsTracker.cpp
++++ b/media/codec2/hal/client/GraphicsTracker.cpp
+@@ -1003,6 +1003,19 @@ c2_status_t GraphicsTracker::render(const C2ConstGraphicBlock& blk,
+     return C2_OK;
+ }
+ 
++void GraphicsTracker::pollForRenderedFrames(FrameEventHistoryDelta* delta) {
++    sp<IGraphicBufferProducer> igbp;
++    {
++        std::unique_lock<std::mutex> l(mLock);
++        if (mBufferCache) {
++            igbp = mBufferCache->mIgbp;
++        }
++    }
++    if (igbp) {
++        igbp->getFrameTimestamps(delta);
++    }
++}
++
+ void GraphicsTracker::onReleased(uint32_t generation) {
+     bool updateDequeue = false;
+     {
+diff --git a/media/codec2/hal/client/client.cpp b/media/codec2/hal/client/client.cpp
+index 9ee9b9ee86..2162c0811f 100644
+--- a/media/codec2/hal/client/client.cpp
++++ b/media/codec2/hal/client/client.cpp
+@@ -3407,7 +3407,11 @@ uint64_t Codec2Client::Component::configConsumerUsage(
+ 
+ void Codec2Client::Component::pollForRenderedFrames(FrameEventHistoryDelta* delta) {
+     if (mAidlBase) {
+-        // TODO b/311348680
++        std::shared_ptr<AidlGraphicBufferAllocator> gba =
++                mGraphicBufferAllocators->current();
++        if (gba) {
++            gba->pollForRenderedFrames(delta);
++        }
+         return;
+     }
+     mOutputBufferQueue->pollForRenderedFrames(delta);
+diff --git a/media/codec2/hal/client/include/codec2/aidl/GraphicBufferAllocator.h b/media/codec2/hal/client/include/codec2/aidl/GraphicBufferAllocator.h
+index a797cb78c3..1af5095da8 100644
+--- a/media/codec2/hal/client/include/codec2/aidl/GraphicBufferAllocator.h
++++ b/media/codec2/hal/client/include/codec2/aidl/GraphicBufferAllocator.h
+@@ -84,6 +84,11 @@ public:
+      */
+     void onBufferAttached(uint32_t generation);
+ 
++    /**
++     * Retrieve frame event history from the crurrent surface if any.
++     */
++    void pollForRenderedFrames(::android::FrameEventHistoryDelta* delta);
++
+     /**
+      * Allocates a buffer.
+      *
+diff --git a/media/codec2/hal/client/include/codec2/aidl/GraphicsTracker.h b/media/codec2/hal/client/include/codec2/aidl/GraphicsTracker.h
+index 9a4fa12f08..9d07672a86 100644
+--- a/media/codec2/hal/client/include/codec2/aidl/GraphicsTracker.h
++++ b/media/codec2/hal/client/include/codec2/aidl/GraphicsTracker.h
+@@ -35,6 +35,7 @@ namespace aidl::android::hardware::media::c2::implementation {
+ 
+ using ::android::IGraphicBufferProducer;
+ using ::android::GraphicBuffer;
++using ::android::FrameEventHistoryDelta;
+ using ::android::Fence;
+ using ::android::PixelFormat;
+ using ::android::sp;
+@@ -132,6 +133,11 @@ public:
+                        const IGraphicBufferProducer::QueueBufferInput& input,
+                        IGraphicBufferProducer::QueueBufferOutput *output);
+ 
++    /**
++     * Retrieve frame event history from the crurrent surface if any.
++     */
++    void pollForRenderedFrames(FrameEventHistoryDelta* delta);
++
+     /**
+      * Notifies when a Buffer is ready to allocate from Graphics.
+      * If generation does not match to the current, notifications via the interface
+-- 
+2.43.0
+

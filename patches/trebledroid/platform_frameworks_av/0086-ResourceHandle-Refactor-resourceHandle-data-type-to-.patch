@@ -1,0 +1,380 @@
+From 5338e406c7ccae143ddd8b4300308c7a1d9f4ecb Mon Sep 17 00:00:00 2001
+From: Venkatarama Avadhani <venkatarama.avadhani@ittiam.com>
+Date: Wed, 15 May 2024 11:55:30 +0000
+Subject: [PATCH 086/436] ResourceHandle : Refactor resourceHandle data type to
+ long
+
+Existing resource handle doesn't retain the value of resource id
+which can be 32 bits. Widening the resource handle to 64 bits so
+that it retains the resource id as well as resource type.
+
+Bug: 319372054
+Test: atest TunerResourceManagerServiceTest MediaCasTest
+Flag: EXEMPT bugfix
+
+Change-Id: I3a545c775872c00e666e7a70880e83d179c81b80
+---
+ services/tuner/TunerHelper.cpp                | 21 +++++++++++++-----
+ services/tuner/TunerHelper.h                  | 14 ++++++++----
+ services/tuner/TunerService.cpp               | 22 +++++++++----------
+ services/tuner/TunerService.h                 | 14 ++++++------
+ .../android/media/tv/tuner/ITunerService.aidl | 10 ++++-----
+ services/tuner/hidl/TunerHidlService.cpp      | 15 +++++++------
+ services/tuner/hidl/TunerHidlService.h        | 15 ++++++-------
+ 7 files changed, 62 insertions(+), 49 deletions(-)
+
+diff --git a/services/tuner/TunerHelper.cpp b/services/tuner/TunerHelper.cpp
+index a03386f3ea..8357a9e7ca 100644
+--- a/services/tuner/TunerHelper.cpp
++++ b/services/tuner/TunerHelper.cpp
+@@ -73,7 +73,7 @@ bool TunerHelper::checkTunerFeature() {
+ 
+ // TODO: update Demux, Descrambler.
+ void TunerHelper::updateTunerResources(const vector<TunerFrontendInfo>& feInfos,
+-                                       const vector<int32_t>& lnbHandles) {
++                                       const vector<int64_t>& lnbHandles) {
+     ::ndk::SpAIBinder binder(AServiceManager_waitForService("tv_tuner_resource_mgr"));
+     shared_ptr<ITunerResourceManager> tunerRM = ITunerResourceManager::fromBinder(binder);
+     if (tunerRM == nullptr) {
+@@ -85,7 +85,7 @@ void TunerHelper::updateTunerResources(const vector<TunerFrontendInfo>& feInfos,
+ }
+ void TunerHelper::updateTunerResources(const vector<TunerFrontendInfo>& feInfos,
+                                        const vector<TunerDemuxInfo>& demuxInfos,
+-                                       const vector<int32_t>& lnbHandles) {
++                                       const vector<int64_t>& lnbHandles) {
+     ::ndk::SpAIBinder binder(AServiceManager_waitForService("tv_tuner_resource_mgr"));
+     shared_ptr<ITunerResourceManager> tunerRM = ITunerResourceManager::fromBinder(binder);
+     if (tunerRM == nullptr) {
+@@ -101,13 +101,22 @@ void TunerHelper::updateTunerResources(const vector<TunerFrontendInfo>& feInfos,
+ }
+ 
+ // TODO: create a map between resource id and handles.
+-int TunerHelper::getResourceIdFromHandle(int resourceHandle, int /*type*/) {
+-    return (resourceHandle & 0x00ff0000) >> 16;
++int TunerHelper::getResourceIdFromHandle(long resourceHandle, int /*type*/) {
++    return (int)((resourceHandle >> RESOURCE_ID_SHIFT) & RESOURCE_ID_MASK);
+ }
+ 
+-int TunerHelper::getResourceHandleFromId(int id, int resourceType) {
++/**
++ *   Generate resource handle for resourceType and id
++ *   Resource Handle Allotment : 64 bits (long)
++ *   8 bits - resourceType
++ *   32 bits - id
++ *   24 bits - resourceRequestCount
++ */
++long TunerHelper::getResourceHandleFromId(int id, int resourceType) {
+     // TODO: build up randomly generated id to handle mapping
+-    return (resourceType & 0x000000ff) << 24 | (id << 16) | (sResourceRequestCount++ & 0xffff);
++    return static_cast<int64_t>(resourceType & RESOURCE_TYPE_MASK) << RESOURCE_TYPE_SHIFT |
++           static_cast<int64_t>(id & RESOURCE_ID_MASK) << RESOURCE_ID_SHIFT |
++           (sResourceRequestCount++ & RESOURCE_COUNT_MASK);
+ }
+ 
+ }  // namespace tuner
+diff --git a/services/tuner/TunerHelper.h b/services/tuner/TunerHelper.h
+index 65a9b0b846..74e166239e 100644
+--- a/services/tuner/TunerHelper.h
++++ b/services/tuner/TunerHelper.h
+@@ -56,17 +56,23 @@ public:
+ 
+     // TODO: update Demux, Descrambler.
+     static void updateTunerResources(const vector<TunerFrontendInfo>& feInfos,
+-                                     const vector<int32_t>& lnbHandles);
++                                     const vector<int64_t>& lnbHandles);
+ 
+     static void updateTunerResources(const vector<TunerFrontendInfo>& feInfos,
+                                      const vector<TunerDemuxInfo>& demuxInfos,
+-                                     const vector<int32_t>& lnbHandles);
++                                     const vector<int64_t>& lnbHandles);
+     // TODO: create a map between resource id and handles.
+-    static int getResourceIdFromHandle(int resourceHandle, int type);
+-    static int getResourceHandleFromId(int id, int resourceType);
++    static int getResourceIdFromHandle(long resourceHandle, int type);
++    static long getResourceHandleFromId(int id, int resourceType);
+ 
+ private:
+     static int32_t sResourceRequestCount;
++
++    static constexpr uint32_t RESOURCE_ID_SHIFT = 24;
++    static constexpr uint32_t RESOURCE_TYPE_SHIFT = 56;
++    static constexpr uint32_t RESOURCE_COUNT_MASK = 0xffffff;
++    static constexpr uint32_t RESOURCE_ID_MASK = 0xffffffff;
++    static constexpr uint32_t RESOURCE_TYPE_MASK = 0xff;
+ };
+ 
+ }  // namespace tuner
+diff --git a/services/tuner/TunerService.cpp b/services/tuner/TunerService.cpp
+index 9a1e8bb905..8cf84e22df 100644
+--- a/services/tuner/TunerService.cpp
++++ b/services/tuner/TunerService.cpp
+@@ -82,7 +82,7 @@ binder_status_t TunerService::instantiate() {
+     return AServiceManager_addService(tunerService->asBinder().get(), getServiceName());
+ }
+ 
+-::ndk::ScopedAStatus TunerService::openDemux(int32_t in_demuxHandle,
++::ndk::ScopedAStatus TunerService::openDemux(int64_t in_demuxHandle,
+                                              shared_ptr<ITunerDemux>* _aidl_return) {
+     ALOGV("openDemux");
+     shared_ptr<IDemux> demux;
+@@ -116,7 +116,7 @@ binder_status_t TunerService::instantiate() {
+     }
+ }
+ 
+-::ndk::ScopedAStatus TunerService::getDemuxInfo(int32_t in_demuxHandle, DemuxInfo* _aidl_return) {
++::ndk::ScopedAStatus TunerService::getDemuxInfo(int64_t in_demuxHandle, DemuxInfo* _aidl_return) {
+     if (mTunerVersion <= TUNER_HAL_VERSION_2_0) {
+         return ::ndk::ScopedAStatus::fromServiceSpecificError(
+                 static_cast<int32_t>(Result::UNAVAILABLE));
+@@ -169,7 +169,7 @@ binder_status_t TunerService::instantiate() {
+     return mTuner->getFrontendInfo(id, _aidl_return);
+ }
+ 
+-::ndk::ScopedAStatus TunerService::openFrontend(int32_t frontendHandle,
++::ndk::ScopedAStatus TunerService::openFrontend(int64_t frontendHandle,
+                                                 shared_ptr<ITunerFrontend>* _aidl_return) {
+     int id = TunerHelper::getResourceIdFromHandle(frontendHandle, FRONTEND);
+     shared_ptr<IFrontend> frontend;
+@@ -181,7 +181,7 @@ binder_status_t TunerService::instantiate() {
+     return status;
+ }
+ 
+-::ndk::ScopedAStatus TunerService::openLnb(int lnbHandle, shared_ptr<ITunerLnb>* _aidl_return) {
++::ndk::ScopedAStatus TunerService::openLnb(int64_t lnbHandle, shared_ptr<ITunerLnb>* _aidl_return) {
+     shared_ptr<ILnb> lnb;
+     int id = TunerHelper::getResourceIdFromHandle(lnbHandle, LNB);
+     auto status = mTuner->openLnbById(id, &lnb);
+@@ -204,7 +204,7 @@ binder_status_t TunerService::instantiate() {
+     return ::ndk::ScopedAStatus::ok();
+ }
+ 
+-::ndk::ScopedAStatus TunerService::openDescrambler(int32_t /*descramblerHandle*/,
++::ndk::ScopedAStatus TunerService::openDescrambler(int64_t /*descramblerHandle*/,
+                                                    shared_ptr<ITunerDescrambler>* _aidl_return) {
+     shared_ptr<IDescrambler> descrambler;
+     // int id = TunerHelper::getResourceIdFromHandle(descramblerHandle, DESCRAMBLER);
+@@ -310,7 +310,7 @@ vector<TunerFrontendInfo> TunerService::getTRMFrontendInfos() {
+             continue;
+         }
+         TunerFrontendInfo tunerFrontendInfo{
+-                .handle = TunerHelper::getResourceHandleFromId((int)ids[i], FRONTEND),
++                .handle = TunerHelper::getResourceHandleFromId(ids[i], FRONTEND),
+                 .type = static_cast<int>(frontendInfo.type),
+                 .exclusiveGroupId = frontendInfo.exclusiveGroupId,
+         };
+@@ -336,18 +336,16 @@ vector<TunerDemuxInfo> TunerService::getTRMDemuxInfos() {
+     for (int i = 0; i < ids.size(); i++) {
+         DemuxInfo demuxInfo;
+         mTuner->getDemuxInfo(ids[i], &demuxInfo);
+-        TunerDemuxInfo tunerDemuxInfo{
+-                .handle = TunerHelper::getResourceHandleFromId((int)ids[i], DEMUX),
+-                .filterTypes = static_cast<int>(demuxInfo.filterTypes)
+-        };
++        TunerDemuxInfo tunerDemuxInfo{.handle = TunerHelper::getResourceHandleFromId(ids[i], DEMUX),
++                                      .filterTypes = static_cast<int>(demuxInfo.filterTypes)};
+         infos.push_back(tunerDemuxInfo);
+     }
+ 
+     return infos;
+ }
+ 
+-vector<int32_t> TunerService::getTRMLnbHandles() {
+-    vector<int32_t> lnbHandles;
++vector<int64_t> TunerService::getTRMLnbHandles() {
++    vector<int64_t> lnbHandles;
+     if (mTuner != nullptr) {
+         vector<int32_t> lnbIds;
+         auto res = mTuner->getLnbIds(&lnbIds);
+diff --git a/services/tuner/TunerService.h b/services/tuner/TunerService.h
+index 190ccd4b75..07b414eb12 100644
+--- a/services/tuner/TunerService.h
++++ b/services/tuner/TunerService.h
+@@ -61,20 +61,20 @@ public:
+     virtual ~TunerService();
+ 
+     ::ndk::ScopedAStatus getFrontendIds(vector<int32_t>* out_ids) override;
+-    ::ndk::ScopedAStatus getFrontendInfo(int32_t in_frontendHandle,
++    ::ndk::ScopedAStatus getFrontendInfo(int32_t in_frontendId,
+                                          FrontendInfo* _aidl_return) override;
+-    ::ndk::ScopedAStatus openFrontend(int32_t in_frontendHandle,
++    ::ndk::ScopedAStatus openFrontend(int64_t in_frontendHandle,
+                                       shared_ptr<ITunerFrontend>* _aidl_return) override;
+-    ::ndk::ScopedAStatus openLnb(int32_t in_lnbHandle,
++    ::ndk::ScopedAStatus openLnb(int64_t in_lnbHandle,
+                                  shared_ptr<ITunerLnb>* _aidl_return) override;
+     ::ndk::ScopedAStatus openLnbByName(const string& in_lnbName,
+                                        shared_ptr<ITunerLnb>* _aidl_return) override;
+-    ::ndk::ScopedAStatus openDemux(int32_t in_demuxHandle,
++    ::ndk::ScopedAStatus openDemux(int64_t in_demuxHandle,
+                                    shared_ptr<ITunerDemux>* _aidl_return) override;
+     ::ndk::ScopedAStatus getDemuxCaps(DemuxCapabilities* _aidl_return) override;
+-    ::ndk::ScopedAStatus getDemuxInfo(int32_t in_demuxHandle, DemuxInfo* _aidl_return) override;
++    ::ndk::ScopedAStatus getDemuxInfo(int64_t in_demuxHandle, DemuxInfo* _aidl_return) override;
+     ::ndk::ScopedAStatus getDemuxInfoList(vector<DemuxInfo>* _aidl_return) override;
+-    ::ndk::ScopedAStatus openDescrambler(int32_t in_descramblerHandle,
++    ::ndk::ScopedAStatus openDescrambler(int64_t in_descramblerHandle,
+                                          shared_ptr<ITunerDescrambler>* _aidl_return) override;
+     ::ndk::ScopedAStatus getTunerHalVersion(int32_t* _aidl_return) override;
+     ::ndk::ScopedAStatus openSharedFilter(const string& in_filterToken,
+@@ -94,7 +94,7 @@ private:
+     void updateTunerResources();
+     vector<TunerFrontendInfo> getTRMFrontendInfos();
+     vector<TunerDemuxInfo> getTRMDemuxInfos();
+-    vector<int32_t> getTRMLnbHandles();
++    vector<int64_t> getTRMLnbHandles();
+ 
+     shared_ptr<ITuner> mTuner;
+     int mTunerVersion = TUNER_HAL_VERSION_UNKNOWN;
+diff --git a/services/tuner/aidl/android/media/tv/tuner/ITunerService.aidl b/services/tuner/aidl/android/media/tv/tuner/ITunerService.aidl
+index 932133eab3..0d238171cf 100644
+--- a/services/tuner/aidl/android/media/tv/tuner/ITunerService.aidl
++++ b/services/tuner/aidl/android/media/tv/tuner/ITunerService.aidl
+@@ -54,7 +54,7 @@ interface ITunerService {
+      * @param frontendHandle the handle of the frontend granted by TRM.
+      * @return the aidl interface of the frontend.
+      */
+-    ITunerFrontend openFrontend(in int frontendHandle);
++    ITunerFrontend openFrontend(in long frontendHandle);
+ 
+     /**
+      * Open a new interface of ITunerLnb given a lnbHandle.
+@@ -62,7 +62,7 @@ interface ITunerService {
+      * @param lnbHandle the handle of the LNB granted by TRM.
+      * @return a newly created ITunerLnb interface.
+      */
+-    ITunerLnb openLnb(in int lnbHandle);
++    ITunerLnb openLnb(in long lnbHandle);
+ 
+     /**
+      * Open a new interface of ITunerLnb given a LNB name.
+@@ -75,7 +75,7 @@ interface ITunerService {
+     /**
+      * Create a new instance of Demux.
+      */
+-    ITunerDemux openDemux(in int demuxHandle);
++    ITunerDemux openDemux(in long demuxHandle);
+ 
+     /**
+      * Retrieve the supported filter main types
+@@ -83,7 +83,7 @@ interface ITunerService {
+      * @param demuxHandle the handle of the demux to query demux info for
+      * @return the demux info
+      */
+-    DemuxInfo getDemuxInfo(in int demuxHandle);
++    DemuxInfo getDemuxInfo(in long demuxHandle);
+ 
+     /**
+      * Retrieve the list of demux info for all the demuxes on the system
+@@ -104,7 +104,7 @@ interface ITunerService {
+      * @param descramblerHandle the handle of the descrambler granted by TRM.
+      * @return a newly created ITunerDescrambler interface.
+      */
+-    ITunerDescrambler openDescrambler(in int descramblerHandle);
++    ITunerDescrambler openDescrambler(in long descramblerHandle);
+ 
+     /**
+      * Get an integer that carries the Tuner HIDL version. The high 16 bits are the
+diff --git a/services/tuner/hidl/TunerHidlService.cpp b/services/tuner/hidl/TunerHidlService.cpp
+index 6bc36be868..1b6b032e58 100644
+--- a/services/tuner/hidl/TunerHidlService.cpp
++++ b/services/tuner/hidl/TunerHidlService.cpp
+@@ -101,7 +101,7 @@ binder_status_t TunerHidlService::instantiate() {
+     return AServiceManager_addService(tunerService->asBinder().get(), getServiceName());
+ }
+ 
+-::ndk::ScopedAStatus TunerHidlService::openDemux(int32_t /* in_demuxHandle */,
++::ndk::ScopedAStatus TunerHidlService::openDemux(int64_t /* in_demuxHandle */,
+                                                  shared_ptr<ITunerDemux>* _aidl_return) {
+     ALOGV("openDemux");
+     HidlResult res;
+@@ -123,7 +123,7 @@ binder_status_t TunerHidlService::instantiate() {
+     return ::ndk::ScopedAStatus::fromServiceSpecificError(static_cast<int32_t>(res));
+ }
+ 
+-::ndk::ScopedAStatus TunerHidlService::getDemuxInfo(int32_t /* in_demuxHandle */,
++::ndk::ScopedAStatus TunerHidlService::getDemuxInfo(int64_t /* in_demuxHandle */,
+                                                     DemuxInfo* /* _aidl_return */) {
+     ALOGE("getDemuxInfo is not supported");
+     return ::ndk::ScopedAStatus::fromServiceSpecificError(
+@@ -195,7 +195,7 @@ binder_status_t TunerHidlService::instantiate() {
+     return ::ndk::ScopedAStatus::ok();
+ }
+ 
+-::ndk::ScopedAStatus TunerHidlService::openFrontend(int32_t frontendHandle,
++::ndk::ScopedAStatus TunerHidlService::openFrontend(int64_t frontendHandle,
+                                                     shared_ptr<ITunerFrontend>* _aidl_return) {
+     HidlResult status;
+     sp<HidlIFrontend> frontend;
+@@ -221,7 +221,8 @@ binder_status_t TunerHidlService::instantiate() {
+     return ::ndk::ScopedAStatus::ok();
+ }
+ 
+-::ndk::ScopedAStatus TunerHidlService::openLnb(int lnbHandle, shared_ptr<ITunerLnb>* _aidl_return) {
++::ndk::ScopedAStatus TunerHidlService::openLnb(int64_t lnbHandle,
++                                               shared_ptr<ITunerLnb>* _aidl_return) {
+     HidlResult status;
+     sp<HidlILnb> lnb;
+     int id = TunerHelper::getResourceIdFromHandle(lnbHandle, LNB);
+@@ -256,7 +257,7 @@ binder_status_t TunerHidlService::instantiate() {
+ }
+ 
+ ::ndk::ScopedAStatus TunerHidlService::openDescrambler(
+-        int32_t /*descramblerHandle*/, shared_ptr<ITunerDescrambler>* _aidl_return) {
++        int64_t /*descramblerHandle*/, shared_ptr<ITunerDescrambler>* _aidl_return) {
+     HidlResult status;
+     sp<HidlIDescrambler> descrambler;
+     //int id = TunerHelper::getResourceIdFromHandle(descramblerHandle, DESCRAMBLER);
+@@ -410,8 +411,8 @@ vector<TunerFrontendInfo> TunerHidlService::getTRMFrontendInfos() {
+     return infos;
+ }
+ 
+-vector<int32_t> TunerHidlService::getTRMLnbHandles() {
+-    vector<int32_t> lnbHandles;
++vector<int64_t> TunerHidlService::getTRMLnbHandles() {
++    vector<int64_t> lnbHandles;
+     if (mTuner != nullptr) {
+         HidlResult res;
+         vector<HidlLnbId> lnbIds;
+diff --git a/services/tuner/hidl/TunerHidlService.h b/services/tuner/hidl/TunerHidlService.h
+index 526c5e65a0..1973a771aa 100644
+--- a/services/tuner/hidl/TunerHidlService.h
++++ b/services/tuner/hidl/TunerHidlService.h
+@@ -73,20 +73,19 @@ public:
+     virtual ~TunerHidlService();
+ 
+     ::ndk::ScopedAStatus getFrontendIds(vector<int32_t>* out_ids) override;
+-    ::ndk::ScopedAStatus getFrontendInfo(int32_t in_frontendHandle,
+-                                         FrontendInfo* _aidl_return) override;
+-    ::ndk::ScopedAStatus openFrontend(int32_t in_frontendHandle,
++    ::ndk::ScopedAStatus getFrontendInfo(int32_t in_id, FrontendInfo* _aidl_return) override;
++    ::ndk::ScopedAStatus openFrontend(int64_t in_frontendHandle,
+                                       shared_ptr<ITunerFrontend>* _aidl_return) override;
+-    ::ndk::ScopedAStatus openLnb(int32_t in_lnbHandle,
++    ::ndk::ScopedAStatus openLnb(int64_t in_lnbHandle,
+                                  shared_ptr<ITunerLnb>* _aidl_return) override;
+     ::ndk::ScopedAStatus openLnbByName(const std::string& in_lnbName,
+                                        shared_ptr<ITunerLnb>* _aidl_return) override;
+-    ::ndk::ScopedAStatus openDemux(int32_t in_demuxHandle,
++    ::ndk::ScopedAStatus openDemux(int64_t in_demuxHandle,
+                                    shared_ptr<ITunerDemux>* _aidl_return) override;
+     ::ndk::ScopedAStatus getDemuxCaps(DemuxCapabilities* _aidl_return) override;
+-    ::ndk::ScopedAStatus getDemuxInfo(int32_t in_demuxHandle, DemuxInfo* _aidl_return) override;
++    ::ndk::ScopedAStatus getDemuxInfo(int64_t in_demuxHandle, DemuxInfo* _aidl_return) override;
+     ::ndk::ScopedAStatus getDemuxInfoList(vector<DemuxInfo>* _aidl_return) override;
+-    ::ndk::ScopedAStatus openDescrambler(int32_t in_descramblerHandle,
++    ::ndk::ScopedAStatus openDescrambler(int64_t in_descramblerHandle,
+                                          shared_ptr<ITunerDescrambler>* _aidl_return) override;
+     ::ndk::ScopedAStatus getTunerHalVersion(int32_t* _aidl_return) override;
+     ::ndk::ScopedAStatus openSharedFilter(const string& in_filterToken,
+@@ -106,7 +105,7 @@ public:
+ private:
+     void updateTunerResources();
+     vector<TunerFrontendInfo> getTRMFrontendInfos();
+-    vector<int32_t> getTRMLnbHandles();
++    vector<int64_t> getTRMLnbHandles();
+     HidlResult getHidlFrontendIds(hidl_vec<HidlFrontendId>& ids);
+     HidlResult getHidlFrontendInfo(const int id, HidlFrontendInfo& info);
+     DemuxCapabilities getAidlDemuxCaps(const HidlDemuxCapabilities& caps);
+-- 
+2.43.0
+

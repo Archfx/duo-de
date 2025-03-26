@@ -1,0 +1,35 @@
+From 22a113615d945d2fa6d0a6f844e523f6d819bb17 Mon Sep 17 00:00:00 2001
+From: Vadim Caen <caen@google.com>
+Date: Fri, 15 Nov 2024 09:56:04 +0100
+Subject: [PATCH 360/436] Fix producer usage in virtual camera
+
+Per documentation the HAL should add its own usage flag on top of the
+ones provided by the hal stream config.
+
+Test: Camera CTS, VirtualCamera CTS
+Flag: EXEMPT bugfix
+Change-Id: I84e268929ee9afb94ac9fcf041cf6b3ba2419c0d
+---
+ services/camera/virtualcamera/VirtualCameraSession.cc | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/services/camera/virtualcamera/VirtualCameraSession.cc b/services/camera/virtualcamera/VirtualCameraSession.cc
+index e1815c769d..d074826b17 100644
+--- a/services/camera/virtualcamera/VirtualCameraSession.cc
++++ b/services/camera/virtualcamera/VirtualCameraSession.cc
+@@ -191,7 +191,11 @@ HalStream getHalStream(const Stream& stream) {
+   }
+   halStream.overrideDataSpace = stream.dataSpace;
+ 
+-  halStream.producerUsage = BufferUsage::GPU_RENDER_TARGET;
++  halStream.producerUsage = static_cast<BufferUsage>(
++      static_cast<int64_t>(stream.usage) |
++      static_cast<int64_t>(BufferUsage::CAMERA_OUTPUT) |
++      static_cast<int64_t>(BufferUsage::GPU_RENDER_TARGET));
++
+   halStream.supportOffline = false;
+   return halStream;
+ }
+-- 
+2.43.0
+

@@ -1,0 +1,109 @@
+From cfc29a3f1f7b2e1abd29979fe40abcdfa105edbd Mon Sep 17 00:00:00 2001
+From: Shunkai Yao <yaoshunkai@google.com>
+Date: Thu, 7 Nov 2024 22:15:19 +0000
+Subject: [PATCH 232/436] Add audio eraser effect filter in libaudiohal
+
+Remove eraser effect without audio_eraser_effect
+
+Flag: com.android.media.audio.audio_eraser_effect
+Bug: 367667349
+Test: Build
+Change-Id: Ia77fa36bcfb6e9d710e19f9ca0242a22bf5697ad
+---
+ media/libaudiohal/impl/Android.bp             |  1 +
+ .../impl/EffectsFactoryHalAidl.cpp            | 25 +++++++++++++++++++
+ .../libaudiohal/impl/EffectsFactoryHalAidl.h  |  5 ++++
+ 3 files changed, 31 insertions(+)
+
+diff --git a/media/libaudiohal/impl/Android.bp b/media/libaudiohal/impl/Android.bp
+index f5dec561c6..ddef8520b7 100644
+--- a/media/libaudiohal/impl/Android.bp
++++ b/media/libaudiohal/impl/Android.bp
+@@ -206,6 +206,7 @@ cc_defaults {
+     shared_libs: [
+         "android.hardware.common-V2-ndk",
+         "android.hardware.common.fmq-V1-ndk",
++        "com.android.media.audio-aconfig-cc",
+         "libaudio_aidl_conversion_common_cpp",
+         "libaudio_aidl_conversion_common_ndk",
+         "libaudio_aidl_conversion_common_ndk_cpp",
+diff --git a/media/libaudiohal/impl/EffectsFactoryHalAidl.cpp b/media/libaudiohal/impl/EffectsFactoryHalAidl.cpp
+index 2753906a23..ac69b267da 100644
+--- a/media/libaudiohal/impl/EffectsFactoryHalAidl.cpp
++++ b/media/libaudiohal/impl/EffectsFactoryHalAidl.cpp
+@@ -25,10 +25,12 @@
+ #include <error/expected_utils.h>
+ #include <aidl/android/media/audio/common/AudioStreamType.h>
+ #include <android/binder_manager.h>
++#include <com_android_media_audio.h>
+ #include <media/AidlConversionCppNdk.h>
+ #include <media/AidlConversionEffect.h>
+ #include <system/audio.h>
+ #include <system/audio_aidl_utils.h>
++#include <system/audio_effects/effect_uuid.h>
+ #include <utils/Log.h>
+ 
+ #include "AidlUtils.h"
+@@ -68,6 +70,7 @@ EffectsFactoryHalAidl::EffectsFactoryHalAidl(std::shared_ptr<IFactory> effectsFa
+           std::vector<Descriptor> list;
+           if (mFactory) {
+               mFactory->queryEffects(std::nullopt, std::nullopt, std::nullopt, &list).isOk();
++              filterHalDescriptors(list);
+           }
+           return list;
+       }()),
+@@ -180,6 +183,11 @@ status_t EffectsFactoryHalAidl::createEffect(const effect_uuid_t* uuid, int32_t
+ 
+     AudioUuid aidlUuid =
+             VALUE_OR_RETURN_STATUS(::aidl::android::legacy2aidl_audio_uuid_t_AudioUuid(*uuid));
++    if (!com_android_media_audio_audio_eraser_effect() && isAudioEraser(aidlUuid)) {
++        ALOGE("%s Audio eraser effect not supported yet", __func__);
++        return BAD_VALUE;
++    }
++
+     std::shared_ptr<IEffect> aidlEffect;
+     // Use EffectProxy interface instead of IFactory to create
+     const bool isProxy = isProxyEffect(aidlUuid);
+@@ -367,6 +375,23 @@ std::shared_ptr<const effectsConfig::Processings> EffectsFactoryHalAidl::getProc
+     return 0;
+ }
+ 
++
++bool EffectsFactoryHalAidl::isAudioEraser(const AudioUuid& uuid) {
++    return uuid == getEffectTypeUuidEraser();
++}
++
++void EffectsFactoryHalAidl::filterHalDescriptors(std::vector<Descriptor>& descs) {
++    if (!com_android_media_audio_audio_eraser_effect()) {
++        descs.erase(std::remove_if(descs.begin(), descs.end(),
++                                   [](const Descriptor& desc) {
++                                       return isAudioEraser(desc.common.id.type);
++                                   }),
++                    descs.end());
++    }
++
++    return;
++}
++
+ } // namespace effect
+ 
+ // When a shared library is built from a static library, even explicit
+diff --git a/media/libaudiohal/impl/EffectsFactoryHalAidl.h b/media/libaudiohal/impl/EffectsFactoryHalAidl.h
+index 3b8628c8fd..a3cd165b4d 100644
+--- a/media/libaudiohal/impl/EffectsFactoryHalAidl.h
++++ b/media/libaudiohal/impl/EffectsFactoryHalAidl.h
+@@ -94,6 +94,11 @@ class EffectsFactoryHalAidl final : public EffectsFactoryHalInterface {
+             std::vector<effect_descriptor_t>* descriptors);
+ 
+     bool isProxyEffect(const aidl::android::media::audio::common::AudioUuid& uuid) const;
++
++    static bool isAudioEraser(const aidl::android::media::audio::common::AudioUuid& uuid);
++
++    // filter out descriptors which can not supported by the framework
++    static void filterHalDescriptors(std::vector<Descriptor>& descs);
+ };
+ 
+ } // namespace effect
+-- 
+2.43.0
+

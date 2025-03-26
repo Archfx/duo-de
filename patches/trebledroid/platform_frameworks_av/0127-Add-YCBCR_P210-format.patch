@@ -1,0 +1,38 @@
+From 5b9d40731560858b9c5a473e7b4a22b274433921 Mon Sep 17 00:00:00 2001
+From: Eino-Ville Talvala <etalvala@google.com>
+Date: Wed, 23 Oct 2024 02:34:42 +0000
+Subject: [PATCH 127/436] Add YCBCR_P210 format
+
+YCBCR_P210 is a 10-bit 4:2:2 YCbCr color format
+
+Test: New tests added pass
+Flag: android.media.codec.p210_format_support
+Bug: 368395888
+Merged-In: If97d8d96c1a5de699b3559160414731d011c62ab
+Change-Id: If97d8d96c1a5de699b3559160414731d011c62ab
+---
+ media/aconfig/codec_fwk.aconfig | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/media/aconfig/codec_fwk.aconfig b/media/aconfig/codec_fwk.aconfig
+index ed1522b94e..ed53fe1be1 100644
+--- a/media/aconfig/codec_fwk.aconfig
++++ b/media/aconfig/codec_fwk.aconfig
+@@ -102,6 +102,14 @@ flag {
+   bug: "325550522"
+ }
+ 
++flag {
++  name: "p210_format_support"
++  is_exported: true
++  namespace: "codec_fwk"
++  description: "Feature flag for Android support for P210 YCbCr format"
++  bug: "368395888"
++}
++
+ flag {
+   name: "region_of_interest"
+   is_exported: true
+-- 
+2.43.0
+

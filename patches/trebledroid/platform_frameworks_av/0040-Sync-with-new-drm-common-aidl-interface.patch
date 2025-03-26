@@ -1,0 +1,55 @@
+From acd5def6b4bb1d9e8036565947c8a36ba01f68c8 Mon Sep 17 00:00:00 2001
+From: Huihong Luo <huisinro@google.com>
+Date: Fri, 27 Sep 2024 18:15:39 +0000
+Subject: [PATCH 040/436] Sync with new drm common aidl interface
+
+A common base aidl interface is introduced.
+
+This is safe (and unflagged) because the same types are simply moved to a different compilation unit, and it's only build time changes.
+
+Flag: EXEMPT bugfix
+Bug: 293945485
+Test: manaul
+(cherry picked from https://googleplex-android-review.googlesource.com/q/commit:9373e8311ccedf55da1a5ad101f6c25e578c9629)
+Merged-In: I54b1ebbb1e9e3467ecb401555c4de42dfcaf8ca6
+Change-Id: I54b1ebbb1e9e3467ecb401555c4de42dfcaf8ca6
+---
+ drm/libmediadrmrkp/Android.bp                 | 2 ++
+ drm/mediadrm/plugins/clearkey/aidl/Android.bp | 1 +
+ 2 files changed, 3 insertions(+)
+
+diff --git a/drm/libmediadrmrkp/Android.bp b/drm/libmediadrmrkp/Android.bp
+index b1a01e48f6..88f0571c97 100644
+--- a/drm/libmediadrmrkp/Android.bp
++++ b/drm/libmediadrmrkp/Android.bp
+@@ -14,6 +14,7 @@ cc_library {
+     ],
+     static_libs: [
+         "android.hardware.common-V2-ndk",
++        "android.hardware.drm.common-V1-ndk",
+         "android.hardware.drm-V1-ndk",
+         "android.hardware.security.rkp-V3-ndk",
+         "libbase",
+@@ -39,6 +40,7 @@ cc_binary {
+     ],
+     static_libs: [
+         "android.hardware.common-V2-ndk",
++        "android.hardware.drm.common-V1-ndk",
+         "android.hardware.drm-V1-ndk",
+         "android.hardware.security.rkp-V3-ndk",
+         "libbase",
+diff --git a/drm/mediadrm/plugins/clearkey/aidl/Android.bp b/drm/mediadrm/plugins/clearkey/aidl/Android.bp
+index 9a06bd263c..d22be78a7f 100644
+--- a/drm/mediadrm/plugins/clearkey/aidl/Android.bp
++++ b/drm/mediadrm/plugins/clearkey/aidl/Android.bp
+@@ -40,6 +40,7 @@ cc_defaults {
+ 
+     static_libs: [
+         "android.hardware.common-V2-ndk",
++        "android.hardware.drm.common-V1-ndk",
+         "android.hardware.drm-V1-ndk",
+         "libbase",
+         "libclearkeybase",
+-- 
+2.43.0
+

@@ -1,0 +1,31 @@
+From b2fa420f0ada8fe5f416814e24dbf429ce463b51 Mon Sep 17 00:00:00 2001
+From: Aaron Okano <aaronokano@google.com>
+Date: Mon, 23 Sep 2024 14:23:18 +0000
+Subject: [PATCH 009/436] Change IAfEffectChain::sendMetadata_l to pure virtual
+
+I encountered a "missing key function" error [1] for IAfEffectChain while experimenting with some compiler options, and the cause was that there is no definition for IAfEffectChain::sendMetadata_l. Because it does not appear that there is any intention of providing a default implementation in the base class, the appropriate fix for the error should be to make the function pure virtual instead.
+
+[1]: https://lld.llvm.org/missingkeyfunction
+Flag: EXEMPT refactor
+Change-Id: I5ee49b88c07945e9b4fb58a0c81e5816a0902b9c
+---
+ services/audioflinger/IAfEffect.h | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/services/audioflinger/IAfEffect.h b/services/audioflinger/IAfEffect.h
+index 3452e9491f..3a059b6f0d 100644
+--- a/services/audioflinger/IAfEffect.h
++++ b/services/audioflinger/IAfEffect.h
+@@ -345,7 +345,8 @@ public:
+ 
+     // sendMetadata_l() must be called with thread->mLock held
+     virtual void sendMetadata_l(const std::vector<playback_track_metadata_v7_t>& allMetadata,
+-        const std::optional<const std::vector<playback_track_metadata_v7_t>> spatializedMetadata);
++                                const std::optional<const std::vector<playback_track_metadata_v7_t>>
++                                        spatializedMetadata) = 0;
+ 
+     virtual void dump(int fd, const Vector<String16>& args) const = 0;
+ };
+-- 
+2.43.0
+

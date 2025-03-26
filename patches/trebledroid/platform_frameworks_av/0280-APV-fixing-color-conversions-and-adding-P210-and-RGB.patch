@@ -1,0 +1,625 @@
+From 7f64e01613db48d97df55d3f477e48967984643a Mon Sep 17 00:00:00 2001
+From: Fyodor Kyslov <kyslov@google.com>
+Date: Fri, 15 Nov 2024 20:17:33 +0000
+Subject: [PATCH 280/436] APV: fixing color conversions and adding P210 and
+ RGBA1010102 support
+
+This patch fixes the following:
+ - Adding P210 and RGBA1010102 support to APV codec
+ - moving color conversion functions to proper location
+ - advertising adaptive playback
+
+Test: CodecEncoderTest, CodecDecoderTest, CodecInfoTest
+Bug: 376770121
+Change-Id: Ic542c26d720763cd62c65f77239b12dbfbc3cb70
+---
+ media/codec2/components/apv/C2SoftApvDec.cpp  | 110 ++++++++++++++++-
+ media/codec2/components/apv/C2SoftApvDec.h    |  22 ++++
+ media/codec2/components/apv/C2SoftApvEnc.cpp  | 111 ++++++------------
+ media/codec2/components/apv/C2SoftApvEnc.h    |   3 -
+ .../components/base/SimpleC2Component.cpp     |  82 +++++++++++++
+ .../base/include/SimpleC2Component.h          |  15 +++
+ media/codec2/sfplugin/Codec2InfoBuilder.cpp   |   1 +
+ .../sfplugin/utils/Codec2CommonUtils.cpp      |  13 ++
+ media/libstagefright/data/media_codecs_sw.xml |   1 +
+ 9 files changed, 273 insertions(+), 85 deletions(-)
+
+diff --git a/media/codec2/components/apv/C2SoftApvDec.cpp b/media/codec2/components/apv/C2SoftApvDec.cpp
+index 0064cec6e8..77305ce55f 100644
+--- a/media/codec2/components/apv/C2SoftApvDec.cpp
++++ b/media/codec2/components/apv/C2SoftApvDec.cpp
+@@ -279,6 +279,10 @@ class C2SoftApvDec::IntfImpl : public SimpleInterface<void>::BaseParams {
+         if (isHalPixelFormatSupported((AHardwareBuffer_Format)HAL_PIXEL_FORMAT_YCBCR_P010)) {
+             pixelFormats.push_back(HAL_PIXEL_FORMAT_YCBCR_P010);
+         }
++        if (isHalPixelFormatSupported((AHardwareBuffer_Format)AHARDWAREBUFFER_FORMAT_YCbCr_P210)) {
++            pixelFormats.push_back(AHARDWAREBUFFER_FORMAT_YCbCr_P210);
++        }
++
+         // If color format surface isn't added to supported formats, there is no way to know
+         // when the color-format is configured to surface. This is necessary to be able to
+         // choose 10-bit format while decoding 10-bit clips in surface mode.
+@@ -374,6 +378,8 @@ class C2SoftApvDec::IntfImpl : public SimpleInterface<void>::BaseParams {
+         (void)mayBlock;
+         ALOGV("%s", __FUNCTION__);
+         // take default values for all unspecified fields, and coded values for specified ones
++        ALOGV("%s - coded range: %u, primaries: %u, transfer: %u, matrix: %u",
++             __func__, coded.v.range, coded.v.primaries, coded.v.transfer, coded.v.matrix);
+         me.set().range = coded.v.range == RANGE_UNSPECIFIED ? def.v.range : coded.v.range;
+         me.set().primaries =
+                 coded.v.primaries == PRIMARIES_UNSPECIFIED ? def.v.primaries : coded.v.primaries;
+@@ -717,6 +723,22 @@ static void copyBufferFromYUV420ToYV12(uint8_t* dstY, uint8_t* dstU, uint8_t* ds
+     }
+ }
+ 
++static void copyBufferP210(uint16_t *dstY, uint16_t *dstUV, const uint16_t *srcY,
++            const uint16_t *srcUV, size_t srcYStride, size_t srcUVStride, size_t dstYStride,
++            size_t dstUVStride, size_t width, size_t height) {
++    for (size_t y = 0; y < height; ++y) {
++        memcpy(dstY, srcY, width * sizeof(uint16_t));
++        srcY += srcYStride;
++        dstY += dstYStride;
++    }
++
++    for (size_t y = 0; y < height; ++y) {
++        memcpy(dstUV, srcUV, width * sizeof(uint16_t));
++        srcUV += srcUVStride;
++        dstUV += dstUVStride;
++    }
++}
++
+ static void copyBufferFromYUV422ToYV12(uint8_t* dstY, uint8_t* dstU, uint8_t* dstV,
+                                        const uint8_t* srcY, const uint8_t* srcU,
+                                        const uint8_t* srcV, size_t srcYStride, size_t srcUStride,
+@@ -992,28 +1014,81 @@ void C2SoftApvDec::process(const std::unique_ptr<C2Work>& work,
+     }
+ }
+ 
++void C2SoftApvDec::getVuiParams(VuiColorAspects* buffer) {
++    VuiColorAspects vuiColorAspects;
++    vuiColorAspects.primaries = buffer->primaries;
++    vuiColorAspects.transfer = buffer->transfer;
++    vuiColorAspects.coeffs = buffer->coeffs;
++    vuiColorAspects.fullRange = buffer->fullRange;
++
++    // convert vui aspects to C2 values if changed
++    if (!(vuiColorAspects == mBitstreamColorAspects)) {
++        mBitstreamColorAspects = vuiColorAspects;
++        ColorAspects sfAspects;
++        C2StreamColorAspectsInfo::input codedAspects = { 0u };
++        ColorUtils::convertIsoColorAspectsToCodecAspects(
++                vuiColorAspects.primaries, vuiColorAspects.transfer, vuiColorAspects.coeffs,
++                vuiColorAspects.fullRange, sfAspects);
++        if (!C2Mapper::map(sfAspects.mPrimaries, &codedAspects.primaries)) {
++            codedAspects.primaries = C2Color::PRIMARIES_UNSPECIFIED;
++        }
++        if (!C2Mapper::map(sfAspects.mRange, &codedAspects.range)) {
++            codedAspects.range = C2Color::RANGE_UNSPECIFIED;
++        }
++        if (!C2Mapper::map(sfAspects.mMatrixCoeffs, &codedAspects.matrix)) {
++            codedAspects.matrix = C2Color::MATRIX_UNSPECIFIED;
++        }
++        if (!C2Mapper::map(sfAspects.mTransfer, &codedAspects.transfer)) {
++            codedAspects.transfer = C2Color::TRANSFER_UNSPECIFIED;
++        }
++        ALOGV("colorAspects: primaries:%d, transfer:%d, coeffs:%d, fullRange:%d",
++                codedAspects.primaries, codedAspects.transfer, codedAspects.matrix,
++                codedAspects.range);
++        std::vector<std::unique_ptr<C2SettingResult>> failures;
++        mIntf->config({&codedAspects}, C2_MAY_BLOCK, &failures);
++    }
++}
++
+ status_t C2SoftApvDec::outputBuffer(const std::shared_ptr<C2BlockPool>& pool,
+                                     const std::unique_ptr<C2Work>& work) {
+     if (!(work && pool)) return BAD_VALUE;
+ 
+-    oapv_imgb_t* imgbOutput;
++    oapv_imgb_t* imgbOutput = nullptr;
+     std::shared_ptr<C2GraphicBlock> block;
+ 
+     if (ofrms.num_frms > 0) {
+-        oapv_frm_t* frm = &ofrms.frm[0];
+-        imgbOutput = frm->imgb;
++        for(int i = 0; i < ofrms.num_frms; i++) {
++            oapv_frm_t* frm = &ofrms.frm[0];
++            if(frm->pbu_type == OAPV_PBU_TYPE_PRIMARY_FRAME) {
++                imgbOutput = frm->imgb;
++                break;
++            }
++        }
++        if(imgbOutput == nullptr) {
++            ALOGW("No OAPV primary frame");
++            return false;
++        }
+     } else {
+         ALOGW("No output frames");
+         return false;
+     }
+     bool isMonochrome = OAPV_CS_GET_FORMAT(imgbOutput->cs) == OAPV_CS_YCBCR400;
+ 
++    // TODO: use bitstream color aspect after vui parsing
++    VuiColorAspects colorAspect;
++    colorAspect.primaries = 2;
++    colorAspect.transfer = 2;
++    colorAspect.coeffs = 2;
++    colorAspect.fullRange = 1;
++    getVuiParams(&colorAspect);
++
+     uint32_t format = HAL_PIXEL_FORMAT_YV12;
+     std::shared_ptr<C2StreamColorAspectsInfo::output> codedColorAspects;
+     if (OAPV_CS_GET_BIT_DEPTH(imgbOutput->cs) == 10 &&
+         mPixelFormatInfo->value != HAL_PIXEL_FORMAT_YCBCR_420_888) {
+         IntfImpl::Lock lock = mIntf->lock();
+         codedColorAspects = mIntf->getColorAspects_l();
++
+         bool allowRGBA1010102 = false;
+         if (codedColorAspects->primaries == C2Color::PRIMARIES_BT2020 &&
+             codedColorAspects->matrix == C2Color::MATRIX_BT2020 &&
+@@ -1070,7 +1145,34 @@ status_t C2SoftApvDec::outputBuffer(const std::shared_ptr<C2BlockPool>& pool,
+     size_t dstUStride = layout.planes[C2PlanarLayout::PLANE_U].rowInc;
+     size_t dstVStride = layout.planes[C2PlanarLayout::PLANE_V].rowInc;
+ 
+-    if (format == HAL_PIXEL_FORMAT_YCBCR_P010) {
++    if(format == AHARDWAREBUFFER_FORMAT_YCbCr_P210) {
++        if(OAPV_CS_GET_BIT_DEPTH(imgbOutput->cs) == 10) {
++            const uint16_t *srcY = (const uint16_t *)imgbOutput->a[0];
++            const uint16_t *srcU = (const uint16_t *)imgbOutput->a[1];
++            const uint16_t *srcV = (const uint16_t *)imgbOutput->a[2];
++            size_t srcYStride = imgbOutput->s[0] / 2;
++            size_t srcUStride = imgbOutput->s[1] / 2;
++            size_t srcVStride = imgbOutput->s[2] / 2;
++            dstYStride /= 2;
++            dstUStride /= 2;
++            dstVStride /= 2;
++            ALOGV("OAPV_CS_P210 buffer");
++            copyBufferP210((uint16_t *)dstY, (uint16_t *)dstU, srcY, srcU,
++                            srcYStride, srcUStride, dstYStride, dstUStride, mWidth, mHeight);
++        } else {
++            ALOGE("Not supported convder from bd:%d, format: %d(%s), to format: %d(%s)",
++                OAPV_CS_GET_BIT_DEPTH(imgbOutput->cs),
++                OAPV_CS_GET_FORMAT(imgbOutput->cs),
++                OAPV_CS_GET_FORMAT(imgbOutput->cs) == OAPV_CF_YCBCR420 ?
++                    "YUV420" : (OAPV_CS_GET_FORMAT(imgbOutput->cs) == OAPV_CF_YCBCR422 ?
++                                 "YUV422" : "UNKNOWN"),
++                format,
++                format == HAL_PIXEL_FORMAT_YCBCR_P010 ?
++                    "P010" : (format == HAL_PIXEL_FORMAT_YCBCR_420_888 ?
++                         "YUV420" : (format == HAL_PIXEL_FORMAT_YV12 ? "YV12" : "UNKNOWN"))
++                );
++        }
++    } else if(format == HAL_PIXEL_FORMAT_YCBCR_P010) {
+         if (OAPV_CS_GET_BIT_DEPTH(imgbOutput->cs) == 10) {
+             const uint16_t* srcY = (const uint16_t*)imgbOutput->a[0];
+             const uint16_t* srcU = (const uint16_t*)imgbOutput->a[1];
+diff --git a/media/codec2/components/apv/C2SoftApvDec.h b/media/codec2/components/apv/C2SoftApvDec.h
+index f5beb8f322..05afdb24cf 100644
+--- a/media/codec2/components/apv/C2SoftApvDec.h
++++ b/media/codec2/components/apv/C2SoftApvDec.h
+@@ -118,6 +118,26 @@ struct C2SoftApvDec final : public SimpleC2Component {
+     uint32_t mHeight;
+     bool mSignalledOutputEos;
+     bool mSignalledError;
++    // Color aspects. These are ISO values and are meant to detect changes in aspects to avoid
++    // converting them to C2 values for each frame
++    struct VuiColorAspects {
++        uint8_t primaries;
++        uint8_t transfer;
++        uint8_t coeffs;
++        uint8_t fullRange;
++
++        // default color aspects
++        VuiColorAspects()
++            : primaries(C2Color::PRIMARIES_UNSPECIFIED),
++            transfer(C2Color::TRANSFER_UNSPECIFIED),
++            coeffs(C2Color::MATRIX_UNSPECIFIED),
++            fullRange(C2Color::RANGE_UNSPECIFIED) { }
++
++        bool operator==(const VuiColorAspects &o) {
++            return primaries == o.primaries && transfer == o.transfer && coeffs == o.coeffs
++                && fullRange == o.fullRange;
++        }
++    } mBitstreamColorAspects;
+ 
+     oapvd_t oapvdHandle;
+     oapvm_t oapvmHandle;
+@@ -126,6 +146,8 @@ struct C2SoftApvDec final : public SimpleC2Component {
+ 
+     int outputCsp;
+ 
++    void getVuiParams(VuiColorAspects* buffer);
++
+     C2_DO_NOT_COPY(C2SoftApvDec);
+ };
+ 
+diff --git a/media/codec2/components/apv/C2SoftApvEnc.cpp b/media/codec2/components/apv/C2SoftApvEnc.cpp
+index a61cfd617b..d6a959796a 100644
+--- a/media/codec2/components/apv/C2SoftApvEnc.cpp
++++ b/media/codec2/components/apv/C2SoftApvEnc.cpp
+@@ -221,11 +221,14 @@ class C2SoftApvEnc::IntfImpl : public SimpleInterface<void>::BaseParams {
+                              .withSetter(CodedColorAspectsSetter, mColorAspects)
+                              .build());
+         std::vector<uint32_t> pixelFormats = {
+-                HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED,
++            HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED,
+         };
+         if (isHalPixelFormatSupported((AHardwareBuffer_Format)HAL_PIXEL_FORMAT_YCBCR_P010)) {
+             pixelFormats.push_back(HAL_PIXEL_FORMAT_YCBCR_P010);
+         }
++        if (isHalPixelFormatSupported((AHardwareBuffer_Format)AHARDWAREBUFFER_FORMAT_YCbCr_P210)) {
++            pixelFormats.push_back(AHARDWAREBUFFER_FORMAT_YCbCr_P210);
++        }
+         addParameter(DefineParam(mPixelFormat, C2_PARAMKEY_PIXEL_FORMAT)
+                              .withDefault(new C2StreamPixelFormatInfo::input(
+                                      0u, HAL_PIXEL_FORMAT_YCBCR_P010))
+@@ -623,12 +626,6 @@ c2_status_t C2SoftApvEnc::initEncoder() {
+         return C2_NO_MEMORY;
+     }
+ 
+-    /* Calculate SDR to HDR mapping values */
+-    mSdrToHdrMapping.clear();
+-    for (int32_t i = 0; i < 256; i++) {
+-        mSdrToHdrMapping.push_back((uint16_t)(i * 1023 / 255 + 0.5));
+-    }
+-
+     mStarted = true;
+     mInitEncoder = true;
+     return C2_OK;
+@@ -692,26 +689,48 @@ c2_status_t C2SoftApvEnc::setEncodeArgs(oapv_frms_t* inputFrames, const C2Graphi
+ 
+     switch (layout.type) {
+         case C2PlanarLayout::TYPE_RGB:
+-            [[fallthrough]];
+-        case C2PlanarLayout::TYPE_RGBA: {
+-            // TODO: Add RGBA1010102 support
+             ALOGE("Not supported RGB color format");
+             return C2_BAD_VALUE;
++        case C2PlanarLayout::TYPE_RGBA: {
++            [[fallthrough]];
++        }
++        case C2PlanarLayout::TYPE_YUVA: {
++            ALOGV("Convert from ABGR2101010 to P210");
++            uint16_t *dstY, *dstU, *dstV;
++            dstY = (uint16_t*)inputFrames->frm[0].imgb->a[0];
++            dstU = (uint16_t*)inputFrames->frm[0].imgb->a[1];
++            dstV = (uint16_t*)inputFrames->frm[0].imgb->a[2];
++            convertRGBA1010102ToYUV420Planar16(dstY, dstU, dstV, (uint32_t*)(input->data()[0]),
++                                                layout.planes[layout.PLANE_Y].rowInc / 4, width,
++                                                height, mColorAspects->matrix,
++                                                mColorAspects->range);
++            break;
+         }
+         case C2PlanarLayout::TYPE_YUV: {
+             if (IsP010(*input)) {
+                 if (mColorFormat == OAPV_CF_YCBCR422) {
+                     ColorConvertP010ToYUV422P10le(input, inputFrames->frm[0].imgb);
+                 } else if (mColorFormat == OAPV_CF_PLANAR2) {
+-                    ColorConvertP010ToP210(input, inputFrames->frm[0].imgb);
++                    uint16_t *srcY  = (uint16_t*)(input->data()[0]);
++                    uint16_t *srcUV = (uint16_t*)(input->data()[1]);
++                    uint16_t *dstY  = (uint16_t*)inputFrames->frm[0].imgb->a[0];
++                    uint16_t *dstUV = (uint16_t*)inputFrames->frm[0].imgb->a[1];
++                    convertP010ToP210(dstY, dstUV, srcY, srcUV,
++                                      input->width(), input->width(), input->width(),
++                                      input->height());
+                 } else {
+                     ALOGE("Not supported color format. %d", mColorFormat);
+                     return C2_BAD_VALUE;
+                 }
+             } else if (IsNV12(*input)) {
+-                ColorConvertNv12ToP210(input, inputFrames->frm[0].imgb);
+-            } else if (IsNV21(*input)) {
+-                ColorConvertNv12ToP210(input, inputFrames->frm[0].imgb);
++                uint8_t  *srcY  = (uint8_t*)input->data()[0];
++                uint8_t  *srcUV = (uint8_t*)input->data()[1];
++                uint16_t *dstY  = (uint16_t*)inputFrames->frm[0].imgb->a[0];
++                uint16_t *dstUV = (uint16_t*)inputFrames->frm[0].imgb->a[1];
++                convertSemiPlanar8ToP210(dstY, dstUV, srcY, srcUV,
++                                         input->width(), input->width(), input->width(),
++                                         input->width(), input->width(), input->height(),
++                                         CONV_FORMAT_I420);
+             } else if (IsYUV420(*input)) {
+                 return C2_BAD_VALUE;
+             } else if (IsI420(*input)) {
+@@ -731,46 +750,6 @@ c2_status_t C2SoftApvEnc::setEncodeArgs(oapv_frms_t* inputFrames, const C2Graphi
+     return C2_OK;
+ }
+ 
+-void C2SoftApvEnc::ColorConvertNv12ToP210(const C2GraphicView* const input, oapv_imgb_t* imgb) {
+-    auto width = input->width();
+-    auto height = input->height();
+-
+-    auto* yPlane = (uint8_t*)input->data()[0];
+-    auto* uvPlane = (uint8_t*)input->data()[1];
+-
+-    auto* dst = (uint16_t*)imgb->a[0];
+-    int32_t lumaOffset = 0;
+-    for (int32_t y = 0; y < height; ++y) {
+-        for (int32_t x = 0; x < width; ++x) {
+-            lumaOffset = y * width + x;
+-            dst[lumaOffset] = (mSdrToHdrMapping[yPlane[lumaOffset]] << 6) |
+-                              ((mSdrToHdrMapping[yPlane[lumaOffset]] & 0x300) >> 3);
+-        }
+-    }
+-
+-    auto* dst_uv = (uint16_t*)imgb->a[1];
+-    uint32_t uvDstStride = width;
+-    int32_t srcOffset = 0;
+-    int32_t dstOffset1 = 0, dstOffset2 = 0;
+-    int32_t tmp1 = 0, tmp2 = 0;
+-    for (int32_t y = 0; y < height / 2; ++y) {
+-        for (int32_t x = 0; x < width; x += 2) {
+-            srcOffset = y * width + x;
+-            dstOffset1 = (y * 2) * width + x;
+-            dstOffset2 = ((y * 2) + 1) * width + x;
+-
+-            tmp1 = (mSdrToHdrMapping[uvPlane[srcOffset]] << 6) |
+-                   ((mSdrToHdrMapping[uvPlane[srcOffset]] & 0x300) >> 3);
+-            tmp2 = (mSdrToHdrMapping[uvPlane[srcOffset + 1]] << 6) |
+-                   ((mSdrToHdrMapping[uvPlane[srcOffset + 1]] & 0x300) >> 3);
+-            dst_uv[dstOffset1] = (uint16_t)tmp1;
+-            dst_uv[dstOffset1 + 1] = (uint16_t)tmp2;
+-            dst_uv[dstOffset2] = (uint16_t)tmp1;
+-            dst_uv[dstOffset2 + 1] = (uint16_t)tmp2;
+-        }
+-    }
+-}
+-
+ C2Config::level_t C2SoftApvEnc::decisionApvLevel(int32_t width, int32_t height, int32_t fps,
+                                                  int32_t bitrate, int32_t band) {
+     C2Config::level_t level = C2Config::LEVEL_APV_1_BAND_0;
+@@ -885,30 +864,6 @@ C2Config::level_t C2SoftApvEnc::decisionApvLevel(int32_t width, int32_t height,
+     return level;
+ }
+ 
+-void C2SoftApvEnc::ColorConvertP010ToP210(const C2GraphicView* const input, oapv_imgb_t* imgb) {
+-    auto width = input->width();
+-    auto height = input->height();
+-
+-    auto* yPlane = (uint8_t*)input->data()[0];
+-    auto* uvPlane = (uint8_t*)input->data()[1];
+-    uint32_t uvStride = width * 2;
+-
+-    auto* src = yPlane;
+-    auto* dst = (uint8_t*)imgb->a[0];
+-    std::memcpy(dst, src, width * height * 2);
+-
+-    auto* dst_uv = (uint8_t*)imgb->a[1];
+-    int32_t offset1 = 0, offset2 = 0;
+-    for (int32_t y = 0; y < height / 2; ++y) {
+-        offset1 = (y * 2) * uvStride;
+-        offset2 = (y * 2 + 1) * uvStride;
+-        src = uvPlane + (y * uvStride);
+-
+-        std::memcpy(dst_uv + offset1, src, uvStride);
+-        std::memcpy(dst_uv + offset2, src, uvStride);
+-    }
+-}
+-
+ void C2SoftApvEnc::ColorConvertP010ToYUV422P10le(const C2GraphicView* const input,
+                                                  oapv_imgb_t* imgb) {
+     uint32_t width = input->width();
+diff --git a/media/codec2/components/apv/C2SoftApvEnc.h b/media/codec2/components/apv/C2SoftApvEnc.h
+index 441c663357..fc4ad7d264 100644
+--- a/media/codec2/components/apv/C2SoftApvEnc.h
++++ b/media/codec2/components/apv/C2SoftApvEnc.h
+@@ -65,9 +65,7 @@ struct C2SoftApvEnc final : public SimpleC2Component {
+ 
+     void showEncoderParams(oapve_cdesc_t* cdsc);
+ 
+-    void ColorConvertNv12ToP210(const C2GraphicView* const input, oapv_imgb_t* imgb);
+     void ColorConvertP010ToYUV422P10le(const C2GraphicView* const input, oapv_imgb_t* imgb);
+-    void ColorConvertP010ToP210(const C2GraphicView* const input, oapv_imgb_t* imgb);
+ 
+     void createCsdData(const std::unique_ptr<C2Work>& work, oapv_bitb_t* bitb,
+                        uint32_t encodedSize);
+@@ -106,7 +104,6 @@ struct C2SoftApvEnc final : public SimpleC2Component {
+     oapve_t mEncoderId;
+     oapvm_t mMetaId;
+     uint8_t* mBitstreamBuf = nullptr;
+-    std::vector<uint16_t> mSdrToHdrMapping;
+     bool mReceivedFirstFrame = false;
+     C2_DO_NOT_COPY(C2SoftApvEnc);
+ };
+diff --git a/media/codec2/components/base/SimpleC2Component.cpp b/media/codec2/components/base/SimpleC2Component.cpp
+index aec6523e8a..a03f24ffac 100644
+--- a/media/codec2/components/base/SimpleC2Component.cpp
++++ b/media/codec2/components/base/SimpleC2Component.cpp
+@@ -463,6 +463,19 @@ void convertP010ToYUV420Planar16(uint16_t *dstY, uint16_t *dstU, uint16_t *dstV,
+     }
+ }
+ 
++void convertP010ToP210(uint16_t *dstY, uint16_t *dstUV, const uint16_t *srcY, const uint16_t *srcUV,
++                       size_t srcUVStride, size_t dstUVStride, size_t width, size_t height) {
++    std::memcpy(dstY, srcY, width * height * sizeof(uint16_t));
++
++    int32_t offsetTop, offsetBot;
++    for (size_t y = 0; y < (height + 1) / 2; ++y) {
++        offsetTop = (y * 2) * dstUVStride;
++        offsetBot = (y * 2 + 1) * dstUVStride;
++        std::memcpy(dstUV + offsetTop, srcUV + (y * srcUVStride), srcUVStride * sizeof(uint16_t));
++        std::memcpy(dstUV + offsetBot, srcUV + (y * srcUVStride), srcUVStride * sizeof(uint16_t));
++    }
++}
++
+ static const int16_t bt709Matrix_10bit[2][3][3] = {
+     { { 218, 732, 74 }, { -117, -395, 512 }, { 512, -465, -47 } }, /* RANGE_FULL */
+     { { 186, 627, 63 }, { -103, -345, 448 }, { 448, -407, -41 } }, /* RANGE_LIMITED */
+@@ -517,6 +530,45 @@ void convertRGBA1010102ToYUV420Planar16(uint16_t* dstY, uint16_t* dstU, uint16_t
+     }
+ }
+ 
++void convertRGBA1010102ToP210(uint16_t* dstY, uint16_t* dstUV, const uint32_t* srcRGBA,
++                              size_t srcRGBStride, size_t width, size_t height,
++                              C2Color::matrix_t colorMatrix, C2Color::range_t colorRange) {
++    uint16_t r, g, b;
++    int32_t i32Y, i32U, i32V;
++    uint16_t zeroLvl =  colorRange == C2Color::RANGE_FULL ? 0 : 64;
++    uint16_t maxLvlLuma =  colorRange == C2Color::RANGE_FULL ? 1023 : 940;
++    uint16_t maxLvlChroma =  colorRange == C2Color::RANGE_FULL ? 1023 : 960;
++    // set default range as limited
++    if (colorRange != C2Color::RANGE_FULL) {
++        colorRange = C2Color::RANGE_LIMITED;
++    }
++    const int16_t(*weights)[3] = (colorMatrix == C2Color::MATRIX_BT709)
++                                         ? bt709Matrix_10bit[colorRange - 1]
++                                         : bt2020Matrix_10bit[colorRange - 1];
++
++    for (size_t y = 0; y < height; ++y) {
++        for (size_t x = 0; x < width; ++x) {
++            b = (srcRGBA[x]  >> 20) & 0x3FF;
++            g = (srcRGBA[x]  >> 10) & 0x3FF;
++            r = srcRGBA[x] & 0x3FF;
++
++            i32Y = ((r * weights[0][0] + g * weights[0][1] + b * weights[0][2] + 512) >> 10) +
++                   zeroLvl;
++            dstY[x] = (CLIP3(zeroLvl, i32Y, maxLvlLuma) << 6) & 0xFFC0;
++            if (x % 2 == 0) {
++                i32U = ((r * weights[1][0] + g * weights[1][1] + b * weights[1][2] + 512) >> 10) +
++                       512;
++                i32V = ((r * weights[2][0] + g * weights[2][1] + b * weights[2][2] + 512) >> 10) +
++                       512;
++                dstUV[x] = (CLIP3(zeroLvl, i32U, maxLvlChroma) << 6) & 0xFFC0;
++                dstUV[x + 1] = (CLIP3(zeroLvl, i32V, maxLvlChroma) << 6) & 0xFFC0;
++            }
++        }
++        srcRGBA += srcRGBStride;
++        dstY += width;
++    }
++}
++
+ void convertPlanar16ToY410OrRGBA1010102(uint8_t* dst, const uint16_t* srcY, const uint16_t* srcU,
+                                         const uint16_t* srcV, size_t srcYStride, size_t srcUStride,
+                                         size_t srcVStride, size_t dstStride, size_t width,
+@@ -631,6 +683,36 @@ void convertPlanar8ToYV12(uint8_t* dstY, uint8_t* dstU, uint8_t* dstV, const uin
+                                    isMonochrome);
+     }
+ }
++
++void convertSemiPlanar8ToP210(uint16_t *dstY, uint16_t *dstUV,
++                              const uint8_t *srcY, const uint8_t *srcUV,
++                              size_t srcYStride, size_t srcUVStride,
++                              size_t dstYStride, size_t dstUVStride,
++                              uint32_t width, uint32_t height,
++                              CONV_FORMAT_T format) {
++  if (format != CONV_FORMAT_I420) {
++    ALOGE("No support for semi-planar8 to P210. format is %d", format);
++    return;
++  }
++
++  for (int32_t y = 0; y < height; ++y) {
++    for (int32_t x = 0; x < width; ++x) {
++      dstY[x] = ((uint16_t)((double)srcY[x] * 1023 / 255 + 0.5) << 6) & 0xFFC0;
++    }
++    dstY += dstYStride;
++    srcY += srcYStride;
++  }
++
++  for (int32_t y = 0; y < height / 2; ++y) {
++    for (int32_t x = 0; x < width; ++x) {
++      dstUV[x] = dstUV[dstUVStride + x] =
++          ((uint16_t)((double)srcUV[x] * 1023 / 255 + 0.5) << 6) & 0xFFC0;
++    }
++    srcUV += srcUVStride;
++    dstUV += dstUVStride << 1;
++  }
++}
++
+ std::unique_ptr<C2Work> SimpleC2Component::WorkQueue::pop_front() {
+     std::unique_ptr<C2Work> work = std::move(mQueue.front().work);
+     mQueue.pop_front();
+diff --git a/media/codec2/components/base/include/SimpleC2Component.h b/media/codec2/components/base/include/SimpleC2Component.h
+index b28c47e0fa..4306e556c1 100644
+--- a/media/codec2/components/base/include/SimpleC2Component.h
++++ b/media/codec2/components/base/include/SimpleC2Component.h
+@@ -68,10 +68,19 @@ void convertP010ToYUV420Planar16(uint16_t *dstY, uint16_t *dstU, uint16_t *dstV,
+                                  size_t dstUStride, size_t dstVStride, size_t width,
+                                  size_t height, bool isMonochrome = false);
+ 
++void convertP010ToP210(uint16_t *dstY, uint16_t *dstUV, const uint16_t *srcY,
++                       const uint16_t *srcUV, size_t srcUVStride, size_t dstUVStride,
++                       size_t width, size_t height);
++
+ void convertRGBA1010102ToYUV420Planar16(uint16_t* dstY, uint16_t* dstU, uint16_t* dstV,
+                                         const uint32_t* srcRGBA, size_t srcRGBStride, size_t width,
+                                         size_t height, C2Color::matrix_t colorMatrix,
+                                         C2Color::range_t colorRange);
++
++void convertRGBA1010102ToP210(uint16_t* dstY, uint16_t* dstUV, const uint32_t* srcRGBA,
++                              size_t srcRGBStride, size_t width, size_t height,
++                              C2Color::matrix_t colorMatrix, C2Color::range_t colorRange);
++
+ void convertPlanar16ToY410OrRGBA1010102(uint8_t* dst, const uint16_t* srcY, const uint16_t* srcU,
+                                         const uint16_t* srcV, size_t srcYStride, size_t srcUStride,
+                                         size_t srcVStride, size_t dstStride, size_t width,
+@@ -96,6 +105,12 @@ void convertPlanar8ToYV12(uint8_t* dstY, uint8_t* dstU, uint8_t* dstV, const uin
+                           size_t srcUStride, size_t srcVStride, size_t dstYStride,
+                           size_t dstUStride, size_t dstVStride, uint32_t width, uint32_t height,
+                           bool isMonochrome, CONV_FORMAT_T format);
++void convertSemiPlanar8ToP210(uint16_t *dstY, uint16_t *dstUV,
++                              const uint8_t *srcY, const uint8_t *srcUV,
++                              size_t srcYStride, size_t srcUVStride,
++                              size_t dstYStride, size_t dstUVStride,
++                              uint32_t width, uint32_t height,
++                              CONV_FORMAT_T format);
+ 
+ class SimpleC2Component
+         : public C2Component, public std::enable_shared_from_this<SimpleC2Component> {
+diff --git a/media/codec2/sfplugin/Codec2InfoBuilder.cpp b/media/codec2/sfplugin/Codec2InfoBuilder.cpp
+index 692f7003e4..fd242a18b6 100644
+--- a/media/codec2/sfplugin/Codec2InfoBuilder.cpp
++++ b/media/codec2/sfplugin/Codec2InfoBuilder.cpp
+@@ -740,6 +740,7 @@ status_t Codec2InfoBuilder::buildMediaCodecList(MediaCodecListWriter* writer) {
+                     pixelFormatMap[HAL_PIXEL_FORMAT_YCBCR_P010]    = COLOR_FormatYUVP010;
+                     pixelFormatMap[HAL_PIXEL_FORMAT_RGBA_1010102]  = COLOR_Format32bitABGR2101010;
+                     pixelFormatMap[HAL_PIXEL_FORMAT_RGBA_FP16]     = COLOR_Format64bitABGRFloat;
++                    pixelFormatMap[AHARDWAREBUFFER_FORMAT_YCbCr_P210]    = COLOR_FormatYUVP210;
+ 
+                     std::shared_ptr<C2StoreFlexiblePixelFormatDescriptorsInfo> pixelFormatInfo;
+                     std::vector<std::unique_ptr<C2Param>> heapParams;
+diff --git a/media/codec2/sfplugin/utils/Codec2CommonUtils.cpp b/media/codec2/sfplugin/utils/Codec2CommonUtils.cpp
+index 7a33af4096..aa87e976f9 100644
+--- a/media/codec2/sfplugin/utils/Codec2CommonUtils.cpp
++++ b/media/codec2/sfplugin/utils/Codec2CommonUtils.cpp
+@@ -64,6 +64,13 @@ static bool isP010Allowed() {
+     return kVendorApiLevel >= __ANDROID_API_T__;
+ }
+ 
++static bool isP210Allowed() {
++    static const int32_t kVendorApiLevel =
++        base::GetIntProperty<int32_t>("ro.vendor.api_level", 0);
++
++    return kVendorApiLevel > __ANDROID_API_V__;
++}
++
+ bool isHalPixelFormatSupported(AHardwareBuffer_Format format) {
+     // HAL_PIXEL_FORMAT_YCBCR_P010 requirement was added in T VSR, although it could have been
+     // supported prior to this.
+@@ -76,6 +83,12 @@ bool isHalPixelFormatSupported(AHardwareBuffer_Format format) {
+         return false;
+     }
+ 
++    // P210 is not available before Android B
++    if (format == (AHardwareBuffer_Format)AHARDWAREBUFFER_FORMAT_YCbCr_P210 &&
++            !isP210Allowed()) {
++        return false;
++    }
++
+     // Default scenario --- the consumer is display or GPU
+     const AHardwareBuffer_Desc consumableForDisplayOrGpu = {
+             .width = 320,
+diff --git a/media/libstagefright/data/media_codecs_sw.xml b/media/libstagefright/data/media_codecs_sw.xml
+index 4601831f9b..20c97dc45c 100644
+--- a/media/libstagefright/data/media_codecs_sw.xml
++++ b/media/libstagefright/data/media_codecs_sw.xml
+@@ -261,6 +261,7 @@
+             <Limit name="bitrate" range="1-240000000"/>
+             <Limit name="block-size" value="16x16" />
+             <Limit name="block-count" range="1-32768" /> <!-- max 4096x2048 equivalent -->
++            <Feature name="adaptive-playback" />
+             <Attribute name="software-codec"/>
+         </MediaCodec>
+     </Decoders>
+-- 
+2.43.0
+

@@ -1,0 +1,42 @@
+From 386bc6657e62de385afa303b009666e4a6632cbb Mon Sep 17 00:00:00 2001
+From: Atneya Nair <atneya@google.com>
+Date: Mon, 25 Nov 2024 20:40:58 -0800
+Subject: [PATCH 356/436] Fix MMAP stream perm check
+
+Fix issue in refactoring APM permission checking where the MMAP path
+was missing a call to the perm check.
+
+Fixes: 380479018
+Flag: EXEMPT bugfix
+Test: atest CtsNativeMediaAAudioTestCases
+Change-Id: I85b9a8329c988d469d28f45e06c1d159a127ef7c
+---
+ .../managerdefault/AudioPolicyManager.cpp            | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index 303f313dc8..c635feb051 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -3013,6 +3013,18 @@ AudioPolicyManager::getInputForAttr(audio_attributes_t attributes,
+         }
+         device = inputDesc->getDevice();
+         ALOGV("%s reusing MMAP input %d for session %d", __FUNCTION__, requestedInput, session);
++        auto permRes = mpClientInterface->checkPermissionForInput(attributionSource, permReq);
++        if (!permRes.has_value()) return base::unexpected {permRes.error()};
++        if (!permRes.value()) {
++            return base::unexpected{Status::fromExceptionCode(
++                    EX_SECURITY, String8::format("%s: %s missing perms for source %d mix %d vdi %d"
++                        "hotword? %d callredir? %d", __func__, attributionSource.toString().c_str(),
++                                                 static_cast<int>(permReq.source),
++                                                 static_cast<int>(permReq.mixType),
++                                                 permReq.virtualDeviceId,
++                                                 permReq.isHotword,
++                                                 permReq.isCallRedir))};
++        }
+     } else {
+         if (attributes.source == AUDIO_SOURCE_REMOTE_SUBMIX &&
+                 extractAddressFromAudioAttributes(attributes).has_value()) {
+-- 
+2.43.0
+

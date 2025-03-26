@@ -1,0 +1,32 @@
+From 6c84214caae2a81b06988536fabcde688522a075 Mon Sep 17 00:00:00 2001
+From: Sham Rathod <shamrathod@google.com>
+Date: Tue, 5 Nov 2024 15:16:55 +0000
+Subject: [PATCH 203/436] Add java lib for extractor flag
+
+Bug: 370061501
+Test: atest MediaExtractorTest
+Change-Id: Ib8d7cdc95faf0357ebaf52e6b5c9ab6f855b8d17
+---
+ media/module/extractors/Android.bp | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/media/module/extractors/Android.bp b/media/module/extractors/Android.bp
+index e29d3e6069..cbaabe30f4 100644
+--- a/media/module/extractors/Android.bp
++++ b/media/module/extractors/Android.bp
+@@ -81,6 +81,12 @@ aconfig_declarations {
+     srcs: ["extractor.aconfig"],
+ }
+ 
++java_aconfig_library {
++    name: "android.media.extractor.flags-aconfig-java",
++    aconfig_declarations: "android.media.extractor.flags-aconfig",
++    defaults: ["framework-minus-apex-aconfig-java-defaults"],
++}
++
+ cc_aconfig_library {
+     name: "android.media.extractor.flags-aconfig-cc",
+     aconfig_declarations: "android.media.extractor.flags-aconfig",
+-- 
+2.43.0
+

@@ -1,0 +1,111 @@
+From 33b620a42b81f9ad350f1dc5f049730bcd24f15a Mon Sep 17 00:00:00 2001
+From: "Chaitanya Cheemala (xWF)" <ccheemala@google.com>
+Date: Wed, 27 Nov 2024 14:37:59 +0000
+Subject: [PATCH 359/436] Revert "Mark @FlaggedApi flags as exported"
+
+Revert submission 30583310-fix-non-exported-flags
+
+Reason for revert: Likely culprit for b/381233132  - verifying through ABTD before revert submission. This is part of the standard investigation process, and does not mean your CL will be reverted.
+
+Reverted changes: /q/submissionid:30583310-fix-non-exported-flags
+
+Change-Id: Id0bce130d996af3a92ae8dd0138ca4595b51022b
+---
+ media/aconfig/codec_fwk.aconfig             | 2 --
+ media/aconfig/mediacodec_flags.aconfig      | 1 -
+ media/audio/aconfig/audio_framework.aconfig | 7 -------
+ 3 files changed, 10 deletions(-)
+
+diff --git a/media/aconfig/codec_fwk.aconfig b/media/aconfig/codec_fwk.aconfig
+index a1413b7de1..af82982e05 100644
+--- a/media/aconfig/codec_fwk.aconfig
++++ b/media/aconfig/codec_fwk.aconfig
+@@ -130,7 +130,6 @@ flag {
+   namespace: "codec_fwk"
+   description: "Feature flag for exposing number of input slots"
+   bug: "159891571"
+-  is_exported: true
+ }
+ 
+ flag {
+@@ -208,7 +207,6 @@ flag {
+   namespace: "codec_fwk"
+   description: "Feature flag for subsession codec metrics"
+   bug: "363382811"
+-  is_exported: true
+ }
+ 
+ flag {
+diff --git a/media/aconfig/mediacodec_flags.aconfig b/media/aconfig/mediacodec_flags.aconfig
+index 2679920457..3cc9a1a688 100644
+--- a/media/aconfig/mediacodec_flags.aconfig
++++ b/media/aconfig/mediacodec_flags.aconfig
+@@ -26,5 +26,4 @@ flag {
+   namespace: "codec_fwk"
+   description: "Feature flags for large audio frame support"
+   bug: "297219557"
+-  is_exported: true
+ }
+diff --git a/media/audio/aconfig/audio_framework.aconfig b/media/audio/aconfig/audio_framework.aconfig
+index d157a9740e..14504171d4 100644
+--- a/media/audio/aconfig/audio_framework.aconfig
++++ b/media/audio/aconfig/audio_framework.aconfig
+@@ -30,7 +30,6 @@ flag {
+        "New privileged permission to allow bypassing concurrent audio"
+        "capture rules."
+     bug: "374751406"
+-    is_exported: true
+ }
+ 
+ flag {
+@@ -83,7 +82,6 @@ flag {
+     description: "Feature flag for Dolby AC-4 level 4 AudioFormat encoding."
+     is_fixed_read_only: true
+     bug: "266537650"
+-    is_exported: true
+ }
+ 
+ # TODO remove
+@@ -160,7 +158,6 @@ flag {
+     namespace: "media_audio"
+     description: "Playback monitoring flag used when player muted by port volume"
+     bug: "319515324"
+-    is_exported: true
+ }
+ 
+ flag {
+@@ -207,7 +204,6 @@ flag {
+         "Enable Java and native functions to get"
+         "multiple routed device ids"
+     bug: "367816690"
+-    is_exported: true
+ }
+ 
+ flag {
+@@ -222,7 +218,6 @@ flag {
+     namespace: "media_audio"
+     description: "spatializer reports effective channel masks"
+     bug: "377582613"
+-    is_exported: true
+ }
+ 
+ flag {
+@@ -230,7 +225,6 @@ flag {
+     namespace: "media_audio"
+     description: "Support new AudioAttributes usage for speaker cleanup"
+     bug: "355050846"
+-    is_exported: true
+ }
+ 
+ flag {
+@@ -238,7 +232,6 @@ flag {
+     namespace: "media_audio"
+     description: "Surface new API method for returning speaker layout channel mask for devices"
+     bug: "337522902"
+-    is_exported: true
+ }
+ 
+ # TODO remove
+-- 
+2.43.0
+

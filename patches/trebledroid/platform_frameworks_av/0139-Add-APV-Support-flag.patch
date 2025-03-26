@@ -1,0 +1,38 @@
+From ca3a89b4923c640609e9a63d7d204e4103847597 Mon Sep 17 00:00:00 2001
+From: Fyodor Kyslov <kyslov@google.com>
+Date: Sat, 12 Oct 2024 03:05:50 +0000
+Subject: [PATCH 139/436] Add APV Support flag
+
+Adding APV support flag
+
+Bug: 363333555
+Bug: 375464302
+Test: WIP
+Flag: android.media.codec.apv_support
+Change-Id: I316ccaa89e4d4dbd63fa5de4403662f81100464e
+---
+ media/aconfig/codec_fwk.aconfig | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/media/aconfig/codec_fwk.aconfig b/media/aconfig/codec_fwk.aconfig
+index 14540b7f62..c061cf8641 100644
+--- a/media/aconfig/codec_fwk.aconfig
++++ b/media/aconfig/codec_fwk.aconfig
+@@ -12,6 +12,14 @@ flag {
+   bug: "201479783"
+ }
+ 
++flag {
++  name: "apv_support"
++  is_exported: true
++  namespace: "codec_fwk"
++  description: "Feature flag for Android support for APV Content"
++  bug: "375464302"
++}
++
+ flag {
+   name: "codec_buffer_state_cleanup"
+   namespace: "codec_fwk"
+-- 
+2.43.0
+

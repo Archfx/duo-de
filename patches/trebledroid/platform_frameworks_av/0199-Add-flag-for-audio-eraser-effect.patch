@@ -1,0 +1,35 @@
+From 80d8238a14050b5f856636e87c227903273d1e47 Mon Sep 17 00:00:00 2001
+From: Shunkai Yao <yaoshunkai@google.com>
+Date: Tue, 5 Nov 2024 00:50:17 +0000
+Subject: [PATCH 199/436] Add flag for audio eraser effect
+
+Flag: com.android.media.audio.audio_eraser_effect
+Bug: 367667349
+Test: m com.android.media.audio-aconfig-cc
+Test: m com.android.media.audio-aconfig-java
+Change-Id: I22e3316835528afeba60a7e93b714ff61ebf832a
+---
+ media/audio/aconfig/audio.aconfig | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/media/audio/aconfig/audio.aconfig b/media/audio/aconfig/audio.aconfig
+index 9221c04098..146d95f84a 100644
+--- a/media/audio/aconfig/audio.aconfig
++++ b/media/audio/aconfig/audio.aconfig
+@@ -34,6 +34,13 @@ flag {
+     bug: "338089555"
+ }
+ 
++flag {
++    name: "audio_eraser_effect"
++    namespace: "media_audio"
++    description: "Enable audio eraser effect"
++    bug: "367667349"
++}
++
+ flag {
+     name: "bluetooth_mac_address_anonymization"
+     namespace: "media_audio"
+-- 
+2.43.0
+

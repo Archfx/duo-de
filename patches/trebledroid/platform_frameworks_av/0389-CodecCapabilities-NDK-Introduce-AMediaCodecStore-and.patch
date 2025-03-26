@@ -1,0 +1,1810 @@
+From d88caa41af777ab38763008ab76097b8047d123d Mon Sep 17 00:00:00 2001
+From: Songyue Han <songyueh@google.com>
+Date: Tue, 29 Oct 2024 23:31:27 +0000
+Subject: [PATCH 389/436] CodecCapabilities NDK: Introduce AMediaCodecStore and
+ AMediaCodecInfo.
+
+Bug: 363320865
+Test: build
+Change-Id: I27f51bbc848e75071492c2284279bb680eef5155
+---
+ media/ndk/Android.bp                         |   4 +
+ media/ndk/NdkMediaCodecInfo.cpp              | 520 +++++++++++++++
+ media/ndk/NdkMediaCodecInfoPriv.h            | 122 ++++
+ media/ndk/NdkMediaCodecStore.cpp             | 254 ++++++++
+ media/ndk/include/media/NdkMediaCodecInfo.h  | 625 +++++++++++++++++++
+ media/ndk/include/media/NdkMediaCodecStore.h | 144 +++++
+ media/ndk/libmediandk.map.txt                |  44 ++
+ 7 files changed, 1713 insertions(+)
+ create mode 100644 media/ndk/NdkMediaCodecInfo.cpp
+ create mode 100644 media/ndk/NdkMediaCodecInfoPriv.h
+ create mode 100644 media/ndk/NdkMediaCodecStore.cpp
+ create mode 100644 media/ndk/include/media/NdkMediaCodecInfo.h
+ create mode 100644 media/ndk/include/media/NdkMediaCodecStore.h
+
+diff --git a/media/ndk/Android.bp b/media/ndk/Android.bp
+index b250a03f67..e7fc1065f0 100644
+--- a/media/ndk/Android.bp
++++ b/media/ndk/Android.bp
+@@ -93,6 +93,8 @@ cc_library_shared {
+     srcs: [
+         "NdkJavaVMHelper.cpp",
+         "NdkMediaCodec.cpp",
++        "NdkMediaCodecInfo.cpp",
++        "NdkMediaCodecStore.cpp",
+         "NdkMediaCrypto.cpp",
+         "NdkMediaDataSource.cpp",
+         "NdkMediaExtractor.cpp",
+@@ -131,6 +133,8 @@ cc_library_shared {
+         "libbase",
+         "libdatasource",
+         "libmedia",
++        "libmedia_codeclist",
++        "libmedia_codeclist_capabilities",
+         "libmediadrm",
+         "libmedia_omx",
+         "libmedia_jni_utils",
+diff --git a/media/ndk/NdkMediaCodecInfo.cpp b/media/ndk/NdkMediaCodecInfo.cpp
+new file mode 100644
+index 0000000000..82ceb61564
+--- /dev/null
++++ b/media/ndk/NdkMediaCodecInfo.cpp
+@@ -0,0 +1,520 @@
++/*
++ * Copyright (C) 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++//#define LOG_NDEBUG 0
++#define LOG_TAG "NdkMediaCodecInfo"
++
++#include "NdkMediaCodecInfoPriv.h"
++
++#include <media/NdkMediaFormatPriv.h>
++
++using namespace android;
++
++extern "C" {
++
++// Utils
++
++EXPORT
++void AIntRange_delete(AIntRange *range) {
++    free(range);
++}
++
++EXPORT
++void ADoubleRange_delete(ADoubleRange *range) {
++    free(range);
++}
++
++// AMediaCodecInfo
++
++EXPORT
++const char* AMediaCodecInfo_getCanonicalName(const AMediaCodecInfo *info) {
++    if (info == nullptr || info->mInfo == nullptr) {
++        return nullptr;
++    }
++
++    return info->mInfo->getCodecName();
++}
++
++EXPORT
++bool AMediaCodecInfo_isEncoder(const AMediaCodecInfo *info) {
++    return info->mInfo->isEncoder();
++}
++
++EXPORT
++bool AMediaCodecInfo_isVendor(const AMediaCodecInfo *info) {
++    int32_t attributes = info->mInfo->getAttributes();
++    return (attributes & android::MediaCodecInfo::kFlagIsVendor);
++}
++
++EXPORT
++AMediaCodecType AMediaCodecInfo_getMediaCodecInfoType(const AMediaCodecInfo *info) {
++    if (info == nullptr || info->mInfo == nullptr) {
++        return (AMediaCodecType)0;
++    }
++
++    int32_t attributes = info->mInfo->getAttributes();
++
++    if (attributes & android::MediaCodecInfo::kFlagIsSoftwareOnly) {
++        return SOFTWARE_ONLY;
++    }
++    if (attributes & android::MediaCodecInfo::kFlagIsHardwareAccelerated) {
++        return HARDWARE_ACCELERATED;
++    }
++    return SOFTWARE_WITH_DEVICE_ACCESS;
++}
++
++EXPORT
++const char* AMediaCodecInfo_getMediaType(const AMediaCodecInfo *info) {
++    if (info == nullptr || info->mInfo == nullptr) {
++        return nullptr;
++    }
++
++    return info->mMediaType.c_str();
++}
++
++EXPORT
++int32_t AMediaCodecInfo_getMaxSupportedInstances(const AMediaCodecInfo *info) {
++    if (info == nullptr) {
++        return -1;
++    }
++
++    return info->mCodecCaps->getMaxSupportedInstances();
++}
++
++EXPORT
++int32_t AMediaCodecInfo_isFeatureSupported(const AMediaCodecInfo *info, const char *featureName) {
++    if (featureName == nullptr) {
++        return -1;
++    }
++    return info->mCodecCaps->isFeatureSupported(std::string(featureName));
++}
++
++EXPORT
++int32_t AMediaCodecInfo_isFeatureRequired(const AMediaCodecInfo *info, const char *featureName) {
++    if (featureName == nullptr) {
++        return -1;
++    }
++    return info->mCodecCaps->isFeatureRequired(std::string(featureName));
++}
++
++EXPORT
++int32_t AMediaCodecInfo_isFormatSupported(const AMediaCodecInfo *info, const AMediaFormat *format) {
++    if (format == nullptr) {
++        return -1;
++    }
++
++    sp<AMessage> nativeFormat;
++    AMediaFormat_getFormat(format, &nativeFormat);
++
++    return info->mCodecCaps->isFormatSupported(nativeFormat);
++}
++
++EXPORT
++media_status_t AMediaCodecInfo_getAudioCapabilities(const AMediaCodecInfo *info,
++        const ACodecAudioCapabilities **outAudioCaps) {
++    if (info == nullptr || info->mInfo == nullptr) {
++        return AMEDIA_ERROR_INVALID_PARAMETER;
++    }
++
++    *outAudioCaps = info->mAAudioCaps.get();
++
++    if ((*outAudioCaps) == nullptr) {
++        return AMEDIA_ERROR_UNSUPPORTED;
++    }
++
++    return AMEDIA_OK;
++}
++
++EXPORT
++media_status_t AMediaCodecInfo_getVideoCapabilities(const AMediaCodecInfo *info,
++        const ACodecVideoCapabilities **outVideoCaps) {
++    if (info == nullptr || info->mInfo == nullptr) {
++        return AMEDIA_ERROR_INVALID_PARAMETER;
++    }
++
++    *outVideoCaps = info->mAVideoCaps.get();
++
++    if ((*outVideoCaps) == nullptr) {
++        return AMEDIA_ERROR_UNSUPPORTED;
++    }
++
++    return AMEDIA_OK;
++}
++
++EXPORT
++media_status_t AMediaCodecInfo_getEncoderCapabilities(const AMediaCodecInfo *info,
++        const ACodecEncoderCapabilities **outEncoderCaps) {
++    if (info == nullptr || info->mInfo == nullptr) {
++        return AMEDIA_ERROR_INVALID_PARAMETER;
++    }
++
++    *outEncoderCaps = info->mAEncoderCaps.get();
++
++    if ((*outEncoderCaps) == nullptr) {
++        return AMEDIA_ERROR_UNSUPPORTED;
++    }
++
++    return AMEDIA_OK;
++}
++
++// ACodecAudioCapabilities
++
++EXPORT
++media_status_t ACodecAudioCapabilities_getBitrateRange(const ACodecAudioCapabilities *audioCaps,
++        AIntRange *outRange) {
++    if (audioCaps == nullptr || outRange == nullptr) {
++        return AMEDIA_ERROR_INVALID_PARAMETER;
++    }
++
++    const Range<int32_t>& bitrateRange = audioCaps->mAudioCaps->getBitrateRange();
++    outRange->mLower = bitrateRange.lower();
++    outRange->mUpper = bitrateRange.upper();
++
++    return AMEDIA_OK;
++}
++
++EXPORT
++media_status_t ACodecAudioCapabilities_getSupportedSampleRates(
++        const ACodecAudioCapabilities *audioCaps, const int **outArrayPtr, size_t *outCount) {
++    if (audioCaps == nullptr || outArrayPtr == nullptr || outCount == nullptr) {
++        return AMEDIA_ERROR_INVALID_PARAMETER;
++    }
++
++    if (audioCaps->mSampleRates.empty()) {
++        return AMEDIA_ERROR_UNSUPPORTED;
++    }
++
++    *outArrayPtr = audioCaps->mSampleRates.data();
++    *outCount = audioCaps->mSampleRates.size();
++
++    return AMEDIA_OK;
++}
++
++EXPORT
++media_status_t ACodecAudioCapabilities_getSupportedSampleRateRanges(
++        const ACodecAudioCapabilities *audioCaps, const AIntRange **outArrayPtr, size_t *outCount) {
++    if (audioCaps == nullptr || outArrayPtr == nullptr || outCount == nullptr) {
++        return AMEDIA_ERROR_INVALID_PARAMETER;
++    }
++
++    *outArrayPtr = audioCaps->mSampleRateRanges.data();
++    *outCount = audioCaps->mSampleRateRanges.size();
++
++    return AMEDIA_OK;
++}
++
++EXPORT
++int32_t ACodecAudioCapabilities_getMaxInputChannelCount(const ACodecAudioCapabilities *audioCaps) {
++    if (audioCaps == nullptr) {
++        return -1;
++    }
++    return audioCaps->mAudioCaps->getMaxInputChannelCount();
++}
++
++EXPORT
++int32_t ACodecAudioCapabilities_getMinInputChannelCount(const ACodecAudioCapabilities *audioCaps) {
++    if (audioCaps == nullptr) {
++        return -1;
++    }
++    return audioCaps->mAudioCaps->getMinInputChannelCount();
++}
++
++EXPORT
++media_status_t ACodecAudioCapabilities_getInputChannelCountRanges(
++        const ACodecAudioCapabilities *audioCaps, const AIntRange **outArrayPtr, size_t *outCount) {
++    if (audioCaps == nullptr || outArrayPtr == nullptr || outCount == nullptr) {
++        return AMEDIA_ERROR_INVALID_PARAMETER;
++    }
++
++    *outArrayPtr = audioCaps->mInputChannelCountRanges.data();
++    *outCount = audioCaps->mInputChannelCountRanges.size();
++
++    return AMEDIA_OK;
++}
++
++EXPORT
++int32_t ACodecAudioCapabilities_isSampleRateSupported(const ACodecAudioCapabilities *audioCaps,
++        int32_t sampleRate) {
++    if (audioCaps == nullptr) {
++        return -1;
++    }
++    return audioCaps->mAudioCaps->isSampleRateSupported(sampleRate);
++}
++
++// ACodecPerformancePoint
++
++EXPORT
++ACodecPerformancePoint* ACodecPerformancePoint_create(int32_t width, int32_t height,
++        int32_t frameRate) {
++    return new ACodecPerformancePoint(
++            std::make_shared<VideoCapabilities::PerformancePoint>(width, height, frameRate));
++}
++
++EXPORT
++media_status_t ACodecPerformancePoint_delete(ACodecPerformancePoint *performancePoint) {
++    if (performancePoint == nullptr) {
++        return AMEDIA_ERROR_INVALID_PARAMETER;
++    }
++
++    delete performancePoint;
++
++    return AMEDIA_OK;
++}
++
++EXPORT
++bool ACodecPerformancePoint_coversFormat(const ACodecPerformancePoint *performancePoint,
++        const AMediaFormat *format) {
++    sp<AMessage> nativeFormat;
++    AMediaFormat_getFormat(format, &nativeFormat);
++
++    return performancePoint->mPerformancePoint->covers(nativeFormat);
++}
++
++EXPORT
++bool ACodecPerformancePoint_covers(const ACodecPerformancePoint *one,
++        const ACodecPerformancePoint *another) {
++    return one->mPerformancePoint->covers(*(another->mPerformancePoint));
++}
++
++EXPORT
++bool ACodecPerformancePoint_equals(const ACodecPerformancePoint *one,
++        const ACodecPerformancePoint *another) {
++    return one->mPerformancePoint->equals(*(another->mPerformancePoint));
++}
++
++// ACodecVideoCapabilities
++
++EXPORT
++media_status_t ACodecVideoCapabilities_getBitrateRange(const ACodecVideoCapabilities *videoCaps,
++        AIntRange *outRange) {
++    if (videoCaps == nullptr || outRange == nullptr) {
++        return AMEDIA_ERROR_INVALID_PARAMETER;
++    }
++
++    const Range<int32_t>& bitrateRange = videoCaps->mVideoCaps->getBitrateRange();
++    outRange->mLower = bitrateRange.lower();
++    outRange->mUpper = bitrateRange.upper();
++
++    return AMEDIA_OK;
++}
++
++EXPORT
++media_status_t ACodecVideoCapabilities_getSupportedWidths(const ACodecVideoCapabilities *videoCaps,
++        AIntRange *outRange) {
++    if (videoCaps == nullptr || outRange == nullptr) {
++        return AMEDIA_ERROR_INVALID_PARAMETER;
++    }
++
++    const Range<int32_t>& supportedWidths = videoCaps->mVideoCaps->getSupportedWidths();
++    outRange->mLower = supportedWidths.lower();
++    outRange->mUpper = supportedWidths.upper();
++
++    return AMEDIA_OK;
++}
++
++EXPORT
++media_status_t ACodecVideoCapabilities_getSupportedHeights(const ACodecVideoCapabilities *videoCaps,
++        AIntRange *outRange) {
++    if (videoCaps == nullptr || outRange == nullptr) {
++        return AMEDIA_ERROR_INVALID_PARAMETER;
++    }
++
++    const Range<int32_t>& supportedHeights = videoCaps->mVideoCaps->getSupportedHeights();
++    outRange->mLower = supportedHeights.lower();
++    outRange->mUpper = supportedHeights.upper();
++
++    return AMEDIA_OK;
++}
++
++EXPORT
++int32_t ACodecVideoCapabilities_getWidthAlignment(const ACodecVideoCapabilities *videoCaps) {
++    if (videoCaps == nullptr) {
++        return -1;
++    }
++    return videoCaps->mVideoCaps->getWidthAlignment();
++}
++
++EXPORT
++int32_t ACodecVideoCapabilities_getHeightAlignment(const ACodecVideoCapabilities *videoCaps) {
++    if (videoCaps == nullptr) {
++        return -1;
++    }
++    return videoCaps->mVideoCaps->getHeightAlignment();
++}
++
++EXPORT
++media_status_t ACodecVideoCapabilities_getSupportedFrameRates(
++        const ACodecVideoCapabilities *videoCaps, AIntRange *outRange) {
++    if (videoCaps == nullptr || outRange == nullptr) {
++        return AMEDIA_ERROR_INVALID_PARAMETER;
++    }
++
++    const Range<int32_t>& frameRateRange = videoCaps->mVideoCaps->getSupportedFrameRates();
++    outRange->mLower = frameRateRange.lower();
++    outRange->mUpper = frameRateRange.upper();
++
++    return AMEDIA_OK;
++}
++
++EXPORT
++media_status_t ACodecVideoCapabilities_getSupportedWidthsFor(
++        const ACodecVideoCapabilities *videoCaps, int32_t height, AIntRange *outRange) {
++    if (videoCaps == nullptr || outRange == nullptr) {
++        return AMEDIA_ERROR_INVALID_PARAMETER;
++    }
++
++    std::optional<Range<int32_t>> widthRange = videoCaps->mVideoCaps->getSupportedWidthsFor(height);
++    if (!widthRange) {
++        return AMEDIA_ERROR_UNSUPPORTED;
++    }
++
++    outRange->mLower = widthRange.value().lower();
++    outRange->mUpper = widthRange.value().upper();
++
++    return AMEDIA_OK;
++}
++
++EXPORT
++media_status_t ACodecVideoCapabilities_getSupportedHeightsFor(
++        const ACodecVideoCapabilities *videoCaps, int32_t width, AIntRange *outRange) {
++    if (videoCaps == nullptr || outRange == nullptr) {
++        return AMEDIA_ERROR_INVALID_PARAMETER;
++    }
++
++    std::optional<Range<int32_t>> heightRange
++            = videoCaps->mVideoCaps->getSupportedHeightsFor(width);
++    if (!heightRange) {
++        return AMEDIA_ERROR_UNSUPPORTED;
++    }
++
++    outRange->mLower = heightRange.value().lower();
++    outRange->mUpper = heightRange.value().upper();
++
++    return AMEDIA_OK;
++}
++
++EXPORT
++media_status_t ACodecVideoCapabilities_getSupportedFrameRatesFor(
++        const ACodecVideoCapabilities *videoCaps, int32_t width, int32_t height,
++        ADoubleRange *outRange) {
++    if (videoCaps == nullptr || outRange == nullptr) {
++        return AMEDIA_ERROR_INVALID_PARAMETER;
++    }
++
++    std::optional<Range<double>> frameRates
++            = videoCaps->mVideoCaps->getSupportedFrameRatesFor(width, height);
++    if (!frameRates) {
++        return AMEDIA_ERROR_UNSUPPORTED;
++    }
++
++    outRange->mLower = frameRates.value().lower();
++    outRange->mUpper = frameRates.value().upper();
++
++    return AMEDIA_OK;
++}
++
++EXPORT
++media_status_t ACodecVideoCapabilities_getAchievableFrameRatesFor(
++        const ACodecVideoCapabilities *videoCaps, int32_t width, int32_t height,
++        ADoubleRange *outRange) {
++    if (videoCaps == nullptr || outRange == nullptr) {
++        return AMEDIA_ERROR_INVALID_PARAMETER;
++    }
++
++    std::optional<Range<double>> frameRates
++            = videoCaps->mVideoCaps->getAchievableFrameRatesFor(width, height);
++    if (!frameRates) {
++        return AMEDIA_ERROR_UNSUPPORTED;
++    }
++
++    outRange->mLower = frameRates.value().lower();
++    outRange->mUpper = frameRates.value().upper();
++
++    return AMEDIA_OK;
++}
++
++EXPORT
++media_status_t ACodecVideoCapabilities_getSupportedPerformancePoints(
++        const ACodecVideoCapabilities *videoCaps,
++        const ACodecPerformancePoint **outPerformancePointArray, size_t *outCount) {
++    if (videoCaps == nullptr) {
++        return AMEDIA_ERROR_INVALID_PARAMETER;
++    }
++
++    *outPerformancePointArray = videoCaps->mPerformancePoints.data();
++    *outCount = videoCaps->mPerformancePoints.size();
++
++    return AMEDIA_OK;
++}
++
++EXPORT
++int32_t ACodecVideoCapabilities_areSizeAndRateSupported(const ACodecVideoCapabilities *videoCaps,
++        int32_t width, int32_t height, double frameRate) {
++    if (videoCaps == nullptr) {
++        return -1;
++    }
++    return videoCaps->mVideoCaps->areSizeAndRateSupported(width, height, frameRate);
++}
++
++EXPORT
++int32_t ACodecVideoCapabilities_isSizeSupported(const ACodecVideoCapabilities *videoCaps,
++        int32_t width, int32_t height) {
++    if (videoCaps == nullptr) {
++        return -1;
++    }
++    return videoCaps->mVideoCaps->isSizeSupported(width, height);
++}
++
++// ACodecEncoderCapabilities
++
++EXPORT
++media_status_t ACodecEncoderCapabilities_getQualityRange(
++        const ACodecEncoderCapabilities *encoderCaps, AIntRange *outRange) {
++    if (encoderCaps == nullptr || outRange == nullptr) {
++        return AMEDIA_ERROR_INVALID_PARAMETER;
++    }
++
++    const Range<int32_t>& qualityRange = encoderCaps->mEncoderCaps->getQualityRange();
++    outRange->mLower = qualityRange.lower();
++    outRange->mUpper = qualityRange.upper();
++
++    return AMEDIA_OK;
++}
++
++EXPORT
++media_status_t ACodecEncoderCapabilities_getComplexityRange(
++        const ACodecEncoderCapabilities *encoderCaps, AIntRange *outRange) {
++    if (encoderCaps == nullptr || outRange == nullptr) {
++        return AMEDIA_ERROR_INVALID_PARAMETER;
++    }
++
++    const Range<int32_t>& complexityRange = encoderCaps->mEncoderCaps->getComplexityRange();
++    outRange->mLower = complexityRange.lower();
++    outRange->mUpper = complexityRange.upper();
++
++    return AMEDIA_OK;
++}
++
++int32_t ACodecEncoderCapabilities_isBitrateModeSupported(
++        const ACodecEncoderCapabilities *encoderCaps, ABiterateMode mode) {
++    if (encoderCaps == nullptr) {
++        return -1;
++    }
++    return encoderCaps->mEncoderCaps->isBitrateModeSupported(mode);
++}
++
++
++}
+\ No newline at end of file
+diff --git a/media/ndk/NdkMediaCodecInfoPriv.h b/media/ndk/NdkMediaCodecInfoPriv.h
+new file mode 100644
+index 0000000000..6d9188b1d2
+--- /dev/null
++++ b/media/ndk/NdkMediaCodecInfoPriv.h
+@@ -0,0 +1,122 @@
++/*
++ * Copyright (C) 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#ifndef _NDK_MEDIA_CODEC_INFO_PRIV_H
++#define _NDK_MEDIA_CODEC_INFO_PRIV_H
++
++#include <media/MediaCodecInfo.h>
++#include <media/NdkMediaCodecInfo.h>
++
++struct ACodecAudioCapabilities {
++    std::shared_ptr<android::AudioCapabilities> mAudioCaps;
++
++    std::vector<int> mSampleRates;
++    std::vector<AIntRange> mSampleRateRanges;
++    std::vector<AIntRange> mInputChannelCountRanges;
++
++    void initSampleRates() {
++        mSampleRates = mAudioCaps->getSupportedSampleRates();
++    }
++
++    void initSampleRateRanges() {
++        const std::vector<android::Range<int>>& sampleRateRanges
++                = mAudioCaps->getSupportedSampleRateRanges();
++        for (auto it = sampleRateRanges.begin(); it != sampleRateRanges.end(); it++) {
++            mSampleRateRanges.emplace_back(it->lower(), it->upper());
++        }
++    }
++
++    void initInputChannelCountRanges() {
++        const std::vector<android::Range<int>>& inputChannels
++                = mAudioCaps->getInputChannelCountRanges();
++        for (auto it = inputChannels.begin(); it != inputChannels.end(); it++) {
++            mInputChannelCountRanges.emplace_back(it->lower(), it->upper());
++        }
++    }
++
++    ACodecAudioCapabilities(std::shared_ptr<android::AudioCapabilities> audioCaps)
++            : mAudioCaps(audioCaps) {
++        initSampleRates();
++        initSampleRateRanges();
++        initInputChannelCountRanges();
++    }
++};
++
++struct ACodecPerformancePoint {
++    std::shared_ptr<const android::VideoCapabilities::PerformancePoint> mPerformancePoint;
++
++    ACodecPerformancePoint(std::shared_ptr<const android::VideoCapabilities::PerformancePoint>
++            performancePoint) : mPerformancePoint(performancePoint) {}
++};
++
++struct ACodecVideoCapabilities {
++    std::shared_ptr<android::VideoCapabilities> mVideoCaps;
++
++    std::vector<ACodecPerformancePoint> mPerformancePoints;
++
++    void initPerformancePoints() {
++        const std::vector<android::VideoCapabilities::PerformancePoint>& performancePoints
++            = mVideoCaps->getSupportedPerformancePoints();
++        for (auto it = performancePoints.begin(); it != performancePoints.end(); it++) {
++            mPerformancePoints.emplace_back(
++                    std::shared_ptr<const android::VideoCapabilities::PerformancePoint>(&(*it)));
++        }
++    }
++
++    ACodecVideoCapabilities(std::shared_ptr<android::VideoCapabilities> videoCaps)
++            : mVideoCaps(videoCaps) {
++        initPerformancePoints();
++    }
++};
++
++struct ACodecEncoderCapabilities {
++    std::shared_ptr<android::EncoderCapabilities> mEncoderCaps;
++
++    ACodecEncoderCapabilities(std::shared_ptr<android::EncoderCapabilities> encoderCaps)
++            : mEncoderCaps(encoderCaps) {}
++};
++
++struct AMediaCodecInfo {
++    std::string mName;
++    android::sp<android::MediaCodecInfo> mInfo;
++    std::string mMediaType;
++    std::shared_ptr<android::CodecCapabilities> mCodecCaps;
++
++    std::shared_ptr<const ACodecAudioCapabilities> mAAudioCaps;
++    std::shared_ptr<const ACodecVideoCapabilities> mAVideoCaps;
++    std::shared_ptr<const ACodecEncoderCapabilities> mAEncoderCaps;
++
++    AMediaCodecInfo(std::string name, android::sp<android::MediaCodecInfo> info,
++            std::shared_ptr<android::CodecCapabilities> codecCaps, std::string mediaType)
++            : mName(name), mInfo(info), mMediaType(mediaType), mCodecCaps(codecCaps) {
++        if (!mName.empty() && mInfo != nullptr && !mMediaType.empty() && mCodecCaps != nullptr) {
++            if (mCodecCaps->getAudioCapabilities() != nullptr) {
++                mAAudioCaps = std::make_shared<const ACodecAudioCapabilities>(
++                        mCodecCaps->getAudioCapabilities());
++            }
++            if (mCodecCaps->getVideoCapabilities() != nullptr) {
++                mAVideoCaps = std::make_shared<const ACodecVideoCapabilities>(
++                        mCodecCaps->getVideoCapabilities());
++            }
++            if (mCodecCaps->getEncoderCapabilities() != nullptr) {
++                mAEncoderCaps = std::make_shared<const ACodecEncoderCapabilities>(
++                    mCodecCaps->getEncoderCapabilities());
++            }
++        }
++    }
++};
++
++#endif //_NDK_MEDIA_CODEC_INFO_PRIV_H
+\ No newline at end of file
+diff --git a/media/ndk/NdkMediaCodecStore.cpp b/media/ndk/NdkMediaCodecStore.cpp
+new file mode 100644
+index 0000000000..d911593e6a
+--- /dev/null
++++ b/media/ndk/NdkMediaCodecStore.cpp
+@@ -0,0 +1,254 @@
++/*
++ * Copyright (C) 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++//#define LOG_NDEBUG 0
++#define LOG_TAG "NdkMediaCodecStore"
++
++#include "NdkMediaCodecInfoPriv.h"
++
++#include <media/NdkMediaCodecStore.h>
++#include <media/NdkMediaFormatPriv.h>
++
++#include <media/IMediaCodecList.h>
++
++#include <media/MediaCodecInfo.h>
++#include <media/stagefright/foundation/AMessage.h>
++#include <media/stagefright/foundation/ADebug.h>
++#include <media/stagefright/MediaCodecConstants.h>
++#include <media/stagefright/MediaCodecList.h>
++
++using namespace android;
++
++static sp<IMediaCodecList> sCodecList;
++static std::vector<AMediaCodecSupportedMediaType> sMediaTypes;
++static std::vector<AMediaCodecInfo> sCodecInfos;
++
++static std::map<std::string, AMediaCodecInfo> sNameToInfoMap;
++static std::map<std::string, std::vector<AMediaCodecInfo>> sTypeToInfoList;
++
++static void initMediaTypes() {
++    if (sCodecList == nullptr) {
++        sCodecList = MediaCodecList::getInstance();
++    }
++
++    std::map<std::string, AMediaCodecSupportedMediaType> typesInfoMap;
++    std::vector<std::string> mediaTypes; // Keep the order of media types appearing in sCodecList.
++    for (size_t idx = 0; idx < sCodecList->countCodecs(); idx++) {
++        sp<MediaCodecInfo> codecInfo = sCodecList->getCodecInfo(idx);
++        if (codecInfo == nullptr) {
++            ALOGW("NULL MediaCodecInfo in MediaCodecList");
++            continue;
++        }
++        Vector<AString> codecMediaTypes;
++        codecInfo->getSupportedMediaTypes(&codecMediaTypes);
++        for (AString codecMediaType : codecMediaTypes) {
++            std::string mediaType = std::string(codecMediaType.c_str());
++
++            // Excludes special codecs from NDK
++            const std::shared_ptr<CodecCapabilities> codecCaps
++                    = codecInfo->getCodecCapsFor(mediaType.c_str());
++            if (codecCaps->isFeatureSupported(FEATURE_SpecialCodec)) {
++                continue;
++            }
++
++            auto it = typesInfoMap.find(mediaType);
++            if (it == typesInfoMap.end()) {
++                AMediaCodecSupportedMediaType supportedType = { mediaType.c_str(), 0 };
++                it = typesInfoMap.emplace(mediaType, supportedType).first;
++                mediaTypes.push_back(mediaType);
++            }
++            uint32_t &mode = it->second.mMode;
++            mode |= (codecInfo->isEncoder() ? AMediaCodecSupportedMediaType::FLAG_ENCODER
++                                            : AMediaCodecSupportedMediaType::FLAG_DECODER);
++        }
++    }
++
++    // sMediaTypes keeps the order of media types appearing in sCodecList.
++    for (std::string &type : mediaTypes) {
++        sMediaTypes.push_back(typesInfoMap.find(type)->second);
++    }
++}
++
++static void initCodecInfoMap() {
++    if (sCodecList == nullptr) {
++        sCodecList = MediaCodecList::getInstance();
++    }
++
++    for (size_t idx = 0; idx < sCodecList->countCodecs(); idx++) {
++        sp<MediaCodecInfo> codecInfo = sCodecList->getCodecInfo(idx);
++        if (codecInfo == nullptr) {
++            ALOGW("NULL MediaCodecInfo in MediaCodecList");
++            continue;
++        }
++
++        Vector<AString> codecMediaTypes;
++        codecInfo->getSupportedMediaTypes(&codecMediaTypes);
++        bool useTypeSuffix = codecMediaTypes.size() > 1;
++        for (AString codecMediaType : codecMediaTypes) {
++            std::string mediaType = std::string(codecMediaType.c_str());
++
++            // Excludes special codecs from NDK
++            const std::shared_ptr<CodecCapabilities> codecCaps
++                    = codecInfo->getCodecCapsFor(mediaType.c_str());
++            if (codecCaps->isFeatureSupported(FEATURE_SpecialCodec)) {
++                continue;
++            }
++
++            // get the type name after the slash. e.g. video/x.on2.vp8
++            size_t slashIx = mediaType.find_last_of('/');
++            if (slashIx == std::string::npos) {
++                slashIx = 0;
++            } else {
++                slashIx++;
++            }
++            std::string ndkBaseName = std::string(codecInfo->getCodecName());
++            if (useTypeSuffix) {
++                // If there are multiple supported media types,
++                // add the type to the end of the name to disambiguate names.
++                ndkBaseName += "." + mediaType.substr(slashIx);
++            }
++
++            int32_t copyIx = 0;
++            std::string ndkName;
++            // if a name is already registered,
++            // add ".1", ".2", ... at the end to disambiguate names.
++            while (true) {
++                ndkName = ndkBaseName;
++                if (copyIx > 0) {
++                    ndkName += "." + std::to_string(copyIx);
++                }
++                if (!sNameToInfoMap.contains(ndkName)) {
++                    break;
++                }
++                copyIx++;
++            }
++
++            AMediaCodecInfo info = AMediaCodecInfo(ndkName, codecInfo, codecCaps, mediaType);
++            sCodecInfos.push_back(info);
++            sNameToInfoMap.emplace(ndkName, info);
++
++            auto it = sTypeToInfoList.find(mediaType);
++            if (it == sTypeToInfoList.end()) {
++                std::vector<AMediaCodecInfo> infoList;
++                infoList.push_back(info);
++                sTypeToInfoList.emplace(mediaType, infoList);
++            } else {
++                it->second.push_back(info);
++            }
++        }
++    }
++}
++
++static bool codecHandlesFormat(const AMediaCodecInfo codecInfo,
++        sp<AMessage> format, bool isEncoder) {
++    return codecInfo.mCodecCaps->isEncoder() == isEncoder
++            && codecInfo.mCodecCaps->isFormatSupported(format);
++}
++
++static media_status_t findNextCodecForFormat(
++        const AMediaFormat *format, bool isEncoder, const AMediaCodecInfo **outCodecInfo) {
++    if (outCodecInfo == nullptr) {
++        return AMEDIA_ERROR_INVALID_PARAMETER;
++    }
++
++    if (sCodecInfos.empty()) {
++        initCodecInfoMap();
++    }
++
++    std::unique_ptr<std::vector<AMediaCodecInfo>> infos;
++    sp<AMessage> nativeFormat;
++    if (format == nullptr) {
++        infos = std::unique_ptr<std::vector<AMediaCodecInfo>>(&sCodecInfos);
++    } else {
++        AMediaFormat_getFormat(format, &nativeFormat);
++        AString mime;
++        if (!nativeFormat->findString(KEY_MIME, &mime)) {
++            return AMEDIA_ERROR_INVALID_PARAMETER;
++        }
++
++        std::string mediaType = std::string(mime.c_str());
++        auto it = sTypeToInfoList.find(mediaType);
++        if (it == sTypeToInfoList.end()) {
++            return AMEDIA_ERROR_UNSUPPORTED;
++        }
++        infos = std::unique_ptr<std::vector<AMediaCodecInfo>>(&(it->second));
++    }
++
++    bool found = *outCodecInfo == nullptr;
++    for (const AMediaCodecInfo &info : *infos) {
++        if (found && (format == nullptr
++                || codecHandlesFormat(info, nativeFormat, isEncoder))) {
++            *outCodecInfo = &info;
++            return AMEDIA_OK;
++        }
++        if (*outCodecInfo == &info) {
++            found = true;
++        }
++
++    }
++    *outCodecInfo = nullptr;
++    return AMEDIA_ERROR_UNSUPPORTED;
++}
++
++extern "C" {
++
++EXPORT
++media_status_t AMediaCodecStore_getSupportedMediaTypes(
++        const AMediaCodecSupportedMediaType **outMediaTypes, size_t *outCount) {
++    if (outMediaTypes == nullptr) {
++        return AMEDIA_ERROR_INVALID_PARAMETER;
++    }
++
++    if (sMediaTypes.empty()) {
++        initMediaTypes();
++    }
++
++    *outCount = sMediaTypes.size();
++    *outMediaTypes = sMediaTypes.data();
++
++    return AMEDIA_OK;
++}
++
++EXPORT
++media_status_t AMediaCodecStore_findNextDecoderForFormat(
++        const AMediaFormat *format, const AMediaCodecInfo **outCodecInfo){
++    return findNextCodecForFormat(format, false, outCodecInfo);
++}
++
++EXPORT
++media_status_t AMediaCodecStore_findNextEncoderForFormat(
++        const AMediaFormat *format, const AMediaCodecInfo **outCodecInfo){
++    return findNextCodecForFormat(format, true, outCodecInfo);
++}
++
++EXPORT
++media_status_t AMediaCodecStore_getCodecInfo(
++        const char *name, const AMediaCodecInfo **outCodecInfo) {
++    if (outCodecInfo == nullptr || name == nullptr) {
++        return AMEDIA_ERROR_INVALID_PARAMETER;
++    }
++
++    auto it = sNameToInfoMap.find(std::string(name));
++    if (it == sNameToInfoMap.end()) {
++        *outCodecInfo = nullptr;
++        return AMEDIA_ERROR_UNSUPPORTED;
++    } else {
++        *outCodecInfo = &(it->second);
++        return AMEDIA_OK;
++    }
++}
++
++}
+\ No newline at end of file
+diff --git a/media/ndk/include/media/NdkMediaCodecInfo.h b/media/ndk/include/media/NdkMediaCodecInfo.h
+new file mode 100644
+index 0000000000..3bbb34eb41
+--- /dev/null
++++ b/media/ndk/include/media/NdkMediaCodecInfo.h
+@@ -0,0 +1,625 @@
++/*
++ * Copyright (C) 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++/**
++ * @addtogroup Media
++ * @{
++ */
++
++/**
++ * @file NdkMediaCodecInfo.h
++ */
++
++/*
++ * This file defines an NDK API.
++ * Do not remove methods.
++ * Do not change method signatures.
++ * Do not change the value of constants.
++ * Do not change the size of any of the classes defined in here.
++ * Do not reference types that are not part of the NDK.
++ * Do not #include files that aren't part of the NDK.
++ */
++
++#ifndef _NDK_MEDIA_CODEC_INFO_H
++#define _NDK_MEDIA_CODEC_INFO_H
++
++#include "NdkMediaError.h"
++#include "NdkMediaFormat.h"
++
++__BEGIN_DECLS
++
++struct ACodecAudioCapabilities;
++typedef struct ACodecAudioCapabilities ACodecAudioCapabilities;
++struct ACodecPerformancePoint;
++typedef struct ACodecPerformancePoint ACodecPerformancePoint;
++struct ACodecVideoCapabilities;
++typedef struct ACodecVideoCapabilities ACodecVideoCapabilities;
++struct ACodecEncoderCapabilities;
++typedef struct ACodecEncoderCapabilities ACodecEncoderCapabilities;
++struct AMediaCodecInfo;
++typedef struct AMediaCodecInfo AMediaCodecInfo;
++
++/**
++ * A uitlity structure describing the range of two integer values.
++ */
++typedef struct AIntRange {
++    int32_t mLower;
++    int32_t mUpper;
++} AIntRange;
++
++/**
++ * A uitlity structure describing the range of two double values.
++ */
++typedef struct ADoubleRange {
++    double mLower;
++    double mUpper;
++} ADoubleRange;
++
++// AMediaCodecInfo
++
++/**
++ * Get the canonical name of a codec.
++ *
++ * \return      The char pointer to the canonical name.
++ *              It is owned by the framework. No lifetime management needed for users.
++ *
++ * Return NULL if @param info is invalid.
++ */
++const char* AMediaCodecInfo_getCanonicalName(const AMediaCodecInfo *info) __INTRODUCED_IN(36);
++
++/**
++ * Query if the codec is an encoder.
++ */
++bool AMediaCodecInfo_isEncoder(const AMediaCodecInfo *info) __INTRODUCED_IN(36);
++
++/**
++ * Query if the codec is provided by the Android platform (false) or the device manufacturer (true).
++ */
++bool AMediaCodecInfo_isVendor(const AMediaCodecInfo *info) __INTRODUCED_IN(36);
++
++/**
++ * The type of codecs.
++ */
++enum AMediaCodecType : int32_t {
++    /**
++     * Not a codec type. Used for indicating an invalid operation occurred.
++     */
++    INVALID_CODEC_INFO = 0,
++
++    /**
++     * Software codec.
++     *
++     * Software-only codecs are more secure as they run in a tighter security sandbox.
++     * On the other hand, software-only codecs do not provide any performance guarantees.
++     */
++    SOFTWARE_ONLY = 1,
++
++    /**
++     * Hardware accelerated codec.
++     *
++     * Hardware codecs generally have higher performance or lower power consumption than
++     * software codecs, but since they are specific to each device,
++     * the actual performance details can vary.
++     */
++    HARDWARE_ACCELERATED = 2,
++
++    /**
++     * Software codec but have device access.
++     * Mainly referring to software codecs provided by vendors.
++     */
++    SOFTWARE_WITH_DEVICE_ACCESS = 3,
++};
++
++/**
++ * Query if the codec is SOFTWARE_ONLY, HARDWARE_ACCELERATED or SOFTWARE_WITH_DEVICE_ACCESS.
++ *
++ * Return INVALID_CODEC_INFO if @param info is invalid.
++ */
++AMediaCodecType AMediaCodecInfo_getMediaCodecInfoType(
++        const AMediaCodecInfo *info) __INTRODUCED_IN(36);
++
++/**
++ * Get the supported media type of the codec.
++ *
++ * \return  The char pointer to the media type.
++ *          It is owned by the framework with infinite lifetime.
++ *
++ * Return NULL if @param info is invalid.
++ */
++const char* AMediaCodecInfo_getMediaType(const AMediaCodecInfo *info) __INTRODUCED_IN(36);
++
++/**
++ * Returns the max number of the supported concurrent codec instances.
++ *
++ * This is a hint for an upper bound. Applications should not expect to successfully
++ * operate more instances than the returned value, but the actual number of
++ * concurrently operable instances may be less as it depends on the available
++ * resources at time of use.
++ *
++ * Return -1 if @param info is invalid.
++ */
++int32_t AMediaCodecInfo_getMaxSupportedInstances(const AMediaCodecInfo *info) __INTRODUCED_IN(36);
++
++/**
++ * Query codec feature capabilities.
++ *
++ * These features are supported to be used by the codec.  These
++ * include optional features that can be turned on, as well as
++ * features that are always on.
++ *
++ * Return 1 if the feature is supported;
++ * Return 0 if the feature is unsupported;
++ * Return -1 if @param featureName is invalid.
++ */
++int32_t AMediaCodecInfo_isFeatureSupported(const AMediaCodecInfo *info,
++        const char *featureName) __INTRODUCED_IN(36);
++
++/**
++ * Query codec feature requirements.
++ *
++ * These features are required to be used by the codec, and as such,
++ * they are always turned on.
++ *
++ * Return 1 if the feature is required;
++ * Return 0 if the feature is not required;
++ * Return -1 if @param featureName is invalid.
++ */
++int32_t AMediaCodecInfo_isFeatureRequired(const AMediaCodecInfo *info,
++        const char *featureName) __INTRODUCED_IN(36);
++
++/**
++ * Query whether codec supports a given @param format.
++ *
++ * Return 1 if the format is supported;
++ * Return 0 if the format is unsupported;
++ * Return -1 if @param format is invalid.
++ */
++int32_t AMediaCodecInfo_isFormatSupported(const AMediaCodecInfo *info,
++        const AMediaFormat *format) __INTRODUCED_IN(36);
++
++/**
++ * Get the ACodecAudioCapabilities from the given AMediaCodecInfo.
++ *
++ * @param outAudioCaps        The pointer to the output ACodecAudioCapabilities.
++ *                            It is owned by the framework and has an infinite lifetime.
++ *
++ * Return AMEDIA_OK if successfully got the ACodecAudioCapabilities.
++ * Return AMEDIA_ERROR_UNSUPPORTED if the codec is not an audio codec.
++ * Return AMEDIA_ERROR_INVALID_PARAMETER if @param info is invalid.
++ */
++media_status_t AMediaCodecInfo_getAudioCapabilities(const AMediaCodecInfo *info,
++        const ACodecAudioCapabilities **outAudioCaps) __INTRODUCED_IN(36);
++
++/**
++ * Get the ACodecVideoCapabilities from the given AMediaCodecInfo.
++ *
++ * @param outVideoCaps        The pointer to the output ACodecVideoCapabilities.
++ *                            It is owned by the framework and has an infinite lifetime.
++ *
++ * Return AMEDIA_OK if successfully got the ACodecVideoCapabilities.
++ * Return AMEDIA_ERROR_UNSUPPORTED if the codec is not a video codec.
++ * Return AMEDIA_ERROR_INVALID_PARAMETER if @param info is invalid.
++ */
++media_status_t AMediaCodecInfo_getVideoCapabilities(const AMediaCodecInfo *info,
++        const ACodecVideoCapabilities **outVideoCaps) __INTRODUCED_IN(36);
++
++/**
++ * Get the ACodecEncoderCapabilities from the given AMediaCodecInfo.
++ *
++ * @param outEncoderCaps        The pointer to the output ACodecEncoderCapabilities.
++ *                              It is owned by the framework and has an infinite lifetime.
++ *
++ * Return AMEDIA_OK if successfully got the ACodecEncoderCapabilities.
++ * Return AMEDIA_ERROR_UNSUPPORTED if the codec is not an encoder.
++ * Return AMEDIA_ERROR_INVALID_PARAMETER if @param info is invalid.
++ */
++media_status_t AMediaCodecInfo_getEncoderCapabilities(const AMediaCodecInfo *info,
++        const ACodecEncoderCapabilities **outEncoderCaps) __INTRODUCED_IN(36);
++
++// ACodecAudioCapabilities
++
++/**
++ * Get the range of supported bitrates in bits/second.
++ *
++ * @param outRange  The pointer to the range of supported bitrates.
++ *                  Users are responsible for allocating a valid AIntRange structure and
++ *                  managing the lifetime of it.
++ *
++ * Return AMEDIA_OK if got bitrates successfully.
++ * Return AMEDIA_ERROR_INVALID_PARAMETER if any of @param audioCaps and @param outRange is invalid.
++ */
++media_status_t ACodecAudioCapabilities_getBitrateRange(const ACodecAudioCapabilities *audioCaps,
++        AIntRange *outRange) __INTRODUCED_IN(36);
++
++/**
++ * Get the array of supported sample rates
++ *
++ * The array is sorted in ascending order.
++ *
++ * @param outArrayPtr   The pointer to the output sample rates array.
++ *                      The array is owned by the framework and has an infinite lifetime.
++ * @param outCount      The size of the output array.
++ *
++ * Return AMEDIA_OK if the codec supports only discrete values.
++ * Otherwise, it returns AMEDIA_ERROR_UNSUPPORTED.
++ * Return AMEDIA_ERROR_INVALID_PARAMETER if any of @param audioCaps, @param outArrayPtr
++ * and @param outCount is invalid.
++ */
++media_status_t ACodecAudioCapabilities_getSupportedSampleRates(
++        const ACodecAudioCapabilities *audioCaps, const int **outArrayPtr,
++        size_t *outCount) __INTRODUCED_IN(36);
++
++/**
++ * Get the array of supported sample rate ranges.
++ *
++ * The array is sorted in ascending order, and the ranges are distinct (non-intersecting).
++ *
++ * @param outArrayPtr   The pointer to the out sample rate ranges array.
++ *                      The array is owned by the framework and has an infinite lifetime.
++ * @param outCount      The size of the out array.
++ *
++ * Return AMEDIA_OK if got the sample rate ranges successfully.
++ * Return AMEDIA_ERROR_INVALID_PARAMETER if any of @param audioCaps, @param outArrayPtr
++ * and @param outCount is invalid.
++ */
++media_status_t ACodecAudioCapabilities_getSupportedSampleRateRanges(
++        const ACodecAudioCapabilities *audioCaps,
++        const AIntRange **outArrayPtr, size_t *outCount) __INTRODUCED_IN(36);
++
++/**
++ * Return the maximum number of input channels supported.
++ *
++ * Return -1 if @param audioCaps is invalid.
++ */
++int32_t ACodecAudioCapabilities_getMaxInputChannelCount(
++        const ACodecAudioCapabilities *audioCaps) __INTRODUCED_IN(36);
++
++/**
++ * Returns the minimum number of input channels supported.
++ * This is often 1, but does vary for certain mime types.
++ *
++ * Return -1 if @param audioCaps is invalid.
++ */
++int32_t ACodecAudioCapabilities_getMinInputChannelCount(
++        const ACodecAudioCapabilities *audioCaps) __INTRODUCED_IN(36);
++
++/**
++ * Get an array of ranges representing the number of input channels supported.
++ * The codec supports any number of input channels within this range.
++ * For many codecs, this will be a single range [1..N], for some N.
++ *
++ * The array is sorted in ascending order, and the ranges are distinct (non-intersecting).
++ *
++ * @param outArrayPtr   The pointer to the output array of input-channels ranges.
++ *                      The array is owned by the framework and has an infinite lifetime.
++ * @param outCount      The size of the output array.
++ *
++ * Return AMEDIA_OK if got the input channel array successfully.
++ * Return AMEDIA_ERROR_INVALID_PARAMETER if @param audioCaps is invalid.
++ */
++media_status_t ACodecAudioCapabilities_getInputChannelCountRanges(
++        const ACodecAudioCapabilities *audioCaps,
++        const AIntRange **outArrayPtr, size_t *outCount) __INTRODUCED_IN(36);
++
++/**
++ * Query whether the sample rate is supported by the codec.
++ *
++ * Return 1 if the sample rate is supported.
++ * Return 0 if the sample rate is unsupported
++ * Return -1 if @param audioCaps is invalid.
++ */
++int32_t ACodecAudioCapabilities_isSampleRateSupported(const ACodecAudioCapabilities *audioCaps,
++        int32_t sampleRate) __INTRODUCED_IN(36);
++
++// ACodecPerformancePoint
++
++/**
++ * Create a performance point for a given frame size and frame rate.
++ *
++ * Performance points are defined by number of pixels, pixel rate and frame rate.
++ *
++ * Users are responsible for calling
++ * ACodecPerformancePoint_delete(ACodecPerformancePoint *performancePoint) after use.
++ *
++ * @param width width of the frame in pixels
++ * @param height height of the frame in pixels
++ * @param frameRate frame rate in frames per second
++ */
++ACodecPerformancePoint* ACodecPerformancePoint_create(int32_t width, int32_t height,
++        int32_t frameRate) __INTRODUCED_IN(36);
++
++/**
++ * Delete a created performance point.
++ *
++ * Return AMEDIA_OK if it is successfully deleted.
++ * Return AMEDIA_ERROR_INVALID_PARAMETER if @param performancePoint is invalid.
++ */
++media_status_t ACodecPerformancePoint_delete(
++        ACodecPerformancePoint *performancePoint) __INTRODUCED_IN(36);
++
++/**
++ * Checks whether the performance point covers a media format.
++ *
++ * @param format Stream format considered.
++ * Return true if the performance point covers the format.
++ */
++bool ACodecPerformancePoint_coversFormat(const ACodecPerformancePoint *performancePoint,
++        const AMediaFormat *format) __INTRODUCED_IN(36);
++
++/**
++ * Checks whether a performance point covers another performance point.
++ *
++ * Use this method to determine if a performance point advertised by a codec covers the
++ * performance point required. This method can also be used for loose ordering as this
++ * method is transitive.
++ *
++ * A Performance point represents an upper bound. This means that
++ * it covers all performance points with fewer pixels, pixel rate and frame rate.
++ *
++ * Return true if @param one covers @param another.
++ */
++bool ACodecPerformancePoint_covers(const ACodecPerformancePoint *one,
++        const ACodecPerformancePoint *another) __INTRODUCED_IN(36);
++
++/**
++ * Checks whether two performance points are equal.
++ */
++bool ACodecPerformancePoint_equals(const ACodecPerformancePoint *one,
++        const ACodecPerformancePoint *another) __INTRODUCED_IN(36);
++
++// ACodecVideoCapabilities
++
++/**
++ * Get the range of supported bitrates in bits/second.
++ *
++ * @param outRange  The pointer to the range of output bitrates.
++ *                  Users are responsible for allocating a valid AIntRange structure and
++ *                  managing the lifetime of it.
++ *
++ * Return AMEDIA_OK if got the supported bitrates successfully.
++ * Return AMEDIA_ERROR_INVALID_PARAMETER if any of @param videoCaps and @param outRange is invalid.
++ */
++media_status_t ACodecVideoCapabilities_getBitrateRange(const ACodecVideoCapabilities *videoCaps,
++        AIntRange *outRange) __INTRODUCED_IN(36);
++
++/**
++ * Get the range of supported video widths.
++ *
++ * @param outRange  The pointer to the range of output supported widths.
++ *                  Users are responsible for allocating a valid AIntRange structure and
++ *                  managing the lifetime of it.
++ *
++ * Return AMEDIA_OK if got the supported video widths successfully.
++ * Return AMEDIA_ERROR_INVALID_PARAMETER if any of @param videoCaps and @param outRange is invalid.
++ */
++media_status_t ACodecVideoCapabilities_getSupportedWidths(const ACodecVideoCapabilities *videoCaps,
++        AIntRange *outRange) __INTRODUCED_IN(36);
++
++/**
++ * Get the range of supported video heights.
++ *
++ * @param outRange  The pointer to the range of output supported heights.
++ *                  Users are responsible for allocating a valid AIntRange structure and
++ *                  managing the lifetime of it.
++ *
++ * Return AMEDIA_OK if got the supported video heights successfully.
++ * Return AMEDIA_ERROR_INVALID_PARAMETER if any of @param videoCaps and @param outRange is invalid.
++ */
++media_status_t ACodecVideoCapabilities_getSupportedHeights(const ACodecVideoCapabilities *videoCaps,
++        AIntRange *outRange) __INTRODUCED_IN(36);
++
++/**
++ * Return the alignment requirement for video width (in pixels).
++ *
++ * This is a power-of-2 value that video width must be a multiple of.
++ *
++ * Return -1 if @param videoCaps is invalid.
++ */
++int32_t ACodecVideoCapabilities_getWidthAlignment(
++        const ACodecVideoCapabilities *videoCaps) __INTRODUCED_IN(36);
++
++/**
++ * Return the alignment requirement for video height (in pixels).
++ *
++ * This is a power-of-2 value that video height must be a multiple of.
++ *
++ * Return -1 if @param videoCaps is invalid.
++ */
++int32_t ACodecVideoCapabilities_getHeightAlignment(
++        const ACodecVideoCapabilities *videoCaps) __INTRODUCED_IN(36);
++
++/**
++ * Get the range of supported frame rates.
++ *
++ * This is not a performance indicator. Rather, it expresses the limits specified in the coding
++ * standard, based on the complexities of encoding material for later playback at a certain
++ * frame rate, or the decoding of such material in non-realtime.
++ *
++ * @param outRange  The pointer to the range of output supported frame rates.
++ *                  Users are responsible for allocating a valid AIntRange structure and
++ *                  managing the lifetime of it.
++ *
++ * \return AMEDIA_OK if got the frame rate range successfully.
++ * \return AMEDIA_ERROR_INVALID_PARAMETER if any of @param videoCaps and @param outRange is invalid.
++ */
++media_status_t ACodecVideoCapabilities_getSupportedFrameRates(
++        const ACodecVideoCapabilities *videoCaps, AIntRange *outRange) __INTRODUCED_IN(36);
++
++/**
++ * Get the range of supported video widths for a video height.
++ *
++ * @param outRange      The pointer to the range of supported widths.
++ *                      Users are responsible for allocating a valid AIntRange structure and
++ *                      managing the lifetime of it.
++ *
++ * Return AMEDIA_OK if got the supported video width range successfully.
++ * Return AMEDIA_ERROR_UNSUPPORTED if the height query is not supported.
++ * Return AMEDIA_ERROR_INVALID_PARAMETER if any of @param videoCaps and @param outRange is invalid.
++ */
++media_status_t ACodecVideoCapabilities_getSupportedWidthsFor(
++        const ACodecVideoCapabilities *videoCaps, int32_t height,
++        AIntRange *outRange) __INTRODUCED_IN(36);
++
++/**
++ * Get the range of supported video heights for a video width.
++ *
++ * @param outRange      The pointer to the range of supported heights.
++ *                      Users are responsible for allocating a valid AIntRange structure and
++ *                      managing the lifetime of it.
++ *
++ * Return AMEDIA_OK if got the supported video height range successfully.
++ * Return AMEDIA_ERROR_UNSUPPORTED if the width query is not supported.
++ * Return AMEDIA_ERROR_INVALID_PARAMETER if any of @param videoCaps and @param outRange is invalid.
++ */
++media_status_t ACodecVideoCapabilities_getSupportedHeightsFor(
++        const ACodecVideoCapabilities *videoCaps, int32_t width,
++        AIntRange *outRange) __INTRODUCED_IN(36);
++
++/**
++ * Get the range of supported video frame rates for a video size.
++ *
++ * This is not a performance indicator.  Rather, it expresses the limits specified in the coding
++ * standard, based on the complexities of encoding material of a given size for later playback at
++ * a certain frame rate, or the decoding of such material in non-realtime.
++ *
++ * @param outRange      The pointer to the range of frame rates.
++ *                      Users are responsible for allocating a valid ADoubleRange structure and
++ *                      managing the lifetime of it.
++ *
++ * Return AMEDIA_OK if got the supported video frame rates successfully.
++ * Return AMEDIA_ERROR_UNSUPPORTED if the size query is not supported.
++ * Return AMEDIA_ERROR_INVALID_PARAMETER if any of @param videoCaps and @param outRange is invalid.
++ */
++media_status_t ACodecVideoCapabilities_getSupportedFrameRatesFor(
++        const ACodecVideoCapabilities *videoCaps, int32_t width, int32_t height,
++        ADoubleRange *outRange) __INTRODUCED_IN(36);
++
++/**
++ * Get the range of achievable video frame rates for a video size.
++ *
++ * This is based on manufacturer's performance measurements for this device and codec.
++ * The measurements may not be available for all codecs or devices.
++ *
++ * @param outRange      The pointer to the range of frame rates.
++  *                     Users are responsible for allocating a valid ADoubleRange structure and
++ *                      managing the lifetime of it.
++ *
++ * Return AMEDIA_OK if got the achievable video frame rates successfully.
++ * Return AMEDIA_ERROR_UNSUPPORTED if the codec did not publish any measurement data.
++ * Return AMEDIA_ERROR_INVALID_PARAMETER if any of @param videoCaps and @param outRange is invalid.
++ */
++media_status_t ACodecVideoCapabilities_getAchievableFrameRatesFor(
++        const ACodecVideoCapabilities *videoCaps, int32_t width, int32_t height,
++        ADoubleRange *outRange) __INTRODUCED_IN(36);
++
++/**
++ * Get the supported performance points.
++ *
++ * @param outPerformancePointArray      The pointer to the output performance points array.
++ *                                      The array is owned by the framework and has an infinite
++ *                                      lifetime.
++ * @param outCount                      The size of the output array.
++ *
++ * Return AMEDIA_OK if successfully got the performance points.
++ * Return AMEDIA_ERROR_INVALID_PARAMETER if @param videoCaps is invalid.
++ */
++media_status_t ACodecVideoCapabilities_getSupportedPerformancePoints(
++        const ACodecVideoCapabilities *videoCaps,
++        const ACodecPerformancePoint **outPerformancePointArray,
++        size_t *outCount) __INTRODUCED_IN(36);
++
++/**
++ * Return whether a given video size and frameRate combination is supported.
++ *
++ * Return 1 if the size and rate are supported.
++ * Return 0 if they are not supported.
++ * Return -1 if @param videoCaps is invalid.
++ */
++int32_t ACodecVideoCapabilities_areSizeAndRateSupported(const ACodecVideoCapabilities *videoCaps,
++        int32_t width, int32_t height, double frameRate) __INTRODUCED_IN(36);
++
++/**
++ * Return whether a given video size is supported.
++ *
++ * Return 1 if the size is supported.
++ * Return 0 if the size is not supported.
++ * Return -1 if @param videoCaps is invalid.
++ */
++int32_t ACodecVideoCapabilities_isSizeSupported(const ACodecVideoCapabilities *videoCaps,
++        int32_t width, int32_t height) __INTRODUCED_IN(36);
++
++// ACodecEncoderCapabilities
++
++/**
++ * Get the supported range of quality values.
++ *
++ * Quality is implementation-specific. As a general rule, a higher quality
++ * setting results in a better image quality and a lower compression ratio.
++ *
++ * @param outRange      The pointer to the range of quality values.
++ *                      Users are responsible for allocating a valid AIntRange structure and
++ *                      managing the lifetime of it.
++ *
++ * Return AMEDIA_OK if successfully got the quality range.
++ * Return AMEDIA_ERROR_INVALID_PARAMETER if any of @param videoCaps and @param outRange is invalid.
++ */
++media_status_t ACodecEncoderCapabilities_getQualityRange(
++        const ACodecEncoderCapabilities *encoderCaps,
++        AIntRange *outRange) __INTRODUCED_IN(36);
++
++/**
++ * Get the supported range of encoder complexity values.
++ *
++ * Some codecs may support multiple complexity levels, where higher complexity values use more
++ * encoder tools (e.g. perform more intensive calculations) to improve the quality or the
++ * compression ratio. Use a lower value to save power and/or time.
++ *
++ * @param outRange      The pointer to the range of encoder complexity values.
++ *                      Users are responsible for allocating a valid AIntRange structure and
++ *                      managing the lifetime of it.
++ *
++ * Return AMEDIA_OK if successfully got the complexity range.
++ * Return AMEDIA_ERROR_INVALID_PARAMETER if any of @param videoCaps and @param outRange is invalid.
++ */
++media_status_t ACodecEncoderCapabilities_getComplexityRange(
++        const ACodecEncoderCapabilities *encoderCaps,
++        AIntRange *outRange) __INTRODUCED_IN(36);
++
++/**
++ * Encoder bitrate modes.
++ */
++enum ABiterateMode : int32_t {
++    BITRATE_MODE_CQ = 0,
++    BITRATE_MODE_VBR = 1,
++    BITRATE_MODE_CBR = 2,
++    BITRATE_MODE_CBR_FD = 3
++};
++
++/**
++ * Query whether a bitrate mode is supported.
++ *
++ * Return 1 if the bitrate mode is supported.
++ * Return 0 if the bitrate mode is unsupported.
++ * Return -1 if @param encoderCaps is invalid.
++ */
++int32_t ACodecEncoderCapabilities_isBitrateModeSupported(
++        const ACodecEncoderCapabilities *encoderCaps, ABiterateMode mode) __INTRODUCED_IN(36);
++
++__END_DECLS
++
++#endif //_NDK_MEDIA_CODEC_INFO_H
++
++/** @} */
+\ No newline at end of file
+diff --git a/media/ndk/include/media/NdkMediaCodecStore.h b/media/ndk/include/media/NdkMediaCodecStore.h
+new file mode 100644
+index 0000000000..aab868929d
+--- /dev/null
++++ b/media/ndk/include/media/NdkMediaCodecStore.h
+@@ -0,0 +1,144 @@
++/*
++ * Copyright (C) 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++/**
++ * @addtogroup Media
++ * @{
++ */
++
++/**
++ * @file NdkMediaCodecStore.h
++ */
++
++/*
++ * This file defines an NDK API.
++ * Do not remove methods.
++ * Do not change method signatures.
++ * Do not change the value of constants.
++ * Do not change the size of any of the classes defined in here.
++ * Do not reference types that are not part of the NDK.
++ * Do not #include files that aren't part of the NDK.
++ */
++
++#ifndef _NDK_MEDIA_CODEC_STORE_H
++#define _NDK_MEDIA_CODEC_STORE_H
++
++#include <stdint.h>
++
++#include "NdkMediaCodecInfo.h"
++#include "NdkMediaError.h"
++#include "NdkMediaFormat.h"
++
++__BEGIN_DECLS
++
++/**
++ * The media type definition with bitfeids indicating if it is
++ * supported by decoders/ encoders/ both.
++ */
++typedef struct AMediaCodecSupportedMediaType {
++    enum Mode : uint32_t {
++        FLAG_DECODER = 1 << 0,
++        FLAG_ENCODER = 1 << 1,
++    };
++
++    // The media type.
++    const char *mMediaType;
++    // bitfields for modes.
++    uint32_t mMode;
++} AMediaCodecSupportedMediaType;
++
++/**
++ * Get an array of all the supported media types of a device.
++ *
++ * @param outMediaTypes The pointer to the output AMediaCodecSupportedMediaType array.
++ *                      It is owned by the fraework and has an infinite lifetime.
++ *
++ * @param outCount size of the out array.
++ *
++ * Return AMEDIA_OK if successfully made the copy.
++ * Return AMEDIA_ERROR_INVALID_PARAMETER if the @param outMediaTypes is invalid.
++ */
++media_status_t AMediaCodecStore_getSupportedMediaTypes(
++        const AMediaCodecSupportedMediaType **outMediaTypes, size_t *outCount) __INTRODUCED_IN(36);
++
++/**
++ * Get the next decoder info that supports the format.
++ *
++ * @param outCodecInfo  should be set as NULL to start the iteration.
++ *                      Keep the last codecInfo you got from a previous call to get the next one.
++ *                      *outCodecInfo will be set to NULL if reached the end.
++ *                      It is owned by the framework and has an infinite lifetime.
++ *
++ * @param format        If set as NULL, this API will iterate through all available decoders.
++ *                      If NOT NULL, it MUST contain key "mime" implying the media type.
++ *
++ * Return AMEDIA_OK if successfully got the info.
++ * Return AMEDIA_ERROR_INVALID_PARAMETER if @param outCodecInfo or @param format is invalid.
++ * Return AMEDIA_ERROR_UNSUPPORTED if no more decoder supporting the format.
++ *
++ * It is undefined behavior to call this API with a NON NULL @param outCodecInfo
++ * and a different @param format during an iteration.
++ */
++media_status_t AMediaCodecStore_findNextDecoderForFormat(
++        const AMediaFormat *format, const AMediaCodecInfo **outCodecInfo) __INTRODUCED_IN(36);
++
++/**
++ * Get the next encoder info that supports the format.
++ *
++ * @param outCodecInfo  should be set as NULL to start the iteration.
++ *                      Keep the last codecInfo you got from a previous call to get the next one.
++ *                      *outCodecInfo will be set to NULL if reached the end.
++ *                      It is owned by the framework and has an infinite lifetime.
++ *
++ * @param format        If set as NULL, this API will iterate through all available encoders.
++ *                      If NOT NULL, it MUST contain key "mime" implying the media type.
++ *
++ * Return AMEDIA_OK if successfully got the info.
++ * Return AMEDIA_ERROR_INVALID_PARAMETER if @param outCodecInfo is invalid.
++ * Return AMEDIA_ERROR_UNSUPPORTED if no more encoder supporting the format.
++ *
++ * It is undefined behavior to call this API with a NON NULL @param outCodecInfo
++ * and a different @param format during an iteration.
++ *
++ * No secure encoder will show in the output.
++ */
++media_status_t AMediaCodecStore_findNextEncoderForFormat(
++        const AMediaFormat* format, const AMediaCodecInfo **outCodecInfo) __INTRODUCED_IN(36);
++
++/**
++ * Get the codecInfo corresponding to a given codec name.
++ *
++ * @param name          Media codec name.
++ *                      Users can get valid codec names from the AMediaCodecInfo structures
++ *                      returned from findNextDecoder|EncoderForFormat methods.
++ *                      Note that this name may not correspond to the name the same codec used
++ *                      by the SDK API, but will always do for codec names starting with "c2.".
++ *
++ * @param outCodecInfo  Output parameter for the corresponding AMeidaCodecInfo structure.
++ *                      It is owned by the framework and has an infinite lifetime.
++ *
++ * Return AMEDIA_OK if got the codecInfo successfully.
++ * Return AMEDIA_ERROR_UNSUPPORTED if no corresponding codec found.
++ * Return AMEDIA_ERROR_INVALID_PARAMETER if @param outCodecInfo or @param name is invalid.
++ */
++media_status_t AMediaCodecStore_getCodecInfo(
++        const char *name, const AMediaCodecInfo **outCodecInfo) __INTRODUCED_IN(36);
++
++__END_DECLS
++
++#endif //_NDK_MEDIA_CODEC_STORE_H
++
++/** @} */
+\ No newline at end of file
+diff --git a/media/ndk/libmediandk.map.txt b/media/ndk/libmediandk.map.txt
+index 262c169785..35c696ea2c 100644
+--- a/media/ndk/libmediandk.map.txt
++++ b/media/ndk/libmediandk.map.txt
+@@ -1,5 +1,33 @@
+ LIBMEDIANDK {
+   global:
++    ACodecAudioCapabilities_getBitrateRange; # introduced=36
++    ACodecAudioCapabilities_getInputChannelCountRanges; # introduced=36
++    ACodecAudioCapabilities_getMaxInputChannelCount; # introduced=36
++    ACodecAudioCapabilities_getMinInputChannelCount; # introduced=36
++    ACodecAudioCapabilities_getSupportedSampleRates; # introduced=36
++    ACodecAudioCapabilities_getSupportedSampleRateRanges; # introduced=36
++    ACodecAudioCapabilities_isSampleRateSupported; # introduced=36
++    ACodecEncoderCapabilities_getComplexityRange; # introduced=36
++    ACodecEncoderCapabilities_getQualityRange; # introduced=36
++    ACodecEncoderCapabilities_isBitrateModeSupported; # introduced=36
++    ACodecPerformancePoint_create; # introduced=36
++    ACodecPerformancePoint_covers; # introduced=36
++    ACodecPerformancePoint_coversFormat; # introduced=36
++    ACodecPerformancePoint_delete; # introduced=36
++    ACodecPerformancePoint_equals; # introduced=36
++    ACodecVideoCapabilities_areSizeAndRateSupported; # introduced=36
++    ACodecVideoCapabilities_getAchievableFrameRatesFor; # introduced=36
++    ACodecVideoCapabilities_getBitrateRange; # introduced=36
++    ACodecVideoCapabilities_getHeightAlignment; # introduced=36
++    ACodecVideoCapabilities_getSupportedFrameRates; # introduced=36
++    ACodecVideoCapabilities_getSupportedFrameRatesFor; # introduced=36
++    ACodecVideoCapabilities_getSupportedHeights; # introduced=36
++    ACodecVideoCapabilities_getSupportedHeightsFor; # introduced=36
++    ACodecVideoCapabilities_getSupportedPerformancePoints; # introduced=36
++    ACodecVideoCapabilities_getSupportedWidths; # introduced=36
++    ACodecVideoCapabilities_getSupportedWidthsFor; # introduced=36
++    ACodecVideoCapabilities_getWidthAlignment; # introduced=36
++    ACodecVideoCapabilities_isSizeSupported; # introduced=36
+     AImageReader_acquireLatestImage; # introduced=24
+     AImageReader_acquireLatestImageAsync; # introduced=26
+     AImageReader_acquireNextImage; # introduced=24
+@@ -216,6 +244,22 @@ LIBMEDIANDK {
+     AMediaCodec_createPersistentInputSurface; # introduced=26
+     AMediaCodec_start;
+     AMediaCodec_stop;
++    AMediaCodecInfo_getAudioCapabilities; # introduced=36
++    AMediaCodecInfo_getEncoderCapabilities; # introduced=36
++    AMediaCodecInfo_getVideoCapabilities; # introduced=36
++    AMediaCodecInfo_getCanonicalName; # introduced=36
++    AMediaCodecInfo_getMaxSupportedInstances; # introduced=36
++    AMediaCodecInfo_getMediaCodecInfoType; # introduced=36
++    AMediaCodecInfo_getMediaType; # introduced=36
++    AMediaCodecInfo_isEncoder; # introduced=36
++    AMediaCodecInfo_isFeatureRequired; # introduced=36
++    AMediaCodecInfo_isFeatureSupported; # introduced=36
++    AMediaCodecInfo_isFormatSupported; # introduced=36
++    AMediaCodecInfo_isVendor; # introduced=36
++    AMediaCodecStore_getCodecInfo; # introduced=36
++    AMediaCodecStore_getSupportedMediaTypes; # introduced=36
++    AMediaCodecStore_findNextDecoderForFormat; # introduced=36
++    AMediaCodecStore_findNextEncoderForFormat; # introduced=36
+     AMediaCrypto_delete;
+     AMediaCrypto_isCryptoSchemeSupported;
+     AMediaCrypto_new;
+-- 
+2.43.0
+

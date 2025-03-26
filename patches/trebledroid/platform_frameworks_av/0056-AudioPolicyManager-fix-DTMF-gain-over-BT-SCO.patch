@@ -1,0 +1,36 @@
+From c32e669e3da6ad44d86f9c486dfc301165731ebb Mon Sep 17 00:00:00 2001
+From: Eric Laurent <elaurent@google.com>
+Date: Fri, 4 Oct 2024 14:32:28 +0000
+Subject: [PATCH 056/436] AudioPolicyManager: fix DTMF gain over BT SCO
+
+Similarly to voice communication, DTMF usage gain must be maxed out
+when playing over Bluetooth SCO to avoid the double attenuation.
+
+Test: repro steps in bug
+Flag: EXEMPT bug fix
+Bug: 367200697
+Change-Id: I24f28c7f36c13f94fb68b44a4a5a0ccebaad7158
+---
+ services/audiopolicy/managerdefault/AudioPolicyManager.cpp | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index bff0a37774..c1c4a28f4f 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -8540,9 +8540,11 @@ status_t AudioPolicyManager::checkAndSetVolume(IVolumeCurves &curves,
+     }
+ 
+     float volumeDb = computeVolume(curves, volumeSource, index, deviceTypes);
++    const VolumeSource dtmfVolSrc = toVolumeSource(AUDIO_STREAM_DTMF, false);
+     if (outputDesc->isFixedVolume(deviceTypes) ||
+             // Force VoIP volume to max for bluetooth SCO/BLE device except if muted
+-            (index != 0 && (isVoiceVolSrc || isBtScoVolSrc) &&
++            (index != 0 && (isVoiceVolSrc || isBtScoVolSrc
++                        || (isInCall() && (dtmfVolSrc == volumeSource))) &&
+                     (isSingleDeviceType(deviceTypes, audio_is_bluetooth_out_sco_device)
+                     || isSingleDeviceType(deviceTypes, audio_is_ble_out_device)))) {
+         volumeDb = 0.0f;
+-- 
+2.43.0
+

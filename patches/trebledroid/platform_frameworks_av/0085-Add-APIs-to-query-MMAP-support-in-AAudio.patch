@@ -1,0 +1,1006 @@
+From 7ed22ff16894f9fa42f5aa2076e7a10c40af5427 Mon Sep 17 00:00:00 2001
+From: jiabin <jiabin@google.com>
+Date: Fri, 4 Oct 2024 20:51:21 +0000
+Subject: [PATCH 085/436] Add APIs to query MMAP support in AAudio.
+
+Bug: 367809497
+Test: atest AAudioTests
+Flag: EXEMPT NDK
+Change-Id: I19df0f40d6151bba9cb0869876bb6ea3fef38d91
+---
+ media/audioserver/main_audioserver.cpp        |   2 +-
+ .../libaaudio/include/aaudio/AAudioTesting.h  | 209 +++++++++++++++++-
+ media/libaaudio/src/core/AAudioAudio.cpp      |  10 +
+ media/libaaudio/src/core/AudioGlobal.cpp      |  44 ++++
+ media/libaaudio/src/core/AudioGlobal.h        |   5 +
+ .../libaaudio/src/core/AudioStreamBuilder.cpp |   4 +-
+ media/libaaudio/src/libaaudio.map.txt         |   2 +
+ .../libaaudio/src/utility/AAudioUtilities.cpp | 125 +++++++++++
+ media/libaaudio/src/utility/AAudioUtilities.h |  10 +
+ media/libaaudio/tests/test_mmap_path.cpp      |   2 +-
+ media/libaudioclient/AudioSystem.cpp          |  20 +-
+ .../android/media/IAudioPolicyService.aidl    |  13 ++
+ .../include/media/AudioSystem.h               |   6 +-
+ services/audiopolicy/AudioPolicyInterface.h   |  13 ++
+ .../managerdefault/AudioPolicyManager.cpp     | 101 +++++++++
+ .../managerdefault/AudioPolicyManager.h       |  15 ++
+ .../service/AudioPolicyClientImpl.cpp         |  10 +
+ .../service/AudioPolicyInterfaceImpl.cpp      |  20 ++
+ .../service/AudioPolicyService.cpp            |   2 +
+ .../audiopolicy/service/AudioPolicyService.h  |  13 ++
+ .../audiopolicy/tests/AudioPolicyTestClient.h |   6 +
+ 21 files changed, 619 insertions(+), 13 deletions(-)
+
+diff --git a/media/audioserver/main_audioserver.cpp b/media/audioserver/main_audioserver.cpp
+index 5d7daa4b2a..b0a2d71846 100644
+--- a/media/audioserver/main_audioserver.cpp
++++ b/media/audioserver/main_audioserver.cpp
+@@ -190,7 +190,7 @@ int main(int argc __unused, char **argv)
+         // attempting to call audio flinger on a null pointer could make the process crash
+         // and attract attentions.
+         std::vector<AudioMMapPolicyInfo> policyInfos;
+-        status_t status = sp<IAudioFlinger>::cast(af)->getMmapPolicyInfos(
++        status_t status = AudioSystem::getMmapPolicyInfos(
+                 AudioMMapPolicyType::DEFAULT, &policyInfos);
+         // Initialize aaudio service when querying mmap policy succeeds and
+         // any of the policy supports MMAP.
+diff --git a/media/libaaudio/include/aaudio/AAudioTesting.h b/media/libaaudio/include/aaudio/AAudioTesting.h
+index d67ec703cb..16d6c33b61 100644
+--- a/media/libaaudio/include/aaudio/AAudioTesting.h
++++ b/media/libaaudio/include/aaudio/AAudioTesting.h
+@@ -31,24 +31,225 @@ extern "C" {
+  * They may change or be removed at any time.
+  ************************************************************************************/
+ 
++/**
++ * When the audio is played/recorded via AAudio MMAP data path, the apps can write to/read from
++ * a shared memory that will also be accessed directly by hardware. That reduces the audio latency.
++ * The following values are used to describe how AAudio MMAP is supported.
++ */
+ enum {
+     /**
+-     * Related feature is disabled and never used.
++     * AAudio MMAP is disabled and never used.
+      */
+     AAUDIO_POLICY_NEVER = 1,
+ 
+     /**
+-     * If related feature works then use it. Otherwise fall back to something else.
++     * AAudio MMAP support depends on device's availability. It will be used
++     * when it is possible or fallback to the normal path, where the audio data
++     * will be delivered via audio framework data pipeline.
+      */
+-     AAUDIO_POLICY_AUTO,
++    AAUDIO_POLICY_AUTO,
+ 
+     /**
+-     * Related feature must be used. If not available then fail.
++     * AAudio MMAP must be used or fail.
+      */
+     AAUDIO_POLICY_ALWAYS
+ };
+ typedef int32_t aaudio_policy_t;
+ 
++// The values are copied from JAVA SDK device types defined in android/media/AudioDeviceInfo.java
++// When a new value is added, it should be added here and handled by the conversion at
++// AAudioConvert_aaudioToAndroidDeviceType.
++typedef enum AAudio_DeviceType : int32_t {
++    /**
++     * A device type describing the attached earphone speaker.
++     */
++    AAUDIO_DEVICE_BUILTIN_EARPIECE = 1,
++
++    /**
++     * A device type describing the speaker system (i.e. a mono speaker or stereo speakers) built
++     * in a device.
++     */
++    AAUDIO_DEVICE_BUILTIN_SPEAKER = 2,
++
++    /**
++     * A device type describing a headset, which is the combination of a headphones and microphone.
++     */
++    AAUDIO_DEVICE_WIRED_HEADSET = 3,
++
++    /**
++     * A device type describing a pair of wired headphones.
++     */
++    AAUDIO_DEVICE_WIRED_HEADPHONES = 4,
++
++    /**
++     * A device type describing an analog line-level connection.
++     */
++    AAUDIO_DEVICE_LINE_ANALOG = 5,
++
++    /**
++     * A device type describing a digital line connection (e.g. SPDIF).
++     */
++    AAUDIO_DEVICE_LINE_DIGITAL = 6,
++
++    /**
++     * A device type describing a Bluetooth device typically used for telephony.
++     */
++    AAUDIO_DEVICE_BLUETOOTH_SCO = 7,
++
++    /**
++     * A device type describing a Bluetooth device supporting the A2DP profile.
++     */
++    AAUDIO_DEVICE_BLUETOOTH_A2DP = 8,
++
++    /**
++     * A device type describing an HDMI connection .
++     */
++    AAUDIO_DEVICE_HDMI = 9,
++
++    /**
++     * A device type describing the Audio Return Channel of an HDMI connection.
++     */
++    AAUDIO_DEVICE_HDMI_ARC = 10,
++
++    /**
++     * A device type describing a USB audio device.
++     */
++    AAUDIO_DEVICE_USB_DEVICE = 11,
++
++    /**
++     * A device type describing a USB audio device in accessory mode.
++     */
++    AAUDIO_DEVICE_USB_ACCESSORY = 12,
++
++    /**
++     * A device type describing the audio device associated with a dock.
++     * Starting at API 34, this device type only represents digital docks, while docks with an
++     * analog connection are represented with {@link #AAUDIO_DEVICE_DOCK_ANALOG}.
++     */
++    AAUDIO_DEVICE_DOCK = 13,
++
++    /**
++     * A device type associated with the transmission of audio signals over FM.
++     */
++    AAUDIO_DEVICE_FM = 14,
++
++    /**
++     * A device type describing the microphone(s) built in a device.
++     */
++    AAUDIO_DEVICE_BUILTIN_MIC = 15,
++
++    /**
++     * A device type for accessing the audio content transmitted over FM.
++     */
++    AAUDIO_DEVICE_FM_TUNER = 16,
++
++    /**
++     * A device type for accessing the audio content transmitted over the TV tuner system.
++     */
++    AAUDIO_DEVICE_TV_TUNER = 17,
++
++    /**
++     * A device type describing the transmission of audio signals over the telephony network.
++     */
++    AAUDIO_DEVICE_TELEPHONY = 18,
++
++    /**
++     * A device type describing the auxiliary line-level connectors.
++     */
++    AAUDIO_DEVICE_AUX_LINE = 19,
++
++    /**
++     * A device type connected over IP.
++     */
++    AAUDIO_DEVICE_IP = 20,
++
++    /**
++     * A type-agnostic device used for communication with external audio systems.
++     */
++    AAUDIO_DEVICE_BUS = 21,
++
++    /**
++     * A device type describing a USB audio headset.
++     */
++    AAUDIO_DEVICE_USB_HEADSET = 22,
++
++    /**
++     * A device type describing a Hearing Aid.
++     */
++    AAUDIO_DEVICE_HEARING_AID = 23,
++
++    /**
++     * A device type describing the speaker system (i.e. a mono speaker or stereo speakers) built
++     * in a device, that is specifically tuned for outputting sounds like notifications and alarms
++     * (i.e. sounds the user couldn't necessarily anticipate).
++     * <p>Note that this physical audio device may be the same as {@link #TYPE_BUILTIN_SPEAKER}
++     * but is driven differently to safely accommodate the different use case.</p>
++     */
++    AAUDIO_DEVICE_BUILTIN_SPEAKER_SAFE = 24,
++
++    /**
++     * A device type for rerouting audio within the Android framework between mixes and
++     * system applications.
++     */
++    AAUDIO_DEVICE_REMOTE_SUBMIX = 25,
++    /**
++     * A device type describing a Bluetooth Low Energy (BLE) audio headset or headphones.
++     * Headphones are grouped with headsets when the device is a sink:
++     * the features of headsets and headphones with regard to playback are the same.
++     */
++    AAUDIO_DEVICE_BLE_HEADSET = 26,
++
++    /**
++     * A device type describing a Bluetooth Low Energy (BLE) audio speaker.
++     */
++    AAUDIO_DEVICE_BLE_SPEAKER = 27,
++
++    /**
++     * A device type describing an Echo Canceller loopback Reference.
++     * This device is only used when capturing with MediaRecorder.AudioSource.ECHO_REFERENCE,
++     * which requires privileged permission
++     * {@link android.Manifest.permission#CAPTURE_AUDIO_OUTPUT}.
++     *
++     * Note that this is not exposed as it is a system API that requires privileged permission.
++     */
++    // AAUDIO_DEVICE_ECHO_REFERENCE = 28,
++
++    /**
++     * A device type describing the Enhanced Audio Return Channel of an HDMI connection.
++     */
++    AAUDIO_DEVICE_HDMI_EARC = 29,
++
++    /**
++     * A device type describing a Bluetooth Low Energy (BLE) broadcast group.
++     */
++    AAUDIO_DEVICE_BLE_BROADCAST = 30,
++
++    /**
++     * A device type describing the audio device associated with a dock using an analog connection.
++     */
++    AAUDIO_DEVICE_DOCK_ANALOG = 31
++} AAudio_DeviceType;
++
++/**
++ * Query how aaudio mmap is supported for the given device type.
++ *
++ * @param device device type
++ * @param direction {@link AAUDIO_DIRECTION_OUTPUT} or {@link AAUDIO_DIRECTION_INPUT}
++ * @return the mmap policy or negative error
++ */
++AAUDIO_API aaudio_policy_t AAudio_getPlatformMMapPolicy(
++        AAudio_DeviceType device, aaudio_direction_t direction) __INTRODUCED_IN(36);
++
++/**
++ * Query how aaudio exclusive mmap is supported for the given device type.
++ *
++ * @param device device type
++ * @param direction {@link AAUDIO_DIRECTION_OUTPUT} or {@link AAUDIO_DIRECTION_INPUT}
++ * @return the mmap exclusive policy or negative error
++ */
++AAUDIO_API aaudio_policy_t AAudio_getPlatformMMapExclusivePolicy(
++        AAudio_DeviceType device, aaudio_direction_t direction) __INTRODUCED_IN(36);
++
+ /**
+  * Control whether AAudioStreamBuilder_openStream() will use the new MMAP data path
+  * or the older "Legacy" data path.
+diff --git a/media/libaaudio/src/core/AAudioAudio.cpp b/media/libaaudio/src/core/AAudioAudio.cpp
+index 1e8ac8d6d1..3315344c42 100644
+--- a/media/libaaudio/src/core/AAudioAudio.cpp
++++ b/media/libaaudio/src/core/AAudioAudio.cpp
+@@ -53,6 +53,16 @@ AAUDIO_API const char * AAudio_convertStreamStateToText(aaudio_stream_state_t st
+     return AudioGlobal_convertStreamStateToText(state);
+ }
+ 
++AAUDIO_API aaudio_policy_t AAudio_getPlatformMMapPolicy(
++        AAudio_DeviceType device, aaudio_direction_t direction) {
++    return AudioGlobal_getPlatformMMapPolicy(device, direction);
++}
++
++AAUDIO_API aaudio_policy_t AAudio_getPlatformMMapExclusivePolicy(
++        AAudio_DeviceType device, aaudio_direction_t direction) {
++    return AudioGlobal_getPlatformMMapExclusivePolicy(device, direction);
++}
++
+ static AudioStream *convertAAudioStreamToAudioStream(AAudioStream* stream)
+ {
+     return (AudioStream*) stream;
+diff --git a/media/libaaudio/src/core/AudioGlobal.cpp b/media/libaaudio/src/core/AudioGlobal.cpp
+index 30f9677297..3268488109 100644
+--- a/media/libaaudio/src/core/AudioGlobal.cpp
++++ b/media/libaaudio/src/core/AudioGlobal.cpp
+@@ -15,6 +15,13 @@
+  */
+ #include <aaudio/AAudio.h>
+ #include <aaudio/AAudioTesting.h>
++#include <android/media/audio/common/AudioDevice.h>
++#include <android/media/audio/common/AudioMMapPolicyInfo.h>
++#include <android/media/audio/common/AudioMMapPolicyType.h>
++#include <media/AidlConversionCppNdk.h>
++#include <media/AudioSystem.h>
++#include <system/audio-hal-enums.h>
++#include <utility/AAudioUtilities.h>
+ 
+ #include "AudioGlobal.h"
+ 
+@@ -23,6 +30,10 @@
+  */
+ namespace aaudio {
+ 
++using android::media::audio::common::AudioDevice;
++using android::media::audio::common::AudioMMapPolicyInfo;
++using android::media::audio::common::AudioMMapPolicyType;
++
+ static aaudio_policy_t g_MMapPolicy = AAUDIO_UNSPECIFIED;
+ 
+ aaudio_policy_t AudioGlobal_getMMapPolicy() {
+@@ -132,6 +143,39 @@ const char* AudioGlobal_convertStreamStateToText(aaudio_stream_state_t state) {
+     return "Unrecognized";
+ }
+ 
++namespace {
++
++aaudio_policy_t getPlatformMMapPolicy(AudioMMapPolicyType policyType, AAudio_DeviceType device,
++                                      aaudio_direction_t direction) {
++    if (direction != AAUDIO_DIRECTION_INPUT && direction != AAUDIO_DIRECTION_OUTPUT) {
++        return AAUDIO_ERROR_ILLEGAL_ARGUMENT;
++    }
++    const audio_devices_t deviceType = AAudioConvert_aaudioToAndroidDeviceType(device, direction);
++    if (deviceType == AUDIO_DEVICE_NONE) {
++        return AAUDIO_ERROR_ILLEGAL_ARGUMENT;
++    }
++
++    AudioMMapPolicyInfo policyInfo;
++    if (android::status_t status = android::AudioSystem::getMmapPolicyForDevice(
++            policyType, deviceType, &policyInfo);
++        status != android::NO_ERROR) {
++        return AAudioConvert_androidToAAudioResult(status);
++    }
++    return AAudioConvert_androidToAAudioMMapPolicy(policyInfo.mmapPolicy);
++}
++
++} // namespace
++
++aaudio_policy_t AudioGlobal_getPlatformMMapPolicy(
++        AAudio_DeviceType device, aaudio_direction_t direction) {
++    return getPlatformMMapPolicy(AudioMMapPolicyType::DEFAULT, device, direction);
++}
++
++aaudio_policy_t AudioGlobal_getPlatformMMapExclusivePolicy(
++        AAudio_DeviceType device, aaudio_direction_t direction) {
++    return getPlatformMMapPolicy(AudioMMapPolicyType::EXCLUSIVE, device, direction);
++}
++
+ #undef AAUDIO_CASE_ENUM
+ 
+ }  // namespace aaudio
+diff --git a/media/libaaudio/src/core/AudioGlobal.h b/media/libaaudio/src/core/AudioGlobal.h
+index 8af49b4f46..7ff344bd20 100644
+--- a/media/libaaudio/src/core/AudioGlobal.h
++++ b/media/libaaudio/src/core/AudioGlobal.h
+@@ -40,6 +40,11 @@ const char* AudioGlobal_convertResultToText(aaudio_result_t returnCode);
+ const char* AudioGlobal_convertSharingModeToText(aaudio_sharing_mode_t mode);
+ const char* AudioGlobal_convertStreamStateToText(aaudio_stream_state_t state);
+ 
++aaudio_policy_t AudioGlobal_getPlatformMMapPolicy(
++        AAudio_DeviceType device, aaudio_direction_t direction);
++aaudio_policy_t AudioGlobal_getPlatformMMapExclusivePolicy(
++        AAudio_DeviceType device, aaudio_direction_t direction);
++
+ } // namespace aaudio
+ 
+ #endif  // AAUDIO_AUDIOGLOBAL_H
+diff --git a/media/libaaudio/src/core/AudioStreamBuilder.cpp b/media/libaaudio/src/core/AudioStreamBuilder.cpp
+index 01f00388ad..b0dc669506 100644
+--- a/media/libaaudio/src/core/AudioStreamBuilder.cpp
++++ b/media/libaaudio/src/core/AudioStreamBuilder.cpp
+@@ -110,7 +110,7 @@ aaudio_result_t AudioStreamBuilder::build(AudioStream** streamPtr) {
+     std::vector<AudioMMapPolicyInfo> policyInfos;
+     aaudio_policy_t mmapPolicy = AudioGlobal_getMMapPolicy();
+     ALOGD("%s, global mmap policy is %d", __func__, mmapPolicy);
+-    if (status_t status = android::AudioSystem::getMmapPolicyInfo(
++    if (status_t status = android::AudioSystem::getMmapPolicyInfos(
+             AudioMMapPolicyType::DEFAULT, &policyInfos); status == NO_ERROR) {
+         aaudio_policy_t systemMmapPolicy = AAudio_getAAudioPolicy(
+                 policyInfos, AAUDIO_MMAP_POLICY_DEFAULT_AIDL);
+@@ -143,7 +143,7 @@ aaudio_result_t AudioStreamBuilder::build(AudioStream** streamPtr) {
+ 
+     policyInfos.clear();
+     aaudio_policy_t mmapExclusivePolicy = AAUDIO_UNSPECIFIED;
+-    if (status_t status = android::AudioSystem::getMmapPolicyInfo(
++    if (status_t status = android::AudioSystem::getMmapPolicyInfos(
+             AudioMMapPolicyType::EXCLUSIVE, &policyInfos); status == NO_ERROR) {
+         mmapExclusivePolicy = AAudio_getAAudioPolicy(
+                 policyInfos, AAUDIO_MMAP_EXCLUSIVE_POLICY_DEFAULT_AIDL);
+diff --git a/media/libaaudio/src/libaaudio.map.txt b/media/libaaudio/src/libaaudio.map.txt
+index e28dcb4989..7213393b6e 100644
+--- a/media/libaaudio/src/libaaudio.map.txt
++++ b/media/libaaudio/src/libaaudio.map.txt
+@@ -70,6 +70,8 @@ LIBAAUDIO {
+     AAudioStream_getHardwareChannelCount; # introduced=UpsideDownCake
+     AAudioStream_getHardwareFormat;       # introduced=UpsideDownCake
+     AAudioStream_getHardwareSampleRate;   # introduced=UpsideDownCake
++    AAudio_getPlatformMMapPolicy; # introduced=36
++    AAudio_getPlatformMMapExclusivePolicy; #introduced=36
+   local:
+     *;
+ };
+diff --git a/media/libaaudio/src/utility/AAudioUtilities.cpp b/media/libaaudio/src/utility/AAudioUtilities.cpp
+index 3df23eeb15..c741946b92 100644
+--- a/media/libaaudio/src/utility/AAudioUtilities.cpp
++++ b/media/libaaudio/src/utility/AAudioUtilities.cpp
+@@ -693,3 +693,128 @@ aaudio_policy_t AAudio_getAAudioPolicy(const std::vector<AudioMMapPolicyInfo>& p
+     }
+     return aidl2legacy_aaudio_policy(policy);
+ }
++
++audio_devices_t AAudioConvert_aaudioToAndroidDeviceType(AAudio_DeviceType device,
++                                                        aaudio_direction_t direction) {
++    if (direction == AAUDIO_DIRECTION_INPUT) {
++        switch (device) {
++            case AAUDIO_DEVICE_BUILTIN_MIC:
++                return AUDIO_DEVICE_IN_BUILTIN_MIC;
++            case AAUDIO_DEVICE_BLUETOOTH_SCO:
++                return AUDIO_DEVICE_IN_BLUETOOTH_SCO_HEADSET;
++            case AAUDIO_DEVICE_WIRED_HEADSET:
++                return AUDIO_DEVICE_IN_WIRED_HEADSET;
++            case AAUDIO_DEVICE_HDMI:
++                return AUDIO_DEVICE_IN_HDMI;
++            case AAUDIO_DEVICE_TELEPHONY:
++                return AUDIO_DEVICE_IN_TELEPHONY_RX;
++            case AAUDIO_DEVICE_DOCK:
++                return AUDIO_DEVICE_IN_DGTL_DOCK_HEADSET;
++            case AAUDIO_DEVICE_DOCK_ANALOG:
++                return AUDIO_DEVICE_IN_ANLG_DOCK_HEADSET;
++            case AAUDIO_DEVICE_USB_ACCESSORY:
++                return AUDIO_DEVICE_IN_USB_ACCESSORY;
++            case AAUDIO_DEVICE_USB_DEVICE:
++                return AUDIO_DEVICE_IN_USB_DEVICE;
++            case AAUDIO_DEVICE_USB_HEADSET:
++                return AUDIO_DEVICE_IN_USB_HEADSET;
++            case AAUDIO_DEVICE_FM_TUNER:
++                return AUDIO_DEVICE_IN_FM_TUNER;
++            case AAUDIO_DEVICE_TV_TUNER:
++                return AUDIO_DEVICE_IN_TV_TUNER;
++            case AAUDIO_DEVICE_LINE_ANALOG:
++                return AUDIO_DEVICE_IN_LINE;
++            case AAUDIO_DEVICE_LINE_DIGITAL:
++                return AUDIO_DEVICE_IN_SPDIF;
++            case AAUDIO_DEVICE_BLUETOOTH_A2DP:
++                return AUDIO_DEVICE_IN_BLUETOOTH_A2DP;
++            case AAUDIO_DEVICE_IP:
++                return AUDIO_DEVICE_IN_IP;
++            case AAUDIO_DEVICE_BUS:
++                return AUDIO_DEVICE_IN_BUS;
++            case AAUDIO_DEVICE_REMOTE_SUBMIX:
++                return AUDIO_DEVICE_IN_REMOTE_SUBMIX;
++            case AAUDIO_DEVICE_BLE_HEADSET:
++                return AUDIO_DEVICE_IN_BLE_HEADSET;
++            case AAUDIO_DEVICE_HDMI_ARC:
++                return AUDIO_DEVICE_IN_HDMI_ARC;
++            case AAUDIO_DEVICE_HDMI_EARC:
++                return AUDIO_DEVICE_IN_HDMI_EARC;
++            default:
++                break;
++        }
++    } else {
++        switch (device) {
++            case AAUDIO_DEVICE_BUILTIN_EARPIECE:
++                return AUDIO_DEVICE_OUT_EARPIECE;
++            case AAUDIO_DEVICE_BUILTIN_SPEAKER:
++                return AUDIO_DEVICE_OUT_SPEAKER;
++            case AAUDIO_DEVICE_WIRED_HEADSET:
++                return AUDIO_DEVICE_OUT_WIRED_HEADSET;
++            case AAUDIO_DEVICE_WIRED_HEADPHONES:
++                return AUDIO_DEVICE_OUT_WIRED_HEADPHONE;
++            case AAUDIO_DEVICE_LINE_ANALOG:
++                return AUDIO_DEVICE_OUT_LINE;
++            case AAUDIO_DEVICE_LINE_DIGITAL:
++                return AUDIO_DEVICE_OUT_SPDIF;
++            case AAUDIO_DEVICE_BLUETOOTH_SCO:
++                return AUDIO_DEVICE_OUT_BLUETOOTH_SCO;
++            case AAUDIO_DEVICE_BLUETOOTH_A2DP:
++                return AUDIO_DEVICE_OUT_BLUETOOTH_A2DP;
++            case AAUDIO_DEVICE_HDMI:
++                return AUDIO_DEVICE_OUT_HDMI;
++            case AAUDIO_DEVICE_HDMI_ARC:
++                return AUDIO_DEVICE_OUT_HDMI_ARC;
++            case AAUDIO_DEVICE_HDMI_EARC:
++                return AUDIO_DEVICE_OUT_HDMI_EARC;
++            case AAUDIO_DEVICE_USB_DEVICE:
++                return AUDIO_DEVICE_OUT_USB_DEVICE;
++            case AAUDIO_DEVICE_USB_HEADSET:
++                return AUDIO_DEVICE_OUT_USB_HEADSET;
++            case AAUDIO_DEVICE_USB_ACCESSORY:
++                return AUDIO_DEVICE_OUT_USB_ACCESSORY;
++            case AAUDIO_DEVICE_DOCK:
++                return AUDIO_DEVICE_OUT_DGTL_DOCK_HEADSET;
++            case AAUDIO_DEVICE_DOCK_ANALOG:
++                return AUDIO_DEVICE_OUT_ANLG_DOCK_HEADSET;
++            case AAUDIO_DEVICE_FM:
++                return AUDIO_DEVICE_OUT_FM;
++            case AAUDIO_DEVICE_TELEPHONY:
++                return AUDIO_DEVICE_OUT_TELEPHONY_TX;
++            case AAUDIO_DEVICE_AUX_LINE:
++                return AUDIO_DEVICE_OUT_AUX_LINE;
++            case AAUDIO_DEVICE_IP:
++                return AUDIO_DEVICE_OUT_IP;
++            case AAUDIO_DEVICE_BUS:
++                return AUDIO_DEVICE_OUT_BUS;
++            case AAUDIO_DEVICE_HEARING_AID:
++                return AUDIO_DEVICE_OUT_HEARING_AID;
++            case AAUDIO_DEVICE_BUILTIN_SPEAKER_SAFE:
++                return AUDIO_DEVICE_OUT_SPEAKER_SAFE;
++            case AAUDIO_DEVICE_REMOTE_SUBMIX:
++                return AUDIO_DEVICE_OUT_REMOTE_SUBMIX;
++            case AAUDIO_DEVICE_BLE_HEADSET:
++                return AUDIO_DEVICE_OUT_BLE_HEADSET;
++            case AAUDIO_DEVICE_BLE_SPEAKER:
++                return AUDIO_DEVICE_OUT_BLE_SPEAKER;
++            case AAUDIO_DEVICE_BLE_BROADCAST:
++                return AUDIO_DEVICE_OUT_BLE_BROADCAST;
++            default:
++                break;
++        }
++    }
++    return AUDIO_DEVICE_NONE;
++}
++
++aaudio_policy_t AAudioConvert_androidToAAudioMMapPolicy(AudioMMapPolicy policy) {
++    switch (policy) {
++        case AudioMMapPolicy::AUTO:
++            return AAUDIO_POLICY_AUTO;
++        case AudioMMapPolicy::ALWAYS:
++            return AAUDIO_POLICY_ALWAYS;
++        case AudioMMapPolicy::NEVER:
++        case AudioMMapPolicy::UNSPECIFIED:
++        default:
++            return AAUDIO_POLICY_NEVER;
++    }
++}
+diff --git a/media/libaaudio/src/utility/AAudioUtilities.h b/media/libaaudio/src/utility/AAudioUtilities.h
+index 7c351e1dc4..d5069f5078 100644
+--- a/media/libaaudio/src/utility/AAudioUtilities.h
++++ b/media/libaaudio/src/utility/AAudioUtilities.h
+@@ -363,4 +363,14 @@ aaudio_policy_t AAudio_getAAudioPolicy(
+         android::media::audio::common::AudioMMapPolicy defaultPolicy =
+                 android::media::audio::common::AudioMMapPolicy::NEVER);
+ 
++/**
++ * Convert the aaudio device type to android device type. Returns AUDIO_DEVICE_NONE if
++ * the given device is not a valid one.
++ */
++audio_devices_t AAudioConvert_aaudioToAndroidDeviceType(
++        AAudio_DeviceType device, aaudio_direction_t direction);
++
++aaudio_policy_t AAudioConvert_androidToAAudioMMapPolicy(
++        android::media::audio::common::AudioMMapPolicy policy);
++
+ #endif //UTILITY_AAUDIO_UTILITIES_H
+diff --git a/media/libaaudio/tests/test_mmap_path.cpp b/media/libaaudio/tests/test_mmap_path.cpp
+index c8376f606e..6ad694f629 100644
+--- a/media/libaaudio/tests/test_mmap_path.cpp
++++ b/media/libaaudio/tests/test_mmap_path.cpp
+@@ -40,7 +40,7 @@ using android::media::audio::common::AudioMMapPolicyType;
+  */
+ static void openStreamAndVerify(aaudio_direction_t direction) {
+     std::vector<AudioMMapPolicyInfo> policyInfos;
+-    ASSERT_EQ(android::NO_ERROR, android::AudioSystem::getMmapPolicyInfo(
++    ASSERT_EQ(android::NO_ERROR, android::AudioSystem::getMmapPolicyInfos(
+             AudioMMapPolicyType::DEFAULT, &policyInfos));
+     if (AAudio_getAAudioPolicy(policyInfos) == AAUDIO_POLICY_NEVER) {
+         // Query the system MMAP policy, if it is NEVER, it indicates there is no MMAP support.
+diff --git a/media/libaudioclient/AudioSystem.cpp b/media/libaudioclient/AudioSystem.cpp
+index ee4407421d..a467d2c175 100644
+--- a/media/libaudioclient/AudioSystem.cpp
++++ b/media/libaudioclient/AudioSystem.cpp
+@@ -2700,13 +2700,13 @@ status_t AudioSystem::setVibratorInfos(
+     return af->setVibratorInfos(vibratorInfos);
+ }
+ 
+-status_t AudioSystem::getMmapPolicyInfo(
++status_t AudioSystem::getMmapPolicyInfos(
+         AudioMMapPolicyType policyType, std::vector<AudioMMapPolicyInfo> *policyInfos) {
+-    const sp<IAudioFlinger> af = get_audio_flinger();
+-    if (af == nullptr) {
++    const sp<IAudioPolicyService> aps = get_audio_policy_service();
++    if (aps == nullptr) {
+         return PERMISSION_DENIED;
+     }
+-    return af->getMmapPolicyInfos(policyType, policyInfos);
++    return statusTFromBinderStatus(aps->getMmapPolicyInfos(policyType, policyInfos));
+ }
+ 
+ int32_t AudioSystem::getAAudioMixerBurstCount() {
+@@ -2803,6 +2803,18 @@ status_t AudioSystem::clearPreferredMixerAttributes(const audio_attributes_t *at
+             aps->clearPreferredMixerAttributes(attrAidl, portIdAidl, uidAidl));
+ }
+ 
++status_t AudioSystem::getMmapPolicyForDevice(AudioMMapPolicyType policyType,
++                                             audio_devices_t device,
++                                             AudioMMapPolicyInfo *policyInfo) {
++    const sp<IAudioPolicyService> aps = get_audio_policy_service();
++    if (aps == nullptr) {
++        return PERMISSION_DENIED;
++    }
++    policyInfo->device.type = VALUE_OR_RETURN_STATUS(
++            legacy2aidl_audio_devices_t_AudioDeviceDescription(device));
++    return statusTFromBinderStatus(aps->getMmapPolicyForDevice(policyType, policyInfo));
++}
++
+ // ---------------------------------------------------------------------------
+ 
+ int AudioSystem::AudioPolicyServiceClient::addAudioPortCallback(
+diff --git a/media/libaudioclient/aidl/android/media/IAudioPolicyService.aidl b/media/libaudioclient/aidl/android/media/IAudioPolicyService.aidl
+index b4f879a021..f262c2e05d 100644
+--- a/media/libaudioclient/aidl/android/media/IAudioPolicyService.aidl
++++ b/media/libaudioclient/aidl/android/media/IAudioPolicyService.aidl
+@@ -46,6 +46,8 @@ import android.media.audio.common.AudioConfigBase;
+ import android.media.audio.common.AudioDevice;
+ import android.media.audio.common.AudioDeviceDescription;
+ import android.media.audio.common.AudioFormatDescription;
++import android.media.audio.common.AudioMMapPolicyInfo;
++import android.media.audio.common.AudioMMapPolicyType;
+ import android.media.audio.common.AudioMode;
+ import android.media.audio.common.AudioPolicyForcedConfig;
+ import android.media.audio.common.AudioPolicyForceUse;
+@@ -482,6 +484,17 @@ interface IAudioPolicyService {
+      * required to control audio access.
+      */
+     INativePermissionController getPermissionController();
++
++    /**
++     * Query mmap policy information.
++     */
++    AudioMMapPolicyInfo[] getMmapPolicyInfos(AudioMMapPolicyType policyType);
++
++    /**
++     * Get all devices that support AAudio MMAP.
++     */
++    void getMmapPolicyForDevice(AudioMMapPolicyType policyType,
++                                inout AudioMMapPolicyInfo policyInfo);
+     // When adding a new method, please review and update
+     // AudioPolicyService.cpp AudioPolicyService::onTransact()
+     // AudioPolicyService.cpp IAUDIOPOLICYSERVICE_BINDER_METHOD_MACRO_LIST
+diff --git a/media/libaudioclient/include/media/AudioSystem.h b/media/libaudioclient/include/media/AudioSystem.h
+index 40e5673944..d0f3767da7 100644
+--- a/media/libaudioclient/include/media/AudioSystem.h
++++ b/media/libaudioclient/include/media/AudioSystem.h
+@@ -797,7 +797,7 @@ public:
+ 
+     static status_t setVibratorInfos(const std::vector<media::AudioVibratorInfo>& vibratorInfos);
+ 
+-    static status_t getMmapPolicyInfo(
++    static status_t getMmapPolicyInfos(
+             media::audio::common::AudioMMapPolicyType policyType,
+             std::vector<media::audio::common::AudioMMapPolicyInfo> *policyInfos);
+ 
+@@ -805,6 +805,10 @@ public:
+ 
+     static int32_t getAAudioHardwareBurstMinUsec();
+ 
++    static status_t getMmapPolicyForDevice(
++            media::audio::common::AudioMMapPolicyType policyType, audio_devices_t device,
++            media::audio::common::AudioMMapPolicyInfo *policyInfo);
++
+     class AudioFlingerClient: public IBinder::DeathRecipient, public media::BnAudioFlingerClient
+     {
+     public:
+diff --git a/services/audiopolicy/AudioPolicyInterface.h b/services/audiopolicy/AudioPolicyInterface.h
+index edcb805fed..d0548ef866 100644
+--- a/services/audiopolicy/AudioPolicyInterface.h
++++ b/services/audiopolicy/AudioPolicyInterface.h
+@@ -19,6 +19,8 @@
+ 
+ #include <android/media/DeviceConnectedState.h>
+ #include <android/media/TrackInternalMuteInfo.h>
++#include <android/media/audio/common/AudioMMapPolicyInfo.h>
++#include <android/media/audio/common/AudioMMapPolicyType.h>
+ #include <media/AudioCommonTypes.h>
+ #include <media/AudioContainers.h>
+ #include <media/AudioDeviceTypeAddr.h>
+@@ -444,6 +446,13 @@ public:
+     virtual status_t clearPreferredMixerAttributes(const audio_attributes_t* attr,
+                                                    audio_port_handle_t portId,
+                                                    uid_t uid) = 0;
++
++    virtual status_t getMmapPolicyInfos(
++            media::audio::common::AudioMMapPolicyType policyType,
++            std::vector<media::audio::common::AudioMMapPolicyInfo> *policyInfos) = 0;
++    virtual status_t getMmapPolicyForDevice(
++            media::audio::common::AudioMMapPolicyType policyType,
++            media::audio::common::AudioMMapPolicyInfo *policyInfo) = 0;
+ };
+ 
+ // Audio Policy client Interface
+@@ -608,6 +617,10 @@ public:
+ 
+     virtual status_t setTracksInternalMute(
+             const std::vector<media::TrackInternalMuteInfo>& tracksInternalMute) = 0;
++
++    virtual status_t getMmapPolicyInfos(
++            media::audio::common::AudioMMapPolicyType policyType,
++            std::vector<media::audio::common::AudioMMapPolicyInfo> *policyInfos) = 0;
+ };
+ 
+     // These are the signatures of createAudioPolicyManager/destroyAudioPolicyManager
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index c1c4a28f4f..36809abc2e 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -40,6 +40,7 @@
+ #include <vector>
+ 
+ #include <Serializer.h>
++#include <android/media/audio/common/AudioMMapPolicy.h>
+ #include <android/media/audio/common/AudioPort.h>
+ #include <com_android_media_audio.h>
+ #include <android_media_audiopolicy.h>
+@@ -64,6 +65,10 @@ namespace audio_flags = android::media::audiopolicy;
+ 
+ using android::media::audio::common::AudioDevice;
+ using android::media::audio::common::AudioDeviceAddress;
++using android::media::audio::common::AudioDeviceDescription;
++using android::media::audio::common::AudioMMapPolicy;
++using android::media::audio::common::AudioMMapPolicyInfo;
++using android::media::audio::common::AudioMMapPolicyType;
+ using android::media::audio::common::AudioPortDeviceExt;
+ using android::media::audio::common::AudioPortExt;
+ using com::android::media::audioserver::fix_call_audio_patch;
+@@ -4707,6 +4712,18 @@ void AudioPolicyManager::dump(String8 *dst) const
+                           dumpDeviceTypes({it.first}).c_str(),
+                           mEngine->getVolumeGroupForAttributes(it.second));
+     }
++
++    // dump mmap policy by device
++    dst->appendFormat("\nMmap policy:\n");
++    for (const auto& [policyType, policyByDevice] : mMmapPolicyByDeviceType) {
++        std::stringstream ss;
++        ss << '{';
++        for (const auto& [deviceType, policy] : policyByDevice) {
++            ss << deviceType.toString() << ":" << toString(policy) << " ";
++        }
++        ss << '}';
++        dst->appendFormat(" - %s: %s\n", toString(policyType).c_str(), ss.str().c_str());
++    }
+ }
+ 
+ status_t AudioPolicyManager::dump(int fd)
+@@ -9362,4 +9379,88 @@ void AudioPolicyManager::updateClientsInternalMute(
+     }
+ }
+ 
++status_t AudioPolicyManager::getMmapPolicyInfos(AudioMMapPolicyType policyType,
++                                                std::vector<AudioMMapPolicyInfo> *policyInfos) {
++    if (policyType != AudioMMapPolicyType::DEFAULT &&
++        policyType != AudioMMapPolicyType::EXCLUSIVE) {
++        return BAD_VALUE;
++    }
++    if (mMmapPolicyByDeviceType.count(policyType) == 0) {
++        if (status_t status = updateMmapPolicyInfos(policyType); status != NO_ERROR) {
++            return status;
++        }
++    }
++    *policyInfos = mMmapPolicyInfos[policyType];
++    return NO_ERROR;
++}
++
++status_t AudioPolicyManager::getMmapPolicyForDevice(
++        AudioMMapPolicyType policyType, AudioMMapPolicyInfo *policyInfo) {
++    if (policyType != AudioMMapPolicyType::DEFAULT &&
++        policyType != AudioMMapPolicyType::EXCLUSIVE) {
++        return BAD_VALUE;
++    }
++    if (mMmapPolicyByDeviceType.count(policyType) == 0) {
++        if (status_t status = updateMmapPolicyInfos(policyType); status != NO_ERROR) {
++            return status;
++        }
++    }
++    auto it = mMmapPolicyByDeviceType[policyType].find(policyInfo->device.type);
++    policyInfo->mmapPolicy = it == mMmapPolicyByDeviceType[policyType].end()
++            ? AudioMMapPolicy::NEVER : it->second;
++    return NO_ERROR;
++}
++
++status_t AudioPolicyManager::updateMmapPolicyInfos(AudioMMapPolicyType policyType) {
++    std::vector<AudioMMapPolicyInfo> policyInfos;
++    if (status_t status = mpClientInterface->getMmapPolicyInfos(policyType, &policyInfos);
++        status != NO_ERROR) {
++        ALOGE("%s, failed, error = %d", __func__, status);
++        return status;
++    }
++    std::map<AudioDeviceDescription, AudioMMapPolicy> mmapPolicyByDeviceType;
++    if (policyInfos.size() == 1 && policyInfos[0].device == AudioDevice()) {
++        // When there is only one AudioMMapPolicyInfo instance and the device is a default value,
++        // it indicates the mmap policy is reported via system property. In that case, use the
++        // routing information to fill details for how mmap is supported for a particular device.
++        for (const auto &hwModule: mHwModules) {
++            for (const auto &profile: hwModule->getInputProfiles()) {
++                if ((profile->getFlags() & AUDIO_INPUT_FLAG_MMAP_NOIRQ)
++                    != AUDIO_INPUT_FLAG_MMAP_NOIRQ) {
++                    continue;
++                }
++                for (const auto &device: profile->getSupportedDevices()) {
++                    auto deviceDesc =
++                            legacy2aidl_audio_devices_t_AudioDeviceDescription(device->type());
++                    if (deviceDesc.ok()) {
++                        mmapPolicyByDeviceType.emplace(
++                                deviceDesc.value(), policyInfos[0].mmapPolicy);
++                    }
++                }
++            }
++            for (const auto &profile: hwModule->getOutputProfiles()) {
++                if ((profile->getFlags() & AUDIO_OUTPUT_FLAG_MMAP_NOIRQ)
++                    != AUDIO_OUTPUT_FLAG_MMAP_NOIRQ) {
++                    continue;
++                }
++                for (const auto &device: profile->getSupportedDevices()) {
++                    auto deviceDesc =
++                            legacy2aidl_audio_devices_t_AudioDeviceDescription(device->type());
++                    if (deviceDesc.ok()) {
++                        mmapPolicyByDeviceType.emplace(
++                                deviceDesc.value(), policyInfos[0].mmapPolicy);
++                    }
++                }
++            }
++        }
++    } else {
++        for (const auto &info: policyInfos) {
++            mmapPolicyByDeviceType[info.device.type] = info.mmapPolicy;
++        }
++    }
++    mMmapPolicyByDeviceType.emplace(policyType, mmapPolicyByDeviceType);
++    mMmapPolicyInfos.emplace(policyType, policyInfos);
++    return NO_ERROR;
++}
++
+ } // namespace android
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.h b/services/audiopolicy/managerdefault/AudioPolicyManager.h
+index 9ad2ea50bb..6c247bacd3 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.h
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.h
+@@ -436,6 +436,13 @@ public:
+ 
+         void onNewAudioModulesAvailable() override;
+ 
++        status_t getMmapPolicyInfos(
++                media::audio::common::AudioMMapPolicyType policyType,
++                std::vector<media::audio::common::AudioMMapPolicyInfo> *policyInfos) override;
++        status_t getMmapPolicyForDevice(
++                media::audio::common::AudioMMapPolicyType policyType,
++                media::audio::common::AudioMMapPolicyInfo *policyInfo) override;
++
+         status_t initialize();
+ 
+ protected:
+@@ -1408,9 +1415,17 @@ private:
+                                                   int index,
+                                                   const DeviceTypeSet &deviceTypes);
+ 
++        status_t updateMmapPolicyInfos(media::audio::common::AudioMMapPolicyType policyType);
++
+         // Contains for devices that support absolute volume the audio attributes
+         // corresponding to the streams that are driving the volume changes
+         std::unordered_map<audio_devices_t, audio_attributes_t> mAbsoluteVolumeDrivingStreams;
++
++        std::map<media::audio::common::AudioMMapPolicyType,
++                const std::vector<media::audio::common::AudioMMapPolicyInfo>> mMmapPolicyInfos;
++        std::map<media::audio::common::AudioMMapPolicyType,
++                const std::map<media::audio::common::AudioDeviceDescription,
++                         media::audio::common::AudioMMapPolicy>> mMmapPolicyByDeviceType;
+ };
+ 
+ };
+diff --git a/services/audiopolicy/service/AudioPolicyClientImpl.cpp b/services/audiopolicy/service/AudioPolicyClientImpl.cpp
+index 363dfa7ef0..cb4297796c 100644
+--- a/services/audiopolicy/service/AudioPolicyClientImpl.cpp
++++ b/services/audiopolicy/service/AudioPolicyClientImpl.cpp
+@@ -376,4 +376,14 @@ status_t AudioPolicyService::AudioPolicyClient::setTracksInternalMute(
+     return af->setTracksInternalMute(tracksInternalMute);
+ }
+ 
++status_t AudioPolicyService::AudioPolicyClient::getMmapPolicyInfos(
++        media::audio::common::AudioMMapPolicyType policyType,
++        std::vector<media::audio::common::AudioMMapPolicyInfo> *policyInfos) {
++    sp<IAudioFlinger> af = AudioSystem::get_audio_flinger();
++    if (af == nullptr) {
++        return PERMISSION_DENIED;
++    }
++    return af->getMmapPolicyInfos(policyType, policyInfos);
++}
++
+ } // namespace android
+diff --git a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+index 24ab6a1c6e..2e25fb2cc7 100644
+--- a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
++++ b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+@@ -2753,4 +2753,24 @@ Status AudioPolicyService::getPermissionController(sp<INativePermissionControlle
+     return Status::ok();
+ }
+ 
++Status AudioPolicyService::getMmapPolicyInfos(
++        AudioMMapPolicyType policyType, std::vector<AudioMMapPolicyInfo> *_aidl_return) {
++    if (mAudioPolicyManager == nullptr) {
++        return binderStatusFromStatusT(NO_INIT);
++    }
++    audio_utils::lock_guard _l(mMutex);
++    return binderStatusFromStatusT(
++            mAudioPolicyManager->getMmapPolicyInfos(policyType, _aidl_return));
++}
++
++Status AudioPolicyService::getMmapPolicyForDevice(
++        AudioMMapPolicyType policyType, AudioMMapPolicyInfo *policyInfo) {
++    if (mAudioPolicyManager == nullptr) {
++        return binderStatusFromStatusT(NO_INIT);
++    }
++    audio_utils::lock_guard _l(mMutex);
++    return binderStatusFromStatusT(
++            mAudioPolicyManager->getMmapPolicyForDevice(policyType, policyInfo));
++}
++
+ } // namespace android
+diff --git a/services/audiopolicy/service/AudioPolicyService.cpp b/services/audiopolicy/service/AudioPolicyService.cpp
+index 7b7275ea99..13ee5cfa6a 100644
+--- a/services/audiopolicy/service/AudioPolicyService.cpp
++++ b/services/audiopolicy/service/AudioPolicyService.cpp
+@@ -170,6 +170,8 @@ BINDER_METHOD_ENTRY(getPreferredMixerAttributes) \
+ BINDER_METHOD_ENTRY(clearPreferredMixerAttributes) \
+ BINDER_METHOD_ENTRY(getRegisteredPolicyMixes) \
+ BINDER_METHOD_ENTRY(getPermissionController) \
++BINDER_METHOD_ENTRY(getMmapPolicyInfos) \
++BINDER_METHOD_ENTRY(getMmapPolicyForDevice) \
+                                                      \
+ // singleton for Binder Method Statistics for IAudioPolicyService
+ static auto& getIAudioPolicyServiceStatistics() {
+diff --git a/services/audiopolicy/service/AudioPolicyService.h b/services/audiopolicy/service/AudioPolicyService.h
+index c47b5e92d9..2fb221f684 100644
+--- a/services/audiopolicy/service/AudioPolicyService.h
++++ b/services/audiopolicy/service/AudioPolicyService.h
+@@ -58,6 +58,8 @@ using media::audio::common::AudioConfigBase;
+ using media::audio::common::AudioDevice;
+ using media::audio::common::AudioDeviceDescription;
+ using media::audio::common::AudioFormatDescription;
++using media::audio::common::AudioMMapPolicyInfo;
++using media::audio::common::AudioMMapPolicyType;
+ using media::audio::common::AudioMode;
+ using media::audio::common::AudioSource;
+ using media::audio::common::AudioStreamType;
+@@ -328,6 +330,13 @@ public:
+     // Should only be called by AudioService to push permission data down to audioserver
+     binder::Status getPermissionController(sp<INativePermissionController>* out) override;
+ 
++    binder::Status getMmapPolicyInfos(
++            AudioMMapPolicyType policyType,
++            std::vector<AudioMMapPolicyInfo>* _aidl_return) override;
++    binder::Status getMmapPolicyForDevice(
++            AudioMMapPolicyType policyType,
++            AudioMMapPolicyInfo* policyInfo) override;
++
+     status_t onTransact(uint32_t code, const Parcel& data, Parcel* reply, uint32_t flags) override;
+ 
+     // -- IAudioPolicyLocal methods
+@@ -938,6 +947,10 @@ private:
+         status_t setTracksInternalMute(
+                 const std::vector<media::TrackInternalMuteInfo>& tracksInternalMute) override;
+ 
++        status_t getMmapPolicyInfos(
++                media::audio::common::AudioMMapPolicyType policyType,
++                std::vector<media::audio::common::AudioMMapPolicyInfo> *policyInfos) override;
++
+      private:
+         AudioPolicyService *mAudioPolicyService;
+     };
+diff --git a/services/audiopolicy/tests/AudioPolicyTestClient.h b/services/audiopolicy/tests/AudioPolicyTestClient.h
+index 9ddfd6c7a5..91d85f3a9c 100644
+--- a/services/audiopolicy/tests/AudioPolicyTestClient.h
++++ b/services/audiopolicy/tests/AudioPolicyTestClient.h
+@@ -120,6 +120,12 @@ public:
+             const std::vector<media::TrackInternalMuteInfo>& /*tracksInternalMute*/) override {
+         return INVALID_OPERATION;
+     }
++
++    status_t getMmapPolicyInfos(
++            media::audio::common::AudioMMapPolicyType /*policyType*/,
++            std::vector<media::audio::common::AudioMMapPolicyInfo>* /*policyInfos*/) override {
++        return INVALID_OPERATION;
++    }
+ };
+ 
+ } // namespace android
+-- 
+2.43.0
+

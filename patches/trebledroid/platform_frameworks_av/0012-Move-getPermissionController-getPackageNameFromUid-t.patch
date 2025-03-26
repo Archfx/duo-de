@@ -1,0 +1,305 @@
+From ce55edbf135ef3b0fb42cd686ac0738c0565f2d9 Mon Sep 17 00:00:00 2001
+From: Austin Borger <borgera@google.com>
+Date: Mon, 23 Sep 2024 15:12:56 -0700
+Subject: [PATCH 012/436] Move getPermissionController / getPackageNameFromUid
+ to AttributionAndPermissionUtils.
+
+These are permission utilities and belong here.
+
+Also remove the cache_permission_services flag in the process.
+
+Bug: 369206663
+Test: Presubmit
+Flag: EXEMPT minor refactor
+Change-Id: Ib16aec7fd141a206992b20d581eaac8aec6437ee
+---
+ camera/camera_platform.aconfig                | 10 ---
+ .../camera/libcameraservice/CameraService.cpp | 46 --------------
+ .../camera/libcameraservice/CameraService.h   | 29 ---------
+ .../utils/AttributionAndPermissionUtils.cpp   | 63 ++++++++++++++++---
+ .../utils/AttributionAndPermissionUtils.h     | 16 +++++
+ 5 files changed, 69 insertions(+), 95 deletions(-)
+
+diff --git a/camera/camera_platform.aconfig b/camera/camera_platform.aconfig
+index bf1520bef3..8ed23fdab7 100644
+--- a/camera/camera_platform.aconfig
++++ b/camera/camera_platform.aconfig
+@@ -125,16 +125,6 @@ flag {
+     }
+ }
+ 
+-flag {
+-    namespace: "camera_platform"
+-    name: "cache_permission_services"
+-    description: "Cache IPermissionController and IPermissionChecker in CameraService to reduce query latency."
+-    bug: "326139956"
+-    metadata {
+-        purpose: PURPOSE_BUGFIX
+-    }
+-}
+-
+ flag {
+     namespace: "camera_platform"
+     name: "check_session_support_before_session_char"
+diff --git a/services/camera/libcameraservice/CameraService.cpp b/services/camera/libcameraservice/CameraService.cpp
+index eb8708e824..0566543615 100644
+--- a/services/camera/libcameraservice/CameraService.cpp
++++ b/services/camera/libcameraservice/CameraService.cpp
+@@ -89,7 +89,6 @@
+ #include "utils/Utils.h"
+ 
+ namespace {
+-    const char* kPermissionServiceName = "permission";
+     const char* kActivityServiceName = "activity";
+     const char* kSensorPrivacyServiceName = "sensor_privacy";
+     const char* kAppopsServiceName = "appops";
+@@ -2387,51 +2386,6 @@ bool CameraService::isCameraPrivacyEnabled(const String16& packageName, const st
+     return false;
+ }
+ 
+-std::string CameraService::getPackageNameFromUid(int clientUid) const {
+-    std::string packageName("");
+-
+-    sp<IPermissionController> permCtrl;
+-    if (flags::cache_permission_services()) {
+-        permCtrl = getPermissionController();
+-    } else {
+-        sp<IServiceManager> sm = defaultServiceManager();
+-#pragma clang diagnostic push
+-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+-        // Using deprecated function to preserve functionality until the
+-        // cache_permission_services flag is removed.
+-        sp<IBinder> binder = sm->getService(toString16(kPermissionServiceName));
+-#pragma clang diagnostic pop
+-        if (binder == 0) {
+-            ALOGE("Cannot get permission service");
+-            permCtrl = nullptr;
+-        } else {
+-            permCtrl = interface_cast<IPermissionController>(binder);
+-        }
+-    }
+-
+-    if (permCtrl == nullptr) {
+-        // Return empty package name and the further interaction
+-        // with camera will likely fail
+-        return packageName;
+-    }
+-
+-    Vector<String16> packages;
+-
+-    permCtrl->getPackagesForUid(clientUid, packages);
+-
+-    if (packages.isEmpty()) {
+-        ALOGE("No packages for calling UID %d", clientUid);
+-        // Return empty package name and the further interaction
+-        // with camera will likely fail
+-        return packageName;
+-    }
+-
+-    // Arbitrarily pick the first name in the list
+-    packageName = toStdString(packages[0]);
+-
+-    return packageName;
+-}
+-
+ void CameraService::logConnectionAttempt(int clientPid, const std::string& clientPackageName,
+         const std::string& cameraId, apiLevel effectiveApiLevel) const {
+     int packagePid = (clientPid == USE_CALLING_PID) ?
+diff --git a/services/camera/libcameraservice/CameraService.h b/services/camera/libcameraservice/CameraService.h
+index 0ac391df5f..80bd7833d1 100644
+--- a/services/camera/libcameraservice/CameraService.h
++++ b/services/camera/libcameraservice/CameraService.h
+@@ -33,7 +33,6 @@
+ #include <binder/IServiceManager.h>
+ #include <binder/IActivityManager.h>
+ #include <binder/IAppOpsCallback.h>
+-#include <binder/IPermissionController.h>
+ #include <binder/IUidObserver.h>
+ #include <hardware/camera.h>
+ #include <sensorprivacy/SensorPrivacyManager.h>
+@@ -686,25 +685,6 @@ private:
+         return activityManager;
+     }
+ 
+-    static const sp<IPermissionController>& getPermissionController() {
+-        static const char* kPermissionControllerService = "permission";
+-        static thread_local sp<IPermissionController> sPermissionController = nullptr;
+-
+-        if (sPermissionController == nullptr ||
+-                !IInterface::asBinder(sPermissionController)->isBinderAlive()) {
+-            sp<IServiceManager> sm = defaultServiceManager();
+-            sp<IBinder> binder = sm->checkService(toString16(kPermissionControllerService));
+-            if (binder == nullptr) {
+-                ALOGE("%s: Could not get permission service", __FUNCTION__);
+-                sPermissionController = nullptr;
+-            } else {
+-                sPermissionController = interface_cast<IPermissionController>(binder);
+-            }
+-        }
+-
+-        return sPermissionController;
+-    }
+-
+     /**
+      * Typesafe version of device status, containing both the HAL-layer and the service interface-
+      * layer values.
+@@ -997,15 +977,6 @@ private:
+     // sorted in alpha-numeric order.
+     void filterAPI1SystemCameraLocked(const std::vector<std::string> &normalDeviceIds);
+ 
+-    // In some cases the calling code has no access to the package it runs under.
+-    // For example, NDK camera API.
+-    // In this case we will get the packages for the calling UID and pick the first one
+-    // for attributing the app op. This will work correctly for runtime permissions
+-    // as for legacy apps we will toggle the app op for all packages in the UID.
+-    // The caveat is that the operation may be attributed to the wrong package and
+-    // stats based on app ops may be slightly off.
+-    std::string getPackageNameFromUid(int clientUid) const;
+-
+     // Single implementation shared between the various connect calls
+     template<class CALLBACK, class CLIENT>
+     binder::Status connectHelper(const sp<CALLBACK>& cameraCb, const std::string& cameraId,
+diff --git a/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.cpp b/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.cpp
+index 72f8c4b7fb..6c16317a8f 100644
+--- a/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.cpp
++++ b/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.cpp
+@@ -28,6 +28,10 @@
+ #include <hwbinder/IPCThreadState.h>
+ #include <binderthreadstate/CallerUtils.h>
+ 
++namespace {
++    static const std::string kPermissionServiceName = "permission";
++} // namespace anonymous
++
+ namespace android {
+ 
+ namespace flags = com::android::internal::camera::flags;
+@@ -138,16 +142,9 @@ bool AttributionAndPermissionUtils::checkPermissionForPreflight(const std::strin
+         return true;
+     }
+ 
+-    if (!flags::cache_permission_services()) {
+-        PermissionChecker permissionChecker;
+-        return permissionChecker.checkPermissionForPreflight(
+-                       toString16(permission), attributionSource, toString16(message),
+-                       attributedOpCode) != PermissionChecker::PERMISSION_HARD_DENIED;
+-    } else {
+-        return mPermissionChecker->checkPermissionForPreflight(
+-                       toString16(permission), attributionSource, toString16(message),
+-                       attributedOpCode) != PermissionChecker::PERMISSION_HARD_DENIED;
+-    }
++    return mPermissionChecker->checkPermissionForPreflight(
++                    toString16(permission), attributionSource, toString16(message),
++                    attributedOpCode) != PermissionChecker::PERMISSION_HARD_DENIED;
+ }
+ 
+ // Can camera service trust the caller based on the calling UID?
+@@ -189,6 +186,33 @@ bool AttributionAndPermissionUtils::isAutomotivePrivilegedClient(int32_t uid) {
+     return uid == AID_AUTOMOTIVE_EVS;
+ }
+ 
++std::string AttributionAndPermissionUtils::getPackageNameFromUid(int clientUid) const {
++    std::string packageName("");
++
++    sp<IPermissionController> permCtrl = getPermissionController();
++    if (permCtrl == nullptr) {
++        // Return empty package name and the further interaction
++        // with camera will likely fail
++        return packageName;
++    }
++
++    Vector<String16> packages;
++
++    permCtrl->getPackagesForUid(clientUid, packages);
++
++    if (packages.isEmpty()) {
++        ALOGE("No packages for calling UID %d", clientUid);
++        // Return empty package name and the further interaction
++        // with camera will likely fail
++        return packageName;
++    }
++
++    // Arbitrarily pick the first name in the list
++    packageName = toStdString(packages[0]);
++
++    return packageName;
++}
++
+ status_t AttributionAndPermissionUtils::getUidForPackage(const std::string &packageName,
+         int userId, /*inout*/uid_t& uid, int err) {
+     PermissionController pc;
+@@ -245,4 +269,23 @@ bool AttributionAndPermissionUtils::hasPermissionsForOpenCloseListener(
+             attributionSource, std::string(), AppOpsManager::OP_NONE);
+ }
+ 
++const sp<IPermissionController>& AttributionAndPermissionUtils::getPermissionController() const {
++    static const char* kPermissionControllerService = "permission";
++    static thread_local sp<IPermissionController> sPermissionController = nullptr;
++
++    if (sPermissionController == nullptr ||
++            !IInterface::asBinder(sPermissionController)->isBinderAlive()) {
++        sp<IServiceManager> sm = defaultServiceManager();
++        sp<IBinder> binder = sm->checkService(toString16(kPermissionControllerService));
++        if (binder == nullptr) {
++            ALOGE("%s: Could not get permission service", __FUNCTION__);
++            sPermissionController = nullptr;
++        } else {
++            sPermissionController = interface_cast<IPermissionController>(binder);
++        }
++    }
++
++    return sPermissionController;
++}
++
+ } // namespace android
+diff --git a/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.h b/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.h
+index a23fba77a4..8bfe6d8a68 100644
+--- a/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.h
++++ b/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.h
+@@ -19,6 +19,7 @@
+ #include <android/content/AttributionSourceState.h>
+ #include <android/permission/PermissionChecker.h>
+ #include <binder/BinderService.h>
++#include <binder/IPermissionController.h>
+ #include <private/android_filesystem_config.h>
+ 
+ namespace android {
+@@ -88,6 +89,15 @@ class AttributionAndPermissionUtils {
+      */
+     virtual bool isAutomotivePrivilegedClient(int32_t uid);
+ 
++    // In some cases the calling code has no access to the package it runs under.
++    // For example, NDK camera API.
++    // In this case we will get the packages for the calling UID and pick the first one
++    // for attributing the app op. This will work correctly for runtime permissions
++    // as for legacy apps we will toggle the app op for all packages in the UID.
++    // The caveat is that the operation may be attributed to the wrong package and
++    // stats based on app ops may be slightly off.
++    virtual std::string getPackageNameFromUid(int clientUid) const;
++
+     virtual status_t getUidForPackage(const std::string &packageName, int userId,
+             /*inout*/uid_t& uid, int err);
+     virtual bool isCallerCameraServerNotDelegating();
+@@ -121,6 +131,8 @@ class AttributionAndPermissionUtils {
+             const AttributionSourceState &attributionSource);
+ 
+   private:
++    virtual const sp<IPermissionController>& getPermissionController() const;
++
+     std::unique_ptr<permission::PermissionChecker> mPermissionChecker =
+             std::make_unique<permission::PermissionChecker>();
+ };
+@@ -258,6 +270,10 @@ public:
+         return mAttributionAndPermissionUtils->getUidForPackage(packageName, userId, uid, err);
+     }
+ 
++    std::string getPackageNameFromUid(int clientUid) const {
++        return mAttributionAndPermissionUtils->getPackageNameFromUid(clientUid);
++    }
++
+     bool isCallerCameraServerNotDelegating() const {
+         return mAttributionAndPermissionUtils->isCallerCameraServerNotDelegating();
+     }
+-- 
+2.43.0
+

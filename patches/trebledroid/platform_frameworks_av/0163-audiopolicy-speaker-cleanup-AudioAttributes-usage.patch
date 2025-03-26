@@ -1,0 +1,75 @@
+From d97c3ae9ba694b3cb4461a7e129ce28dc70e8937 Mon Sep 17 00:00:00 2001
+From: Jean-Michel Trivi <jmtrivi@google.com>
+Date: Mon, 30 Sep 2024 15:00:44 -0700
+Subject: [PATCH 163/436] audiopolicy: speaker cleanup AudioAttributes usage
+
+Flag: android.media.audio.speaker_cleanup_usage
+Bug: 355050846
+Test: atest CtsMediaAudioTestCases:AudioAttributesTest
+Change-Id: Ic9fa523d3c7ad4204fb2732b0c0e2c166ff4a085
+---
+ media/audioaidlconversion/AidlConversionCppNdk.cpp    |  4 ++++
+ .../engine/common/src/EngineDefaultConfig.h           |  2 ++
+ .../audiopolicy/service/AudioPolicyInterfaceImpl.cpp  | 11 +++++++++++
+ 3 files changed, 17 insertions(+)
+
+diff --git a/media/audioaidlconversion/AidlConversionCppNdk.cpp b/media/audioaidlconversion/AidlConversionCppNdk.cpp
+index cdcce08c24..de6742ace1 100644
+--- a/media/audioaidlconversion/AidlConversionCppNdk.cpp
++++ b/media/audioaidlconversion/AidlConversionCppNdk.cpp
+@@ -1797,6 +1797,8 @@ aidl2legacy_AudioUsage_audio_usage_t(AudioUsage aidl) {
+             return AUDIO_USAGE_VEHICLE_STATUS;
+         case AudioUsage::ANNOUNCEMENT:
+             return AUDIO_USAGE_ANNOUNCEMENT;
++        case AudioUsage::SPEAKER_CLEANUP:
++            return AUDIO_USAGE_SPEAKER_CLEANUP;
+     }
+     return unexpected(BAD_VALUE);
+ }
+@@ -1848,6 +1850,8 @@ legacy2aidl_audio_usage_t_AudioUsage(audio_usage_t legacy) {
+             return AudioUsage::VEHICLE_STATUS;
+         case AUDIO_USAGE_ANNOUNCEMENT:
+             return AudioUsage::ANNOUNCEMENT;
++        case AUDIO_USAGE_SPEAKER_CLEANUP:
++            return AudioUsage::SPEAKER_CLEANUP;
+     }
+     return unexpected(BAD_VALUE);
+ }
+diff --git a/services/audiopolicy/engine/common/src/EngineDefaultConfig.h b/services/audiopolicy/engine/common/src/EngineDefaultConfig.h
+index c4bf64a15c..229c5e2930 100644
+--- a/services/audiopolicy/engine/common/src/EngineDefaultConfig.h
++++ b/services/audiopolicy/engine/common/src/EngineDefaultConfig.h
+@@ -131,6 +131,8 @@ const engineConfig::ProductStrategies gOrderedStrategies = {
+               {AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_UNKNOWN, AUDIO_SOURCE_DEFAULT,
+                 AUDIO_FLAG_BEACON, ""},
+               {AUDIO_CONTENT_TYPE_ULTRASOUND, AUDIO_USAGE_UNKNOWN, AUDIO_SOURCE_DEFAULT,
++                AUDIO_FLAG_NONE, ""},
++              {AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_SPEAKER_CLEANUP, AUDIO_SOURCE_DEFAULT,
+                 AUDIO_FLAG_NONE, ""}
+           }
+          }
+diff --git a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+index 1ffa176963..0d9427a1ff 100644
+--- a/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
++++ b/services/audiopolicy/service/AudioPolicyInterfaceImpl.cpp
+@@ -425,6 +425,17 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
+         }
+     }
+ 
++    //TODO this permission check should extend to all system usages
++    if (attr.usage == AUDIO_USAGE_SPEAKER_CLEANUP) {
++        if (!(audioserver_permissions() ?
++              CHECK_PERM(MODIFY_AUDIO_ROUTING, attributionSource.uid)
++              : modifyAudioRoutingAllowed())) {
++            ALOGE("%s: permission denied: SPEAKER_CLEANUP not allowed for uid %d pid %d",
++                    __func__, attributionSource.uid, attributionSource.pid);
++            return binderStatusFromStatusT(PERMISSION_DENIED);
++        }
++    }
++
+     AutoCallerClear acc;
+     AudioPolicyInterface::output_type_t outputType;
+     bool isSpatialized = false;
+-- 
+2.43.0
+

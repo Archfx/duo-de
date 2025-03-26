@@ -1,0 +1,36 @@
+From 4d0c9e8687118f0f0011236d419f8a6e98e6110d Mon Sep 17 00:00:00 2001
+From: Jiabin Huang <jiabin@google.com>
+Date: Mon, 28 Oct 2024 21:51:36 +0000
+Subject: [PATCH 161/436] Add trace for duplicating thread write
+
+Change-Id: I8874638da34a2fbb66d99ed59b65089b5cad19d2
+Test: TH
+Bug: 361029363
+Flag: EXEMPT log only update
+---
+ services/audioflinger/Threads.cpp | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/services/audioflinger/Threads.cpp b/services/audioflinger/Threads.cpp
+index 147a5d6874..b7c0bb3811 100644
+--- a/services/audioflinger/Threads.cpp
++++ b/services/audioflinger/Threads.cpp
+@@ -7731,6 +7731,7 @@ void DuplicatingThread::threadLoop_sleepTime()
+ 
+ ssize_t DuplicatingThread::threadLoop_write()
+ {
++    ATRACE_BEGIN("write");
+     for (size_t i = 0; i < outputTracks.size(); i++) {
+         const ssize_t actualWritten = outputTracks[i]->write(mSinkBuffer, writeFrames);
+ 
+@@ -7749,6 +7750,7 @@ ssize_t DuplicatingThread::threadLoop_write()
+ 
+         // TODO: Report correction for the other output tracks and show in the dump.
+     }
++    ATRACE_END();
+     if (mStandby) {
+         mThreadMetrics.logBeginInterval();
+         mThreadSnapshot.onBegin();
+-- 
+2.43.0
+

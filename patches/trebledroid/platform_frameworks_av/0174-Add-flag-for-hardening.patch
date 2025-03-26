@@ -1,0 +1,35 @@
+From 3a99dee82d220b7bf7c215e28527cbfeb55e8b76 Mon Sep 17 00:00:00 2001
+From: Atneya Nair <atneya@google.com>
+Date: Wed, 30 Oct 2024 11:10:05 -0700
+Subject: [PATCH 174/436] Add flag for hardening
+
+Flag: android.media.audio.hardening_permission_api
+Bug: 376480814
+Test: compile
+Change-Id: I8855602a8f105f88f7341c1e45f479f6be4af446
+---
+ media/audio/aconfig/audio_framework.aconfig | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/media/audio/aconfig/audio_framework.aconfig b/media/audio/aconfig/audio_framework.aconfig
+index 0b434f7d45..c31c091a6e 100644
+--- a/media/audio/aconfig/audio_framework.aconfig
++++ b/media/audio/aconfig/audio_framework.aconfig
+@@ -92,6 +92,14 @@ flag {
+     bug: "301713440"
+ }
+ 
++flag {
++    name: "hardening_permission_api"
++    is_exported: true
++    namespace: "media_audio"
++    description: "API flag for additional appop/perm constructs for hardening."
++    bug: "376480814"
++}
++
+ flag {
+     name: "loudness_configurator_api"
+     is_exported: true
+-- 
+2.43.0
+

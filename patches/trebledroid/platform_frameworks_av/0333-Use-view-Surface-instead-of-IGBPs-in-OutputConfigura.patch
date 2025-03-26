@@ -1,0 +1,1602 @@
+From c45bc939342f7f972a404b187445961cd60fa8d6 Mon Sep 17 00:00:00 2001
+From: Carlos Martinez Romero <carlosmr@google.com>
+Date: Wed, 9 Oct 2024 15:04:51 -0700
+Subject: [PATCH 333/436] Use view::Surface instead of IGBPs in
+ OutputConfiguration
+
+We are currently limiting the use of IGBPs outside of libgui to allow for
+further development of bufferqueues without external breakages. More
+information at go/warren-buffers.
+
+BYPASS_IGBP_IGBC_API_REASON: this CL is part of the migration.
+Bug: 342197849
+Test: atest android.hardware.cts.CameraTest
+Flag: com.android.graphics.libgui.flags.wb_libcameraservice
+
+Change-Id: I308eac2a11aceff7d598f3b14cfc87dfe4a1a767
+---
+ camera/camera2/CaptureRequest.cpp             |  10 +-
+ camera/camera2/OutputConfiguration.cpp        |  69 ++--
+ .../include/camera/android/hardware/ICamera.h |   9 +-
+ .../camera/camera2/OutputConfiguration.h      |  28 +-
+ camera/ndk/impl/ACameraDevice.cpp             |  59 ++--
+ camera/ndk/impl/ACameraDevice.h               |   9 +-
+ .../camera_c2OutputConfiguration_fuzzer.cpp   |  41 +--
+ .../libcameraservice/aidl/AidlUtils.cpp       |  37 +-
+ .../api2/CameraDeviceClient.cpp               | 328 ++++++++++++------
+ .../api2/CameraDeviceClient.h                 |  21 +-
+ .../api2/CameraOfflineSessionClient.h         |  10 +-
+ .../camera/libcameraservice/hidl/Utils.cpp    |  23 +-
+ .../utils/CameraServiceProxyWrapper.cpp       |  23 +-
+ .../utils/SessionConfigurationUtils.cpp       |  52 +--
+ 14 files changed, 464 insertions(+), 255 deletions(-)
+
+diff --git a/camera/camera2/CaptureRequest.cpp b/camera/camera2/CaptureRequest.cpp
+index 071f34ea37..d2fcde6a34 100644
+--- a/camera/camera2/CaptureRequest.cpp
++++ b/camera/camera2/CaptureRequest.cpp
+@@ -24,6 +24,7 @@
+ #include <camera/StringUtils.h>
+ 
+ #include <binder/Parcel.h>
++#include <gui/Flags.h>  // remove with WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
+ #include <gui/Surface.h>
+ #include <gui/view/Surface.h>
+ 
+@@ -112,11 +113,14 @@ status_t CaptureRequest::readFromParcel(const android::Parcel* parcel) {
+             return err;
+         }
+ 
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++        sp<Surface> surface = surfaceShim.toSurface();
++#else
+         sp<Surface> surface;
+         if (surfaceShim.graphicBufferProducer != NULL) {
+             surface = new Surface(surfaceShim.graphicBufferProducer);
+         }
+-
++#endif
+         mSurfaceList.push_back(surface);
+     }
+ 
+@@ -206,9 +210,13 @@ status_t CaptureRequest::writeToParcel(android::Parcel* parcel) const {
+             parcel->writeString16(String16("android.view.Surface"));
+ 
+             // Surface.writeToParcel
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++            view::Surface surfaceShim = view::Surface::fromSurface(mSurfaceList[i]);
++#else
+             view::Surface surfaceShim;
+             surfaceShim.name = String16("unknown_name");
+             surfaceShim.graphicBufferProducer = mSurfaceList[i]->getIGraphicBufferProducer();
++#endif
+             if ((err = surfaceShim.writeToParcel(parcel)) != OK) {
+                 ALOGE("%s: Failed to write output target Surface %d to parcel: %s (%d)",
+                         __FUNCTION__, i, strerror(-err), err);
+diff --git a/camera/camera2/OutputConfiguration.cpp b/camera/camera2/OutputConfiguration.cpp
+index a89d7ca9e5..f67214b9cd 100644
+--- a/camera/camera2/OutputConfiguration.cpp
++++ b/camera/camera2/OutputConfiguration.cpp
+@@ -37,9 +37,8 @@ const int OutputConfiguration::INVALID_ROTATION = -1;
+ const int OutputConfiguration::ROTATION_0 = 0;
+ const int OutputConfiguration::INVALID_SET_ID = -1;
+ 
+-const std::vector<sp<IGraphicBufferProducer>>&
+-        OutputConfiguration::getGraphicBufferProducers() const {
+-    return mGbps;
++const std::vector<ParcelableSurfaceType>& OutputConfiguration::getSurfaces() const {
++    return mSurfaces;
+ }
+ 
+ int OutputConfiguration::getRotation() const {
+@@ -102,24 +101,23 @@ int OutputConfiguration::getMirrorMode() const {
+     return mMirrorMode;
+ }
+ 
+-int OutputConfiguration::getMirrorMode(sp<IGraphicBufferProducer> surface) const {
++int OutputConfiguration::getMirrorMode(ParcelableSurfaceType surface) const {
+     if (!flags::mirror_mode_shared_surfaces()) {
+         return mMirrorMode;
+     }
+ 
+-    if (mGbps.size() != mMirrorModeForProducers.size()) {
+-        ALOGE("%s: mGbps size doesn't match mMirrorModeForProducers: %zu vs %zu",
+-                __FUNCTION__, mGbps.size(), mMirrorModeForProducers.size());
++    if (mSurfaces.size() != mMirrorModeForProducers.size()) {
++        ALOGE("%s: mSurfaces size doesn't match mMirrorModeForProducers: %zu vs %zu",
++                __FUNCTION__, mSurfaces.size(), mMirrorModeForProducers.size());
+         return mMirrorMode;
+     }
+ 
+     // Use per-producer mirror mode if available.
+-    for (size_t i = 0; i < mGbps.size(); i++) {
+-        if (mGbps[i] == surface) {
++    for (size_t i = 0; i < mSurfaces.size(); i++) {
++        if (mSurfaces[i] == surface) {
+             return mMirrorModeForProducers[i];
+         }
+     }
+-
+     // For surface that doesn't belong to this output configuration, use
+     // mMirrorMode as default.
+     ALOGW("%s: Surface doesn't belong to this OutputConfiguration!", __FUNCTION__);
+@@ -144,9 +142,9 @@ int64_t OutputConfiguration::getUsage() const {
+ 
+ bool OutputConfiguration::isComplete() const {
+     return !((mSurfaceType == SURFACE_TYPE_MEDIA_RECORDER ||
+-             mSurfaceType == SURFACE_TYPE_MEDIA_CODEC ||
+-             mSurfaceType == SURFACE_TYPE_IMAGE_READER) &&
+-             mGbps.empty());
++              mSurfaceType == SURFACE_TYPE_MEDIA_CODEC ||
++              mSurfaceType == SURFACE_TYPE_IMAGE_READER) &&
++             mSurfaces.empty());
+ }
+ 
+ OutputConfiguration::OutputConfiguration() :
+@@ -348,7 +346,7 @@ status_t OutputConfiguration::readFromParcel(const android::Parcel* parcel) {
+         ALOGV("%s: OutputConfiguration: %p, name %s", __FUNCTION__,
+                 surface.graphicBufferProducer.get(),
+                 toString8(surface.name).c_str());
+-        mGbps.push_back(surface.graphicBufferProducer);
++        mSurfaces.push_back(flagtools::toParcelableSurfaceType(surface));
+     }
+ 
+     mSensorPixelModesUsed = std::move(sensorPixelModesUsed);
+@@ -369,10 +367,10 @@ status_t OutputConfiguration::readFromParcel(const android::Parcel* parcel) {
+     return err;
+ }
+ 
+-OutputConfiguration::OutputConfiguration(sp<IGraphicBufferProducer>& gbp, int rotation,
++OutputConfiguration::OutputConfiguration(ParcelableSurfaceType& surface, int rotation,
+         const std::string& physicalId,
+         int surfaceSetID, bool isShared) {
+-    mGbps.push_back(gbp);
++    mSurfaces.push_back(surface);
+     mRotation = rotation;
+     mSurfaceSetID = surfaceSetID;
+     mIsDeferred = false;
+@@ -392,17 +390,17 @@ OutputConfiguration::OutputConfiguration(sp<IGraphicBufferProducer>& gbp, int ro
+ }
+ 
+ OutputConfiguration::OutputConfiguration(
+-        const std::vector<sp<IGraphicBufferProducer>>& gbps,
++        const std::vector<ParcelableSurfaceType>& surfaces,
+     int rotation, const std::string& physicalCameraId, int surfaceSetID,  int surfaceType,
+     int width, int height, bool isShared)
+-  : mGbps(gbps), mRotation(rotation), mSurfaceSetID(surfaceSetID), mSurfaceType(surfaceType),
+-    mWidth(width), mHeight(height), mIsDeferred(false), mIsShared(isShared),
+-    mPhysicalCameraId(physicalCameraId), mIsMultiResolution(false),
++  : mSurfaces(surfaces), mRotation(rotation), mSurfaceSetID(surfaceSetID),
++    mSurfaceType(surfaceType), mWidth(width), mHeight(height), mIsDeferred(false),
++    mIsShared(isShared), mPhysicalCameraId(physicalCameraId), mIsMultiResolution(false),
+     mDynamicRangeProfile(ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD),
+     mColorSpace(ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_UNSPECIFIED),
+     mStreamUseCase(ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT),
+     mTimestampBase(TIMESTAMP_BASE_DEFAULT),
+-    mMirrorMode(MIRROR_MODE_AUTO), mMirrorModeForProducers(gbps.size(), mMirrorMode),
++    mMirrorMode(MIRROR_MODE_AUTO), mMirrorModeForProducers(surfaces.size(), mMirrorMode),
+     mUseReadoutTimestamp(false), mFormat(HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED),
+     mDataspace(0), mUsage(0) { }
+ 
+@@ -432,14 +430,18 @@ status_t OutputConfiguration::writeToParcel(android::Parcel* parcel) const {
+     err = parcel->writeInt32(mIsShared ? 1 : 0);
+     if (err != OK) return err;
+ 
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++    err = parcel->writeParcelableVector(mSurfaces);
++#else
+     std::vector<view::Surface> surfaceShims;
+-    for (auto& gbp : mGbps) {
++    for (auto& gbp : mSurfaces) {
+         view::Surface surfaceShim;
+         surfaceShim.name = String16("unknown_name"); // name of surface
+         surfaceShim.graphicBufferProducer = gbp;
+         surfaceShims.push_back(surfaceShim);
+     }
+     err = parcel->writeParcelableVector(surfaceShims);
++#endif
+     if (err != OK) return err;
+ 
+     String16 physicalCameraId = toString16(mPhysicalCameraId);
+@@ -513,10 +515,9 @@ static bool simpleVectorsLessThan(T first, T second) {
+     return false;
+ }
+ 
+-bool OutputConfiguration::gbpsEqual(const OutputConfiguration& other) const {
+-    const std::vector<sp<IGraphicBufferProducer> >& otherGbps =
+-            other.getGraphicBufferProducers();
+-    return simpleVectorsEqual(otherGbps, mGbps);
++bool OutputConfiguration::surfacesEqual(const OutputConfiguration& other) const {
++    const std::vector<ParcelableSurfaceType>& otherSurfaces = other.getSurfaces();
++    return simpleVectorsEqual(otherSurfaces, mSurfaces);
+ }
+ 
+ bool OutputConfiguration::sensorPixelModesUsedEqual(const OutputConfiguration& other) const {
+@@ -527,7 +528,6 @@ bool OutputConfiguration::sensorPixelModesUsedEqual(const OutputConfiguration& o
+ bool OutputConfiguration::mirrorModesEqual(const OutputConfiguration& other) const {
+     const std::vector<int>& otherMirrorModes = other.getMirrorModes();
+     return simpleVectorsEqual(otherMirrorModes, mMirrorModeForProducers);
+-
+ }
+ 
+ bool OutputConfiguration::sensorPixelModesUsedLessThan(const OutputConfiguration& other) const {
+@@ -540,17 +540,16 @@ bool OutputConfiguration::mirrorModesLessThan(const OutputConfiguration& other)
+     return simpleVectorsLessThan(mMirrorModeForProducers, otherMirrorModes);
+ }
+ 
+-bool OutputConfiguration::gbpsLessThan(const OutputConfiguration& other) const {
+-    const std::vector<sp<IGraphicBufferProducer> >& otherGbps =
+-            other.getGraphicBufferProducers();
++bool OutputConfiguration::surfacesLessThan(const OutputConfiguration& other) const {
++    const std::vector<ParcelableSurfaceType>& otherSurfaces = other.getSurfaces();
+ 
+-    if (mGbps.size() !=  otherGbps.size()) {
+-        return mGbps.size() < otherGbps.size();
++    if (mSurfaces.size() != otherSurfaces.size()) {
++        return mSurfaces.size() < otherSurfaces.size();
+     }
+ 
+-    for (size_t i = 0; i < mGbps.size(); i++) {
+-        if (mGbps[i] != otherGbps[i]) {
+-            return mGbps[i] < otherGbps[i];
++    for (size_t i = 0; i < mSurfaces.size(); i++) {
++        if (mSurfaces[i] != otherSurfaces[i]) {
++            return mSurfaces[i] < otherSurfaces[i];
+         }
+     }
+ 
+diff --git a/camera/include/camera/android/hardware/ICamera.h b/camera/include/camera/android/hardware/ICamera.h
+index eb887fbd51..3c1670aaee 100644
+--- a/camera/include/camera/android/hardware/ICamera.h
++++ b/camera/include/camera/android/hardware/ICamera.h
+@@ -34,8 +34,13 @@ namespace hardware {
+ 
+ class ICameraClient;
+ 
+-class ICamera: public android::IInterface
+-{
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++typedef Surface ProducerType;
++#else
++typedef IGraphicBufferProducer ProducerType;
++#endif
++
++class ICamera : public android::IInterface {
+     /**
+      * Keep up-to-date with ICamera.aidl in frameworks/base
+      */
+diff --git a/camera/include/camera/camera2/OutputConfiguration.h b/camera/include/camera/camera2/OutputConfiguration.h
+index 671d065b44..13bedb3ee1 100644
+--- a/camera/include/camera/camera2/OutputConfiguration.h
++++ b/camera/include/camera/camera2/OutputConfiguration.h
+@@ -19,7 +19,12 @@
+ 
+ #include <string>
+ 
++#include <gui/Flags.h>  // remove with WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++#include <gui/view/Surface.h>
++#else
+ #include <gui/IGraphicBufferProducer.h>
++#endif
+ #include <binder/Parcelable.h>
+ 
+ namespace android {
+@@ -59,7 +64,7 @@ public:
+         MIRROR_MODE_V = 3,
+     };
+ 
+-    const std::vector<sp<IGraphicBufferProducer>>& getGraphicBufferProducers() const;
++    const std::vector<ParcelableSurfaceType>& getSurfaces() const;
+     int                        getRotation() const;
+     int                        getSurfaceSetID() const;
+     int                        getSurfaceType() const;
+@@ -73,7 +78,7 @@ public:
+     bool                       isMultiResolution() const;
+     int64_t                    getStreamUseCase() const;
+     int                        getTimestampBase() const;
+-    int                        getMirrorMode(sp<IGraphicBufferProducer> surface) const;
++    int                        getMirrorMode(ParcelableSurfaceType surface) const;
+     int                        getMirrorMode() const;
+     bool                       useReadoutTimestamp() const;
+     int                        getFormat() const;
+@@ -100,11 +105,11 @@ public:
+     // getSurfaceSetID will be INVALID_SET_ID if error occurred
+     OutputConfiguration(const android::Parcel& parcel);
+ 
+-    OutputConfiguration(sp<IGraphicBufferProducer>& gbp, int rotation,
++    OutputConfiguration(ParcelableSurfaceType& surface, int rotation,
+             const std::string& physicalCameraId,
+             int surfaceSetID = INVALID_SET_ID, bool isShared = false);
+ 
+-    OutputConfiguration(const std::vector<sp<IGraphicBufferProducer>>& gbps,
++    OutputConfiguration(const std::vector<ParcelableSurfaceType>& surfaces,
+                         int rotation, const std::string& physicalCameraId,
+                         int surfaceSetID = INVALID_SET_ID,
+                         int surfaceType = SURFACE_TYPE_UNKNOWN, int width = 0,
+@@ -121,7 +126,7 @@ public:
+                 mHeight == other.mHeight &&
+                 mIsDeferred == other.mIsDeferred &&
+                 mIsShared == other.mIsShared &&
+-                gbpsEqual(other) &&
++                surfacesEqual(other) &&
+                 mPhysicalCameraId == other.mPhysicalCameraId &&
+                 mIsMultiResolution == other.mIsMultiResolution &&
+                 sensorPixelModesUsedEqual(other) &&
+@@ -201,18 +206,21 @@ public:
+         if (mUsage != other.mUsage) {
+             return mUsage < other.mUsage;
+         }
+-        return gbpsLessThan(other);
++        return surfacesLessThan(other);
+     }
+ 
+     bool operator > (const OutputConfiguration& other) const {
+         return (*this != other && !(*this < other));
+     }
+ 
+-    bool gbpsEqual(const OutputConfiguration& other) const;
++    bool surfacesEqual(const OutputConfiguration& other) const;
+     bool sensorPixelModesUsedEqual(const OutputConfiguration& other) const;
+     bool sensorPixelModesUsedLessThan(const OutputConfiguration& other) const;
+-    bool gbpsLessThan(const OutputConfiguration& other) const;
+-    void addGraphicProducer(sp<IGraphicBufferProducer> gbp) {mGbps.push_back(gbp);}
++    bool surfacesLessThan(const OutputConfiguration& other) const;
++    void addSurface(ParcelableSurfaceType surface) { mSurfaces.push_back(surface); }
++#if not WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++    void addGraphicProducer(sp<IGraphicBufferProducer> gbp) {addSurface(gbp);}
++#endif
+     bool mirrorModesEqual(const OutputConfiguration& other) const;
+     bool mirrorModesLessThan(const OutputConfiguration& other) const;
+     const std::vector<int32_t>& getMirrorModes() const {return mMirrorModeForProducers;}
+@@ -239,7 +247,7 @@ public:
+     }
+ 
+ private:
+-    std::vector<sp<IGraphicBufferProducer>> mGbps;
++    std::vector<ParcelableSurfaceType>  mSurfaces;
+     int                        mRotation;
+     int                        mSurfaceSetID;
+     int                        mSurfaceType;
+diff --git a/camera/ndk/impl/ACameraDevice.cpp b/camera/ndk/impl/ACameraDevice.cpp
+index aed740fc71..9db13ad837 100644
+--- a/camera/ndk/impl/ACameraDevice.cpp
++++ b/camera/ndk/impl/ACameraDevice.cpp
+@@ -231,25 +231,27 @@ camera_status_t CameraDevice::isSessionConfigurationSupported(
+     SessionConfiguration sessionConfiguration(0 /*inputWidth*/, 0 /*inputHeight*/,
+             -1 /*inputFormat*/, CAMERA3_STREAM_CONFIGURATION_NORMAL_MODE);
+     for (const auto& output : sessionOutputContainer->mOutputs) {
+-        sp<IGraphicBufferProducer> iGBP(nullptr);
+-        ret = getIGBPfromAnw(output.mWindow, iGBP);
++        sp<SurfaceType> surface(nullptr);
++        ret = getSurfacefromAnw(output.mWindow, surface);
+         if (ret != ACAMERA_OK) {
+             ALOGE("Camera device %s failed to extract graphic producer from native window",
+                     getId());
+             return ret;
+         }
+ 
+-        OutputConfiguration outConfig(iGBP, output.mRotation, output.mPhysicalCameraId,
++        ParcelableSurfaceType pSurface = flagtools::convertSurfaceTypeToParcelable(surface);
++        OutputConfiguration outConfig(pSurface, output.mRotation, output.mPhysicalCameraId,
+                 OutputConfiguration::INVALID_SET_ID, true);
+ 
+         for (auto& anw : output.mSharedWindows) {
+-            ret = getIGBPfromAnw(anw, iGBP);
++            ret = getSurfacefromAnw(anw, surface);
+             if (ret != ACAMERA_OK) {
+                 ALOGE("Camera device %s failed to extract graphic producer from native window",
+                         getId());
+                 return ret;
+             }
+-            outConfig.addGraphicProducer(iGBP);
++            pSurface = flagtools::convertSurfaceTypeToParcelable(surface);
++            outConfig.addSurface(pSurface);
+         }
+ 
+         sessionConfiguration.addOutputConfiguration(outConfig);
+@@ -295,25 +297,27 @@ camera_status_t CameraDevice::updateOutputConfigurationLocked(ACaptureSessionOut
+         return ACAMERA_ERROR_INVALID_PARAMETER;
+     }
+ 
+-    sp<IGraphicBufferProducer> iGBP(nullptr);
+-    ret = getIGBPfromAnw(output->mWindow, iGBP);
++    sp<SurfaceType> surface(nullptr);
++    ret = getSurfacefromAnw(output->mWindow, surface);
+     if (ret != ACAMERA_OK) {
+         ALOGE("Camera device %s failed to extract graphic producer from native window",
+                 getId());
+         return ret;
+     }
+ 
+-    OutputConfiguration outConfig(iGBP, output->mRotation, output->mPhysicalCameraId,
+-            OutputConfiguration::INVALID_SET_ID, true);
++    ParcelableSurfaceType pSurface = flagtools::convertSurfaceTypeToParcelable(surface);
++    OutputConfiguration outConfig(pSurface, output->mRotation, output->mPhysicalCameraId,
++                                  OutputConfiguration::INVALID_SET_ID, true);
+ 
+     for (auto& anw : output->mSharedWindows) {
+-        ret = getIGBPfromAnw(anw, iGBP);
++        ret = getSurfacefromAnw(anw, surface);
+         if (ret != ACAMERA_OK) {
+             ALOGE("Camera device %s failed to extract graphic producer from native window",
+                     getId());
+             return ret;
+         }
+-        outConfig.addGraphicProducer(iGBP);
++        pSurface = flagtools::convertSurfaceTypeToParcelable(surface);
++        outConfig.addSurface(pSurface);
+     }
+ 
+     auto remoteRet = mRemote->updateOutputConfiguration(streamId, outConfig);
+@@ -427,9 +431,9 @@ CameraDevice::allocateCaptureRequest(
+         for (const auto& kvPair : mConfiguredOutputs) {
+             int streamId = kvPair.first;
+             const OutputConfiguration& outConfig = kvPair.second.second;
+-            const auto& gbps = outConfig.getGraphicBufferProducers();
+-            for (int surfaceId = 0; surfaceId < (int) gbps.size(); surfaceId++) {
+-                if (gbps[surfaceId] == surface->getIGraphicBufferProducer()) {
++            const auto& surfaces = outConfig.getSurfaces();
++            for (int surfaceId = 0; surfaceId < (int)surfaces.size(); surfaceId++) {
++                if (surfaces[surfaceId] == flagtools::surfaceToSurfaceType(surface)) {
+                     found = true;
+                     req->mStreamIdxList.push_back(streamId);
+                     req->mSurfaceIdxList.push_back(surfaceId);
+@@ -634,16 +638,13 @@ CameraDevice::waitUntilIdleLocked() {
+     return ACAMERA_OK;
+ }
+ 
+-camera_status_t
+-CameraDevice::getIGBPfromAnw(
+-        ANativeWindow* anw,
+-        sp<IGraphicBufferProducer>& out) {
++camera_status_t CameraDevice::getSurfacefromAnw(ANativeWindow* anw, sp<SurfaceType>& out) {
+     sp<Surface> surface;
+     camera_status_t ret = getSurfaceFromANativeWindow(anw, surface);
+     if (ret != ACAMERA_OK) {
+         return ret;
+     }
+-    out = surface->getIGraphicBufferProducer();
++    out = flagtools::surfaceToSurfaceType(surface);
+     return ACAMERA_OK;
+ }
+ 
+@@ -681,14 +682,16 @@ CameraDevice::configureStreamsLocked(const ACaptureSessionOutputContainer* outpu
+     std::set<std::pair<ANativeWindow*, OutputConfiguration>> outputSet;
+     for (const auto& outConfig : outputs->mOutputs) {
+         ANativeWindow* anw = outConfig.mWindow;
+-        sp<IGraphicBufferProducer> iGBP(nullptr);
+-        ret = getIGBPfromAnw(anw, iGBP);
++        sp<SurfaceType> surface(nullptr);
++        ret = getSurfacefromAnw(anw, surface);
+         if (ret != ACAMERA_OK) {
+             return ret;
+         }
++        ParcelableSurfaceType pSurface = flagtools::convertSurfaceTypeToParcelable(surface);
+         outputSet.insert(std::make_pair(
+-                anw, OutputConfiguration(iGBP, outConfig.mRotation, outConfig.mPhysicalCameraId,
+-                        OutputConfiguration::INVALID_SET_ID, outConfig.mIsShared)));
++                anw,
++                OutputConfiguration(pSurface, outConfig.mRotation, outConfig.mPhysicalCameraId,
++                                    OutputConfiguration::INVALID_SET_ID, outConfig.mIsShared)));
+     }
+     auto addSet = outputSet;
+     std::vector<int> deleteList;
+@@ -885,10 +888,14 @@ CameraDevice::onCaptureErrorLocked(
+             return;
+         }
+ 
+-        const auto& gbps = outputPairIt->second.second.getGraphicBufferProducers();
+-        for (const auto& outGbp : gbps) {
++        const auto& outSurfaces = outputPairIt->second.second.getSurfaces();
++        for (const auto& outSurface : outSurfaces) {
+             for (const auto& surface : request->mSurfaceList) {
+-                if (surface->getIGraphicBufferProducer() == outGbp) {
++                if ( outSurface == surface
++#if not WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++                                ->getIGraphicBufferProducer()
++#endif
++                                            ) {
+                     ANativeWindow* anw = static_cast<ANativeWindow*>(surface.get());
+                     ALOGV("Camera %s Lost output buffer for ANW %p frame %" PRId64,
+                             getId(), anw, frameNumber);
+diff --git a/camera/ndk/impl/ACameraDevice.h b/camera/ndk/impl/ACameraDevice.h
+index d3aed4b2a4..930c0a73bb 100644
+--- a/camera/ndk/impl/ACameraDevice.h
++++ b/camera/ndk/impl/ACameraDevice.h
+@@ -38,8 +38,9 @@
+ #include <camera/camera2/SessionConfiguration.h>
+ #include <camera/camera2/CaptureRequest.h>
+ 
+-#include <camera/NdkCameraManager.h>
+ #include <camera/NdkCameraCaptureSession.h>
++#include <camera/NdkCameraManager.h>
++#include <gui/Flags.h>  // remove with WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
+ 
+ #include "ACameraMetadata.h"
+ 
+@@ -178,8 +179,10 @@ class CameraDevice final : public RefBase {
+     // Input message will be posted and cleared after this returns
+     void postSessionMsgAndCleanup(sp<AMessage>& msg);
+ 
+-    static camera_status_t getIGBPfromAnw(
+-            ANativeWindow* anw, sp<IGraphicBufferProducer>& out);
++    // Only used when WB_LIBCAMERASERVICE_WITH_DEPENDENCIES is active
++    static ParcelableSurfaceType convertSurfaceTypeToView(sp<SurfaceType> surface);
++
++    static camera_status_t getSurfacefromAnw(ANativeWindow* anw, sp<SurfaceType>& out);
+ 
+     static camera_status_t getSurfaceFromANativeWindow(
+             ANativeWindow* anw, sp<Surface>& out);
+diff --git a/camera/tests/fuzzer/camera_c2OutputConfiguration_fuzzer.cpp b/camera/tests/fuzzer/camera_c2OutputConfiguration_fuzzer.cpp
+index b6fa817d93..22e04fc003 100644
+--- a/camera/tests/fuzzer/camera_c2OutputConfiguration_fuzzer.cpp
++++ b/camera/tests/fuzzer/camera_c2OutputConfiguration_fuzzer.cpp
+@@ -19,6 +19,7 @@
+ #include <fuzzer/FuzzedDataProvider.h>
+ #include <gui/IGraphicBufferProducer.h>
+ #include <gui/Surface.h>
++#include <gui/Flags.h>  // remove with WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
+ #include <gui/SurfaceComposerClient.h>
+ #include "camera2common.h"
+ 
+@@ -37,11 +38,11 @@ class C2OutputConfigurationFuzzer {
+   private:
+     void invokeC2OutputConfigFuzzer();
+     unique_ptr<OutputConfiguration> getC2OutputConfig();
+-    sp<IGraphicBufferProducer> createIGraphicBufferProducer();
++    sp<SurfaceType> createSurface();
+     FuzzedDataProvider* mFDP = nullptr;
+ };
+ 
+-sp<IGraphicBufferProducer> C2OutputConfigurationFuzzer::createIGraphicBufferProducer() {
++sp<SurfaceType> C2OutputConfigurationFuzzer::createSurface() {
+     sp<SurfaceComposerClient> composerClient = new SurfaceComposerClient;
+     sp<SurfaceControl> surfaceControl = composerClient->createSurface(
+             static_cast<String8>(mFDP->ConsumeRandomLengthString(kMaxBytes).c_str()) /* name */,
+@@ -51,10 +52,9 @@ sp<IGraphicBufferProducer> C2OutputConfigurationFuzzer::createIGraphicBufferProd
+             mFDP->ConsumeIntegral<int32_t>() /* flags */);
+     if (surfaceControl) {
+         sp<Surface> surface = surfaceControl->getSurface();
+-        return surface->getIGraphicBufferProducer();
++        return flagtools::surfaceToSurfaceType(surface);
+     } else {
+-        sp<IGraphicBufferProducer> gbp;
+-        return gbp;
++        return nullptr;
+     }
+ }
+ 
+@@ -69,9 +69,9 @@ unique_ptr<OutputConfiguration> C2OutputConfigurationFuzzer::getC2OutputConfig()
+                         string physicalCameraId = mFDP->ConsumeRandomLengthString(kMaxBytes);
+                         int32_t surfaceSetID = mFDP->ConsumeIntegral<int32_t>();
+                         bool isShared = mFDP->ConsumeBool();
+-                        sp<IGraphicBufferProducer> iGBP = createIGraphicBufferProducer();
++                        sp<SurfaceType> surface = createSurface();
+                         outputConfiguration = make_unique<OutputConfiguration>(
+-                                iGBP, rotation, physicalCameraId, surfaceSetID, isShared);
++                                surface, rotation, physicalCameraId, surfaceSetID, isShared);
+                     },
+ 
+                     [&]() {
+@@ -79,14 +79,15 @@ unique_ptr<OutputConfiguration> C2OutputConfigurationFuzzer::getC2OutputConfig()
+                         string physicalCameraId = mFDP->ConsumeRandomLengthString(kMaxBytes);
+                         int32_t surfaceSetID = mFDP->ConsumeIntegral<int32_t>();
+                         bool isShared = mFDP->ConsumeBool();
+-                        size_t iGBPSize = mFDP->ConsumeIntegralInRange<size_t>(kSizeMin, kSizeMax);
+-                        vector<sp<IGraphicBufferProducer>> iGBPs;
+-                        for (size_t idx = 0; idx < iGBPSize; ++idx) {
+-                            sp<IGraphicBufferProducer> iGBP = createIGraphicBufferProducer();
+-                            iGBPs.push_back(iGBP);
++                        size_t surfaceSize =
++                                mFDP->ConsumeIntegralInRange<size_t>(kSizeMin, kSizeMax);
++                        vector<sp<SurfaceType>> surfaces;
++                        for (size_t idx = 0; idx < surfaceSize; ++idx) {
++                            sp<SurfaceType> surface = createSurface();
++                            surfaces.push_back(surface);
+                         }
+                         outputConfiguration = make_unique<OutputConfiguration>(
+-                                iGBPs, rotation, physicalCameraId, surfaceSetID, isShared);
++                                surfaces, rotation, physicalCameraId, surfaceSetID, isShared);
+                     },
+             });
+     selectOutputConfigurationConstructor();
+@@ -107,22 +108,22 @@ void C2OutputConfigurationFuzzer::invokeC2OutputConfigFuzzer() {
+                 [&]() { outputConfiguration->isDeferred(); },
+                 [&]() { outputConfiguration->isShared(); },
+                 [&]() { outputConfiguration->getPhysicalCameraId(); },
+-                [&]() { outputConfiguration->gbpsEqual(*outputConfiguration2); },
++                [&]() { outputConfiguration->surfacesEqual(*outputConfiguration2); },
+                 [&]() { outputConfiguration->sensorPixelModesUsedEqual(*outputConfiguration2); },
+-                [&]() { outputConfiguration->gbpsLessThan(*outputConfiguration2); },
++                [&]() { outputConfiguration->surfacesLessThan(*outputConfiguration2); },
+                 [&]() { outputConfiguration->sensorPixelModesUsedLessThan(*outputConfiguration2); },
+-                [&]() { outputConfiguration->getGraphicBufferProducers(); },
++                [&]() { outputConfiguration->getSurfaces(); },
+                 [&]() {
+-                    sp<IGraphicBufferProducer> gbp = createIGraphicBufferProducer();
+-                    outputConfiguration->addGraphicProducer(gbp);
++                    sp<SurfaceType> surface = createSurface();
++                    outputConfiguration->addSurface(surface);
+                 },
+                 [&]() { outputConfiguration->isMultiResolution(); },
+                 [&]() { outputConfiguration->getColorSpace(); },
+                 [&]() { outputConfiguration->getStreamUseCase(); },
+                 [&]() { outputConfiguration->getTimestampBase(); },
+                 [&]() {
+-                    sp<IGraphicBufferProducer> gbp = createIGraphicBufferProducer();
+-                    outputConfiguration->getMirrorMode(gbp);
++                    sp<SurfaceType> surface = createSurface();
++                    outputConfiguration->getMirrorMode(surface);
+                 },
+                 [&]() { outputConfiguration->useReadoutTimestamp(); },
+         });
+diff --git a/services/camera/libcameraservice/aidl/AidlUtils.cpp b/services/camera/libcameraservice/aidl/AidlUtils.cpp
+index 1ec50722b0..5dcb0bb063 100644
+--- a/services/camera/libcameraservice/aidl/AidlUtils.cpp
++++ b/services/camera/libcameraservice/aidl/AidlUtils.cpp
+@@ -24,6 +24,7 @@
+ #include <aidlcommonsupport/NativeHandle.h>
+ #include <camera/StringUtils.h>
+ #include <device3/Camera3StreamInterface.h>
++#include <gui/Flags.h>  // remove with WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
+ #include <gui/bufferqueue/1.0/H2BGraphicBufferProducer.h>
+ #include <mediautils/AImageReaderUtils.h>
+ #include "utils/Utils.h"
+@@ -76,20 +77,25 @@ int32_t convertFromAidl(SStreamConfigurationMode streamConfigurationMode) {
+ }
+ 
+ UOutputConfiguration convertFromAidl(const SOutputConfiguration &src) {
+-    std::vector<sp<IGraphicBufferProducer>> iGBPs;
++    std::vector<ParcelableSurfaceType> pSurfaces;
+     if (!src.surfaces.empty()) {
+         auto& surfaces = src.surfaces;
+-        iGBPs.reserve(surfaces.size());
++        pSurfaces.reserve(surfaces.size());
+ 
+         for (auto& sSurface : surfaces) {
+-            sp<IGraphicBufferProducer> igbp =
+-                    Surface::getIGraphicBufferProducer(sSurface.get());
+-            if (igbp == nullptr) {
+-                ALOGE("%s: ANativeWindow (%p) not backed by a Surface.",
+-                      __FUNCTION__, sSurface.get());
++            ParcelableSurfaceType pSurface;
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++            pSurface.graphicBufferProducer = Surface::getIGraphicBufferProducer(sSurface.get());
++            if (pSurface.isEmpty()) {
++#else
++            pSurface = Surface::getIGraphicBufferProducer(sSurface.get());
++            if (pSurface == nullptr) {
++#endif
++                ALOGE("%s: ANativeWindow (%p) not backed by a Surface.", __FUNCTION__,
++                      sSurface.get());
+                 continue;
+             }
+-            iGBPs.push_back(igbp);
++            pSurfaces.push_back(pSurface);
+         }
+     } else {
+ #pragma clang diagnostic push
+@@ -100,7 +106,7 @@ UOutputConfiguration convertFromAidl(const SOutputConfiguration &src) {
+         auto &windowHandles = src.windowHandles;
+ #pragma clang diagnostic pop
+ 
+-        iGBPs.reserve(windowHandles.size());
++        pSurfaces.reserve(windowHandles.size());
+ 
+         for (auto &handle : windowHandles) {
+             native_handle_t* nh = makeFromAidl(handle);
+@@ -111,15 +117,20 @@ UOutputConfiguration convertFromAidl(const SOutputConfiguration &src) {
+                 continue;
+             }
+ 
+-            iGBPs.push_back(new H2BGraphicBufferProducer(igbp));
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++            view::Surface viewSurface;
++            viewSurface.graphicBufferProducer = new H2BGraphicBufferProducer(igbp);
++            pSurfaces.push_back(viewSurface);
++#else
++            pSurfaces.push_back(new H2BGraphicBufferProducer(igbp));
++#endif
+             native_handle_delete(nh);
+         }
+     }
+ 
+     UOutputConfiguration outputConfiguration(
+-        iGBPs, convertFromAidl(src.rotation), src.physicalCameraId,
+-        src.windowGroupId, OutputConfiguration::SURFACE_TYPE_UNKNOWN, 0, 0,
+-        (iGBPs.size() > 1));
++            pSurfaces, convertFromAidl(src.rotation), src.physicalCameraId, src.windowGroupId,
++            OutputConfiguration::SURFACE_TYPE_UNKNOWN, 0, 0, (pSurfaces.size() > 1));
+     return outputConfiguration;
+ }
+ 
+diff --git a/services/camera/libcameraservice/api2/CameraDeviceClient.cpp b/services/camera/libcameraservice/api2/CameraDeviceClient.cpp
+index 8c30d54de7..d1fd571345 100644
+--- a/services/camera/libcameraservice/api2/CameraDeviceClient.cpp
++++ b/services/camera/libcameraservice/api2/CameraDeviceClient.cpp
+@@ -18,15 +18,15 @@
+ #define ATRACE_TAG ATRACE_TAG_CAMERA
+ //#define LOG_NDEBUG 0
+ 
++#include <camera/CameraUtils.h>
++#include <camera/StringUtils.h>
++#include <camera/camera2/CaptureRequest.h>
+ #include <com_android_internal_camera_flags.h>
+ #include <cutils/properties.h>
++#include <gui/Surface.h>
+ #include <utils/Log.h>
+ #include <utils/SessionConfigurationUtils.h>
+ #include <utils/Trace.h>
+-#include <gui/Surface.h>
+-#include <camera/camera2/CaptureRequest.h>
+-#include <camera/CameraUtils.h>
+-#include <camera/StringUtils.h>
+ 
+ #include "common/CameraDeviceBase.h"
+ #include "device3/Camera3Device.h"
+@@ -195,10 +195,44 @@ binder::Status CameraDeviceClient::submitRequest(
+     return submitRequestList(requestList, streaming, submitInfo);
+ }
+ 
+-binder::Status CameraDeviceClient::insertGbpLocked(const sp<IGraphicBufferProducer>& gbp,
++status_t CameraDeviceClient::getSurfaceKey(ParcelableSurfaceType surface, SurfaceKey* out) const {
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++    auto ret = surface.getUniqueId(out);
++    if (ret != OK) {
++        ALOGE("%s: Camera %s: Could not getUniqueId.", __FUNCTION__, mCameraIdStr.c_str());
++        return ret;
++    }
++    return OK;
++#else
++    *out = IInterface::asBinder(surface);
++    return OK;
++#endif
++}
++
++status_t CameraDeviceClient::getSurfaceKey(sp<Surface> surface, SurfaceKey* out) const {
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++    auto ret = surface->getUniqueId(out);
++    if (ret != OK) {
++        ALOGE("%s: Camera %s: Could not getUniqueId.", __FUNCTION__, mCameraIdStr.c_str());
++        return ret;
++    }
++    return OK;
++#else
++    *out = IInterface::asBinder(surface->getIGraphicBufferProducer());
++    return OK;
++#endif
++}
++
++binder::Status CameraDeviceClient::insertSurfaceLocked(const ParcelableSurfaceType& surface,
+         SurfaceMap* outSurfaceMap, Vector<int32_t>* outputStreamIds, int32_t *currentStreamId) {
+     int compositeIdx;
+-    int idx = mStreamMap.indexOfKey(IInterface::asBinder(gbp));
++    SurfaceKey surfaceKey;
++    status_t ret = getSurfaceKey(surface, &surfaceKey);
++    if(ret != OK) {
++        ALOGE("%s: Camera %s: Could not get the SurfaceKey", __FUNCTION__, mCameraIdStr.c_str());
++        return STATUS_ERROR(CameraService::ERROR_INVALID_OPERATION, "Could not get the SurfaceKey");
++    }
++    int idx = mStreamMap.indexOfKey(surfaceKey);
+ 
+     Mutex::Autolock l(mCompositeLock);
+     // Trying to submit request with surface that wasn't created
+@@ -208,7 +242,7 @@ binder::Status CameraDeviceClient::insertGbpLocked(const sp<IGraphicBufferProduc
+                 __FUNCTION__, mCameraIdStr.c_str());
+         return STATUS_ERROR(CameraService::ERROR_ILLEGAL_ARGUMENT,
+                 "Request targets Surface that is not part of current capture session");
+-    } else if ((compositeIdx = mCompositeStreamMap.indexOfKey(IInterface::asBinder(gbp)))
++    } else if ((compositeIdx = mCompositeStreamMap.indexOfKey(surfaceKey))
+             != NAME_NOT_FOUND) {
+         mCompositeStreamMap.valueAt(compositeIdx)->insertGbp(outSurfaceMap, outputStreamIds,
+                 currentStreamId);
+@@ -332,8 +366,12 @@ binder::Status CameraDeviceClient::submitRequestList(
+                 if (surface == 0) continue;
+ 
+                 int32_t streamId;
+-                sp<IGraphicBufferProducer> gbp = surface->getIGraphicBufferProducer();
+-                res = insertGbpLocked(gbp, &surfaceMap, &outputStreamIds, &streamId);
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++                ParcelableSurfaceType surface_type = view::Surface::fromSurface(surface);
++#else
++                ParcelableSurfaceType surface_type = surface->getIGraphicBufferProducer();
++#endif
++                res = insertSurfaceLocked(surface_type, &surfaceMap, &outputStreamIds, &streamId);
+                 if (!res.isOk()) {
+                     return res;
+                 }
+@@ -363,8 +401,8 @@ binder::Status CameraDeviceClient::submitRequestList(
+                             "Request targets Surface that is not part of current capture session");
+                 }
+ 
+-                const auto& gbps = mConfiguredOutputs.valueAt(index).getGraphicBufferProducers();
+-                if ((size_t)surfaceIdx >= gbps.size()) {
++                const auto& surfaces = mConfiguredOutputs.valueAt(index).getSurfaces();
++                if ((size_t)surfaceIdx >= surfaces.size()) {
+                     ALOGE("%s: Camera %s: Tried to submit a request with a surface that"
+                             " we have not called createStream on: stream %d, surfaceIdx %d",
+                             __FUNCTION__, mCameraIdStr.c_str(), streamId, surfaceIdx);
+@@ -372,7 +410,9 @@ binder::Status CameraDeviceClient::submitRequestList(
+                             "Request targets Surface has invalid surface index");
+                 }
+ 
+-                res = insertGbpLocked(gbps[surfaceIdx], &surfaceMap, &outputStreamIds, nullptr);
++                res = insertSurfaceLocked(surfaces[surfaceIdx], &surfaceMap, &outputStreamIds,
++                                          nullptr);
++
+                 if (!res.isOk()) {
+                     return res;
+                 }
+@@ -787,7 +827,7 @@ binder::Status CameraDeviceClient::deleteStream(int streamId) {
+     }
+ 
+     bool isInput = false;
+-    std::vector<sp<IBinder>> surfaces;
++    std::vector<SurfaceKey> surfaces;
+     std::vector<size_t> removedSurfaceIds;
+     ssize_t dIndex = NAME_NOT_FOUND;
+     ssize_t compositeIndex  = NAME_NOT_FOUND;
+@@ -899,13 +939,12 @@ binder::Status CameraDeviceClient::createStream(
+                 "OutputConfiguration isn't valid!");
+     }
+ 
+-    const std::vector<sp<IGraphicBufferProducer>>& bufferProducers =
+-            outputConfiguration.getGraphicBufferProducers();
+-    size_t numBufferProducers = bufferProducers.size();
++    const std::vector<ParcelableSurfaceType>& surfaces = outputConfiguration.getSurfaces();
++    size_t numSurfaces = surfaces.size();
+     bool deferredConsumer = outputConfiguration.isDeferred();
+     bool isShared = outputConfiguration.isShared();
+     const std::string &physicalCameraId = outputConfiguration.getPhysicalCameraId();
+-    bool deferredConsumerOnly = deferredConsumer && numBufferProducers == 0;
++    bool deferredConsumerOnly = deferredConsumer && numSurfaces == 0;
+     bool isMultiResolution = outputConfiguration.isMultiResolution();
+     int64_t dynamicRangeProfile = outputConfiguration.getDynamicRangeProfile();
+     int64_t streamUseCase = outputConfiguration.getStreamUseCase();
+@@ -913,7 +952,7 @@ binder::Status CameraDeviceClient::createStream(
+     int32_t colorSpace = outputConfiguration.getColorSpace();
+     bool useReadoutTimestamp = outputConfiguration.useReadoutTimestamp();
+ 
+-    res = SessionConfigurationUtils::checkSurfaceType(numBufferProducers, deferredConsumer,
++    res = SessionConfigurationUtils::checkSurfaceType(numSurfaces, deferredConsumer,
+             outputConfiguration.getSurfaceType(), /*isConfigurationComplete*/true);
+     if (!res.isOk()) {
+         return res;
+@@ -928,8 +967,8 @@ binder::Status CameraDeviceClient::createStream(
+         return res;
+     }
+ 
+-    std::vector<SurfaceHolder> surfaces;
+-    std::vector<sp<IBinder>> binders;
++    std::vector<SurfaceHolder> surfaceHolders;
++    std::vector<SurfaceKey> surfaceKeys;
+     std::vector<OutputStreamInfo> streamInfos;
+     status_t err;
+ 
+@@ -942,10 +981,19 @@ binder::Status CameraDeviceClient::createStream(
+     bool isStreamInfoValid = false;
+     const std::vector<int32_t> &sensorPixelModesUsed =
+             outputConfiguration.getSensorPixelModesUsed();
+-    for (auto& bufferProducer : bufferProducers) {
++
++    for (auto& surface : surfaces) {
+         // Don't create multiple streams for the same target surface
+-        sp<IBinder> binder = IInterface::asBinder(bufferProducer);
+-        ssize_t index = mStreamMap.indexOfKey(binder);
++        SurfaceKey surfaceKey;
++        status_t ret = getSurfaceKey(surface, &surfaceKey);
++        if(ret != OK) {
++            ALOGE("%s: Camera %s: Could not get the SurfaceKey", __FUNCTION__,
++                mCameraIdStr.c_str());
++            return STATUS_ERROR(CameraService::ERROR_INVALID_OPERATION,
++                "Could not get the SurfaceKey");
++        }
++
++        ssize_t index = mStreamMap.indexOfKey(surfaceKey);
+         if (index != NAME_NOT_FOUND) {
+             std::string msg = std::string("Camera ") + mCameraIdStr
+                     + ": Surface already has a stream created for it (ID "
+@@ -954,10 +1002,14 @@ binder::Status CameraDeviceClient::createStream(
+             return STATUS_ERROR(CameraService::ERROR_ALREADY_EXISTS, msg.c_str());
+         }
+ 
+-        int mirrorMode = outputConfiguration.getMirrorMode(bufferProducer);
+-        sp<Surface> surface;
++        int mirrorMode = outputConfiguration.getMirrorMode(surface);
++        sp<Surface> outSurface;
+         res = SessionConfigurationUtils::createSurfaceFromGbp(streamInfo,
+-                isStreamInfoValid, surface, bufferProducer, mCameraIdStr,
++                isStreamInfoValid, outSurface, surface
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++                .graphicBufferProducer
++#endif
++                , mCameraIdStr,
+                 mDevice->infoPhysical(physicalCameraId), sensorPixelModesUsed, dynamicRangeProfile,
+                 streamUseCase, timestampBase, mirrorMode, colorSpace, /*respectSurfaceSize*/false);
+ 
+@@ -968,8 +1020,8 @@ binder::Status CameraDeviceClient::createStream(
+             isStreamInfoValid = true;
+         }
+ 
+-        binders.push_back(IInterface::asBinder(bufferProducer));
+-        surfaces.push_back({surface, mirrorMode});
++        surfaceKeys.push_back(surfaceKey);
++        surfaceHolders.push_back({outSurface, mirrorMode});
+         if (flags::camera_multi_client() && mSharedMode) {
+             streamInfos.push_back(streamInfo);
+         }
+@@ -980,15 +1032,15 @@ binder::Status CameraDeviceClient::createStream(
+     if (flags::camera_multi_client() && mSharedMode) {
+         err = mDevice->getSharedStreamId(outputConfiguration, &streamId);
+         if (err == OK) {
+-            err = mDevice->addSharedSurfaces(streamId, streamInfos, surfaces, &surfaceIds);
++            err = mDevice->addSharedSurfaces(streamId, streamInfos, surfaceHolders, &surfaceIds);
+         }
+     } else {
+         bool isDepthCompositeStream =
+-                camera3::DepthCompositeStream::isDepthCompositeStream(surfaces[0].mSurface);
++                camera3::DepthCompositeStream::isDepthCompositeStream(surfaceHolders[0].mSurface);
+         bool isHeicCompositeStream = camera3::HeicCompositeStream::isHeicCompositeStream(
+-                surfaces[0].mSurface);
++                surfaceHolders[0].mSurface);
+         bool isJpegRCompositeStream =
+-            camera3::JpegRCompositeStream::isJpegRCompositeStream(surfaces[0].mSurface) &&
++            camera3::JpegRCompositeStream::isJpegRCompositeStream(surfaceHolders[0].mSurface) &&
+             !mDevice->isCompositeJpegRDisabled();
+         if (isDepthCompositeStream || isHeicCompositeStream || isJpegRCompositeStream) {
+             sp<CompositeStream> compositeStream;
+@@ -999,7 +1051,7 @@ binder::Status CameraDeviceClient::createStream(
+             } else {
+                 compositeStream = new camera3::JpegRCompositeStream(mDevice, getRemoteCallback());
+             }
+-            err = compositeStream->createStream(surfaces, deferredConsumer, streamInfo.width,
++            err = compositeStream->createStream(surfaceHolders, deferredConsumer, streamInfo.width,
+                 streamInfo.height, streamInfo.format,
+                 static_cast<camera_stream_rotation_t>(outputConfiguration.getRotation()),
+                 &streamId, physicalCameraId, streamInfo.sensorPixelModesUsed, &surfaceIds,
+@@ -1008,12 +1060,18 @@ binder::Status CameraDeviceClient::createStream(
+                 useReadoutTimestamp);
+             if (err == OK) {
+                 Mutex::Autolock l(mCompositeLock);
+-                mCompositeStreamMap.add(
+-                        IInterface::asBinder(surfaces[0].mSurface->getIGraphicBufferProducer()),
+-                        compositeStream);
++                SurfaceKey surfaceKey;
++                status_t ret = getSurfaceKey(surfaceHolders[0].mSurface, &surfaceKey);
++                if(ret != OK) {
++                    ALOGE("%s: Camera %s: Could not get the SurfaceKey", __FUNCTION__,
++                        mCameraIdStr.c_str());
++                    return STATUS_ERROR(CameraService::ERROR_INVALID_OPERATION,
++                        "Could not get the SurfaceKey");
++                }
++                mCompositeStreamMap.add(surfaceKey, compositeStream);
+             }
+         } else {
+-            err = mDevice->createStream(surfaces, deferredConsumer, streamInfo.width,
++            err = mDevice->createStream(surfaceHolders, deferredConsumer, streamInfo.width,
+                     streamInfo.height, streamInfo.format, streamInfo.dataSpace,
+                     static_cast<camera_stream_rotation_t>(outputConfiguration.getRotation()),
+                     &streamId, physicalCameraId, streamInfo.sensorPixelModesUsed, &surfaceIds,
+@@ -1030,10 +1088,15 @@ binder::Status CameraDeviceClient::createStream(
+                 static_cast<int>(streamInfo.dataSpace), strerror(-err), err);
+     } else {
+         int i = 0;
+-        for (auto& binder : binders) {
+-            ALOGV("%s: mStreamMap add binder %p streamId %d, surfaceId %d",
+-                    __FUNCTION__, binder.get(), streamId, i);
+-            mStreamMap.add(binder, StreamSurfaceId(streamId, surfaceIds[i]));
++        for (auto& surfaceKey : surfaceKeys) {
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++            ALOGV("%s: mStreamMap add surfaceKey %lu streamId %d, surfaceId %d",
++                    __FUNCTION__, surfaceKey, streamId, i);
++#else
++            ALOGV("%s: mStreamMap add surfaceKey %p streamId %d, surfaceId %d",
++                    __FUNCTION__, surfaceKey.get(), streamId, i);
++#endif
++            mStreamMap.add(surfaceKey, StreamSurfaceId(streamId, surfaceIds[i]));
+             i++;
+         }
+ 
+@@ -1257,40 +1320,52 @@ binder::Status CameraDeviceClient::updateOutputConfiguration(int streamId,
+                 "OutputConfiguration isn't valid!");
+     }
+ 
+-    const std::vector<sp<IGraphicBufferProducer> >& bufferProducers =
+-            outputConfiguration.getGraphicBufferProducers();
+-    const std::string &physicalCameraId = outputConfiguration.getPhysicalCameraId();
++    const std::vector<ParcelableSurfaceType>& surfaces = outputConfiguration.getSurfaces();
++    const std::string& physicalCameraId = outputConfiguration.getPhysicalCameraId();
+ 
+-    auto producerCount = bufferProducers.size();
++    auto producerCount = surfaces.size();
+     if (producerCount == 0) {
+-        ALOGE("%s: bufferProducers must not be empty", __FUNCTION__);
++        ALOGE("%s: surfaces must not be empty", __FUNCTION__);
+         return STATUS_ERROR(CameraService::ERROR_ILLEGAL_ARGUMENT,
+-                "bufferProducers must not be empty");
++                            "surfaces must not be empty");
+     }
+ 
+     // The first output is the one associated with the output configuration.
+     // It should always be present, valid and the corresponding stream id should match.
+-    sp<IBinder> binder = IInterface::asBinder(bufferProducers[0]);
+-    ssize_t index = mStreamMap.indexOfKey(binder);
++    SurfaceKey surfaceKey;
++    status_t ret = getSurfaceKey(surfaces[0], &surfaceKey);
++    if(ret != OK) {
++        ALOGE("%s: Camera %s: Could not get the SurfaceKey", __FUNCTION__, mCameraIdStr.c_str());
++        return STATUS_ERROR(CameraService::ERROR_INVALID_OPERATION, "Could not get the SurfaceKey");
++    }
++    ssize_t index = mStreamMap.indexOfKey(surfaceKey);
+     if (index == NAME_NOT_FOUND) {
+         ALOGE("%s: Outputconfiguration is invalid", __FUNCTION__);
+         return STATUS_ERROR(CameraService::ERROR_ILLEGAL_ARGUMENT,
+                 "OutputConfiguration is invalid");
+     }
+-    if (mStreamMap.valueFor(binder).streamId() != streamId) {
++    if (mStreamMap.valueFor(surfaceKey).streamId() != streamId) {
+         ALOGE("%s: Stream Id: %d provided doesn't match the id: %d in the stream map",
+-                __FUNCTION__, streamId, mStreamMap.valueFor(binder).streamId());
++                __FUNCTION__, streamId, mStreamMap.valueFor(surfaceKey).streamId());
+         return STATUS_ERROR(CameraService::ERROR_ILLEGAL_ARGUMENT,
+                 "Stream id is invalid");
+     }
+ 
+     std::vector<size_t> removedSurfaceIds;
+-    std::vector<sp<IBinder>> removedOutputs;
++    std::vector<SurfaceKey> removedOutputs;
+     std::vector<SurfaceHolder> newOutputs;
+     std::vector<OutputStreamInfo> streamInfos;
+-    KeyedVector<sp<IBinder>, sp<IGraphicBufferProducer>> newOutputsMap;
+-    for (auto &it : bufferProducers) {
+-        newOutputsMap.add(IInterface::asBinder(it), it);
++    KeyedVector<SurfaceKey, ParcelableSurfaceType> newOutputsMap;
++    for (auto& surface : surfaces) {
++        SurfaceKey surfaceKey;
++        status_t ret = getSurfaceKey(surface, &surfaceKey);
++        if(ret != OK) {
++            ALOGE("%s: Camera %s: Could not get the SurfaceKey", __FUNCTION__,
++                 mCameraIdStr.c_str());
++            return STATUS_ERROR(CameraService::ERROR_INVALID_OPERATION,
++                 "Could not get the SurfaceKey");
++        }
++        newOutputsMap.add(surfaceKey, surface);
+     }
+ 
+     for (size_t i = 0; i < mStreamMap.size(); i++) {
+@@ -1318,17 +1393,24 @@ binder::Status CameraDeviceClient::updateOutputConfiguration(int streamId,
+ 
+     for (size_t i = 0; i < newOutputsMap.size(); i++) {
+         OutputStreamInfo outInfo;
+-        sp<Surface> surface;
++        sp<Surface> outSurface;
+         int mirrorMode = outputConfiguration.getMirrorMode(newOutputsMap.valueAt(i));
+-        res = SessionConfigurationUtils::createSurfaceFromGbp(outInfo,
+-                /*isStreamInfoValid*/ false, surface, newOutputsMap.valueAt(i), mCameraIdStr,
+-                mDevice->infoPhysical(physicalCameraId), sensorPixelModesUsed, dynamicRangeProfile,
+-                streamUseCase, timestampBase, mirrorMode, colorSpace, /*respectSurfaceSize*/false);
+-        if (!res.isOk())
+-            return res;
++        res = SessionConfigurationUtils::createSurfaceFromGbp(
++                outInfo,
++                /*isStreamInfoValid*/ false, outSurface,
++                newOutputsMap
++                        .valueAt(i)
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++                        .graphicBufferProducer
++#endif
++                ,
++                mCameraIdStr, mDevice->infoPhysical(physicalCameraId), sensorPixelModesUsed,
++                dynamicRangeProfile, streamUseCase, timestampBase, mirrorMode, colorSpace,
++                /*respectSurfaceSize*/ false);
++        if (!res.isOk()) return res;
+ 
+         streamInfos.push_back(outInfo);
+-        newOutputs.push_back({surface, mirrorMode});
++        newOutputs.push_back({outSurface, mirrorMode});
+     }
+ 
+     //Trivial case no changes required
+@@ -1337,8 +1419,7 @@ binder::Status CameraDeviceClient::updateOutputConfiguration(int streamId,
+     }
+ 
+     KeyedVector<sp<Surface>, size_t> outputMap;
+-    auto ret = mDevice->updateStream(streamId, newOutputs, streamInfos, removedSurfaceIds,
+-            &outputMap);
++    ret = mDevice->updateStream(streamId, newOutputs, streamInfos, removedSurfaceIds, &outputMap);
+     if (ret != OK) {
+         switch (ret) {
+             case NAME_NOT_FOUND:
+@@ -1360,8 +1441,15 @@ binder::Status CameraDeviceClient::updateOutputConfiguration(int streamId,
+         }
+ 
+         for (size_t i = 0; i < outputMap.size(); i++) {
+-            mStreamMap.add(IInterface::asBinder(outputMap.keyAt(i)->getIGraphicBufferProducer()),
+-                    StreamSurfaceId(streamId, outputMap.valueAt(i)));
++            SurfaceKey surfaceKey;
++            status_t ret = getSurfaceKey(outputMap.keyAt(i), &surfaceKey);
++            if(ret != OK) {
++                ALOGE("%s: Camera %s: Could not get the SurfaceKey", __FUNCTION__,
++                     mCameraIdStr.c_str());
++                return STATUS_ERROR(CameraService::ERROR_INVALID_OPERATION,
++                     "Could not get the SurfaceKey");
++            }
++            mStreamMap.add(surfaceKey, StreamSurfaceId(streamId, outputMap.valueAt(i)));
+         }
+ 
+         mConfiguredOutputs.replaceValueFor(streamId, outputConfiguration);
+@@ -1641,12 +1729,11 @@ binder::Status CameraDeviceClient::finalizeOutputConfigurations(int32_t streamId
+                 "OutputConfiguration isn't valid!");
+     }
+ 
+-    const std::vector<sp<IGraphicBufferProducer> >& bufferProducers =
+-            outputConfiguration.getGraphicBufferProducers();
+-    const std::string &physicalId = outputConfiguration.getPhysicalCameraId();
++    const std::vector<ParcelableSurfaceType>& surfaces = outputConfiguration.getSurfaces();
++    const std::string& physicalId = outputConfiguration.getPhysicalCameraId();
+ 
+-    if (bufferProducers.size() == 0) {
+-        ALOGE("%s: bufferProducers must not be empty", __FUNCTION__);
++    if (surfaces.size() == 0) {
++        ALOGE("%s: surfaces must not be empty", __FUNCTION__);
+         return STATUS_ERROR(CameraService::ERROR_ILLEGAL_ARGUMENT, "Target Surface is invalid");
+     }
+ 
+@@ -1686,34 +1773,47 @@ binder::Status CameraDeviceClient::finalizeOutputConfigurations(int32_t streamId
+     }
+ 
+     std::vector<SurfaceHolder> consumerSurfaceHolders;
+-    const std::vector<int32_t> &sensorPixelModesUsed =
++    const std::vector<int32_t>& sensorPixelModesUsed =
+             outputConfiguration.getSensorPixelModesUsed();
+     int64_t dynamicRangeProfile = outputConfiguration.getDynamicRangeProfile();
+     int32_t colorSpace = outputConfiguration.getColorSpace();
+     int64_t streamUseCase = outputConfiguration.getStreamUseCase();
+     int timestampBase = outputConfiguration.getTimestampBase();
+-    for (auto& bufferProducer : bufferProducers) {
++
++    for (auto& surface : surfaces) {
+         // Don't create multiple streams for the same target surface
+-        ssize_t index = mStreamMap.indexOfKey(IInterface::asBinder(bufferProducer));
++        SurfaceKey surfaceKey;
++        status_t ret = getSurfaceKey(surface, &surfaceKey);
++        if(ret != OK) {
++            ALOGE("%s: Camera %s: Could not get the SurfaceKey", __FUNCTION__,
++                 mCameraIdStr.c_str());
++            return STATUS_ERROR(CameraService::ERROR_INVALID_OPERATION,
++                 "Could not get the SurfaceKey");
++        }
++        ssize_t index = mStreamMap.indexOfKey(surfaceKey);
+         if (index != NAME_NOT_FOUND) {
+             ALOGV("Camera %s: Surface already has a stream created "
+-                    " for it (ID %zd)", mCameraIdStr.c_str(), index);
++                  " for it (ID %zd)",
++                  mCameraIdStr.c_str(), index);
+             continue;
+         }
+ 
+-        sp<Surface> surface;
+-        int mirrorMode = outputConfiguration.getMirrorMode(bufferProducer);
+-        res = SessionConfigurationUtils::createSurfaceFromGbp(mStreamInfoMap[streamId],
+-                true /*isStreamInfoValid*/, surface, bufferProducer, mCameraIdStr,
+-                mDevice->infoPhysical(physicalId), sensorPixelModesUsed, dynamicRangeProfile,
+-                streamUseCase, timestampBase, mirrorMode, colorSpace, /*respectSurfaceSize*/false);
++        sp<Surface> outSurface;
++        int mirrorMode = outputConfiguration.getMirrorMode(surface);
++        res = SessionConfigurationUtils::createSurfaceFromGbp(
++                mStreamInfoMap[streamId], true /*isStreamInfoValid*/, outSurface,
++                surface
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++                .graphicBufferProducer
++#endif
++                , mCameraIdStr, mDevice->infoPhysical(physicalId),
++                sensorPixelModesUsed, dynamicRangeProfile, streamUseCase, timestampBase, mirrorMode,
++                colorSpace, /*respectSurfaceSize*/ false);
+ 
+-        if (!res.isOk())
+-            return res;
++        if (!res.isOk()) return res;
+ 
+-        consumerSurfaceHolders.push_back({surface, mirrorMode});
++        consumerSurfaceHolders.push_back({outSurface, mirrorMode});
+     }
+-
+     // Gracefully handle case where finalizeOutputConfigurations is called
+     // without any new surface.
+     if (consumerSurfaceHolders.size() == 0) {
+@@ -1727,11 +1827,22 @@ binder::Status CameraDeviceClient::finalizeOutputConfigurations(int32_t streamId
+     err = mDevice->setConsumerSurfaces(streamId, consumerSurfaceHolders, &consumerSurfaceIds);
+     if (err == OK) {
+         for (size_t i = 0; i < consumerSurfaceHolders.size(); i++) {
+-            sp<IBinder> binder = IInterface::asBinder(
+-                    consumerSurfaceHolders[i].mSurface->getIGraphicBufferProducer());
+-            ALOGV("%s: mStreamMap add binder %p streamId %d, surfaceId %d", __FUNCTION__,
+-                    binder.get(), streamId, consumerSurfaceIds[i]);
+-            mStreamMap.add(binder, StreamSurfaceId(streamId, consumerSurfaceIds[i]));
++            SurfaceKey surfaceKey;
++            status_t ret = getSurfaceKey(consumerSurfaceHolders[i].mSurface, &surfaceKey);
++            if(ret != OK) {
++                ALOGE("%s: Camera %s: Could not get the SurfaceKey", __FUNCTION__,
++                     mCameraIdStr.c_str());
++                return STATUS_ERROR(CameraService::ERROR_INVALID_OPERATION,
++                     "Could not get the SurfaceKey");
++            }
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++            ALOGV("%s: mStreamMap add surface_key %lu streamId %d, surfaceId %d", __FUNCTION__,
++                    surfaceKey, streamId, consumerSurfaceIds[i]);
++#else
++            ALOGV("%s: mStreamMap add surface_key %p streamId %d, surfaceId %d", __FUNCTION__,
++                    surfaceKey.get(), streamId, consumerSurfaceIds[i]);
++#endif
++            mStreamMap.add(surfaceKey, StreamSurfaceId(streamId, consumerSurfaceIds[i]));
+         }
+         if (deferredStreamIndex != NAME_NOT_FOUND) {
+             mDeferredStreams.removeItemsAt(deferredStreamIndex);
+@@ -1866,7 +1977,7 @@ binder::Status CameraDeviceClient::switchToOffline(
+ 
+     std::vector<int32_t> offlineStreamIds;
+     offlineStreamIds.reserve(offlineOutputIds.size());
+-    KeyedVector<sp<IBinder>, sp<CompositeStream>> offlineCompositeStreamMap;
++    KeyedVector<SurfaceKey, sp<CompositeStream>> offlineCompositeStreamMap;
+     for (const auto& streamId : offlineOutputIds) {
+         ssize_t index = mConfiguredOutputs.indexOfKey(streamId);
+         if (index == NAME_NOT_FOUND) {
+@@ -1885,24 +1996,37 @@ binder::Status CameraDeviceClient::switchToOffline(
+ 
+         Mutex::Autolock l(mCompositeLock);
+         bool isCompositeStream = false;
+-        for (const auto& gbp : mConfiguredOutputs.valueAt(index).getGraphicBufferProducers()) {
+-            sp<Surface> s = new Surface(gbp, false /*controlledByApp*/);
++
++        for (const auto& surface : mConfiguredOutputs.valueAt(index).getSurfaces()) {
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++            sp<Surface> s = surface.toSurface();
++#else
++            sp<Surface> s = new Surface(surface, false /*controlledByApp*/);
++#endif
+             isCompositeStream = camera3::DepthCompositeStream::isDepthCompositeStream(s) ||
+-                camera3::HeicCompositeStream::isHeicCompositeStream(s) ||
+-                (camera3::JpegRCompositeStream::isJpegRCompositeStream(s) &&
+-                 !mDevice->isCompositeJpegRDisabled());
++                                camera3::HeicCompositeStream::isHeicCompositeStream(s) ||
++                                (camera3::JpegRCompositeStream::isJpegRCompositeStream(s) &&
++                                 !mDevice->isCompositeJpegRDisabled());
+             if (isCompositeStream) {
+-                auto compositeIdx = mCompositeStreamMap.indexOfKey(IInterface::asBinder(gbp));
++                SurfaceKey surfaceKey;
++                status_t ret = getSurfaceKey(surface, &surfaceKey);
++                if(ret != OK) {
++                    ALOGE("%s: Camera %s: Could not get the SurfaceKey", __FUNCTION__,
++                        mCameraIdStr.c_str());
++                    return STATUS_ERROR(CameraService::ERROR_INVALID_OPERATION,
++                        "Could not get the SurfaceKey");
++                }
++                auto compositeIdx = mCompositeStreamMap.indexOfKey(surfaceKey);
+                 if (compositeIdx == NAME_NOT_FOUND) {
+                     ALOGE("%s: Unknown composite stream", __FUNCTION__);
+                     return STATUS_ERROR(CameraService::ERROR_ILLEGAL_ARGUMENT,
+-                            "Unknown composite stream");
++                                        "Unknown composite stream");
+                 }
+ 
+-                mCompositeStreamMap.valueAt(compositeIdx)->insertCompositeStreamIds(
+-                        &offlineStreamIds);
++                mCompositeStreamMap.valueAt(compositeIdx)
++                        ->insertCompositeStreamIds(&offlineStreamIds);
+                 offlineCompositeStreamMap.add(mCompositeStreamMap.keyAt(compositeIdx),
+-                        mCompositeStreamMap.valueAt(compositeIdx));
++                                              mCompositeStreamMap.valueAt(compositeIdx));
+                 break;
+             }
+         }
+diff --git a/services/camera/libcameraservice/api2/CameraDeviceClient.h b/services/camera/libcameraservice/api2/CameraDeviceClient.h
+index a8cf451e2b..ae90dd697d 100644
+--- a/services/camera/libcameraservice/api2/CameraDeviceClient.h
++++ b/services/camera/libcameraservice/api2/CameraDeviceClient.h
+@@ -23,6 +23,7 @@
+ #include <camera/camera2/SessionConfiguration.h>
+ #include <camera/camera2/SubmitInfo.h>
+ #include <unordered_map>
++#include <gui/Flags.h>  // remove with WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
+ 
+ #include "CameraOfflineSessionClient.h"
+ #include "CameraService.h"
+@@ -37,6 +38,12 @@ using android::camera3::CompositeStream;
+ 
+ namespace android {
+ 
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++typedef uint64_t SurfaceKey;
++#else
++typedef sp<IBinder> SurfaceKey;
++#endif
++
+ struct CameraDeviceClientBase :
+          public CameraService::BasicClient,
+          public hardware::camera2::BnCameraDeviceUser
+@@ -293,12 +300,20 @@ private:
+             int* newStreamId = NULL);
+ 
+     // Utility method to insert the surface into SurfaceMap
+-    binder::Status insertGbpLocked(const sp<IGraphicBufferProducer>& gbp,
++    binder::Status insertSurfaceLocked(const ParcelableSurfaceType& surface,
+             /*out*/SurfaceMap* surfaceMap, /*out*/Vector<int32_t>* streamIds,
+             /*out*/int32_t*  currentStreamId);
+ 
++    // A ParcelableSurfaceType can be either a view::Surface or IGBP.
++    // We use this type of surface when we need to be able to have a parcelable data type.
++    // view::Surface has helper functions to make converting between a regular Surface and a
++    // view::Surface easy.
++    status_t getSurfaceKey(ParcelableSurfaceType surface, SurfaceKey* out) const;
++    // Surface only
++    status_t getSurfaceKey(sp<Surface> surface, SurfaceKey* out) const;
++
+     // IGraphicsBufferProducer binder -> Stream ID + Surface ID for output streams
+-    KeyedVector<sp<IBinder>, StreamSurfaceId> mStreamMap;
++    KeyedVector<SurfaceKey, StreamSurfaceId> mStreamMap;
+ 
+     // Stream ID -> OutputConfiguration. Used for looking up Surface by stream/surface index
+     KeyedVector<int32_t, hardware::camera2::params::OutputConfiguration> mConfiguredOutputs;
+@@ -340,7 +355,7 @@ private:
+ 
+     // Synchronize access to 'mCompositeStreamMap'
+     Mutex mCompositeLock;
+-    KeyedVector<sp<IBinder>, sp<CompositeStream>> mCompositeStreamMap;
++    KeyedVector<SurfaceKey, sp<CompositeStream>> mCompositeStreamMap;
+ 
+     sp<CameraProviderManager> mProviderManager;
+ 
+diff --git a/services/camera/libcameraservice/api2/CameraOfflineSessionClient.h b/services/camera/libcameraservice/api2/CameraOfflineSessionClient.h
+index 78a3055ec9..3799ba3e16 100644
+--- a/services/camera/libcameraservice/api2/CameraOfflineSessionClient.h
++++ b/services/camera/libcameraservice/api2/CameraOfflineSessionClient.h
+@@ -30,6 +30,12 @@ namespace android {
+ using android::hardware::camera2::ICameraDeviceCallbacks;
+ using camera3::CompositeStream;
+ 
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++typedef uint64_t SurfaceKey;
++#else
++typedef sp<IBinder> SurfaceKey;
++#endif
++
+ // Client for offline session. Note that offline session client does not affect camera service's
+ // client arbitration logic. It is camera HAL's decision to decide whether a normal camera
+ // client is conflicting with existing offline client(s).
+@@ -45,7 +51,7 @@ class CameraOfflineSessionClient :
+ public:
+     CameraOfflineSessionClient(
+             const sp<CameraService>& cameraService, sp<CameraOfflineSessionBase> session,
+-            const KeyedVector<sp<IBinder>, sp<CompositeStream>>& offlineCompositeStreamMap,
++            const KeyedVector<SurfaceKey, sp<CompositeStream>>& offlineCompositeStreamMap,
+             const sp<ICameraDeviceCallbacks>& remoteCallback,
+             std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
+             const AttributionSourceState& clientAttribution, int callingPid,
+@@ -135,7 +141,7 @@ private:
+     sp<camera2::FrameProcessorBase> mFrameProcessor;
+ 
+     // Offline composite stream map, output surface -> composite stream
+-    KeyedVector<sp<IBinder>, sp<CompositeStream>> mCompositeStreamMap;
++    KeyedVector<SurfaceKey, sp<CompositeStream>> mCompositeStreamMap;
+ };
+ 
+ } // namespace android
+diff --git a/services/camera/libcameraservice/hidl/Utils.cpp b/services/camera/libcameraservice/hidl/Utils.cpp
+index d0302d0eb2..62b4f82389 100644
+--- a/services/camera/libcameraservice/hidl/Utils.cpp
++++ b/services/camera/libcameraservice/hidl/Utils.cpp
+@@ -14,11 +14,12 @@
+  * limitations under the License.
+  */
+ 
+-#include <hidl/Utils.h>
+-#include <gui/bufferqueue/1.0/H2BGraphicBufferProducer.h>
++#include <camera/StringUtils.h>
+ #include <cutils/native_handle.h>
++#include <gui/Flags.h>  // remove with WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++#include <gui/bufferqueue/1.0/H2BGraphicBufferProducer.h>
++#include <hidl/Utils.h>
+ #include <mediautils/AImageReaderUtils.h>
+-#include <camera/StringUtils.h>
+ 
+ namespace android {
+ namespace hardware {
+@@ -84,9 +85,9 @@ int convertFromHidl(HOutputConfiguration::Rotation rotation) {
+ 
+ hardware::camera2::params::OutputConfiguration convertFromHidl(
+     const HOutputConfiguration &hOutputConfiguration) {
+-    std::vector<sp<IGraphicBufferProducer>> iGBPs;
+-    auto &windowHandles = hOutputConfiguration.windowHandles;
+-    iGBPs.reserve(windowHandles.size());
++    std::vector<ParcelableSurfaceType> surfaces;
++    auto& windowHandles = hOutputConfiguration.windowHandles;
++    surfaces.reserve(windowHandles.size());
+     for (auto &handle : windowHandles) {
+         auto igbp = AImageReader_getHGBPFromHandle(handle);
+         if (igbp == nullptr) {
+@@ -94,10 +95,16 @@ hardware::camera2::params::OutputConfiguration convertFromHidl(
+                     __FUNCTION__, handle.getNativeHandle());
+             continue;
+         }
+-        iGBPs.push_back(new H2BGraphicBufferProducer(igbp));
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++        view::Surface surface;
++        surface.graphicBufferProducer = new H2BGraphicBufferProducer(igbp);
++        surfaces.push_back(surface);
++#else
++        surfaces.push_back(new H2BGraphicBufferProducer(igbp));
++#endif
+     }
+     hardware::camera2::params::OutputConfiguration outputConfiguration(
+-        iGBPs, convertFromHidl(hOutputConfiguration.rotation),
++        surfaces, convertFromHidl(hOutputConfiguration.rotation),
+         hOutputConfiguration.physicalCameraId,
+         hOutputConfiguration.windowGroupId, OutputConfiguration::SURFACE_TYPE_UNKNOWN, 0, 0,
+         (windowHandles.size() > 1));
+diff --git a/services/camera/libcameraservice/utils/CameraServiceProxyWrapper.cpp b/services/camera/libcameraservice/utils/CameraServiceProxyWrapper.cpp
+index 85bca6f007..8f93ee0ed6 100644
+--- a/services/camera/libcameraservice/utils/CameraServiceProxyWrapper.cpp
++++ b/services/camera/libcameraservice/utils/CameraServiceProxyWrapper.cpp
+@@ -18,13 +18,14 @@
+ #define ATRACE_TAG ATRACE_TAG_CAMERA
+ //#define LOG_NDEBUG 0
+ 
++#include <binder/IServiceManager.h>
++#include <camera/StringUtils.h>
++#include <gui/Flags.h>  // remove with WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
+ #include <gui/Surface.h>
+ #include <inttypes.h>
++#include <system/window.h>
+ #include <utils/Log.h>
+ #include <utils/String16.h>
+-#include <camera/StringUtils.h>
+-#include <binder/IServiceManager.h>
+-#include <system/window.h>
+ 
+ #include "aidl/android/hardware/graphics/common/Dataspace.h"
+ 
+@@ -265,16 +266,24 @@ int64_t CameraServiceProxyWrapper::encodeSessionConfiguration(
+             }
+ 
+             // Check 4K
+-            const auto& gbps = config.getGraphicBufferProducers();
++            const std::vector<ParcelableSurfaceType>& surfaces = config.getSurfaces();
+             int32_t width = 0, height = 0;
+-            if (gbps.size() > 0) {
+-                if (gbps[0] == nullptr) {
++            if (surfaces.size() > 0) {
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++                if (surfaces[0].isEmpty()) {
++#else
++                if (surfaces[0] == nullptr) {
++#endif
+                     ALOGE("%s: Failed to query size due to abandoned surface.",
+                             __FUNCTION__);
+                     return CameraFeatureCombinationStats::CAMERA_FEATURE_UNKNOWN;
+                 }
+ 
+-                sp<Surface> surface = new Surface(gbps[0], /*useAsync*/false);
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++                sp<Surface> surface = surfaces[0].toSurface();
++#else
++                sp<Surface> surface = new Surface(surfaces[0], /*useAsync*/false);
++#endif
+                 ANativeWindow *anw = surface.get();
+ 
+                 width = ANativeWindow_getWidth(anw);
+diff --git a/services/camera/libcameraservice/utils/SessionConfigurationUtils.cpp b/services/camera/libcameraservice/utils/SessionConfigurationUtils.cpp
+index ee4df4e11c..79769d2bbb 100644
+--- a/services/camera/libcameraservice/utils/SessionConfigurationUtils.cpp
++++ b/services/camera/libcameraservice/utils/SessionConfigurationUtils.cpp
+@@ -18,21 +18,23 @@
+ 
+ #include "SessionConfigurationUtils.h"
+ #include <android/data_space.h>
++#include <camera/StringUtils.h>
++#include <gui/Flags.h>  // remove with WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++#include <ui/PublicFormat.h>
++#include "../CameraService.h"
+ #include "../api2/DepthCompositeStream.h"
+ #include "../api2/HeicCompositeStream.h"
++#include "SessionConfigurationUtils.h"
+ #include "aidl/android/hardware/graphics/common/Dataspace.h"
+ #include "api2/JpegRCompositeStream.h"
+ #include "binder/Status.h"
+ #include "common/CameraDeviceBase.h"
+ #include "common/HalConversionsTemplated.h"
+-#include "../CameraService.h"
+-#include "device3/aidl/AidlCamera3Device.h"
+-#include "device3/hidl/HidlCamera3Device.h"
+ #include "device3/Camera3OutputStream.h"
+ #include "device3/ZoomRatioMapper.h"
++#include "device3/aidl/AidlCamera3Device.h"
++#include "device3/hidl/HidlCamera3Device.h"
+ #include "system/graphics-base-v1.1.h"
+-#include <camera/StringUtils.h>
+-#include <ui/PublicFormat.h>
+ 
+ using android::camera3::OutputStreamInfo;
+ using android::camera3::OutputStreamInfo;
+@@ -827,8 +829,7 @@ convertToHALStreamCombination(
+     }
+ 
+     for (const auto &it : outputConfigs) {
+-        const std::vector<sp<IGraphicBufferProducer>>& bufferProducers =
+-            it.getGraphicBufferProducers();
++        const std::vector<ParcelableSurfaceType>& surfaces = it.getSurfaces();
+         bool deferredConsumer = it.isDeferred();
+         bool isConfigurationComplete = it.isComplete();
+         const std::string &physicalCameraId = it.getPhysicalCameraId();
+@@ -841,12 +842,12 @@ convertToHALStreamCombination(
+         const CameraMetadata &metadataChosen =
+                 physicalCameraId.size() > 0 ? physicalDeviceInfo : deviceInfo;
+ 
+-        size_t numBufferProducers = bufferProducers.size();
++        size_t numSurfaces = surfaces.size();
+         bool isStreamInfoValid = false;
+         int32_t groupId = it.isMultiResolution() ? it.getSurfaceSetID() : -1;
+         OutputStreamInfo streamInfo;
+ 
+-        res = checkSurfaceType(numBufferProducers, deferredConsumer, it.getSurfaceType(),
++        res = checkSurfaceType(numSurfaces, deferredConsumer, it.getSurfaceType(),
+                                isConfigurationComplete);
+         if (!res.isOk()) {
+             return res;
+@@ -861,7 +862,7 @@ convertToHALStreamCombination(
+         int timestampBase = it.getTimestampBase();
+         // If the configuration is a deferred consumer, or a not yet completed
+         // configuration with no buffer producers attached.
+-        if (deferredConsumer || (!isConfigurationComplete && numBufferProducers == 0)) {
++        if (deferredConsumer || (!isConfigurationComplete && numSurfaces == 0)) {
+             streamInfo.width = it.getWidth();
+             streamInfo.height = it.getHeight();
+             auto surfaceType = it.getSurfaceType();
+@@ -912,26 +913,31 @@ convertToHALStreamCombination(
+ 
+             isStreamInfoValid = true;
+ 
+-            if (numBufferProducers == 0) {
++            if (numSurfaces == 0) {
+                 continue;
+             }
+         }
+ 
+-        for (auto& bufferProducer : bufferProducers) {
+-            int mirrorMode = it.getMirrorMode(bufferProducer);
++        for (auto& surface_type : surfaces) {
+             sp<Surface> surface;
+-            res = createSurfaceFromGbp(streamInfo, isStreamInfoValid, surface, bufferProducer,
+-                    logicalCameraId, metadataChosen, sensorPixelModesUsed, dynamicRangeProfile,
+-                    streamUseCase, timestampBase, mirrorMode, colorSpace,
+-                    /*respectSurfaceSize*/true);
+-
+-            if (!res.isOk())
+-                return res;
++            int mirrorMode = it.getMirrorMode(surface_type);
++            res = createSurfaceFromGbp(streamInfo, isStreamInfoValid, surface,
++                                       surface_type
++#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
++                                       .graphicBufferProducer
++#endif
++                                       , logicalCameraId,
++                                       metadataChosen, sensorPixelModesUsed, dynamicRangeProfile,
++                                       streamUseCase, timestampBase, mirrorMode, colorSpace,
++                                       /*respectSurfaceSize*/ true);
++
++            if (!res.isOk()) return res;
+ 
+             if (!isStreamInfoValid) {
+-                auto status  = mapStream(streamInfo, isCompositeJpegRDisabled, deviceInfo,
+-                        static_cast<camera_stream_rotation_t> (it.getRotation()), &streamIdx,
+-                        physicalCameraId, groupId, logicalCameraId, streamConfiguration, earlyExit);
++                auto status = mapStream(streamInfo, isCompositeJpegRDisabled, deviceInfo,
++                                        static_cast<camera_stream_rotation_t>(it.getRotation()),
++                                        &streamIdx, physicalCameraId, groupId, logicalCameraId,
++                                        streamConfiguration, earlyExit);
+                 if (*earlyExit || !status.isOk()) {
+                     return status;
+                 }
+-- 
+2.43.0
+

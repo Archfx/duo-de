@@ -1,0 +1,80 @@
+From a5af5074bf6527f621f5d51d046db7a8c2b3620c Mon Sep 17 00:00:00 2001
+From: Andy Hung <hunga@google.com>
+Date: Mon, 11 Nov 2024 16:15:10 -0800
+Subject: [PATCH 252/436] Audio: clarify client service timeout naming
+
+Flag: EXEMPT bugfix, mechanical refactor
+Test: compiles
+Bug: 375691003
+Change-Id: I7e67541634a6ef5b9822a393832d226b861e22ca
+---
+ media/libaudioclient/AudioSystem.cpp | 17 ++++++++++-------
+ 1 file changed, 10 insertions(+), 7 deletions(-)
+
+diff --git a/media/libaudioclient/AudioSystem.cpp b/media/libaudioclient/AudioSystem.cpp
+index f68b506796..bb0deb1fb9 100644
+--- a/media/libaudioclient/AudioSystem.cpp
++++ b/media/libaudioclient/AudioSystem.cpp
+@@ -95,7 +95,7 @@ sp<CaptureStateListenerImpl> AudioSystem::gSoundTriggerCaptureStateListener;
+ // ServiceSingleton to provide interaction with the service notifications and
+ // binder death notifications.
+ //
+-// If the AF/AP service is unavailable for kServiceWaitMs from ServiceManager,
++// If the AF/AP service is unavailable for kServiceClientWaitMs from ServiceManager,
+ // ServiceSingleton will return a nullptr service handle resulting in the same dead object error
+ // as if the service died (which it did, otherwise we'd be returning the cached handle).
+ //
+@@ -129,9 +129,10 @@ sp<CaptureStateListenerImpl> AudioSystem::gSoundTriggerCaptureStateListener;
+ //
+ // TODO(b/375691003) We use 10s as a conservative timeout value, and will tune closer to 3s.
+ // Too small a value (i.e. less than 1s would churn repeated calls to get the service).
+-static constexpr int32_t kServiceWaitMs = 10'000;
++// The value can be tuned by the property audio.service.client_wait_ms.
++static constexpr int32_t kServiceClientWaitMs = 10'000;
+ 
+-static constexpr const char kServiceWaitProperty[] = "audio.service.wait_ms";
++static constexpr const char kServiceWaitProperty[] = "audio.service.client_wait_ms";
+ 
+ // AudioFlingerServiceTraits is a collection of methods that parameterize the
+ // ServiceSingleton handler for IAudioFlinger
+@@ -172,7 +173,7 @@ public:
+             }
+             mediautils::initService<media::IAudioFlingerService, AudioFlingerServiceTraits>();
+             mWaitMs = std::chrono::milliseconds(
+-                property_get_int32(kServiceWaitProperty, kServiceWaitMs));
++                property_get_int32(kServiceWaitProperty, kServiceClientWaitMs));
+             init = true;
+         }
+         if (mValid) return mService;
+@@ -272,7 +273,8 @@ private:
+     static inline constinit std::mutex mMutex;
+     static inline constinit sp<AudioSystem::AudioFlingerClient> mClient GUARDED_BY(mMutex);
+     static inline constinit sp<IAudioFlinger> mService GUARDED_BY(mMutex);
+-    static inline constinit std::chrono::milliseconds mWaitMs GUARDED_BY(mMutex) {kServiceWaitMs};
++    static inline constinit std::chrono::milliseconds mWaitMs
++            GUARDED_BY(mMutex) {kServiceClientWaitMs};
+     static inline constinit bool mValid GUARDED_BY(mMutex) = false;
+     static inline constinit std::atomic_bool mDisableThreadPoolStart = false;
+ };
+@@ -1014,7 +1016,7 @@ public:
+             }
+             mediautils::initService<IAudioPolicyService, AudioPolicyServiceTraits>();
+             mWaitMs = std::chrono::milliseconds(
+-                    property_get_int32(kServiceWaitProperty, kServiceWaitMs));
++                    property_get_int32(kServiceWaitProperty, kServiceClientWaitMs));
+             init = true;
+         }
+         if (mValid) return mService;
+@@ -1071,7 +1073,8 @@ private:
+     static inline constinit sp<AudioSystem::AudioPolicyServiceClient> mClient GUARDED_BY(mMutex);
+     static inline constinit sp<IAudioPolicyService> mService GUARDED_BY(mMutex);
+     static inline constinit bool mValid GUARDED_BY(mMutex) = false;
+-    static inline constinit std::chrono::milliseconds mWaitMs GUARDED_BY(mMutex) {kServiceWaitMs};
++    static inline constinit std::chrono::milliseconds mWaitMs
++            GUARDED_BY(mMutex) {kServiceClientWaitMs};
+     static inline constinit std::atomic_bool mDisableThreadPoolStart = false;
+ };
+ 
+-- 
+2.43.0
+

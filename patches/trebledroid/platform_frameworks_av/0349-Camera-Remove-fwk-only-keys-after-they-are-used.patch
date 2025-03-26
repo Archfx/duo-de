@@ -1,0 +1,86 @@
+From 31681aa1d8f213b7478db83c16515fa5cbf7c781 Mon Sep 17 00:00:00 2001
+From: Shuzhen Wang <shuzhenwang@google.com>
+Date: Sun, 24 Nov 2024 23:25:16 -0800
+Subject: [PATCH 349/436] Camera: Remove fwk only keys after they are used
+
+The fwk only keys should be removed after all the
+updates on CaptureRequest keys are done.
+
+Also fix up a wrongly flipped boolean in ag/30529258.
+
+Flag: EXEMPT bug-fix
+Test: atest CaptureRequestTest#testZoomRatioWithMethod
+Bug: 380532555
+Bug: 380950927
+Change-Id: Ied94280d77fa2e24bc214d6d55d80eba74d72127
+---
+ .../device3/Camera3Device.cpp                 | 20 +++++++------------
+ .../device3/Camera3OutputUtils.cpp            |  4 ++--
+ 2 files changed, 9 insertions(+), 15 deletions(-)
+
+diff --git a/services/camera/libcameraservice/device3/Camera3Device.cpp b/services/camera/libcameraservice/device3/Camera3Device.cpp
+index c050f1b6bd..d95242b422 100644
+--- a/services/camera/libcameraservice/device3/Camera3Device.cpp
++++ b/services/camera/libcameraservice/device3/Camera3Device.cpp
+@@ -3882,12 +3882,6 @@ status_t Camera3Device::RequestThread::prepareHalRequests() {
+                             it != captureRequest->mSettingsList.end(); it++) {
+                         if (parent->mUHRCropAndMeteringRegionMappers.find(it->cameraId) ==
+                                 parent->mUHRCropAndMeteringRegionMappers.end()) {
+-                            if (removeFwkOnlyKeys(&(it->metadata)) != OK) {
+-                                SET_ERR("RequestThread: Unable to remove fwk-only keys from request"
+-                                        "%d: %s (%d)", halRequest->frame_number, strerror(-res),
+-                                        res);
+-                                return INVALID_OPERATION;
+-                            }
+                             continue;
+                         }
+ 
+@@ -3902,12 +3896,6 @@ status_t Camera3Device::RequestThread::prepareHalRequests() {
+                                 return INVALID_OPERATION;
+                             }
+                             captureRequest->mUHRCropAndMeteringRegionsUpdated = true;
+-                            if (removeFwkOnlyKeys(&(it->metadata)) != OK) {
+-                                SET_ERR("RequestThread: Unable to remove fwk-only keys from request"
+-                                        "%d: %s (%d)", halRequest->frame_number, strerror(-res),
+-                                        res);
+-                                return INVALID_OPERATION;
+-                            }
+                         }
+                     }
+ 
+@@ -3981,7 +3969,13 @@ status_t Camera3Device::RequestThread::prepareHalRequests() {
+                                     "%d: %s (%d)", halRequest->frame_number, strerror(-res), res);
+                             return INVALID_OPERATION;
+                         }
+-
++                        res = removeFwkOnlyKeys(&(it->metadata));
++                        if (res != OK) {
++                            SET_ERR("RequestThread: Unable to remove fwk-only keys from request"
++                                    "%d: %s (%d)", halRequest->frame_number, strerror(-res),
++                                    res);
++                            return INVALID_OPERATION;
++                        }
+                         if (!parent->mSupportsExtensionKeys) {
+                             res = filterExtensionKeys(&it->metadata);
+                             if (res != OK) {
+diff --git a/services/camera/libcameraservice/device3/Camera3OutputUtils.cpp b/services/camera/libcameraservice/device3/Camera3OutputUtils.cpp
+index 66dcbc3b0b..7a53847765 100644
+--- a/services/camera/libcameraservice/device3/Camera3OutputUtils.cpp
++++ b/services/camera/libcameraservice/device3/Camera3OutputUtils.cpp
+@@ -458,11 +458,11 @@ void sendCaptureResult(
+         }
+ 
+         // Note: Physical camera continues to use SCALER_CROP_REGION to reflect
+-        // zoom levels.
++        // zoom levels. Model this by treating app-set ZOOM_RATIO as 1x.
+         res = states.zoomRatioMappers[cameraId].updateCaptureResult(
+                 &physicalMetadata.mCameraMetadataInfo.get<CameraMetadataInfo::metadata>(),
+                 /*zoomMethodIsRatio*/false,
+-                /*zoomRatioIs1*/false);
++                /*zoomRatioIs1*/true);
+         if (res != OK) {
+             SET_ERR("Failed to update camera %s's physical zoom ratio metadata for "
+                     "frame %d: %s(%d)", cameraId.c_str(), frameNumber, strerror(-res), res);
+-- 
+2.43.0
+

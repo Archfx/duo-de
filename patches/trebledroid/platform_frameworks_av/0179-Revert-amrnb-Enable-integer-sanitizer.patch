@@ -1,0 +1,313 @@
+From d0799e1a03277ee4a62fb86c24eda3aca19899cc Mon Sep 17 00:00:00 2001
+From: "Harish Mahendrakar (xWF)" <hmahendrakar@google.com>
+Date: Thu, 31 Oct 2024 03:30:18 +0000
+Subject: [PATCH 179/436] Revert "amrnb: Enable integer sanitizer"
+
+This reverts commit 8616d81468f2e4f0fce86dd6ee075d2e2cd58d24.
+
+Reason for revert: b/376559318 enabling integer overflow in AMR
+decoder causes some CTS tests to fail.
+
+Bug: 25409744
+Bug: 357558004
+Bug: 376559318
+Change-Id: Ied38622418dd53c24982f78bc417427891ca64b1
+---
+ media/module/codecs/amrnb/common/Android.bp   | 20 +++++-----
+ media/module/codecs/amrnb/dec/Android.bp      | 40 ++++++++-----------
+ media/module/codecs/amrnb/enc/Android.bp      | 34 +++++++---------
+ .../module/codecs/amrnb/enc/fuzzer/Android.bp |  9 +----
+ media/module/codecs/amrnb/fuzzer/Android.bp   | 11 +----
+ 5 files changed, 45 insertions(+), 69 deletions(-)
+
+diff --git a/media/module/codecs/amrnb/common/Android.bp b/media/module/codecs/amrnb/common/Android.bp
+index 9859aa8eaa..0bc6ed266a 100644
+--- a/media/module/codecs/amrnb/common/Android.bp
++++ b/media/module/codecs/amrnb/common/Android.bp
+@@ -1,5 +1,4 @@
+ package {
+-    default_team: "trendy_team_media_codec_framework",
+     default_applicable_licenses: [
+         "frameworks_av_media_codecs_amrnb_common_license",
+     ],
+@@ -43,8 +42,8 @@ cc_library {
+         "src/gains_tbl.cpp",
+         "src/gc_pred.cpp",
+         "src/gmed_n.cpp",
+-        "src/gray_tbl.cpp",
+         "src/grid_tbl.cpp",
++        "src/gray_tbl.cpp",
+         "src/int_lpc.cpp",
+         "src/inv_sqrt.cpp",
+         "src/inv_sqrt_tbl.cpp",
+@@ -92,9 +91,9 @@ cc_library {
+     export_include_dirs: ["include"],
+ 
+     cflags: [
+-        "-DOSCL_EXPORT_REF=",
+-        "-DOSCL_IMPORT_REF=",
+         "-DOSCL_UNUSED_ARG(x)=(void)(x)",
++        "-DOSCL_IMPORT_REF=",
++        "-DOSCL_EXPORT_REF=",
+ 
+         "-Werror",
+     ],
+@@ -105,10 +104,11 @@ cc_library {
+         },
+     },
+ 
+-    sanitize: {
+-        misc_undefined: [
+-            "signed-integer-overflow",
+-            "unsigned-integer-overflow",
+-        ],
+-    },
++    //addressing b/25409744
++    //sanitize: {
++    //    misc_undefined: [
++    //        "signed-integer-overflow",
++    //        "unsigned-integer-overflow",
++    //    ],
++    //},
+ }
+diff --git a/media/module/codecs/amrnb/dec/Android.bp b/media/module/codecs/amrnb/dec/Android.bp
+index 1ee45a95b5..70741d25aa 100644
+--- a/media/module/codecs/amrnb/dec/Android.bp
++++ b/media/module/codecs/amrnb/dec/Android.bp
+@@ -1,5 +1,4 @@
+ package {
+-    default_team: "trendy_team_media_codec_framework",
+     default_applicable_licenses: [
+         "frameworks_av_media_codecs_amrnb_dec_license",
+     ],
+@@ -48,12 +47,12 @@ cc_library_static {
+         "src/b_cn_cod.cpp",
+         "src/bgnscd.cpp",
+         "src/c_g_aver.cpp",
+-        "src/d2_9pf.cpp",
++        "src/d1035pf.cpp",
+         "src/d2_11pf.cpp",
++        "src/d2_9pf.cpp",
+         "src/d3_14pf.cpp",
+         "src/d4_17pf.cpp",
+         "src/d8_31pf.cpp",
+-        "src/d1035pf.cpp",
+         "src/d_gain_c.cpp",
+         "src/d_gain_p.cpp",
+         "src/d_plsf.cpp",
+@@ -82,22 +81,21 @@ cc_library_static {
+     export_include_dirs: ["src"],
+ 
+     cflags: [
+-        "-DOSCL_IMPORT_REF=",
+         "-DOSCL_UNUSED_ARG(x)=(void)(x)",
++        "-DOSCL_IMPORT_REF=",
+ 
+         "-Werror",
+     ],
+ 
+-    sanitize: {
+-        misc_undefined: [
+-            "signed-integer-overflow",
+-            "unsigned-integer-overflow",
+-        ],
+-    },
++    //sanitize: {
++    //    misc_undefined: [
++    //        "signed-integer-overflow",
++    //    ],
++    //},
+ 
+     shared_libs: [
+-        "liblog",
+         "libstagefright_amrnb_common",
++        "liblog",
+     ],
+ 
+     target: {
+@@ -115,22 +113,19 @@ cc_test {
+ 
+     srcs: ["test/amrnbdec_test.cpp"],
+ 
+-    cflags: [
+-        "-Wall",
+-        "-Werror",
+-    ],
++    cflags: ["-Wall", "-Werror"],
+ 
+     local_include_dirs: ["src"],
+ 
+     static_libs: [
+-        "libsndfile",
+         "libstagefright_amrnbdec",
++        "libsndfile",
+     ],
+ 
+     shared_libs: [
++        "libstagefright_amrnb_common",
+         "libaudioutils",
+         "liblog",
+-        "libstagefright_amrnb_common",
+     ],
+ 
+     target: {
+@@ -139,10 +134,9 @@ cc_test {
+         },
+     },
+ 
+-    sanitize: {
+-        misc_undefined: [
+-            "signed-integer-overflow",
+-            "unsigned-integer-overflow",
+-        ],
+-    },
++    //sanitize: {
++    //    misc_undefined: [
++    //        "signed-integer-overflow",
++    //    ],
++    //},
+ }
+diff --git a/media/module/codecs/amrnb/enc/Android.bp b/media/module/codecs/amrnb/enc/Android.bp
+index d1e5276525..3c6566e8c8 100644
+--- a/media/module/codecs/amrnb/enc/Android.bp
++++ b/media/module/codecs/amrnb/enc/Android.bp
+@@ -1,5 +1,4 @@
+ package {
+-    default_team: "trendy_team_media_codec_framework",
+     default_applicable_licenses: [
+         "frameworks_av_media_codecs_amrnb_enc_license",
+     ],
+@@ -43,12 +42,12 @@ cc_library_static {
+     srcs: [
+         "src/amrencode.cpp",
+         "src/autocorr.cpp",
+-        "src/c2_9pf.cpp",
++        "src/c1035pf.cpp",
+         "src/c2_11pf.cpp",
++        "src/c2_9pf.cpp",
+         "src/c3_14pf.cpp",
+         "src/c4_17pf.cpp",
+         "src/c8_31pf.cpp",
+-        "src/c1035pf.cpp",
+         "src/calc_cor.cpp",
+         "src/calc_en.cpp",
+         "src/cbsearch.cpp",
+@@ -108,12 +107,12 @@ cc_library_static {
+         "-Werror",
+     ],
+ 
+-    sanitize: {
+-        misc_undefined: [
+-            "signed-integer-overflow",
+-            "unsigned-integer-overflow",
+-        ],
+-    },
++    //addressing b/25409744
++    //sanitize: {
++    //    misc_undefined: [
++    //        "signed-integer-overflow",
++    //    ],
++    //},
+ 
+     shared_libs: ["libstagefright_amrnb_common"],
+ 
+@@ -133,10 +132,7 @@ cc_test {
+ 
+     srcs: ["test/amrnb_enc_test.cpp"],
+ 
+-    cflags: [
+-        "-Wall",
+-        "-Werror",
+-    ],
++    cflags: ["-Wall", "-Werror"],
+ 
+     local_include_dirs: ["src"],
+ 
+@@ -144,10 +140,10 @@ cc_test {
+ 
+     shared_libs: ["libstagefright_amrnb_common"],
+ 
+-    sanitize: {
+-        misc_undefined: [
+-            "signed-integer-overflow",
+-            "unsigned-integer-overflow",
+-        ],
+-    },
++    //addressing b/25409744
++    //sanitize: {
++    //    misc_undefined: [
++    //        "signed-integer-overflow",
++    //    ],
++    //},
+ }
+diff --git a/media/module/codecs/amrnb/enc/fuzzer/Android.bp b/media/module/codecs/amrnb/enc/fuzzer/Android.bp
+index 62143ebf84..bcbcee27a1 100644
+--- a/media/module/codecs/amrnb/enc/fuzzer/Android.bp
++++ b/media/module/codecs/amrnb/enc/fuzzer/Android.bp
+@@ -19,7 +19,6 @@
+  */
+ 
+ package {
+-    default_team: "trendy_team_media_codec_framework",
+     // See: http://go/android-license-faq
+     // A large-scale-change added 'default_applicable_licenses' to import
+     // all of the 'license_kinds' from "frameworks_av_media_codecs_amrnb_enc_license"
+@@ -40,8 +39,8 @@ cc_fuzz {
+ 
+     static_libs: [
+         "liblog",
+-        "libstagefright_amrnb_common",
+         "libstagefright_amrnbenc",
++        "libstagefright_amrnb_common",
+     ],
+ 
+     fuzz_config: {
+@@ -58,10 +57,4 @@ cc_fuzz {
+         users: "multi_user",
+         fuzzed_code_usage: "shipped",
+     },
+-    sanitize: {
+-        misc_undefined: [
+-            "signed-integer-overflow",
+-            "unsigned-integer-overflow",
+-        ],
+-    },
+ }
+diff --git a/media/module/codecs/amrnb/fuzzer/Android.bp b/media/module/codecs/amrnb/fuzzer/Android.bp
+index e1d999bd3a..3f292675ce 100644
+--- a/media/module/codecs/amrnb/fuzzer/Android.bp
++++ b/media/module/codecs/amrnb/fuzzer/Android.bp
+@@ -19,7 +19,6 @@
+  */
+ 
+ package {
+-    default_team: "trendy_team_media_codec_framework",
+     // See: http://go/android-license-faq
+     // A large-scale-change added 'default_applicable_licenses' to import
+     // all of the 'license_kinds' from "frameworks_av_license"
+@@ -35,9 +34,9 @@ cc_fuzz {
+         "amrnb_dec_fuzzer.cpp",
+     ],
+     static_libs: [
+-        "liblog",
+-        "libstagefright_amrnb_common",
+         "libstagefright_amrnbdec",
++        "libstagefright_amrnb_common",
++        "liblog",
+     ],
+     target: {
+         darwin: {
+@@ -58,10 +57,4 @@ cc_fuzz {
+         users: "multi_user",
+         fuzzed_code_usage: "shipped",
+     },
+-    sanitize: {
+-        misc_undefined: [
+-            "signed-integer-overflow",
+-            "unsigned-integer-overflow",
+-        ],
+-    },
+ }
+-- 
+2.43.0
+

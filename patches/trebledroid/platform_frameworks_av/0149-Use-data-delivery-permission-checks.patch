@@ -1,0 +1,867 @@
+From a0c61f11cee8880e2db434a95bf1dba61c24f1d5 Mon Sep 17 00:00:00 2001
+From: Austin Borger <borgera@google.com>
+Date: Fri, 11 Oct 2024 13:38:35 -0700
+Subject: [PATCH 149/436] Use data delivery permission checks
+
+The new PermissionChecker APIs check permission for a client while also
+intiating an AppOp at the same time. They are also capable of checking
+permissions for the full AttributionSource chain in the process.
+
+In this change, we switch out the legacy AppOpsManager APIs for the
+new PermissionChecker APIs. Some details may need to be ironed out,
+particularly when it comes to prioritization of clients. This will be
+handled in a future CL.
+
+Bug: 190657833
+Bug: 369841571
+Test: Ran CameraPermissionTest with 10 iterations for all flag permutations
+Flag: com.android.internal.camera.flags.check_full_attribution_source_chain
+Change-Id: If6a777bcb9af4f7004a45a2aac35a404be8d9db1
+---
+ .../camera/libcameraservice/CameraService.cpp | 232 +++++++++++++-----
+ .../camera/libcameraservice/CameraService.h   |  24 +-
+ .../api2/CameraOfflineSessionClient.cpp       |  20 +-
+ .../api2/CameraOfflineSessionClient.h         |   4 +-
+ .../common/Camera2ClientBase.cpp              |   8 +-
+ .../utils/AttributionAndPermissionUtils.cpp   | 104 +++++++-
+ .../utils/AttributionAndPermissionUtils.h     |  92 ++++++-
+ 7 files changed, 378 insertions(+), 106 deletions(-)
+
+diff --git a/services/camera/libcameraservice/CameraService.cpp b/services/camera/libcameraservice/CameraService.cpp
+index 03dbce2bf8..6da160648f 100644
+--- a/services/camera/libcameraservice/CameraService.cpp
++++ b/services/camera/libcameraservice/CameraService.cpp
+@@ -105,6 +105,20 @@ namespace {
+         const auto &deviceIdEntry = cameraInfo.find(ANDROID_INFO_DEVICE_ID);
+         return deviceIdEntry.data.i32[0];
+     }
++
++    static android::PermissionChecker::PermissionResult appOpModeToPermissionResult(int32_t res) {
++        switch (res) {
++            case android::AppOpsManager::MODE_ERRORED:
++                return android::PermissionChecker::PERMISSION_HARD_DENIED;
++            case android::AppOpsManager::MODE_IGNORED:
++                return android::PermissionChecker::PERMISSION_SOFT_DENIED;
++            case android::AppOpsManager::MODE_ALLOWED:
++                return android::PermissionChecker::PERMISSION_GRANTED;
++        }
++
++        ALOGE("%s: Unexpected appOpMode %d", __FUNCTION__, res);
++        return android::PermissionChecker::PERMISSION_HARD_DENIED;
++    }
+ } // namespace anonymous
+ 
+ namespace android {
+@@ -4073,8 +4087,8 @@ CameraService::BasicClient::BasicClient(
+       mRotationOverride(rotationOverride),
+       mAudioRestriction(hardware::camera2::ICameraDeviceUser::AUDIO_RESTRICTION_NONE),
+       mRemoteBinder(remoteCallback),
+-      mOpsActive(false),
+-      mOpsStreaming(false) {
++      mCameraOpen(false),
++      mCameraStreaming(false) {
+     if (sCameraService == nullptr) {
+         sCameraService = cameraService;
+     }
+@@ -4119,7 +4133,7 @@ binder::Status CameraService::BasicClient::disconnect() {
+         remote->unlinkToDeath(sCameraService);
+     }
+ 
+-    finishCameraOps();
++    notifyCameraClosing();
+     // Notify flashlight that a camera device is closed.
+     sCameraService->mFlashlight->deviceClosed(mCameraIdStr);
+     ALOGI("%s: Disconnected client for camera %s for PID %d", __FUNCTION__, mCameraIdStr.c_str(),
+@@ -4219,14 +4233,15 @@ bool CameraService::BasicClient::isValidAudioRestriction(int32_t mode) {
+     }
+ }
+ 
+-status_t CameraService::BasicClient::handleAppOpMode(int32_t mode) {
+-    if (mode == AppOpsManager::MODE_ERRORED) {
++status_t CameraService::BasicClient::handlePermissionResult(
++        PermissionChecker::PermissionResult result) {
++    if (result == PermissionChecker::PERMISSION_HARD_DENIED) {
+         ALOGI("Camera %s: Access for \"%s\" has been revoked", mCameraIdStr.c_str(),
+               getPackageName().c_str());
+         return PERMISSION_DENIED;
+-    } else if (!mUidIsTrusted && mode == AppOpsManager::MODE_IGNORED) {
+-        // If the calling Uid is trusted (a native service), the AppOpsManager could
+-        // return MODE_IGNORED. Do not treat such case as error.
++    } else if (!mUidIsTrusted && result == PermissionChecker::PERMISSION_SOFT_DENIED) {
++        // If the calling Uid is trusted (a native service), the AppOpsManager/PermissionChecker
++        // could return MODE_IGNORED/PERMISSION_SOFT_DENIED. Do not treat such case as error.
+         bool isUidActive =
+                 sCameraService->mUidPolicy->isUidActive(getClientUid(), getPackageName());
+ 
+@@ -4255,31 +4270,41 @@ status_t CameraService::BasicClient::handleAppOpMode(int32_t mode) {
+     return OK;
+ }
+ 
+-status_t CameraService::BasicClient::startCameraOps() {
++status_t CameraService::BasicClient::handleAppOpMode(int32_t mode) {
++    return handlePermissionResult(appOpModeToPermissionResult(mode));
++}
++
++status_t CameraService::BasicClient::notifyCameraOpening() {
+     ATRACE_CALL();
+ 
+-    {
+-        ALOGV("%s: Start camera ops, package name = %s, client UID = %d", __FUNCTION__,
++    // Don't start watching until we're streaming when using permissionChecker for data delivery
++    if (!flags::check_full_attribution_source_chain()) {
++        ALOGD("%s: Start camera ops, package name = %s, client UID = %d", __FUNCTION__,
+               getPackageName().c_str(), getClientUid());
+-    }
+-    if (mAppOpsManager != nullptr) {
+-        // Notify app ops that the camera is not available
+-        mOpsCallback = new OpsCallback(this);
+ 
+-        mAppOpsManager->startWatchingMode(AppOpsManager::OP_CAMERA, toString16(getPackageName()),
+-                                          AppOpsManager::WATCH_FOREGROUND_CHANGES, mOpsCallback);
++        if (mAppOpsManager != nullptr) {
++            // Notify app ops that the camera is not available
++            mOpsCallback = new OpsCallback(this);
+ 
+-        // Just check for camera acccess here on open - delay startOp until
+-        // camera frames start streaming in startCameraStreamingOps
+-        int32_t mode = mAppOpsManager->checkOp(AppOpsManager::OP_CAMERA, getClientUid(),
+-                                               toString16(getPackageName()));
+-        status_t res = handleAppOpMode(mode);
+-        if (res != OK) {
+-            return res;
++            mAppOpsManager->startWatchingMode(
++                    AppOpsManager::OP_CAMERA, toString16(getPackageName()),
++                    AppOpsManager::WATCH_FOREGROUND_CHANGES, mOpsCallback);
++
++            // Just check for camera access here on open - delay startOp until
++            // camera frames start streaming in startCameraStreamingOps
++            int32_t mode = mAppOpsManager->checkOp(AppOpsManager::OP_CAMERA, getClientUid(),
++                                                   toString16(getPackageName()));
++            status_t res = handleAppOpMode(mode);
++            if (res != OK) {
++                return res;
++            }
+         }
++    } else {
++        // TODO: Remove when removing the check_full_attribution_source_chain flag
++        ALOGD("%s: Bypassing checkOp for uid %d", __FUNCTION__, getClientUid());
+     }
+ 
+-    mOpsActive = true;
++    mCameraOpen = true;
+ 
+     // Transition device availability listeners from PRESENT -> NOT_AVAILABLE
+     sCameraService->updateStatus(StatusInternal::NOT_AVAILABLE, mCameraIdStr);
+@@ -4295,11 +4320,12 @@ status_t CameraService::BasicClient::startCameraOps() {
+ status_t CameraService::BasicClient::startCameraStreamingOps() {
+     ATRACE_CALL();
+ 
+-    if (!mOpsActive) {
++    if (!mCameraOpen) {
+         ALOGE("%s: Calling streaming start when not yet active", __FUNCTION__);
+         return INVALID_OPERATION;
+     }
+-    if (mOpsStreaming) {
++
++    if (mCameraStreaming) {
+         ALOGV("%s: Streaming already active!", __FUNCTION__);
+         return OK;
+     }
+@@ -4308,17 +4334,38 @@ status_t CameraService::BasicClient::startCameraStreamingOps() {
+           getPackageName().c_str(), getClientUid());
+ 
+     if (mAppOpsManager != nullptr) {
+-        int32_t mode = mAppOpsManager->startOpNoThrow(
+-                AppOpsManager::OP_CAMERA, getClientUid(), toString16(getPackageName()),
+-                /*startIfModeDefault*/ false, toString16(getClientAttributionTag()),
+-                toString16("start camera ") + toString16(mCameraIdStr));
+-        status_t res = handleAppOpMode(mode);
+-        if (res != OK) {
+-            return res;
++        if (flags::check_full_attribution_source_chain()) {
++            ALOGD("%s: Start data delivery for uid %d", __FUNCTION__, getClientUid());
++
++            const PermissionChecker::PermissionResult result =
++                    checkPermissionsForCameraForStartDataDelivery(mCameraIdStr, mClientAttribution);
++            status_t res = handlePermissionResult(result);
++            if (res != OK) {
++                return res;
++            }
++
++            mOpsCallback = new OpsCallback(this);
++            std::for_each(AttrSourceItr{mClientAttribution}, AttrSourceItr::end(),
++                      [&](const auto& attr) {
++                          mAppOpsManager->startWatchingMode(
++                                  AppOpsManager::OP_CAMERA,
++                                  toString16(attr.packageName.value_or("")),
++                                  AppOpsManager::WATCH_FOREGROUND_CHANGES, mOpsCallback);
++                      });
++        } else {
++            ALOGD("%s: startOp for uid %d", __FUNCTION__, getClientUid());
++            int32_t mode = mAppOpsManager->startOpNoThrow(
++                    AppOpsManager::OP_CAMERA, getClientUid(), toString16(getPackageName()),
++                    /*startIfModeDefault*/ false, toString16(getClientAttributionTag()),
++                    toString16("start camera ") + toString16(mCameraIdStr));
++            status_t res = handleAppOpMode(mode);
++            if (res != OK) {
++                return res;
++            }
+         }
+     }
+ 
+-    mOpsStreaming = true;
++    mCameraStreaming = true;
+ 
+     return OK;
+ }
+@@ -4331,7 +4378,12 @@ status_t CameraService::BasicClient::noteAppOp() {
+ 
+     // noteAppOp is only used for when camera mute is not supported, in order
+     // to trigger the sensor privacy "Unblock" dialog
+-    if (mAppOpsManager != nullptr) {
++    if (flags::check_full_attribution_source_chain()) {
++        // Ignore the result, since we're only triggering the dialog
++        ALOGD("%s: Check data delivery permissions for uid %d", __FUNCTION__, getClientUid());
++        hasPermissionsForCameraForDataDelivery(std::string(), mClientAttribution);
++    } else if (mAppOpsManager != nullptr) {
++        ALOGD("%s: noteOp for uid %d", __FUNCTION__, getClientUid());
+         int32_t mode = mAppOpsManager->noteOp(
+                 AppOpsManager::OP_CAMERA, getClientUid(), toString16(getPackageName()),
+                 toString16(getClientAttributionTag()),
+@@ -4348,36 +4400,48 @@ status_t CameraService::BasicClient::noteAppOp() {
+ status_t CameraService::BasicClient::finishCameraStreamingOps() {
+     ATRACE_CALL();
+ 
+-    if (!mOpsActive) {
++    if (!mCameraOpen) {
+         ALOGE("%s: Calling streaming start when not yet active", __FUNCTION__);
+         return INVALID_OPERATION;
+     }
+-    if (!mOpsStreaming) {
++    if (!mCameraStreaming) {
+         ALOGV("%s: Streaming not active!", __FUNCTION__);
+         return OK;
+     }
+ 
+     if (mAppOpsManager != nullptr) {
+-        mAppOpsManager->finishOp(AppOpsManager::OP_CAMERA, getClientUid(),
+-                                 toString16(getPackageName()),
+-                                 toString16(getClientAttributionTag()));
+-        mOpsStreaming = false;
++        if (flags::check_full_attribution_source_chain()) {
++            ALOGD("%s: finishDataDelivery for uid %d", __FUNCTION__, getClientUid());
++            finishDataDelivery(mClientAttribution);
++
++            // Stop watching app op changes after stop streaming
++            if (mOpsCallback != nullptr) {
++                mAppOpsManager->stopWatchingMode(mOpsCallback);
++                mOpsCallback.clear();
++            }
++        } else {
++            ALOGD("%s: finishOp for uid %d", __FUNCTION__, getClientUid());
++            mAppOpsManager->finishOp(AppOpsManager::OP_CAMERA, getClientUid(),
++                                     toString16(getPackageName()),
++                                     toString16(getClientAttributionTag()));
++        }
++        mCameraStreaming = false;
+     }
+ 
+     return OK;
+ }
+ 
+-status_t CameraService::BasicClient::finishCameraOps() {
++status_t CameraService::BasicClient::notifyCameraClosing() {
+     ATRACE_CALL();
+ 
+-    if (mOpsStreaming) {
++    if (mCameraStreaming) {
+         // Make sure we've notified everyone about camera stopping
+         finishCameraStreamingOps();
+     }
+ 
+-    // Check if startCameraOps succeeded, and if so, finish the camera op
+-    if (mOpsActive) {
+-        mOpsActive = false;
++    // Check if notifyCameraOpening succeeded, and if so, finish the camera op if necessary
++    if (mCameraOpen) {
++        mCameraOpen = false;
+ 
+         // This function is called when a client disconnects. This should
+         // release the camera, but actually only if it was in a proper
+@@ -4389,11 +4453,15 @@ status_t CameraService::BasicClient::finishCameraOps() {
+         sCameraService->updateStatus(StatusInternal::PRESENT,
+                 mCameraIdStr, rejected);
+     }
+-    // Always stop watching, even if no camera op is active
+-    if (mOpsCallback != nullptr && mAppOpsManager != nullptr) {
+-        mAppOpsManager->stopWatchingMode(mOpsCallback);
++
++    // When using the data delivery permission checks, the open state does not involve AppOps
++    if (!flags::check_full_attribution_source_chain()) {
++        // Always stop watching, even if no camera op is active
++        if (mOpsCallback != nullptr && mAppOpsManager != nullptr) {
++            mAppOpsManager->stopWatchingMode(mOpsCallback);
++        }
++        mOpsCallback.clear();
+     }
+-    mOpsCallback.clear();
+ 
+     sCameraService->mUidPolicy->unregisterMonitorUid(getClientUid(), /*closeCamera*/ true);
+ 
+@@ -4414,26 +4482,60 @@ void CameraService::BasicClient::opChanged(int32_t op, const String16&) {
+         return;
+     }
+ 
+-    int32_t res;
+-    res = mAppOpsManager->checkOp(AppOpsManager::OP_CAMERA, getClientUid(),
+-                                  toString16(getPackageName()));
+-    ALOGV("checkOp returns: %d, %s ", res,
+-            res == AppOpsManager::MODE_ALLOWED ? "ALLOWED" :
+-            res == AppOpsManager::MODE_IGNORED ? "IGNORED" :
+-            res == AppOpsManager::MODE_ERRORED ? "ERRORED" :
+-            "UNKNOWN");
++    PermissionChecker::PermissionResult res;
++    if (flags::check_full_attribution_source_chain()) {
++        int32_t appOpMode = AppOpsManager::MODE_ALLOWED;
++        std::for_each(AttrSourceItr{mClientAttribution}, AttrSourceItr::end(),
++                [&](const auto& attr) {
++                    appOpMode = std::max(appOpMode, mAppOpsManager->checkOp(
++                            AppOpsManager::OP_CAMERA, attr.uid,
++                            toString16(attr.packageName.value_or(""))));
++                });
++        ALOGV("checkOp returns: %d, %s ", res,
++              appOpMode == AppOpsManager::MODE_ALLOWED   ? "ALLOWED"
++              : appOpMode == AppOpsManager::MODE_IGNORED ? "IGNORED"
++              : appOpMode == AppOpsManager::MODE_ERRORED ? "ERRORED"
++                                                         : "UNKNOWN");
++        res = appOpModeToPermissionResult(appOpMode);
++    } else {
++        int32_t appOpMode = mAppOpsManager->checkOp(AppOpsManager::OP_CAMERA, getClientUid(),
++                                                    toString16(getPackageName()));
++        ALOGV("checkOp returns: %d, %s ", res,
++              appOpMode == AppOpsManager::MODE_ALLOWED   ? "ALLOWED"
++              : appOpMode == AppOpsManager::MODE_IGNORED ? "IGNORED"
++              : appOpMode == AppOpsManager::MODE_ERRORED ? "ERRORED"
++                                                         : "UNKNOWN");
++        res = appOpModeToPermissionResult(appOpMode);
++    }
+ 
+-    if (res == AppOpsManager::MODE_ERRORED) {
++    if (res == PermissionChecker::PERMISSION_HARD_DENIED) {
+         ALOGI("Camera %s: Access for \"%s\" revoked", mCameraIdStr.c_str(),
+               getPackageName().c_str());
+         block();
+-    } else if (res == AppOpsManager::MODE_IGNORED) {
++    } else if (res == PermissionChecker::PERMISSION_SOFT_DENIED) {
+         bool isUidActive =
+                 sCameraService->mUidPolicy->isUidActive(getClientUid(), getPackageName());
+ 
+         // Uid may be active, but not visible to the user (e.g. PROCESS_STATE_FOREGROUND_SERVICE).
+         // If not visible, but still active, then we want to block instead of muting the camera.
+-        int32_t procState = sCameraService->mUidPolicy->getProcState(getClientUid());
++        int32_t procState = ActivityManager::PROCESS_STATE_NONEXISTENT;
++        if (flags::check_full_attribution_source_chain()) {
++            // Use the proc state of the last uid in the chain (ultimately receiving the data)
++            // when determining whether to mute or block
++            int32_t uid = -1;
++            std::for_each(AttrSourceItr{mClientAttribution}, AttrSourceItr::end(),
++                      [&](const auto& attr) {
++                          uid = static_cast<uid_t>(attr.uid);
++                      });
++            const auto& activityManager = getActivityManager();
++            if (activityManager != nullptr) {
++                procState = activityManager->getUidProcessState(uid, toString16(kServiceName));
++            } else {
++                ALOGD("%s: getActivityManager returned nullptr.", __FUNCTION__);
++            }
++        } else {
++            procState = sCameraService->mUidPolicy->getProcState(getClientUid());
++        }
+         bool isUidVisible = (procState <= ActivityManager::PROCESS_STATE_BOUND_TOP);
+ 
+         bool isCameraPrivacyEnabled;
+@@ -4446,9 +4548,9 @@ void CameraService::BasicClient::opChanged(int32_t op, const String16&) {
+         }
+ 
+         ALOGI("Camera %s: Access for \"%s\" has been restricted, isUidTrusted %d, isUidActive %d"
+-              " isUidVisible %d, isCameraPrivacyEnabled %d",
++              " isUidVisible %d, isCameraPrivacyEnabled %d procState %d",
+               mCameraIdStr.c_str(), getPackageName().c_str(), mUidIsTrusted, isUidActive,
+-              isUidVisible, isCameraPrivacyEnabled);
++              isUidVisible, isCameraPrivacyEnabled, procState);
+         // If the calling Uid is trusted (a native service), or the client Uid is active / visible
+         // (WAR for b/175320666)the AppOpsManager could return MODE_IGNORED. Do not treat such
+         // cases as error.
+@@ -4459,7 +4561,7 @@ void CameraService::BasicClient::opChanged(int32_t op, const String16&) {
+                 block();
+             }
+         }
+-    } else if (res == AppOpsManager::MODE_ALLOWED) {
++    } else if (res == PermissionChecker::PERMISSION_GRANTED) {
+         setCameraMute(sCameraService->mOverrideCameraMuteMode);
+     }
+ }
+diff --git a/services/camera/libcameraservice/CameraService.h b/services/camera/libcameraservice/CameraService.h
+index 07c59fc8c8..4c93ae176b 100644
+--- a/services/camera/libcameraservice/CameraService.h
++++ b/services/camera/libcameraservice/CameraService.h
+@@ -462,13 +462,13 @@ public:
+ 
+         virtual ~BasicClient();
+ 
+-        // the instance is in the middle of destruction. When this is set,
++        // The instance is in the middle of destruction. When this is set,
+         // the instance should not be accessed from callback.
+         // CameraService's mClientLock should be acquired to access this.
+         // - subclasses should set this to true in their destructors.
+         bool mDestructionStarted;
+ 
+-        // these are initialized in the constructor.
++        // These are initialized in the constructor.
+         static sp<CameraService>        sCameraService;
+         const std::string               mCameraIdStr;
+         const int                       mCameraFacing;
+@@ -489,16 +489,18 @@ public:
+ 
+         // Permissions management methods for camera lifecycle
+ 
+-        // Notify rest of system/apps about camera opening, and check appops
+-        virtual status_t                startCameraOps();
++        // Notify rest of system/apps about camera opening, and (legacy) check appops
++        virtual status_t                notifyCameraOpening();
+         // Notify rest of system/apps about camera starting to stream data, and confirm appops
+         virtual status_t                startCameraStreamingOps();
+         // Notify rest of system/apps about camera stopping streaming data
+         virtual status_t                finishCameraStreamingOps();
+         // Notify rest of system/apps about camera closing
+-        virtual status_t                finishCameraOps();
+-        // Handle errors for start/checkOps
++        virtual status_t                notifyCameraClosing();
++        // Handle errors for start/checkOps, startDataDelivery
+         virtual status_t                handleAppOpMode(int32_t mode);
++        virtual status_t                handlePermissionResult(
++                                                PermissionChecker::PermissionResult result);
+         // Just notify camera appops to trigger unblocking dialog if sensor
+         // privacy is enabled and camera mute is not supported
+         virtual status_t                noteAppOp();
+@@ -516,12 +518,10 @@ public:
+         }; // class OpsCallback
+ 
+         sp<OpsCallback> mOpsCallback;
+-        // Track whether checkOps was called successfully, to avoid
+-        // finishing what we didn't start, on camera open.
+-        bool            mOpsActive;
+-        // Track whether startOps was called successfully on start of
+-        // camera streaming.
+-        bool            mOpsStreaming;
++        // Track if the camera is currently active.
++        bool mCameraOpen;
++        // Track if the camera is currently streaming.
++        bool mCameraStreaming;
+ 
+         // IAppOpsCallback interface, indirected through opListener
+         virtual void opChanged(int32_t op, const String16& packageName);
+diff --git a/services/camera/libcameraservice/api2/CameraOfflineSessionClient.cpp b/services/camera/libcameraservice/api2/CameraOfflineSessionClient.cpp
+index 277a8cfc0f..e783cbc695 100644
+--- a/services/camera/libcameraservice/api2/CameraOfflineSessionClient.cpp
++++ b/services/camera/libcameraservice/api2/CameraOfflineSessionClient.cpp
+@@ -34,8 +34,8 @@ status_t CameraOfflineSessionClient::initialize(sp<CameraProviderManager>, const
+         return OK;
+     }
+ 
+-    // Verify ops permissions
+-    auto res = startCameraOps();
++    // Verify ops permissions and/or open camera
++    auto res = notifyCameraOpening();
+     if (res != OK) {
+         return res;
+     }
+@@ -184,7 +184,7 @@ binder::Status CameraOfflineSessionClient::disconnect() {
+     mFrameProcessor->requestExit();
+     mFrameProcessor->join();
+ 
+-    finishCameraOps();
++    notifyCameraClosing();
+     ALOGI("%s: Disconnected client for offline camera %s for PID %d", __FUNCTION__,
+             mCameraIdStr.c_str(), mCallingPid);
+ 
+@@ -227,10 +227,10 @@ void CameraOfflineSessionClient::notifyError(int32_t errorCode,
+     }
+ }
+ 
+-status_t CameraOfflineSessionClient::startCameraOps() {
++status_t CameraOfflineSessionClient::notifyCameraOpening() {
+     ATRACE_CALL();
+     {
+-        ALOGV("%s: Start camera ops, package name = %s, client UID = %d", __FUNCTION__,
++        ALOGV("%s: Notify camera opening, package name = %s, client UID = %d", __FUNCTION__,
+               getPackageName().c_str(), getClientUid());
+     }
+ 
+@@ -262,7 +262,7 @@ status_t CameraOfflineSessionClient::startCameraOps() {
+         }
+     }
+ 
+-    mOpsActive = true;
++    mCameraOpen = true;
+ 
+     // Transition device state to OPEN
+     sCameraService->mUidPolicy->registerMonitorUid(getClientUid(), /*openCamera*/ true);
+@@ -270,17 +270,17 @@ status_t CameraOfflineSessionClient::startCameraOps() {
+     return OK;
+ }
+ 
+-status_t CameraOfflineSessionClient::finishCameraOps() {
++status_t CameraOfflineSessionClient::notifyCameraClosing() {
+     ATRACE_CALL();
+ 
+-    // Check if startCameraOps succeeded, and if so, finish the camera op
+-    if (mOpsActive) {
++    // Check if notifyCameraOpening succeeded, and if so, finish the camera op if necessary
++    if (mCameraOpen) {
+         // Notify app ops that the camera is available again
+         if (mAppOpsManager != nullptr) {
+             // TODO : possibly change this to OP_OFFLINE_CAMERA_SESSION
+             mAppOpsManager->finishOp(AppOpsManager::OP_CAMERA, getClientUid(),
+                                      toString16(getPackageName()));
+-            mOpsActive = false;
++            mCameraOpen = false;
+         }
+     }
+     // Always stop watching, even if no camera op is active
+diff --git a/services/camera/libcameraservice/api2/CameraOfflineSessionClient.h b/services/camera/libcameraservice/api2/CameraOfflineSessionClient.h
+index 29dd72c246..574ff9a311 100644
+--- a/services/camera/libcameraservice/api2/CameraOfflineSessionClient.h
++++ b/services/camera/libcameraservice/api2/CameraOfflineSessionClient.h
+@@ -98,8 +98,8 @@ public:
+     status_t setZoomOverride(int32_t zoomOverride) override;
+ 
+     // permissions management
+-    status_t startCameraOps() override;
+-    status_t finishCameraOps() override;
++    status_t notifyCameraOpening() override;
++    status_t notifyCameraClosing() override;
+ 
+     // FilteredResultListener API
+     void onResultAvailable(const CaptureResult& result) override;
+diff --git a/services/camera/libcameraservice/common/Camera2ClientBase.cpp b/services/camera/libcameraservice/common/Camera2ClientBase.cpp
+index 1f13492eca..f6b1e80f70 100644
+--- a/services/camera/libcameraservice/common/Camera2ClientBase.cpp
++++ b/services/camera/libcameraservice/common/Camera2ClientBase.cpp
+@@ -131,10 +131,10 @@ status_t Camera2ClientBase<TClientBase>::initializeImpl(TProviderPtr providerPtr
+         return NO_INIT;
+     }
+ 
+-    // Verify ops permissions
+-    res = TClientBase::startCameraOps();
++    // Notify camera opening (check op if check_full_attribution_source_chain flag is off).
++    res = TClientBase::notifyCameraOpening();
+     if (res != OK) {
+-        TClientBase::finishCameraOps();
++        TClientBase::notifyCameraClosing();
+         return res;
+     }
+ 
+@@ -142,7 +142,7 @@ status_t Camera2ClientBase<TClientBase>::initializeImpl(TProviderPtr providerPtr
+     if (res != OK) {
+         ALOGE("%s: Camera %s: unable to initialize device: %s (%d)",
+                 __FUNCTION__, TClientBase::mCameraIdStr.c_str(), strerror(-res), res);
+-        TClientBase::finishCameraOps();
++        TClientBase::notifyCameraClosing();
+         return res;
+     }
+ 
+diff --git a/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.cpp b/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.cpp
+index b21321878e..4b63704d4e 100644
+--- a/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.cpp
++++ b/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.cpp
+@@ -132,26 +132,78 @@ binder::Status AttributionAndPermissionUtils::resolveAttributionSource(
+     return binder::Status::ok();
+ }
+ 
+-bool AttributionAndPermissionUtils::checkPermissionForPreflight(
++PermissionChecker::PermissionResult AttributionAndPermissionUtils::checkPermission(
+         const std::string& cameraId, const std::string& permission,
+         const AttributionSourceState& attributionSource, const std::string& message,
+-        int32_t attributedOpCode) {
++        int32_t attributedOpCode, bool forDataDelivery, bool startDataDelivery,
++        bool checkAutomotive) {
+     AttributionSourceState clientAttribution = attributionSource;
+     if (!flags::check_full_attribution_source_chain() && !clientAttribution.next.empty()) {
+         clientAttribution.next.clear();
+     }
+ 
+-    if (checkAutomotivePrivilegedClient(cameraId, clientAttribution)) {
+-        return true;
++    if (checkAutomotive && checkAutomotivePrivilegedClient(cameraId, clientAttribution)) {
++        return PermissionChecker::PERMISSION_GRANTED;
++    }
++
++    PermissionChecker::PermissionResult result;
++    if (forDataDelivery) {
++        if (startDataDelivery) {
++            result = mPermissionChecker->checkPermissionForStartDataDeliveryFromDatasource(
++                    toString16(permission), clientAttribution, toString16(message),
++                    attributedOpCode);
++        } else {
++            result = mPermissionChecker->checkPermissionForDataDeliveryFromDatasource(
++                    toString16(permission), clientAttribution, toString16(message),
++                    attributedOpCode);
++        }
++    } else {
++        result = mPermissionChecker->checkPermissionForPreflight(
++                toString16(permission), clientAttribution, toString16(message), attributedOpCode);
+     }
+ 
+-    PermissionChecker::PermissionResult result = mPermissionChecker->checkPermissionForPreflight(
+-            toString16(permission), clientAttribution, toString16(message), attributedOpCode);
+     if (result == PermissionChecker::PERMISSION_HARD_DENIED) {
+-        ALOGE("%s: Permission denied for client attribution %s", __FUNCTION__,
++        ALOGI("%s (forDataDelivery %d startDataDelivery %d): Permission hard denied "
++              "for client attribution %s",
++              __FUNCTION__, forDataDelivery, startDataDelivery,
++              getAttributionString(clientAttribution).c_str());
++    } else if (result == PermissionChecker::PERMISSION_SOFT_DENIED) {
++        ALOGI("%s checkPermission (forDataDelivery %d startDataDelivery %d): Permission soft "
++              "denied "
++              "for client attribution %s",
++              __FUNCTION__, forDataDelivery, startDataDelivery,
+               getAttributionString(clientAttribution).c_str());
+     }
+-    return result != PermissionChecker::PERMISSION_HARD_DENIED;
++    return result;
++}
++
++bool AttributionAndPermissionUtils::checkPermissionForPreflight(
++        const std::string& cameraId, const std::string& permission,
++        const AttributionSourceState& attributionSource, const std::string& message,
++        int32_t attributedOpCode) {
++    return checkPermission(cameraId, permission, attributionSource, message, attributedOpCode,
++                           /* forDataDelivery */ false, /* startDataDelivery */ false,
++                           /* checkAutomotive */ true) != PermissionChecker::PERMISSION_HARD_DENIED;
++}
++
++bool AttributionAndPermissionUtils::checkPermissionForDataDelivery(
++        const std::string& cameraId, const std::string& permission,
++        const AttributionSourceState& attributionSource, const std::string& message,
++        int32_t attributedOpCode) {
++    return checkPermission(cameraId, permission, attributionSource, message, attributedOpCode,
++                           /* forDataDelivery */ true, /* startDataDelivery */ false,
++                           /* checkAutomotive */ false) !=
++           PermissionChecker::PERMISSION_HARD_DENIED;
++}
++
++PermissionChecker::PermissionResult
++AttributionAndPermissionUtils::checkPermissionForStartDataDelivery(
++        const std::string& cameraId, const std::string& permission,
++        const AttributionSourceState& attributionSource, const std::string& message,
++        int32_t attributedOpCode) {
++    return checkPermission(cameraId, permission, attributionSource, message, attributedOpCode,
++                           /* forDataDelivery */ true, /* startDataDelivery */ true,
++                           /* checkAutomotive */ false);
+ }
+ 
+ // Can camera service trust the caller based on the calling UID?
+@@ -244,9 +296,35 @@ bool AttributionAndPermissionUtils::isCallerCameraServerNotDelegating() {
+ }
+ 
+ bool AttributionAndPermissionUtils::hasPermissionsForCamera(
++        const std::string& cameraId, const AttributionSourceState& attributionSource,
++        bool forDataDelivery, bool checkAutomotive) {
++    return checkPermission(cameraId, sCameraPermission, attributionSource, std::string(),
++                           AppOpsManager::OP_NONE, forDataDelivery, /* startDataDelivery */ false,
++                           checkAutomotive) != PermissionChecker::PERMISSION_HARD_DENIED;
++}
++
++PermissionChecker::PermissionResult
++AttributionAndPermissionUtils::checkPermissionsForCameraForPreflight(
+         const std::string& cameraId, const AttributionSourceState& attributionSource) {
+-    return checkPermissionForPreflight(cameraId, sCameraPermission, attributionSource,
+-                                       std::string(), AppOpsManager::OP_NONE);
++    return checkPermission(cameraId, sCameraPermission, attributionSource, std::string(),
++                           AppOpsManager::OP_NONE, /* forDataDelivery */ false,
++                           /* startDataDelivery */ false, /* checkAutomotive */ false);
++}
++
++PermissionChecker::PermissionResult
++AttributionAndPermissionUtils::checkPermissionsForCameraForDataDelivery(
++        const std::string& cameraId, const AttributionSourceState& attributionSource) {
++    return checkPermission(cameraId, sCameraPermission, attributionSource, std::string(),
++                           AppOpsManager::OP_NONE, /* forDataDelivery */ true,
++                           /* startDataDelivery */ false, /* checkAutomotive */ false);
++}
++
++PermissionChecker::PermissionResult
++AttributionAndPermissionUtils::checkPermissionsForCameraForStartDataDelivery(
++        const std::string& cameraId, const AttributionSourceState& attributionSource) {
++    return checkPermission(cameraId, sCameraPermission, attributionSource, std::string(),
++                           AppOpsManager::OP_NONE, /* forDataDelivery */ true,
++                           /* startDataDelivery */ true, /* checkAutomotive */ false);
+ }
+ 
+ bool AttributionAndPermissionUtils::hasPermissionsForSystemCamera(
+@@ -277,6 +355,12 @@ bool AttributionAndPermissionUtils::hasPermissionsForOpenCloseListener(
+                                        attributionSource, std::string(), AppOpsManager::OP_NONE);
+ }
+ 
++void AttributionAndPermissionUtils::finishDataDelivery(
++        const AttributionSourceState& attributionSource) {
++    mPermissionChecker->finishDataDeliveryFromDatasource(AppOpsManager::OP_CAMERA,
++                                                         attributionSource);
++}
++
+ bool AttributionAndPermissionUtils::checkAutomotivePrivilegedClient(
+         const std::string& cameraId, const AttributionSourceState& attributionSource) {
+     if (isAutomotivePrivilegedClient(attributionSource.uid)) {
+diff --git a/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.h b/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.h
+index 9ed7fa294b..3361eaae5b 100644
+--- a/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.h
++++ b/services/camera/libcameraservice/utils/AttributionAndPermissionUtils.h
+@@ -29,6 +29,37 @@ class CameraService;
+ using content::AttributionSourceState;
+ using permission::PermissionChecker;
+ 
++class AttrSourceItr {
++  public:
++    using value_type = AttributionSourceState;
++    using pointer = const value_type*;
++    using reference = const value_type&;
++
++    AttrSourceItr() : mAttr(nullptr) {}
++
++    AttrSourceItr(const AttributionSourceState& attr) : mAttr(&attr) {}
++
++    reference operator*() const { return *mAttr; }
++    pointer operator->() const { return mAttr; }
++
++    AttrSourceItr& operator++() {
++        mAttr = !mAttr->next.empty() ? mAttr->next.data() : nullptr;
++        return *this;
++    }
++
++    AttrSourceItr operator++(int) {
++        AttrSourceItr tmp = *this;
++        ++(*this);
++        return tmp;
++    }
++
++    friend bool operator==(const AttrSourceItr& a, const AttrSourceItr& b) = default;
++
++    static AttrSourceItr end() { return AttrSourceItr{}; }
++private:
++    const AttributionSourceState * mAttr;
++};
++
+ /**
+  * Utility class consolidating methods/data for verifying permissions and the identity of the
+  * caller.
+@@ -87,6 +118,15 @@ class AttributionAndPermissionUtils {
+                                              const std::string& permission,
+                                              const AttributionSourceState& attributionSource,
+                                              const std::string& message, int32_t attributedOpCode);
++    virtual bool checkPermissionForDataDelivery(const std::string& cameraId,
++                                                const std::string& permission,
++                                                const AttributionSourceState& attributionSource,
++                                                const std::string& message,
++                                                int32_t attributedOpCode);
++    virtual PermissionChecker::PermissionResult checkPermissionForStartDataDelivery(
++            const std::string& cameraId, const std::string& permission,
++            const AttributionSourceState& attributionSource, const std::string& message,
++            int32_t attributedOpCode);
+ 
+     // Can camera service trust the caller based on the calling UID?
+     virtual bool isTrustedCallingUid(uid_t uid);
+@@ -114,7 +154,14 @@ class AttributionAndPermissionUtils {
+ 
+     // Utils for checking specific permissions
+     virtual bool hasPermissionsForCamera(const std::string& cameraId,
+-                                         const AttributionSourceState& attributionSource);
++                                         const AttributionSourceState& attributionSource,
++                                         bool forDataDelivery = false, bool checkAutomotive = true);
++    virtual PermissionChecker::PermissionResult checkPermissionsForCameraForPreflight(
++            const std::string& cameraId, const AttributionSourceState& attributionSource);
++    virtual PermissionChecker::PermissionResult checkPermissionsForCameraForDataDelivery(
++            const std::string& cameraId, const AttributionSourceState& attributionSource);
++    virtual PermissionChecker::PermissionResult checkPermissionsForCameraForStartDataDelivery(
++            const std::string& cameraId, const AttributionSourceState& attributionSource);
+     virtual bool hasPermissionsForSystemCamera(const std::string& cameraId,
+                                                const AttributionSourceState& attributionSource,
+                                                bool checkCameraPermissions = true);
+@@ -125,6 +172,8 @@ class AttributionAndPermissionUtils {
+     virtual bool hasPermissionsForOpenCloseListener(
+             const AttributionSourceState& attributionSource);
+ 
++    virtual void finishDataDelivery(const AttributionSourceState& attributionSource);
++
+     static const std::string sDumpPermission;
+     static const std::string sManageCameraPermission;
+     static const std::string sCameraPermission;
+@@ -156,6 +205,12 @@ class AttributionAndPermissionUtils {
+   private:
+     virtual const sp<IPermissionController>& getPermissionController() const;
+ 
++    virtual PermissionChecker::PermissionResult checkPermission(
++            const std::string& cameraId, const std::string& permission,
++            const AttributionSourceState& attributionSource, const std::string& message,
++            int32_t attributedOpCode, bool forDataDelivery, bool startDataDelivery,
++            bool checkAutomotive);
++
+     std::unique_ptr<permission::PermissionChecker> mPermissionChecker =
+             std::make_unique<permission::PermissionChecker>();
+ };
+@@ -230,12 +285,39 @@ class AttributionAndPermissionUtilsEncapsulator {
+     bool hasPermissionsForCamera(const std::string& cameraId, int callingPid, int callingUid,
+                                  int32_t deviceId) const {
+         auto attributionSource = buildAttributionSource(callingPid, callingUid, deviceId);
+-        return mAttributionAndPermissionUtils->hasPermissionsForCamera(cameraId, attributionSource);
++        return hasPermissionsForCamera(cameraId, attributionSource);
+     }
+ 
+     bool hasPermissionsForCamera(const std::string& cameraId,
+                                  const AttributionSourceState& clientAttribution) const {
+-        return mAttributionAndPermissionUtils->hasPermissionsForCamera(cameraId, clientAttribution);
++        return mAttributionAndPermissionUtils->hasPermissionsForCamera(cameraId, clientAttribution,
++                                                                       /* forDataDelivery */ false,
++                                                                       /* checkAutomotive */ true);
++    }
++
++    bool hasPermissionsForCameraForDataDelivery(
++            const std::string& cameraId, const AttributionSourceState& clientAttribution) const {
++        return mAttributionAndPermissionUtils->hasPermissionsForCamera(cameraId, clientAttribution,
++                                                                       /* forDataDelivery */ true,
++                                                                       /* checkAutomotive */ false);
++    }
++
++    PermissionChecker::PermissionResult checkPermissionsForCameraForPreflight(
++            const std::string& cameraId, const AttributionSourceState& clientAttribution) const {
++        return mAttributionAndPermissionUtils->checkPermissionsForCameraForPreflight(
++                cameraId, clientAttribution);
++    }
++
++    PermissionChecker::PermissionResult checkPermissionsForCameraForDataDelivery(
++            const std::string& cameraId, const AttributionSourceState& clientAttribution) const {
++        return mAttributionAndPermissionUtils->checkPermissionsForCameraForDataDelivery(
++                cameraId, clientAttribution);
++    }
++
++    PermissionChecker::PermissionResult checkPermissionsForCameraForStartDataDelivery(
++            const std::string& cameraId, const AttributionSourceState& clientAttribution) const {
++        return mAttributionAndPermissionUtils->checkPermissionsForCameraForStartDataDelivery(
++                cameraId, clientAttribution);
+     }
+ 
+     bool hasPermissionsForSystemCamera(const std::string& cameraId, int callingPid, int callingUid,
+@@ -264,6 +346,10 @@ class AttributionAndPermissionUtilsEncapsulator {
+                 attributionSource);
+     }
+ 
++    void finishDataDelivery(const AttributionSourceState& attributionSource) {
++        mAttributionAndPermissionUtils->finishDataDelivery(attributionSource);
++    }
++
+     bool isAutomotiveDevice() const { return mAttributionAndPermissionUtils->isAutomotiveDevice(); }
+ 
+     bool isAutomotivePrivilegedClient(int32_t uid) const {
+-- 
+2.43.0
+

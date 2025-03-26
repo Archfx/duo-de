@@ -1,0 +1,146 @@
+From 7f7344aafbd10384e25b801235d496a647b8b590 Mon Sep 17 00:00:00 2001
+From: Mikhail Naganov <mnaganov@google.com>
+Date: Fri, 6 Sep 2024 10:23:24 -0700
+Subject: [PATCH 385/436] audiopolicymanager_tests: add execution tracing
+
+Add Started / Finished log entries for each test execution.
+
+Flag: EXEMPT bugfix
+Bug: 360937480
+Test: atest audiopolicy_tests
+Merged-In: Ib80459b1379e5bbe3446feddd2ae2a922345f1ff
+Change-Id: Ib80459b1379e5bbe3446feddd2ae2a922345f1ff
+---
+ services/audiopolicy/tests/Android.bp         |  5 ++-
+ .../tests/audiopolicymanager_tests.cpp        |  7 +++
+ .../tests/test_execution_tracer.cpp           | 43 +++++++++++++++++++
+ .../audiopolicy/tests/test_execution_tracer.h | 29 +++++++++++++
+ 4 files changed, 83 insertions(+), 1 deletion(-)
+ create mode 100644 services/audiopolicy/tests/test_execution_tracer.cpp
+ create mode 100644 services/audiopolicy/tests/test_execution_tracer.h
+
+diff --git a/services/audiopolicy/tests/Android.bp b/services/audiopolicy/tests/Android.bp
+index c600fb6b06..154b063cf5 100644
+--- a/services/audiopolicy/tests/Android.bp
++++ b/services/audiopolicy/tests/Android.bp
+@@ -53,7 +53,10 @@ cc_test {
+         "libaudiopolicymanager_interface_headers",
+     ],
+ 
+-    srcs: ["audiopolicymanager_tests.cpp"],
++    srcs: [
++        "audiopolicymanager_tests.cpp",
++        "test_execution_tracer.cpp",
++    ],
+ 
+     data: [":audiopolicytest_configuration_files"],
+ 
+diff --git a/services/audiopolicy/tests/audiopolicymanager_tests.cpp b/services/audiopolicy/tests/audiopolicymanager_tests.cpp
+index 5278b7320d..5402bfe511 100644
+--- a/services/audiopolicy/tests/audiopolicymanager_tests.cpp
++++ b/services/audiopolicy/tests/audiopolicymanager_tests.cpp
+@@ -44,6 +44,7 @@
+ #include "AudioPolicyManagerTestClient.h"
+ #include "AudioPolicyTestClient.h"
+ #include "AudioPolicyTestManager.h"
++#include "test_execution_tracer.h"
+ 
+ using namespace android;
+ using testing::UnorderedElementsAre;
+@@ -4145,3 +4146,9 @@ INSTANTIATE_TEST_CASE_P(
+         testing::Values(AUDIO_USAGE_NOTIFICATION_TELEPHONY_RINGTONE,
+                         AUDIO_USAGE_ALARM)
+ );
++
++int main(int argc, char** argv) {
++    ::testing::InitGoogleTest(&argc, argv);
++    ::testing::UnitTest::GetInstance()->listeners().Append(new TestExecutionTracer());
++    return RUN_ALL_TESTS();
++}
+diff --git a/services/audiopolicy/tests/test_execution_tracer.cpp b/services/audiopolicy/tests/test_execution_tracer.cpp
+new file mode 100644
+index 0000000000..09de4a1d7e
+--- /dev/null
++++ b/services/audiopolicy/tests/test_execution_tracer.cpp
+@@ -0,0 +1,43 @@
++/*
++ * Copyright (C) 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#define LOG_TAG "TestExecutionTracer"
++
++#include "test_execution_tracer.h"
++
++#include <android-base/logging.h>
++
++void TestExecutionTracer::OnTestStart(const ::testing::TestInfo& test_info) {
++    TraceTestState("Started", test_info);
++}
++
++void TestExecutionTracer::OnTestEnd(const ::testing::TestInfo& test_info) {
++    TraceTestState("Finished", test_info);
++}
++
++void TestExecutionTracer::OnTestPartResult(const ::testing::TestPartResult& result) {
++    if (result.failed()) {
++        LOG(ERROR) << result;
++    } else {
++        LOG(INFO) << result;
++    }
++}
++
++// static
++void TestExecutionTracer::TraceTestState(const std::string& state,
++                                         const ::testing::TestInfo& test_info) {
++    LOG(INFO) << state << " " << test_info.test_suite_name() << "::" << test_info.name();
++}
+diff --git a/services/audiopolicy/tests/test_execution_tracer.h b/services/audiopolicy/tests/test_execution_tracer.h
+new file mode 100644
+index 0000000000..9031aafa3c
+--- /dev/null
++++ b/services/audiopolicy/tests/test_execution_tracer.h
+@@ -0,0 +1,29 @@
++/*
++ * Copyright (C) 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#pragma once
++
++#include <gtest/gtest.h>
++
++class TestExecutionTracer : public ::testing::EmptyTestEventListener {
++  public:
++    void OnTestStart(const ::testing::TestInfo& test_info) override;
++    void OnTestEnd(const ::testing::TestInfo& test_info) override;
++    void OnTestPartResult(const ::testing::TestPartResult& result) override;
++
++  private:
++    static void TraceTestState(const std::string& state, const ::testing::TestInfo& test_info);
++};
+-- 
+2.43.0
+

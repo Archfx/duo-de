@@ -1,0 +1,246 @@
+From c926d1b332516c0380d19aef2661d79fd08489ff Mon Sep 17 00:00:00 2001
+From: Emilian Peev <epeev@google.com>
+Date: Sat, 16 Nov 2024 00:02:11 +0000
+Subject: [PATCH 299/436] Camera: Extend the HEIF UltraHDR format muxing
+
+- Insert 'tmap' within ftyp in case a gainmap
+  is present
+- Avoid adding prefixes when writing the gainmap
+  metadata
+- Switch to using the HEIF UltraHDR dataspace AIDL definition
+
+Flag: com.android.internal.camera.flags.camera_heif_gainmap
+Bug: 362608343
+Test: atest -c -d cts/tests/camera/src/android/hardware/camera2/cts/ImageReaderTest.java#testHeicUltraHdr
+
+Change-Id: I99ae2cf553923e4a1b9994a6c2148959786db359
+---
+ media/libstagefright/MPEG4Writer.cpp                | 13 ++++++++++++-
+ media/libstagefright/Utils.cpp                      |  5 +++++
+ .../include/media/stagefright/MPEG4Writer.h         |  1 +
+ .../include/media/stagefright/MetaDataBase.h        |  1 +
+ .../libcameraservice/api2/HeicCompositeStream.cpp   | 10 ++++++++--
+ .../libcameraservice/api2/HeicCompositeStream.h     |  3 ++-
+ .../libcameraservice/common/CameraDeviceBase.h      |  4 ----
+ .../libcameraservice/device3/Camera3Device.cpp      |  3 ++-
+ .../device3/Camera3OutputStream.cpp                 |  3 ++-
+ .../utils/SessionConfigurationUtils.cpp             | 10 ++++++----
+ 10 files changed, 39 insertions(+), 14 deletions(-)
+
+diff --git a/media/libstagefright/MPEG4Writer.cpp b/media/libstagefright/MPEG4Writer.cpp
+index 1e233cf3a7..edd7e7817d 100644
+--- a/media/libstagefright/MPEG4Writer.cpp
++++ b/media/libstagefright/MPEG4Writer.cpp
+@@ -580,6 +580,7 @@ void MPEG4Writer::initInternal(int fd, bool isFirstSession) {
+     mTimeScale = -1;
+     mHasFileLevelMeta = false;
+     mIsAvif = false;
++    mHasGainmap = false;
+     mFileLevelMetaDataSize = 0;
+     mPrimaryItemId = 0;
+     mAssociationEntryCount = 0;
+@@ -737,6 +738,13 @@ status_t MPEG4Writer::addSource(const sp<MediaSource> &source) {
+         mIsBackgroundMode |= isBackgroundMode;
+     }
+ 
++    if (flags_camera::camera_heif_gainmap()) {
++        int32_t gainmap = 0;
++        if (meta && meta->findInt32(kKeyGainmap, &gainmap)) {
++            mHasGainmap |= gainmap;
++        }
++    }
++
+     if (!strcmp(mime, MEDIA_MIMETYPE_VIDEO_DOLBY_VISION)) {
+         // For MEDIA_MIMETYPE_VIDEO_DOLBY_VISION,
+         // getFourCCForMime() requires profile information
+@@ -1600,6 +1608,9 @@ void MPEG4Writer::writeFtypBox(MetaData *param) {
+             } else {
+                 writeFourcc("mif1");
+                 writeFourcc("heic");
++                if (flags_camera::camera_heif_gainmap() && mHasGainmap) {
++                    writeFourcc("tmap");
++                }
+             }
+         }
+         if (mHasMoovBox) {
+@@ -3919,7 +3930,7 @@ status_t MPEG4Writer::Track::threadEntry() {
+         if (isExif) {
+             copy->meta_data().setInt32(kKeyExifTiffOffset, tiffHdrOffset);
+         }
+-        bool usePrefix = this->usePrefix() && !isExif;
++        bool usePrefix = this->usePrefix() && !isExif && !isGainmapMeta;
+         if (sampleFileOffset == -1 && usePrefix) {
+             StripStartcode(copy);
+         }
+diff --git a/media/libstagefright/Utils.cpp b/media/libstagefright/Utils.cpp
+index 86741a616d..6fb19b92a3 100644
+--- a/media/libstagefright/Utils.cpp
++++ b/media/libstagefright/Utils.cpp
+@@ -2052,6 +2052,11 @@ status_t convertMessageToMetaData(const sp<AMessage> &msg, sp<MetaData> &meta) {
+         meta->setInt32(kKeyMaxHeight, maxHeight);
+     }
+ 
++    int32_t gainmap;
++    if (msg->findInt32("gainmap", &gainmap)) {
++        meta->setInt32(kKeyGainmap, gainmap);
++    }
++
+     int32_t fps;
+     float fpsFloat;
+     if (msg->findInt32("frame-rate", &fps) && fps > 0) {
+diff --git a/media/libstagefright/include/media/stagefright/MPEG4Writer.h b/media/libstagefright/include/media/stagefright/MPEG4Writer.h
+index a409e4622d..51daac529c 100644
+--- a/media/libstagefright/include/media/stagefright/MPEG4Writer.h
++++ b/media/libstagefright/include/media/stagefright/MPEG4Writer.h
+@@ -240,6 +240,7 @@ private:
+ 
+     bool mHasFileLevelMeta;
+     bool mIsAvif; // used to differentiate HEIC and AVIF under the same OUTPUT_FORMAT_HEIF
++    bool mHasGainmap;
+     uint64_t mFileLevelMetaDataSize;
+     bool mHasMoovBox;
+     uint32_t mPrimaryItemId;
+diff --git a/media/libstagefright/include/media/stagefright/MetaDataBase.h b/media/libstagefright/include/media/stagefright/MetaDataBase.h
+index 9dce55bf65..0a5d4019fd 100644
+--- a/media/libstagefright/include/media/stagefright/MetaDataBase.h
++++ b/media/libstagefright/include/media/stagefright/MetaDataBase.h
+@@ -85,6 +85,7 @@ enum {
+     kKeyPixelFormat       = 'pixf',  // int32_t
+     kKeyColorFormat       = 'colf',  // int32_t
+     kKeyColorSpace        = 'cols',  // int32_t
++    kKeyGainmap           = 'gmap',  // int32_t
+     kKeyPlatformPrivate   = 'priv',  // pointer
+     kKeyDecoderComponent  = 'decC',  // cstring
+     kKeyBufferID          = 'bfID',
+diff --git a/services/camera/libcameraservice/api2/HeicCompositeStream.cpp b/services/camera/libcameraservice/api2/HeicCompositeStream.cpp
+index 768eaf8379..e1de010717 100644
+--- a/services/camera/libcameraservice/api2/HeicCompositeStream.cpp
++++ b/services/camera/libcameraservice/api2/HeicCompositeStream.cpp
+@@ -1054,6 +1054,7 @@ bool HeicCompositeStream::getNextReadyInputLocked(int64_t *frameNumber /*out*/)
+             }
+             if (it.second.gainmapFormat == nullptr && mGainmapFormat != nullptr){
+                 it.second.gainmapFormat = mGainmapFormat->dup();
++                it.second.gainmapFormat->setInt32("gainmap", 1);
+             }
+             newInputAvailable = true;
+             break;
+@@ -1410,10 +1411,12 @@ status_t HeicCompositeStream::generateBaseImageAndGainmap(InputFrame &inputFrame
+         ALOGE("%s: Failed HDR gainmap: %d", __FUNCTION__, res.error_code);
+         return BAD_VALUE;
+     }
+-    // Ensure the gaimap U/V planes are all 0
++    // We can only generate a single channel gainmap at the moment. However only
++    // multi channel HEVC encoding (like YUV420) is required. Set the extra U/V
++    // planes to 128 to avoid encoding any actual color data.
+     inputFrame.gainmapChroma = std::make_unique<uint8_t[]>(
+             inputFrame.gainmap->w * inputFrame.gainmap->h / 2);
+-    memset(inputFrame.gainmapChroma.get(), 0, inputFrame.gainmap->w * inputFrame.gainmap->h / 2);
++    memset(inputFrame.gainmapChroma.get(), 128, inputFrame.gainmap->w * inputFrame.gainmap->h / 2);
+ 
+     ultrahdr::uhdr_gainmap_metadata_frac iso_secondary_metadata;
+     res = ultrahdr::uhdr_gainmap_metadata_frac::gainmapMetadataFloatToFraction(
+@@ -1435,6 +1438,9 @@ status_t HeicCompositeStream::generateBaseImageAndGainmap(InputFrame &inputFrame
+                 res.error_code);
+         return BAD_VALUE;
+     }
++    // 6.6.2.4.2 of ISO/IEC 23008-12:2024 expects the ISO 21496-1 gainmap to be
++    // preceded by an u8 version equal to 0
++    inputFrame.isoGainmapMetadata.insert(inputFrame.isoGainmapMetadata.begin(), 0);
+ 
+     inputFrame.gainmapImage = std::make_unique<CpuConsumer::LockedBuffer>();
+     *inputFrame.gainmapImage = inputFrame.yuvBuffer;
+diff --git a/services/camera/libcameraservice/api2/HeicCompositeStream.h b/services/camera/libcameraservice/api2/HeicCompositeStream.h
+index beb08b0759..ed70d562b8 100644
+--- a/services/camera/libcameraservice/api2/HeicCompositeStream.h
++++ b/services/camera/libcameraservice/api2/HeicCompositeStream.h
+@@ -338,7 +338,8 @@ private:
+     static const uhdr_color_transfer kUltraHdrOutputTransfer = UHDR_CT_SRGB;
+     static const uhdr_color_range kUltraHdrOutputRange = UHDR_CR_FULL_RANGE;
+ 
+-    static const auto kUltraHDRDataSpace = ADATASPACE_HEIF_ULTRAHDR;
++    static const auto kUltraHDRDataSpace =
++        aidl::android::hardware::graphics::common::Dataspace::HEIF_ULTRAHDR;
+ 
+     // MediaMuxer/Codec color and format aspects for base image and gainmap metadata
+     static const int32_t kCodecColorFormat = COLOR_FormatYUV420Flexible;
+diff --git a/services/camera/libcameraservice/common/CameraDeviceBase.h b/services/camera/libcameraservice/common/CameraDeviceBase.h
+index cfedf0c4e7..4fe9444d5e 100644
+--- a/services/camera/libcameraservice/common/CameraDeviceBase.h
++++ b/services/camera/libcameraservice/common/CameraDeviceBase.h
+@@ -44,10 +44,6 @@ namespace android {
+ 
+ namespace camera3 {
+ 
+-// TODO: Remove this once the GFX native dataspace
+-// dependencies are available
+-enum { HEIC_ULTRAHDR, ADATASPACE_HEIF_ULTRAHDR = 0x1006 };
+-
+ typedef enum camera_stream_configuration_mode {
+     CAMERA_STREAM_CONFIGURATION_NORMAL_MODE = 0,
+     CAMERA_STREAM_CONFIGURATION_CONSTRAINED_HIGH_SPEED_MODE = 1,
+diff --git a/services/camera/libcameraservice/device3/Camera3Device.cpp b/services/camera/libcameraservice/device3/Camera3Device.cpp
+index c6434a5290..0c37418bb0 100644
+--- a/services/camera/libcameraservice/device3/Camera3Device.cpp
++++ b/services/camera/libcameraservice/device3/Camera3Device.cpp
+@@ -2565,7 +2565,8 @@ status_t Camera3Device::configureStreamsLocked(int operatingMode,
+                                                                 // always occupy the initial entry.
+             if ((outputStream->data_space == HAL_DATASPACE_V0_JFIF) ||
+                     (outputStream->data_space ==
+-                     static_cast<android_dataspace_t>(ADATASPACE_HEIF_ULTRAHDR)) ||
++                     static_cast<android_dataspace_t>(
++                         aidl::android::hardware::graphics::common::Dataspace::HEIF_ULTRAHDR)) ||
+                     (outputStream->data_space ==
+                      static_cast<android_dataspace_t>(
+                          aidl::android::hardware::graphics::common::Dataspace::JPEG_R))) {
+diff --git a/services/camera/libcameraservice/device3/Camera3OutputStream.cpp b/services/camera/libcameraservice/device3/Camera3OutputStream.cpp
+index 2eba5a7675..14a7f79132 100644
+--- a/services/camera/libcameraservice/device3/Camera3OutputStream.cpp
++++ b/services/camera/libcameraservice/device3/Camera3OutputStream.cpp
+@@ -403,7 +403,8 @@ status_t Camera3OutputStream::returnBufferCheckedLocked(
+         // Fix CameraBlob id type discrepancy between HIDL and AIDL, details : http://b/229688810
+         if (getFormat() == HAL_PIXEL_FORMAT_BLOB && (getDataSpace() == HAL_DATASPACE_V0_JFIF ||
+                     (getDataSpace() ==
+-                     static_cast<android_dataspace_t>(ADATASPACE_HEIF_ULTRAHDR)) ||
++                     static_cast<android_dataspace_t>(
++                         aidl::android::hardware::graphics::common::Dataspace::HEIF_ULTRAHDR)) ||
+                     (getDataSpace() ==
+                      static_cast<android_dataspace_t>(
+                          aidl::android::hardware::graphics::common::Dataspace::JPEG_R)))) {
+diff --git a/services/camera/libcameraservice/utils/SessionConfigurationUtils.cpp b/services/camera/libcameraservice/utils/SessionConfigurationUtils.cpp
+index ee4df4e11c..49980ee266 100644
+--- a/services/camera/libcameraservice/utils/SessionConfigurationUtils.cpp
++++ b/services/camera/libcameraservice/utils/SessionConfigurationUtils.cpp
+@@ -175,7 +175,7 @@ bool roundBufferDimensionNearest(int32_t width, int32_t height,
+     bool isJpegRDataSpace = (dataSpace == static_cast<android_dataspace_t>(
+                 ::aidl::android::hardware::graphics::common::Dataspace::JPEG_R));
+     bool isHeicUltraHDRDataSpace = (dataSpace == static_cast<android_dataspace_t>(
+-                ADATASPACE_HEIF_ULTRAHDR));
++                ::aidl::android::hardware::graphics::common::Dataspace::HEIF_ULTRAHDR));
+     camera_metadata_ro_entry streamConfigs =
+             (isJpegRDataSpace) ? info.find(jpegRSizesTag) :
+             (isHeicUltraHDRDataSpace) ? info.find(heicUltraHDRSizesTag) :
+@@ -239,7 +239,8 @@ bool is10bitCompatibleFormat(int32_t format, android_dataspace_t dataSpace) {
+             if (dataSpace == static_cast<android_dataspace_t>(
+                         ::aidl::android::hardware::graphics::common::Dataspace::JPEG_R)) {
+                 return true;
+-            } else if (dataSpace == static_cast<android_dataspace_t>(ADATASPACE_HEIF_ULTRAHDR)) {
++            } else if (dataSpace == static_cast<android_dataspace_t>(
++                        ::aidl::android::hardware::graphics::common::Dataspace::HEIF_ULTRAHDR)) {
+                 return true;
+             }
+ 
+@@ -351,8 +352,9 @@ bool isColorSpaceSupported(int32_t colorSpace, int32_t format, android_dataspace
+                 ::aidl::android::hardware::graphics::common::Dataspace::JPEG_R)) {
+         format64 = static_cast<int64_t>(PublicFormat::JPEG_R);
+     } else if (format == HAL_PIXEL_FORMAT_BLOB && dataSpace ==
+-            static_cast<android_dataspace>(ADATASPACE_HEIF_ULTRAHDR)) {
+-        format64 = static_cast<int64_t>(HEIC_ULTRAHDR);
++            static_cast<android_dataspace>(
++                ::aidl::android::hardware::graphics::common::Dataspace::HEIF_ULTRAHDR)) {
++        format64 = static_cast<int64_t>(PublicFormat::HEIC_ULTRAHDR);
+     }
+ 
+     camera_metadata_ro_entry_t entry =
+-- 
+2.43.0
+

@@ -1,0 +1,168 @@
+From fa982f3d47e22f8dbc0a1316cd7faf20d8228721 Mon Sep 17 00:00:00 2001
+From: Jayant Chowdhary <jchowdhary@google.com>
+Date: Wed, 2 Oct 2024 06:50:38 +0000
+Subject: [PATCH 259/436] camera: Let SurfaceView transform preview only when
+ rotation override isn't rotation only
+
+Both rotate and crop and SurfaceView shouldn't be rotating the preview
+when rotation override is ROTATION_ONLY. This is since, the
+ROTATION_ONLY enum value only makes the camera framework send
+ROTATE_AND_CROP(90 / 270) to the HAL, however it doesn't change the
+sensor orientation.
+Since rotate and crop applies to all processed streams, we modify the
+SurfaceView transform in this case.
+
+Bug: 364275078
+
+Flag: com.android.window.flags.enable_camera_compat_for_desktop_windowing
+
+Test: Manual in desktop mode for apps using SurfaceView
+
+Change-Id: I3699da778410d0d36cf19afa8ef19acd7a4137f7
+Signed-off-by: Jayant Chowdhary <jchowdhary@google.com>
+---
+ camera/CameraUtils.cpp                                |  6 ++++--
+ camera/include/camera/CameraUtils.h                   |  2 +-
+ camera/tests/fuzzer/camera_utils_fuzzer.cpp           |  1 +
+ .../camera/libcameraservice/api1/Camera2Client.cpp    |  9 ++++++++-
+ .../camera/libcameraservice/device3/Camera3Device.cpp | 11 ++++++++++-
+ .../libcameraservice/device3/Camera3OutputUtils.cpp   |  3 ++-
+ 6 files changed, 26 insertions(+), 6 deletions(-)
+
+diff --git a/camera/CameraUtils.cpp b/camera/CameraUtils.cpp
+index 34737806eb..ebb330554d 100644
+--- a/camera/CameraUtils.cpp
++++ b/camera/CameraUtils.cpp
+@@ -32,7 +32,7 @@ namespace android {
+ const char *kCameraServiceDisabledProperty = "config.disable_cameraservice";
+ 
+ status_t CameraUtils::getRotationTransform(const CameraMetadata& staticInfo,
+-        int mirrorMode, /*out*/int32_t* transform) {
++        int mirrorMode,  bool enableTransformInverseDisplay, /*out*/int32_t* transform) {
+     ALOGV("%s", __FUNCTION__);
+ 
+     if (transform == NULL) {
+@@ -128,7 +128,9 @@ status_t CameraUtils::getRotationTransform(const CameraMetadata& staticInfo,
+      * aspect ratio, or the preview will end up looking non-uniformly
+      * stretched.
+      */
+-    flags |= NATIVE_WINDOW_TRANSFORM_INVERSE_DISPLAY;
++    if (enableTransformInverseDisplay) {
++        flags |= NATIVE_WINDOW_TRANSFORM_INVERSE_DISPLAY;
++    }
+ 
+     ALOGV("%s: final transform = 0x%x", __FUNCTION__, flags);
+ 
+diff --git a/camera/include/camera/CameraUtils.h b/camera/include/camera/CameraUtils.h
+index d358407ad1..766cac1149 100644
+--- a/camera/include/camera/CameraUtils.h
++++ b/camera/include/camera/CameraUtils.h
+@@ -46,7 +46,7 @@ class CameraUtils {
+          * Returns OK on success, or a negative error code.
+          */
+         static status_t getRotationTransform(const CameraMetadata& staticInfo,
+-                int mirrorMode, /*out*/int32_t* transform);
++                int mirrorMode, bool enableTransformInverseDisplay, /*out*/int32_t* transform);
+ 
+         /**
+          * Check if the image data is VideoNativeHandleMetadata, that contains a native handle.
+diff --git a/camera/tests/fuzzer/camera_utils_fuzzer.cpp b/camera/tests/fuzzer/camera_utils_fuzzer.cpp
+index c816f825c1..ca0a06fd14 100644
+--- a/camera/tests/fuzzer/camera_utils_fuzzer.cpp
++++ b/camera/tests/fuzzer/camera_utils_fuzzer.cpp
+@@ -75,6 +75,7 @@ void CameraUtilsFuzzer::invokeCameraUtils() {
+ 
+                     CameraUtils::getRotationTransform(
+                             staticMetadata, mFDP->ConsumeIntegral<int32_t>() /* mirrorMode */,
++                            true /*enableTransformInverseDisplay*/,
+                             &transform /*out*/);
+                 },
+                 [&]() { CameraUtils::isCameraServiceDisabled(); },
+diff --git a/services/camera/libcameraservice/api1/Camera2Client.cpp b/services/camera/libcameraservice/api1/Camera2Client.cpp
+index 45b7c3ba4e..6bcc935db8 100644
+--- a/services/camera/libcameraservice/api1/Camera2Client.cpp
++++ b/services/camera/libcameraservice/api1/Camera2Client.cpp
+@@ -28,6 +28,7 @@
+ #include <camera/CameraUtils.h>
+ #include <camera/StringUtils.h>
+ #include <com_android_internal_camera_flags.h>
++#include <com_android_window_flags.h>
+ #include <cutils/properties.h>
+ #include <gui/Surface.h>
+ #include <gui/view/Surface.h>
+@@ -53,6 +54,7 @@ namespace android {
+ using namespace camera2;
+ 
+ namespace flags = com::android::internal::camera::flags;
++namespace wm_flags = com::android::window::flags;
+ 
+ // Interface used by CameraService
+ 
+@@ -134,8 +136,13 @@ status_t Camera2Client::initializeImpl(TProviderPtr providerPtr, const std::stri
+     // The 'mRotateAndCropMode' value only accounts for the necessary adjustment
+     // when the display rotates. The sensor orientation still needs to be calculated
+     // and applied similar to the Camera2 path.
++    using hardware::BnCameraService::ROTATION_OVERRIDE_ROTATION_ONLY;
++    bool enableTransformInverseDisplay = true;
++    if (wm_flags::enable_camera_compat_for_desktop_windowing()) {
++        enableTransformInverseDisplay = (mRotationOverride != ROTATION_OVERRIDE_ROTATION_ONLY);
++    }
+     CameraUtils::getRotationTransform(staticInfo, OutputConfiguration::MIRROR_MODE_AUTO,
+-            &mRotateAndCropPreviewTransform);
++            enableTransformInverseDisplay, &mRotateAndCropPreviewTransform);
+ 
+     mStreamingProcessor = new StreamingProcessor(this);
+ 
+diff --git a/services/camera/libcameraservice/device3/Camera3Device.cpp b/services/camera/libcameraservice/device3/Camera3Device.cpp
+index eb8cb9df10..0375aa52df 100644
+--- a/services/camera/libcameraservice/device3/Camera3Device.cpp
++++ b/services/camera/libcameraservice/device3/Camera3Device.cpp
+@@ -57,6 +57,7 @@
+ #include <android/hardware/camera/device/3.7/ICameraInjectionSession.h>
+ #include <android/hardware/camera2/ICameraDeviceUser.h>
+ #include <com_android_internal_camera_flags.h>
++#include <com_android_window_flags.h>
+ 
+ #include "CameraService.h"
+ #include "aidl/android/hardware/graphics/common/Dataspace.h"
+@@ -82,6 +83,8 @@ using namespace android::hardware::camera;
+ using namespace android::hardware::cameraservice::utils::conversion::aidl;
+ 
+ namespace flags = com::android::internal::camera::flags;
++namespace wm_flags = com::android::window::flags;
++
+ namespace android {
+ 
+ Camera3Device::Camera3Device(std::shared_ptr<CameraServiceProxyWrapper>& cameraServiceProxyWrapper,
+@@ -5808,7 +5811,13 @@ void Camera3Device::overrideStreamUseCaseLocked() {
+ status_t Camera3Device::deriveAndSetTransformLocked(
+         Camera3OutputStreamInterface& stream, int mirrorMode, int surfaceId) {
+     int transform = -1;
+-    int res = CameraUtils::getRotationTransform(mDeviceInfo, mirrorMode, &transform);
++    bool enableTransformInverseDisplay = true;
++    using hardware::ICameraService::ROTATION_OVERRIDE_ROTATION_ONLY;
++    if (wm_flags::enable_camera_compat_for_desktop_windowing()) {
++        enableTransformInverseDisplay = (mRotationOverride != ROTATION_OVERRIDE_ROTATION_ONLY);
++    }
++    int res = CameraUtils::getRotationTransform(mDeviceInfo, mirrorMode,
++            enableTransformInverseDisplay, &transform);
+     if (res != OK) {
+         return res;
+     }
+diff --git a/services/camera/libcameraservice/device3/Camera3OutputUtils.cpp b/services/camera/libcameraservice/device3/Camera3OutputUtils.cpp
+index 62226e1aed..f10df07409 100644
+--- a/services/camera/libcameraservice/device3/Camera3OutputUtils.cpp
++++ b/services/camera/libcameraservice/device3/Camera3OutputUtils.cpp
+@@ -685,7 +685,8 @@ void processCaptureResult(CaptureOutputStates& states, const camera_capture_resu
+                         if (orientation.count > 0) {
+                             int32_t transform;
+                             ret = CameraUtils::getRotationTransform(deviceInfo->second,
+-                                    OutputConfiguration::MIRROR_MODE_AUTO, &transform);
++                                    OutputConfiguration::MIRROR_MODE_AUTO,
++                                            /*transformInverseDisplay*/true, &transform);
+                             if (ret == OK) {
+                                 // It is possible for camera providers to return the capture
+                                 // results after the processed frames. In such scenario, we will
+-- 
+2.43.0
+

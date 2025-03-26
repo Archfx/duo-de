@@ -1,0 +1,338 @@
+From 91beb49d27790722290eecf15ca48f7cc6bac7cc Mon Sep 17 00:00:00 2001
+From: jiabin <jiabin@google.com>
+Date: Wed, 16 Oct 2024 21:53:36 +0000
+Subject: [PATCH 132/436] Pick input profile that partially matches with all
+ flags.
+
+Bug: 367160989
+Test: atest audiopolicy_tests
+Flag: EXEMPT bugfix
+Change-Id: I13e99a54dd8a264b6cb4f336c103ee43f8746d64
+---
+ .../managerdefinitions/include/IOProfile.h    | 12 ++-
+ .../managerdefinitions/src/IOProfile.cpp      | 74 +++++++++++--------
+ .../managerdefault/AudioPolicyManager.cpp     | 37 +++-------
+ .../tests/audiopolicymanager_tests.cpp        | 27 +++++++
+ .../test_audio_policy_configuration.xml       |  7 ++
+ 5 files changed, 94 insertions(+), 63 deletions(-)
+
+diff --git a/services/audiopolicy/common/managerdefinitions/include/IOProfile.h b/services/audiopolicy/common/managerdefinitions/include/IOProfile.h
+index 688772c4a5..c2ee5f68da 100644
+--- a/services/audiopolicy/common/managerdefinitions/include/IOProfile.h
++++ b/services/audiopolicy/common/managerdefinitions/include/IOProfile.h
+@@ -73,7 +73,8 @@ public:
+     enum CompatibilityScore{
+         NO_MATCH = 0,
+         PARTIAL_MATCH = 1,
+-        EXACT_MATCH = 2
++        PARTIAL_MATCH_WITH_FLAG = 2,
++        EXACT_MATCH = 3
+     };
+ 
+     /**
+@@ -92,7 +93,6 @@ public:
+      * @param channelMask to be checked for compatibility. Must be specified
+      * @param updatedChannelMask if non-NULL, it is assigned the actual channel mask
+      * @param flags to be checked for compatibility
+-     * @param exactMatchRequiredForInputFlags true if exact match is required on flags
+      * @return how the IO profile is compatible with the given parameters.
+      */
+     CompatibilityScore getCompatibilityScore(const DeviceVector &devices,
+@@ -103,8 +103,7 @@ public:
+                                              audio_channel_mask_t channelMask,
+                                              audio_channel_mask_t *updatedChannelMask,
+                                              // FIXME parameter type
+-                                             uint32_t flags,
+-                                             bool exactMatchRequiredForInputFlags = false) const;
++                                             uint32_t flags) const;
+ 
+     /**
+      * @brief areAllDevicesSupported: Checks if the given devices are supported by the IO profile.
+@@ -119,11 +118,9 @@ public:
+      * specified flags.
+      *
+      * @param flags to be checked for compatibility
+-     * @param exactMatchRequiredForInputFlags true if exact match is required on flags
+      * @return true if the profile is compatible, false otherwise.
+      */
+-    bool isCompatibleProfileForFlags(uint32_t flags,
+-                                     bool exactMatchRequiredForInputFlags = false) const;
++    bool isCompatibleProfileForFlags(uint32_t flags) const;
+ 
+     void dump(String8 *dst, int spaces) const;
+     void log();
+@@ -235,6 +232,7 @@ public:
+ 
+ private:
+     void refreshMixerBehaviors();
++    CompatibilityScore getFlagsCompatibleScore(uint32_t flags) const;
+ 
+     DeviceVector mSupportedDevices; // supported devices: this input/output can be routed from/to
+ 
+diff --git a/services/audiopolicy/common/managerdefinitions/src/IOProfile.cpp b/services/audiopolicy/common/managerdefinitions/src/IOProfile.cpp
+index 991b103b82..bc9eb202f3 100644
+--- a/services/audiopolicy/common/managerdefinitions/src/IOProfile.cpp
++++ b/services/audiopolicy/common/managerdefinitions/src/IOProfile.cpp
+@@ -42,15 +42,14 @@ IOProfile::CompatibilityScore IOProfile::getCompatibilityScore(
+         audio_channel_mask_t channelMask,
+         audio_channel_mask_t *updatedChannelMask,
+         // FIXME type punning here
+-        uint32_t flags,
+-        bool exactMatchRequiredForInputFlags) const {
++        uint32_t flags) const {
+     const bool isPlaybackThread =
+             getType() == AUDIO_PORT_TYPE_MIX && getRole() == AUDIO_PORT_ROLE_SOURCE;
+     const bool isRecordThread =
+             getType() == AUDIO_PORT_TYPE_MIX && getRole() == AUDIO_PORT_ROLE_SINK;
+     ALOG_ASSERT(isPlaybackThread != isRecordThread);
+-    if (!areAllDevicesSupported(devices) ||
+-            !isCompatibleProfileForFlags(flags, exactMatchRequiredForInputFlags)) {
++    const auto flagsCompatibleScore = getFlagsCompatibleScore(flags);
++    if (!areAllDevicesSupported(devices) || flagsCompatibleScore == NO_MATCH) {
+         return NO_MATCH;
+     }
+ 
+@@ -81,7 +80,11 @@ IOProfile::CompatibilityScore IOProfile::getCompatibilityScore(
+             result = EXACT_MATCH;
+         } else if (checkCompatibleAudioProfile(
+                 myUpdatedSamplingRate, myUpdatedChannelMask, myUpdatedFormat) == NO_ERROR) {
+-            result = PARTIAL_MATCH;
++            if (flagsCompatibleScore == EXACT_MATCH) {
++                result = PARTIAL_MATCH_WITH_FLAG;
++            } else {
++                result = PARTIAL_MATCH;
++            }
+         } else {
+             return result;
+         }
+@@ -118,32 +121,8 @@ bool IOProfile::areAllDevicesSupported(const DeviceVector &devices) const {
+     return mSupportedDevices.containsAllDevices(devices);
+ }
+ 
+-bool IOProfile::isCompatibleProfileForFlags(uint32_t flags,
+-                                            bool exactMatchRequiredForInputFlags) const {
+-    const bool isPlaybackThread =
+-            getType() == AUDIO_PORT_TYPE_MIX && getRole() == AUDIO_PORT_ROLE_SOURCE;
+-    const bool isRecordThread =
+-            getType() == AUDIO_PORT_TYPE_MIX && getRole() == AUDIO_PORT_ROLE_SINK;
+-    ALOG_ASSERT(isPlaybackThread != isRecordThread);
+-
+-    const uint32_t mustMatchOutputFlags =
+-            AUDIO_OUTPUT_FLAG_DIRECT|AUDIO_OUTPUT_FLAG_HW_AV_SYNC|AUDIO_OUTPUT_FLAG_MMAP_NOIRQ;
+-    if (isPlaybackThread &&
+-        !audio_output_flags_is_subset((audio_output_flags_t)getFlags(),
+-                                      (audio_output_flags_t)flags,
+-                                      mustMatchOutputFlags)) {
+-        return false;
+-    }
+-    // The only input flag that is allowed to be different is the fast flag.
+-    // An existing fast stream is compatible with a normal track request.
+-    // An existing normal stream is compatible with a fast track request,
+-    // but the fast request will be denied by AudioFlinger and converted to normal track.
+-    if (isRecordThread && ((getFlags() ^ flags) &
+-            ~(exactMatchRequiredForInputFlags ? AUDIO_INPUT_FLAG_NONE : AUDIO_INPUT_FLAG_FAST))) {
+-        return false;
+-    }
+-
+-    return true;
++bool IOProfile::isCompatibleProfileForFlags(uint32_t flags) const {
++    return getFlagsCompatibleScore(flags) != NO_MATCH;
+ }
+ 
+ bool IOProfile::containsSingleDeviceSupportingEncodedFormats(
+@@ -228,6 +207,39 @@ void IOProfile::importAudioPort(const audio_port_v7 &port) {
+     }
+ }
+ 
++IOProfile::CompatibilityScore IOProfile::getFlagsCompatibleScore(uint32_t flags) const {
++    const bool isPlaybackThread =
++            getType() == AUDIO_PORT_TYPE_MIX && getRole() == AUDIO_PORT_ROLE_SOURCE;
++    const bool isRecordThread =
++            getType() == AUDIO_PORT_TYPE_MIX && getRole() == AUDIO_PORT_ROLE_SINK;
++    ALOG_ASSERT(isPlaybackThread != isRecordThread);
++
++    const uint32_t mustMatchOutputFlags =
++            AUDIO_OUTPUT_FLAG_DIRECT|AUDIO_OUTPUT_FLAG_HW_AV_SYNC|AUDIO_OUTPUT_FLAG_MMAP_NOIRQ;
++    if (isPlaybackThread &&
++        !audio_output_flags_is_subset((audio_output_flags_t)getFlags(),
++                                      (audio_output_flags_t)flags,
++                                      mustMatchOutputFlags)) {
++        return NO_MATCH;
++    }
++    // The only input flag that is allowed to be different is the fast flag.
++    // An existing fast stream is compatible with a normal track request.
++    // An existing normal stream is compatible with a fast track request,
++    // but the fast request will be denied by AudioFlinger and converted to normal track.
++    if (isRecordThread) {
++        const auto unmatchedFlag = getFlags() ^ flags;
++        if (unmatchedFlag == AUDIO_INPUT_FLAG_NONE) {
++            return EXACT_MATCH;
++        } else if (unmatchedFlag == AUDIO_INPUT_FLAG_FAST) {
++            return PARTIAL_MATCH;
++        } else {
++            return NO_MATCH;
++        }
++    }
++
++    return EXACT_MATCH;
++}
++
+ void IOProfile::dump(String8 *dst, int spaces) const
+ {
+     String8 extraInfo;
+diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+index 13db5b38de..c0e5a42387 100644
+--- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
++++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
+@@ -5022,8 +5022,7 @@ status_t AudioPolicyManager::setPreferredMixerAttributes(
+                             nullptr /*updatedFormat*/,
+                             mixerAttributes->config.channel_mask,
+                             nullptr /*updatedChannelMask*/,
+-                            flags,
+-                            false /*exactMatchRequiredForInputFlags*/)
++                            flags)
+                             != IOProfile::NO_MATCH) {
+                 profile = curProfile;
+                 break;
+@@ -8233,7 +8232,7 @@ sp<IOProfile> AudioPolicyManager::getInputProfile(const sp<DeviceDescriptor> &de
+     const underlying_input_flag_t oriFlags = flags;
+ 
+     for (;;) {
+-        sp<IOProfile> firstInexact = nullptr;
++        sp<IOProfile> inexact = nullptr;
+         uint32_t inexactSamplingRate = 0;
+         audio_format_t inexactFormat = AUDIO_FORMAT_INVALID;
+         audio_channel_mask_t inexactChannelMask = AUDIO_CHANNEL_INVALID;
+@@ -8244,7 +8243,7 @@ sp<IOProfile> AudioPolicyManager::getInputProfile(const sp<DeviceDescriptor> &de
+             for (const auto& profile : hwModule->getInputProfiles()) {
+                 // profile->log();
+                 //updatedFormat = format;
+-                if (profile->getCompatibilityScore(
++                auto compatibleScore = profile->getCompatibilityScore(
+                         DeviceVector(device),
+                         samplingRate,
+                         &updatedSamplingRate,
+@@ -8253,27 +8252,16 @@ sp<IOProfile> AudioPolicyManager::getInputProfile(const sp<DeviceDescriptor> &de
+                         channelMask,
+                         &updatedChannelMask,
+                         // FIXME ugly cast
+-                        (audio_output_flags_t) flags,
+-                        true /*exactMatchRequiredForInputFlags*/) == IOProfile::EXACT_MATCH) {
++                        (audio_output_flags_t) flags);
++                if (compatibleScore == IOProfile::EXACT_MATCH) {
+                     samplingRate = updatedSamplingRate;
+                     format = updatedFormat;
+                     channelMask = updatedChannelMask;
+                     return profile;
+-                }
+-                if (firstInexact == nullptr
+-                        && profile->getCompatibilityScore(
+-                                DeviceVector(device),
+-                                samplingRate,
+-                                &updatedSamplingRate,
+-                                format,
+-                                &updatedFormat,
+-                                channelMask,
+-                                &updatedChannelMask,
+-                                // FIXME ugly cast
+-                                (audio_output_flags_t) flags,
+-                                false /*exactMatchRequiredForInputFlags*/)
+-                                != IOProfile::NO_MATCH) {
+-                    firstInexact = profile;
++                } else if ((flags != AUDIO_INPUT_FLAG_NONE
++                        && compatibleScore == IOProfile::PARTIAL_MATCH_WITH_FLAG)
++                    || (inexact == nullptr && compatibleScore != IOProfile::NO_MATCH)) {
++                    inexact = profile;
+                     inexactSamplingRate = updatedSamplingRate;
+                     inexactFormat = updatedFormat;
+                     inexactChannelMask = updatedChannelMask;
+@@ -8281,11 +8269,11 @@ sp<IOProfile> AudioPolicyManager::getInputProfile(const sp<DeviceDescriptor> &de
+             }
+         }
+ 
+-        if (firstInexact != nullptr) {
++        if (inexact != nullptr) {
+             samplingRate = inexactSamplingRate;
+             format = inexactFormat;
+             channelMask = inexactChannelMask;
+-            return firstInexact;
++            return inexact;
+         } else if (flags & AUDIO_INPUT_FLAG_RAW) {
+             flags = (audio_input_flags_t) (flags & ~AUDIO_INPUT_FLAG_RAW); // retry
+         } else if ((flags & mustMatchFlag) == AUDIO_INPUT_FLAG_NONE &&
+@@ -9258,8 +9246,7 @@ status_t AudioPolicyManager::getProfilesForDevices(const DeviceVector& devices,
+                                                  : hwModule->getOutputProfiles();
+         for (const auto& profile : ioProfiles) {
+             if (!profile->areAllDevicesSupported(devices) ||
+-                    !profile->isCompatibleProfileForFlags(
+-                            flags, false /*exactMatchRequiredForInputFlags*/)) {
++                    !profile->isCompatibleProfileForFlags(flags)) {
+                 continue;
+             }
+             audioProfiles.addAllValidProfiles(profile->asAudioPort()->getAudioProfiles());
+diff --git a/services/audiopolicy/tests/audiopolicymanager_tests.cpp b/services/audiopolicy/tests/audiopolicymanager_tests.cpp
+index d83a2775ee..e901cfd157 100644
+--- a/services/audiopolicy/tests/audiopolicymanager_tests.cpp
++++ b/services/audiopolicy/tests/audiopolicymanager_tests.cpp
+@@ -1276,6 +1276,33 @@ TEST_F(AudioPolicyManagerTestWithConfigurationFile, UpdateConfigFromInexactProfi
+     EXPECT_EQ(expectedChannelMask, requestedChannelMask);
+ }
+ 
++TEST_F(AudioPolicyManagerTestWithConfigurationFile, MatchesMoreInputFlagsWhenPossible) {
++    const audio_format_t expectedFormat = AUDIO_FORMAT_PCM_16_BIT;
++    const uint32_t expectedSampleRate = 48000;
++    const audio_channel_mask_t expectedChannelMask = AUDIO_CHANNEL_IN_STEREO;
++    const std::string expectedIOProfile = "mixport_fast_input";
++
++    auto devices = mManager->getAvailableInputDevices();
++    sp<DeviceDescriptor> mic = nullptr;
++    for (auto device : devices) {
++        if (device->type() == AUDIO_DEVICE_IN_BUILTIN_MIC) {
++            mic = device;
++        break;
++        }
++    }
++    EXPECT_NE(nullptr, mic);
++
++    audio_format_t requestedFormat = AUDIO_FORMAT_PCM_24_BIT_PACKED;
++    uint32_t requestedSampleRate = 48000;
++    audio_channel_mask_t requestedChannelMask = AUDIO_CHANNEL_IN_STEREO;
++    auto profile = mManager->getInputProfile(
++            mic, requestedSampleRate, requestedFormat, requestedChannelMask, AUDIO_INPUT_FLAG_FAST);
++    EXPECT_EQ(expectedIOProfile, profile->getName());
++    EXPECT_EQ(expectedFormat, requestedFormat);
++    EXPECT_EQ(expectedSampleRate, requestedSampleRate);
++    EXPECT_EQ(expectedChannelMask, requestedChannelMask);
++}
++
+ class AudioPolicyManagerTestDynamicPolicy : public AudioPolicyManagerTestWithConfigurationFile {
+ protected:
+     void TearDown() override;
+diff --git a/services/audiopolicy/tests/resources/test_audio_policy_configuration.xml b/services/audiopolicy/tests/resources/test_audio_policy_configuration.xml
+index 3c64898da6..9cb3608514 100644
+--- a/services/audiopolicy/tests/resources/test_audio_policy_configuration.xml
++++ b/services/audiopolicy/tests/resources/test_audio_policy_configuration.xml
+@@ -71,6 +71,11 @@
+                              samplingRates="48000"
+                              channelMasks="AUDIO_CHANNEL_IN_5POINT1"/>
+                 </mixPort>
++                <mixPort name="mixport_fast_input" role="sink" flags="AUDIO_INPUT_FLAG_FAST">
++                    <profile name="" format="AUDIO_FORMAT_PCM_16_BIT"
++                        samplingRates="48000"
++                        channelMasks="AUDIO_CHANNEL_IN_STEREO"/>
++                </mixPort>
+             </mixPorts>
+             <devicePorts>
+                 <devicePort tagName="Speaker" type="AUDIO_DEVICE_OUT_SPEAKER" role="sink">
+@@ -121,6 +126,8 @@
+                         sources="USB Device In" />
+                 <route type="mix" sink="multiple_channels_input"
+                        sources="Built-In Mic" />
++                <route type="mix" sink="mixport_fast_input"
++                    sources="Built-In Mic"/>
+             </routes>
+         </module>
+ 
+-- 
+2.43.0
+
