@@ -1,7 +1,7 @@
-From bf0c0040e4c1c93506723ed45f6d530fc60ee841 Mon Sep 17 00:00:00 2001
+From 698955345958f2e84bc273b571551d47e495e32f Mon Sep 17 00:00:00 2001
 From: dhacker29 <dhackerdvm@gmail.com>
 Date: Tue, 24 Nov 2015 01:53:47 -0500
-Subject: [PATCH 04/10] fw/b: Use ro.build.version.incremental to signal OTA
+Subject: [PATCH 1/8] fw/b: Use ro.build.version.incremental to signal OTA
  upgrades
 
 Co-authored-by: maxwen <max.weninger@gmail.com>
@@ -19,7 +19,7 @@ Change-Id: If0eb969ba509981f9209ffa37a949d9042ef4c2a
  7 files changed, 11 insertions(+), 11 deletions(-)
 
 diff --git a/core/java/android/app/admin/SystemUpdateInfo.java b/core/java/android/app/admin/SystemUpdateInfo.java
-index 9e6c91f4ec31..7459b0e05e3a 100644
+index 9e6c91f4e..7459b0e05 100644
 --- a/core/java/android/app/admin/SystemUpdateInfo.java
 +++ b/core/java/android/app/admin/SystemUpdateInfo.java
 @@ -133,7 +133,7 @@ public final class SystemUpdateInfo implements Parcelable {
@@ -41,7 +41,7 @@ index 9e6c91f4ec31..7459b0e05e3a 100644
          }
          try {
 diff --git a/core/java/android/content/pm/PackagePartitions.java b/core/java/android/content/pm/PackagePartitions.java
-index ff80e614be58..da3b68ecf789 100644
+index ff80e614b..da3b68ecf 100644
 --- a/core/java/android/content/pm/PackagePartitions.java
 +++ b/core/java/android/content/pm/PackagePartitions.java
 @@ -131,7 +131,7 @@ public class PackagePartitions {
@@ -54,7 +54,7 @@ index ff80e614be58..da3b68ecf789 100644
      }
  
 diff --git a/services/appwidget/java/com/android/server/appwidget/AppWidgetXmlUtil.java b/services/appwidget/java/com/android/server/appwidget/AppWidgetXmlUtil.java
-index ce9130ad5cbf..737ecae1cc94 100644
+index ce9130ad5..737ecae1c 100644
 --- a/services/appwidget/java/com/android/server/appwidget/AppWidgetXmlUtil.java
 +++ b/services/appwidget/java/com/android/server/appwidget/AppWidgetXmlUtil.java
 @@ -117,7 +117,7 @@ public class AppWidgetXmlUtil {
@@ -76,7 +76,7 @@ index ce9130ad5cbf..737ecae1cc94 100644
          }
          final AppWidgetProviderInfo info = new AppWidgetProviderInfo();
 diff --git a/services/core/java/com/android/server/pm/PackageManagerService.java b/services/core/java/com/android/server/pm/PackageManagerService.java
-index 611e0d86202a..0e343e18ab34 100644
+index aadf11227..8b0c4f42b 100644
 --- a/services/core/java/com/android/server/pm/PackageManagerService.java
 +++ b/services/core/java/com/android/server/pm/PackageManagerService.java
 @@ -2239,7 +2239,8 @@ public class PackageManagerService implements PackageSender, TestUtilityService
@@ -99,7 +99,7 @@ index 611e0d86202a..0e343e18ab34 100644
              }
  
 diff --git a/services/core/java/com/android/server/pm/PackageManagerServiceUtils.java b/services/core/java/com/android/server/pm/PackageManagerServiceUtils.java
-index b6c0e0cc2614..f41841c59712 100644
+index d7d6d89d9..6160c5685 100644
 --- a/services/core/java/com/android/server/pm/PackageManagerServiceUtils.java
 +++ b/services/core/java/com/android/server/pm/PackageManagerServiceUtils.java
 @@ -1411,8 +1411,6 @@ public class PackageManagerServiceUtils {
@@ -120,7 +120,7 @@ index b6c0e0cc2614..f41841c59712 100644
                  cacheDir = FileUtils.createDir(cacheBaseDir, cacheName);
              }
 diff --git a/services/core/java/com/android/server/pm/Settings.java b/services/core/java/com/android/server/pm/Settings.java
-index 1f672a093b38..bef67a838f27 100644
+index 485a28070..78086791a 100644
 --- a/services/core/java/com/android/server/pm/Settings.java
 +++ b/services/core/java/com/android/server/pm/Settings.java
 @@ -485,7 +485,7 @@ public final class Settings implements Watchable, Snappable, ResilientAtomicFile
@@ -133,7 +133,7 @@ index 1f672a093b38..bef67a838f27 100644
          }
      }
 diff --git a/services/core/java/com/android/server/pm/ShortcutService.java b/services/core/java/com/android/server/pm/ShortcutService.java
-index 5518bfae8277..e26eec659d3e 100644
+index 1052c94d7..21481d216 100644
 --- a/services/core/java/com/android/server/pm/ShortcutService.java
 +++ b/services/core/java/com/android/server/pm/ShortcutService.java
 @@ -5259,7 +5259,7 @@ public class ShortcutService extends IShortcutService.Stub {

@@ -1,0 +1,42 @@
+From 7556380a2bb0c48a0f0d3bdc65a3ab697b18d843 Mon Sep 17 00:00:00 2001
+From: Konsta <konsta09@gmail.com>
+Date: Wed, 5 Mar 2025 12:20:05 +0200
+Subject: [PATCH 3/3] HACK: remove non-existing targets from generic system
+ image
+
+* packages/apps/DeviceDiagnostics that provides 'tradeinmode' and
+  'DeviceDiagnostics' targets is not included in android-15.0.0_r20
+  manifest nor have android-15.0.0_r20 tag.
+* Fixes: https://android.googlesource.com/platform/build/+/8add49972f2ceef4e01c8cc802f88e3c6bc2f42e.
+  Fixes: https://android.googlesource.com/platform/build/+/64887d8cc8990402804928b20f37de55c17acaf7.
+
+Change-Id: I97e5168032fd419295c052243c1ed8418f842af4
+---
+ target/product/generic/Android.bp | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/target/product/generic/Android.bp b/target/product/generic/Android.bp
+index a4a20b49f4..ebabd2b8a0 100644
+--- a/target/product/generic/Android.bp
++++ b/target/product/generic/Android.bp
+@@ -540,7 +540,7 @@ android_filesystem_defaults {
+         "tombstoned", // base_system
+         "traced", // base_system
+         "traced_probes", // base_system
+-        "tradeinmode", // base_system
++        //"tradeinmode", // base_system
+         "tune2fs", // base_system
+         "uiautomator", // base_system
+         "uinput", // base_system
+@@ -631,7 +631,7 @@ android_filesystem_defaults {
+                 "ContactsProvider", // base_system
+                 "CredentialManager", // handheld_system
+                 "DeviceAsWebcam", // handheld_system
+-                "DeviceDiagnostics", // handheld_system - internal
++                //"DeviceDiagnostics", // handheld_system - internal
+                 "DocumentsUI", // handheld_system
+                 "DownloadProvider", // base_system
+                 "DownloadProviderUi", // handheld_system
+-- 
+2.34.1
+

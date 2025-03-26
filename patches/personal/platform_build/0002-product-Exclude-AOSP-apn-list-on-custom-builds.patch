@@ -1,7 +1,7 @@
 From e38da8c1aa80ac5ec327cb6fa3aba867caa11871 Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Tue, 26 Dec 2023 17:01:46 +0000
-Subject: [PATCH 2/2] product: Exclude AOSP apn list on custom builds
+Subject: [PATCH 2/3] product: Exclude AOSP apn list on custom builds
 
 Change-Id: I76c8d5ef67de73d4558d350a87a9bc317aaad792
 ---

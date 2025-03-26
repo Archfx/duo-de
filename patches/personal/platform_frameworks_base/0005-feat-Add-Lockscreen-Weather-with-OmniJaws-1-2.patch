@@ -1,7 +1,7 @@
-From 7e1c4b412bd079e49c2ef3abdad016e3e5632d1c Mon Sep 17 00:00:00 2001
+From 2dc23bc310657d27325742332b13ba88d7a1931b Mon Sep 17 00:00:00 2001
 From: maxwen <max.weninger@gmail.com>
 Date: Fri, 22 Oct 2021 14:55:26 +0200
-Subject: [PATCH 09/10] feat: Add Lockscreen Weather with OmniJaws (1/2)
+Subject: [PATCH 5/8] feat: Add Lockscreen Weather with OmniJaws (1/2)
 
 Based on OmniROM's implementation, updated by @maxwen and adapted by @neobuddy89.
 
@@ -19,10 +19,10 @@ Co-authored-by: Pranav Vashi <neobuddy89@gmail.com>
  create mode 100644 core/java/com/android/internal/util/crdroid/OmniJawsClient.java
 
 diff --git a/core/java/android/provider/Settings.java b/core/java/android/provider/Settings.java
-index ef8b3d738154..16a0f3d4810a 100644
+index 4acb6312f..fc1bb4eb3 100644
 --- a/core/java/android/provider/Settings.java
 +++ b/core/java/android/provider/Settings.java
-@@ -6309,6 +6309,11 @@ public final class Settings {
+@@ -6445,6 +6445,11 @@ public final class Settings {
           * the setting value. See an example above.
           */
  
@@ -36,7 +36,7 @@ index ef8b3d738154..16a0f3d4810a 100644
           * process when restoring historical backup datasets.
 diff --git a/core/java/com/android/internal/util/crdroid/OmniJawsClient.java b/core/java/com/android/internal/util/crdroid/OmniJawsClient.java
 new file mode 100644
-index 000000000000..2bbd51ffab8c
+index 000000000..2bbd51ffa
 --- /dev/null
 +++ b/core/java/com/android/internal/util/crdroid/OmniJawsClient.java
 @@ -0,0 +1,441 @@
@@ -482,7 +482,7 @@ index 000000000000..2bbd51ffab8c
 +    }
 +}
 diff --git a/data/etc/com.android.systemui.xml b/data/etc/com.android.systemui.xml
-index 38ea4ac8d109..0ceaa3d4fb26 100644
+index 38ea4ac8d..0ceaa3d4f 100644
 --- a/data/etc/com.android.systemui.xml
 +++ b/data/etc/com.android.systemui.xml
 @@ -16,6 +16,7 @@
@@ -494,10 +494,10 @@ index 38ea4ac8d109..0ceaa3d4fb26 100644
          <permission name="android.permission.ALLOW_SLIPPERY_TOUCHES"/>
          <permission name="android.permission.BATTERY_STATS"/>
 diff --git a/packages/SystemUI/AndroidManifest.xml b/packages/SystemUI/AndroidManifest.xml
-index d8ddda49dbd9..db424bc30073 100644
+index 11cb0703d..88db8a0de 100644
 --- a/packages/SystemUI/AndroidManifest.xml
 +++ b/packages/SystemUI/AndroidManifest.xml
-@@ -391,6 +391,10 @@
+@@ -394,6 +394,10 @@
      <protected-broadcast android:name="com.android.systemui.action.ACTION_LAUNCH_MEDIA_OUTPUT_BROADCAST_DIALOG" />
      <protected-broadcast android:name="com.android.systemui.STARTED" />
  
@@ -509,7 +509,7 @@ index d8ddda49dbd9..db424bc30073 100644
          android:name=".SystemUIApplication"
          android:persistent="true"
 diff --git a/packages/SystemUI/src/com/android/keyguard/KeyguardSliceView.java b/packages/SystemUI/src/com/android/keyguard/KeyguardSliceView.java
-index d8be862e19ac..130f984be3db 100644
+index d8be862e1..130f984be 100644
 --- a/packages/SystemUI/src/com/android/keyguard/KeyguardSliceView.java
 +++ b/packages/SystemUI/src/com/android/keyguard/KeyguardSliceView.java
 @@ -163,14 +163,18 @@ public class KeyguardSliceView extends LinearLayout {
@@ -561,7 +561,7 @@ index d8be862e19ac..130f984be3db 100644
              for (Drawable drawable : getCompoundDrawables()) {
                  if (drawable != null) {
 diff --git a/packages/SystemUI/src/com/android/systemui/keyguard/KeyguardSliceProvider.java b/packages/SystemUI/src/com/android/systemui/keyguard/KeyguardSliceProvider.java
-index 68a252b2caba..c490ec277da1 100644
+index 3b85b5710..659381910 100644
 --- a/packages/SystemUI/src/com/android/systemui/keyguard/KeyguardSliceProvider.java
 +++ b/packages/SystemUI/src/com/android/systemui/keyguard/KeyguardSliceProvider.java
 @@ -24,6 +24,7 @@ import android.content.ContentResolver;
@@ -691,7 +691,7 @@ index 68a252b2caba..c490ec277da1 100644
      /**
       * Add zen mode (DND) icon to slice if it's enabled.
       * @param builder The slice builder.
-@@ -337,6 +390,9 @@ public class KeyguardSliceProvider extends SliceProvider implements
+@@ -342,6 +395,9 @@ public class KeyguardSliceProvider extends SliceProvider implements
              KeyguardSliceProvider.sInstance = this;
              registerClockUpdate();
              updateClockLocked();
@@ -701,7 +701,7 @@ index 68a252b2caba..c490ec277da1 100644
          }
          return true;
      }
-@@ -353,6 +409,8 @@ public class KeyguardSliceProvider extends SliceProvider implements
+@@ -358,6 +414,8 @@ public class KeyguardSliceProvider extends SliceProvider implements
                  mKeyguardUpdateMonitor.removeCallback(mKeyguardUpdateMonitorCallback);
                  getContext().unregisterReceiver(mIntentReceiver);
              }
@@ -710,7 +710,7 @@ index 68a252b2caba..c490ec277da1 100644
              KeyguardSliceProvider.sInstance = null;
          }
      }
-@@ -549,4 +607,47 @@ public class KeyguardSliceProvider extends SliceProvider implements
+@@ -560,4 +618,47 @@ public class KeyguardSliceProvider extends SliceProvider implements
              SystemUIAppComponentFactoryBase.ContextAvailableCallback callback) {
          mContextAvailableCallback = callback;
      }
