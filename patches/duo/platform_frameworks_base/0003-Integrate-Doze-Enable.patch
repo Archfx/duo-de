@@ -1,0 +1,25 @@
+From 2ce8381176540bee90f723ed9d0a6e1f4cd04cef Mon Sep 17 00:00:00 2001
+From: Archfx <cybx@live.com>
+Date: Wed, 5 Mar 2025 10:43:13 -0500
+Subject: [PATCH] Integrate Doze Enable
+
+Change-Id: Ie086cb8a21ba8fc069d0869141d1f0569a207ca8
+---
+ core/res/res/values/config.xml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/core/res/res/values/config.xml b/core/res/res/values/config.xml
+index 68729ebabc1c..dad5da2c0005 100644
+--- a/core/res/res/values/config.xml
++++ b/core/res/res/values/config.xml
+@@ -257,7 +257,7 @@
+          dozing).  This should be enabled if you have such services and expect apps to
+          correctly use them when installed on your device.  Otherwise, keep this disabled
+          so that applications can still use their own mechanisms. -->
+-    <bool name="config_enableAutoPowerModes">false</bool>
++    <bool name="config_enableAutoPowerModes">true</bool>
+ 
+     <!-- Whether (if true) this is a kind of device that can be moved around (eg. phone/laptop),
+          or (if false) something for which movement is either not measurable or should not count
+-- 
+2.34.1
