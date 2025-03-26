@@ -1,0 +1,24 @@
+From a264ad7e0180494a4138a471ada9ba266ac1bd23 Mon Sep 17 00:00:00 2001
+From: Pierre-Hugues Husson <phh@phh.me>
+Date: Mon, 29 Jan 2024 17:07:07 -0500
+Subject: [PATCH 43/53] Add Samsung sysinput
+
+---
+ services/core/Android.bp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/services/core/Android.bp b/services/core/Android.bp
+index 3cae2d728753..cf7457b96423 100644
+--- a/services/core/Android.bp
++++ b/services/core/Android.bp
+@@ -257,6 +257,7 @@ java_library_static {
+         "vendor.xiaomi.hardware.fingerprintextension-V1.0-java",
+ 
+         //AIDL
++        "vendor.samsung.hardware.sysinput-V1-java",
+         "vendor.samsung.hardware.biometrics.fingerprint-V1-java",
+         "vendor.samsung.hardware.light-V1-java",
+     ],
+-- 
+2.43.0
+

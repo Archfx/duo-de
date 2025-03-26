@@ -1,0 +1,24 @@
+From df398c385d8c25dd13fa5355b208f1b7941f8564 Mon Sep 17 00:00:00 2001
+From: Android Build Coastguard Worker
+ <android-build-coastguard-worker@google.com>
+Date: Mon, 14 Oct 2024 23:14:08 +0000
+Subject: [PATCH 06/30] Version bump to AP4A.240925.019 [core/build_id.mk]
+
+Change-Id: I5e9b7fe6e1bf923d9921626baf8e6f58a0cbeb24
+---
+ core/build_id.mk | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/core/build_id.mk b/core/build_id.mk
+index 3faa9c9418..fa2a1f1529 100644
+--- a/core/build_id.mk
++++ b/core/build_id.mk
+@@ -18,4 +18,4 @@
+ # (like "CRB01").  It must be a single word, and is
+ # capitalized by convention.
+ 
+-BUILD_ID=AP4A.240925.018
++BUILD_ID=AP4A.240925.019
+-- 
+2.43.0
+

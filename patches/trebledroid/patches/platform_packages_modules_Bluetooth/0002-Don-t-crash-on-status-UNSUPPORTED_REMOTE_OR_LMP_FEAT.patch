@@ -1,0 +1,32 @@
+From b8d98ef4afafc0e4bc8376a837ac8929e0c17a64 Mon Sep 17 00:00:00 2001
+From: DerTeufel <dominik-kassel@gmx.de>
+Date: Wed, 4 Jan 2023 21:39:37 +0100
+Subject: [PATCH 2/8] Don't crash on status:UNSUPPORTED_REMOTE_OR_LMP_FEATURE
+
+especially 'opcode:0x811 (SNIFF_SUBRATING)' which is the only one I had observed
+
+Change-Id: Ic57d6631185370cbfdeafdac00801c6ca27fb755
+---
+ system/gd/hci/hci_layer.cc | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/system/gd/hci/hci_layer.cc b/system/gd/hci/hci_layer.cc
+index 1311815633..7b913888b2 100644
+--- a/system/gd/hci/hci_layer.cc
++++ b/system/gd/hci/hci_layer.cc
+@@ -238,8 +238,10 @@ struct HciLayer::impl {
+     using WaitingFor = CommandQueueEntry::WaitingFor;
+     WaitingFor waiting_for = command_queue_.front().waiting_for_;
+     CommandStatusView status_view = CommandStatusView::Create(event);
+-    if (is_vendor_specific && (is_status && waiting_for == WaitingFor::COMPLETE) &&
+-        (status_view.IsValid() && status_view.GetStatus() == ErrorCode::UNKNOWN_HCI_COMMAND)) {
++    if ((is_vendor_specific && (is_status && waiting_for == WaitingFor::COMPLETE) &&
++        (status_view.IsValid() && status_view.GetStatus() == ErrorCode::UNKNOWN_HCI_COMMAND)) ||
++        ((is_status && waiting_for == WaitingFor::COMPLETE) &&
++        (status_view.IsValid() && status_view.GetStatus() == ErrorCode::UNSUPPORTED_REMOTE_OR_LMP_FEATURE))) {
+       // If this is a command status of a vendor specific command, and command complete is expected,
+       // we can't treat this as hard failure since we have no way of probing this lack of support at
+       // earlier time. Instead we let the command complete handler handle a empty Command Complete
+-- 
+2.43.0
+
