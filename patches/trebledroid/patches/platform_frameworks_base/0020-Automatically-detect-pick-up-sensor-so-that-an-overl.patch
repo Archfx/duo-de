@@ -1,0 +1,50 @@
+From 36de8c9dec0bb540a2e6e3f05926ac153fedac50 Mon Sep 17 00:00:00 2001
+From: Pierre-Hugues Husson <phh@phh.me>
+Date: Sat, 20 Mar 2021 14:31:01 +0100
+Subject: [PATCH 20/53] Automatically detect pick up sensor, so that an overlay
+ is required for the sole purpose of enabling pulse doze on pick up sensor
+
+---
+ .../display/AmbientDisplayConfiguration.java  | 19 +++++++++++++++++--
+ 1 file changed, 17 insertions(+), 2 deletions(-)
+
+diff --git a/core/java/android/hardware/display/AmbientDisplayConfiguration.java b/core/java/android/hardware/display/AmbientDisplayConfiguration.java
+index 7361d4f6b882..1f0a7b7cb611 100644
+--- a/core/java/android/hardware/display/AmbientDisplayConfiguration.java
++++ b/core/java/android/hardware/display/AmbientDisplayConfiguration.java
+@@ -28,6 +28,9 @@ import android.text.TextUtils;
+ import android.util.ArrayMap;
+ import android.util.SparseArray;
+ 
++import android.hardware.SensorManager;
++import android.hardware.Sensor;
++
+ import com.android.internal.R;
+ import com.android.internal.util.ArrayUtils;
+ 
+@@ -111,8 +114,20 @@ public class AmbientDisplayConfiguration {
+ 
+     /** @hide */
+     public boolean dozePickupSensorAvailable() {
+-        return mContext.getResources().getBoolean(R.bool.config_dozePulsePickup);
+-    }
++        SensorManager sm = mContext.getSystemService(SensorManager.class);
++        boolean found = false;
++        if(sm == null) {
++            android.util.Log.d("PHH", "Failed getting sensor manager, can't detect pickup sensor");
++        } else {
++            java.util.List<Sensor> sensors = sm.getSensorList(Sensor.TYPE_ALL);
++            for(Sensor s : sensors) {
++                if(Sensor.STRING_TYPE_PICK_UP_GESTURE.equals(s.getStringType())) {
++                    found = true;
++                    break;
++                }
++            }
++        }
++        return mContext.getResources().getBoolean(R.bool.config_dozePulsePickup) || found;    }
+ 
+     /** @hide */
+     public boolean tapGestureEnabled(int user) {
+-- 
+2.43.0
+

@@ -1,0 +1,40 @@
+From 88bc41f76bde097b506369ed48f52c041c7e4feb Mon Sep 17 00:00:00 2001
+From: Andy CrossGate Yan <GeForce8800Ultra@gmail.com>
+Date: Wed, 2 Aug 2023 20:59:53 +0800
+Subject: [PATCH 33/53] Restore getSimStateForSlotIndex in SubscriptionManager
+
+MTK IMS still needs it here
+
+Change-Id: I41bac57c68055f369232359a464642daab94403b
+---
+ .../android/telephony/SubscriptionManager.java     | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/telephony/java/android/telephony/SubscriptionManager.java b/telephony/java/android/telephony/SubscriptionManager.java
+index e0af22369182..2175b3d9667c 100644
+--- a/telephony/java/android/telephony/SubscriptionManager.java
++++ b/telephony/java/android/telephony/SubscriptionManager.java
+@@ -2913,6 +2913,20 @@ public class SubscriptionManager {
+         return TelephonyManager.getDefault().isNetworkRoaming(subId);
+     }
+ 
++    /**
++     * Returns a constant indicating the state of sim for the slot index.
++     *
++     * @param slotIndex Logical SIM slot index.
++     *
++     * @see TelephonyManager.SimState
++     *
++     * @hide
++     */
++    @TelephonyManager.SimState
++    public static int getSimStateForSlotIndex(int slotIndex) {
++        return TelephonyManager.getSimStateForSlotIndex(slotIndex);
++    }
++
+     /**
+      * Set a field in the subscription database. Note not all fields are supported.
+      *
+-- 
+2.43.0
+
