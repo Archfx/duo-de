@@ -1,7 +1,7 @@
-From 78ae6314245b0e53322a64abdd8ef9f2ad00e4b4 Mon Sep 17 00:00:00 2001
+From f377672ac9de754e23d8218bee37a678c7f127a4 Mon Sep 17 00:00:00 2001
 From: Luca Stefani <luca.stefani.ge1@gmail.com>
 Date: Mon, 18 Nov 2024 21:24:57 +0100
-Subject: [PATCH 05/10] Make default permissions updates tied to version
+Subject: [PATCH 2/8] Make default permissions updates tied to version
  incremental
 
 Otherwise adding new rules won't have any effect for us.
@@ -13,10 +13,10 @@ Change-Id: Ib81082a184956ea550bdccdbdf53b2b4cc48f487
  2 files changed, 8 insertions(+), 5 deletions(-)
 
 diff --git a/services/core/java/com/android/server/pm/PackageManagerService.java b/services/core/java/com/android/server/pm/PackageManagerService.java
-index 0e343e18ab34..3b48266af8a8 100644
+index 8b0c4f42b..6c6cd6898 100644
 --- a/services/core/java/com/android/server/pm/PackageManagerService.java
 +++ b/services/core/java/com/android/server/pm/PackageManagerService.java
-@@ -4275,7 +4275,7 @@ public class PackageManagerService implements PackageSender, TestUtilityService
+@@ -4283,7 +4283,7 @@ public class PackageManagerService implements PackageSender, TestUtilityService
              final int userId = livingUsers.get(i).id;
              final boolean isPermissionUpgradeNeeded = !Objects.equals(
                      mPermissionManager.getDefaultPermissionGrantFingerprint(userId),
@@ -25,7 +25,7 @@ index 0e343e18ab34..3b48266af8a8 100644
              if (isPermissionUpgradeNeeded) {
                  grantPermissionsUserIds = ArrayUtils.appendInt(
                          grantPermissionsUserIds, userId);
-@@ -4284,7 +4284,8 @@ public class PackageManagerService implements PackageSender, TestUtilityService
+@@ -4292,7 +4292,8 @@ public class PackageManagerService implements PackageSender, TestUtilityService
          // If we upgraded grant all default permissions before kicking off.
          for (int userId : grantPermissionsUserIds) {
              mLegacyPermissionManager.grantDefaultPermissions(userId);
@@ -35,7 +35,7 @@ index 0e343e18ab34..3b48266af8a8 100644
          }
          if (grantPermissionsUserIds == EMPTY_INT_ARRAY) {
              // If we did not grant default permissions, we preload from this the
-@@ -4466,7 +4467,8 @@ public class PackageManagerService implements PackageSender, TestUtilityService
+@@ -4478,7 +4479,8 @@ public class PackageManagerService implements PackageSender, TestUtilityService
          if (!convertedFromPreCreated || !readPermissionStateForUser(userId)) {
              mPermissionManager.onUserCreated(userId);
              mLegacyPermissionManager.grantDefaultPermissions(userId);
@@ -45,7 +45,7 @@ index 0e343e18ab34..3b48266af8a8 100644
              mDomainVerificationManager.clearUser(userId);
          }
      }
-@@ -4478,7 +4480,7 @@ public class PackageManagerService implements PackageSender, TestUtilityService
+@@ -4490,7 +4492,7 @@ public class PackageManagerService implements PackageSender, TestUtilityService
              mPermissionManager.readLegacyPermissionStateTEMP();
              final boolean isPermissionUpgradeNeeded = !Objects.equals(
                      mPermissionManager.getDefaultPermissionGrantFingerprint(userId),
@@ -55,7 +55,7 @@ index 0e343e18ab34..3b48266af8a8 100644
          }
      }
 diff --git a/services/core/java/com/android/server/pm/permission/PermissionManagerServiceImpl.java b/services/core/java/com/android/server/pm/permission/PermissionManagerServiceImpl.java
-index ea71953d7cb3..b420e29d86ab 100644
+index ea71953d7..b420e29d8 100644
 --- a/services/core/java/com/android/server/pm/permission/PermissionManagerServiceImpl.java
 +++ b/services/core/java/com/android/server/pm/permission/PermissionManagerServiceImpl.java
 @@ -4644,7 +4644,8 @@ public class PermissionManagerServiceImpl implements PermissionManagerServiceInt

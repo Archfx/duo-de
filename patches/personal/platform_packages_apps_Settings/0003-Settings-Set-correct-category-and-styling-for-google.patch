@@ -1,4 +1,4 @@
-From d1050e6d8a9a1b7033953efce924e42efd78ab19 Mon Sep 17 00:00:00 2001
+From f2c45e977181fad93d6d912924915072da6c2261 Mon Sep 17 00:00:00 2001
 From: shoya0x00 <shoya0x00@gmail.com>
 Date: Sat, 19 Oct 2024 12:42:04 +0000
 Subject: [PATCH 3/3] Settings: Set correct category and styling for google and
@@ -14,10 +14,10 @@ Signed-off-by: shoya0x00 <shoya0x00@users.noreply.github.com>
  1 file changed, 9 insertions(+), 4 deletions(-)
 
 diff --git a/src/com/android/settings/dashboard/DashboardFragment.java b/src/com/android/settings/dashboard/DashboardFragment.java
-index 9abc6c2a0fa..dca60f902be 100644
+index c79cc65bbfa..7033ff16b65 100644
 --- a/src/com/android/settings/dashboard/DashboardFragment.java
 +++ b/src/com/android/settings/dashboard/DashboardFragment.java
-@@ -556,12 +556,17 @@ public abstract class DashboardFragment extends SettingsPreferenceFragment
+@@ -639,12 +639,17 @@ public abstract class DashboardFragment extends SettingsPreferenceFragment
                          screen.addPreference(pref);
                      }
                  } else {

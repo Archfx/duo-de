@@ -1,7 +1,7 @@
-From 1c9346979da595f504c971eb6f1e25e31e7f27a4 Mon Sep 17 00:00:00 2001
+From 907bb3dfda9059972e13b6dc370af6e76310b84d Mon Sep 17 00:00:00 2001
 From: vladsendrix <83285656+vladsendrix@users.noreply.github.com>
 Date: Fri, 31 Dec 2021 03:18:04 +0100
-Subject: [PATCH 02/10] gmscompat: Spoof Pixel XL for Google Photos
+Subject: [PATCH 8/8] gmscompat: Spoof Pixel XL for Google Photos
 
 Change-Id: I905e40625b07ebf500cbb3ce1deadedee2e624c5
 ---
@@ -9,7 +9,7 @@ Change-Id: I905e40625b07ebf500cbb3ce1deadedee2e624c5
  1 file changed, 12 insertions(+)
 
 diff --git a/core/java/com/android/internal/gmscompat/AttestationHooks.java b/core/java/com/android/internal/gmscompat/AttestationHooks.java
-index e3e47b4fdedc..d145b30ccec9 100644
+index a87e012f1..c5d3a997b 100644
 --- a/core/java/com/android/internal/gmscompat/AttestationHooks.java
 +++ b/core/java/com/android/internal/gmscompat/AttestationHooks.java
 @@ -31,6 +31,7 @@ public final class AttestationHooks {

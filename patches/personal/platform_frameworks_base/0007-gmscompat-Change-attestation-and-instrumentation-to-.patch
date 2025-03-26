@@ -1,8 +1,8 @@
-From 6744fcfb20d29070174c658fb98cf5202422c77b Mon Sep 17 00:00:00 2001
+From 504bd8d4d62d55036757f0854ae3518895b5391f Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Thu, 9 Nov 2023 12:33:55 +0100
-Subject: [PATCH 01/10] gmscompat: Change attestation and instrumentation to
- pass SafetyNet and Play Integrity API.
+Subject: [PATCH 7/8] gmscompat: Change attestation and instrumentation to pass
+ SafetyNet and Play Integrity API.
 
 Original work by @kdrag0n.
 Updated by many people like @dereference23, @Stallix, @dyneteve, @neobuddy89 and @jhenrique09.
@@ -16,10 +16,10 @@ Adapted by @ponces based on the work of @chiteroman to pass newest Play Integrit
  create mode 100644 core/java/com/android/internal/gmscompat/AttestationHooks.java
 
 diff --git a/core/java/android/app/Instrumentation.java b/core/java/android/app/Instrumentation.java
-index 93a9489849af..1f19fd277453 100644
+index 7eacaac29..c82abd14b 100644
 --- a/core/java/android/app/Instrumentation.java
 +++ b/core/java/android/app/Instrumentation.java
-@@ -63,6 +63,8 @@ import android.view.WindowManagerGlobal;
+@@ -66,6 +66,8 @@ import android.view.WindowManagerGlobal;
  
  import com.android.internal.content.ReferrerIntent;
  
@@ -28,7 +28,7 @@ index 93a9489849af..1f19fd277453 100644
  import java.io.File;
  import java.lang.annotation.Retention;
  import java.lang.annotation.RetentionPolicy;
-@@ -1353,6 +1355,7 @@ public class Instrumentation {
+@@ -1356,6 +1358,7 @@ public class Instrumentation {
          Application app = getFactory(context.getPackageName())
                  .instantiateApplication(cl, className);
          app.attach(context);
@@ -36,7 +36,7 @@ index 93a9489849af..1f19fd277453 100644
          return app;
      }
      
-@@ -1370,6 +1373,7 @@ public class Instrumentation {
+@@ -1373,6 +1376,7 @@ public class Instrumentation {
              ClassNotFoundException {
          Application app = (Application)clazz.newInstance();
          app.attach(context);
@@ -46,7 +46,7 @@ index 93a9489849af..1f19fd277453 100644
  
 diff --git a/core/java/com/android/internal/gmscompat/AttestationHooks.java b/core/java/com/android/internal/gmscompat/AttestationHooks.java
 new file mode 100644
-index 000000000000..e3e47b4fdedc
+index 000000000..a87e012f1
 --- /dev/null
 +++ b/core/java/com/android/internal/gmscompat/AttestationHooks.java
 @@ -0,0 +1,89 @@
@@ -111,8 +111,8 @@ index 000000000000..e3e47b4fdedc
 +        setPropValue("MANUFACTURER", "Google");
 +        setPropValue("BRAND", "google");
 +        setPropValue("MODEL", "Pixel 9 Pro Fold");
-+        setPropValue("FINGERPRINT", "google/comet_beta/comet:Baklava/BP21.241121.009/12787338:user/release-keys");
-+        setPropValue("VERSION.SECURITY_PATCH", "2024-12-05");
++        setPropValue("FINGERPRINT", "google/comet_beta/comet:Baklava/BP22.250124.010/13116449:user/release-keys");
++        setPropValue("VERSION.SECURITY_PATCH", "2025-02-05");
 +        setPropValue("VERSION.DEVICE_INITIAL_SDK_INT", "32");
 +    }
 +
@@ -140,7 +140,7 @@ index 000000000000..e3e47b4fdedc
 +    }
 +}
 diff --git a/keystore/java/android/security/keystore2/AndroidKeyStoreSpi.java b/keystore/java/android/security/keystore2/AndroidKeyStoreSpi.java
-index e6a63b9c4c17..6a80c14c9837 100644
+index e6a63b9c4..6a80c14c9 100644
 --- a/keystore/java/android/security/keystore2/AndroidKeyStoreSpi.java
 +++ b/keystore/java/android/security/keystore2/AndroidKeyStoreSpi.java
 @@ -48,6 +48,7 @@ import android.system.keystore2.ResponseCode;
