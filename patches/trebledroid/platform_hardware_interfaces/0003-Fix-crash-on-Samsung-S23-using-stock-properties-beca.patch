@@ -1,4 +1,4 @@
-From 40ef7939c10602a28239b7ca782376b6af4fa45d Mon Sep 17 00:00:00 2001
+From 24c464337dffc6517a23c473d42108ecdb843022 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Tue, 24 Oct 2023 04:59:57 -0400
 Subject: [PATCH 3/3] Fix crash on Samsung S23 using stock properties, because
@@ -24,5 +24,5 @@ index be3833dfa7..c56b30475c 100644
                  dst->data[0] = src.payload.get<Event::EventPayload::scalar>();
              }
 -- 
-2.34.1
+2.43.0
 

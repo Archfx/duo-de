@@ -1,4 +1,4 @@
-From 9df7782b981f000f912d5120d15df7454fa80157 Mon Sep 17 00:00:00 2001
+From b579907f1ff67fd39e252dcfb77ac52072cd9684 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Tue, 17 Oct 2023 11:08:06 -0400
 Subject: [PATCH 07/11] When logging UiccSlot, ignore error if we cant print
@@ -9,10 +9,10 @@ Subject: [PATCH 07/11] When logging UiccSlot, ignore error if we cant print
  1 file changed, 7 insertions(+), 1 deletion(-)
 
 diff --git a/src/java/com/android/internal/telephony/uicc/UiccSlot.java b/src/java/com/android/internal/telephony/uicc/UiccSlot.java
-index db10271a2f..00c8acb0db 100644
+index d986c9332f..31bedb6f40 100644
 --- a/src/java/com/android/internal/telephony/uicc/UiccSlot.java
 +++ b/src/java/com/android/internal/telephony/uicc/UiccSlot.java
-@@ -687,7 +687,13 @@ public class UiccSlot extends Handler {
+@@ -694,7 +694,13 @@ public class UiccSlot extends Handler {
      @NonNull
      @Override
      public String toString() {
@@ -28,5 +28,5 @@ index db10271a2f..00c8acb0db 100644
                  + mPortIdxToPhoneId + ", mEid=" + Rlog.pii(TelephonyUtils.IS_DEBUGGABLE, mEid)
                  + ", mCardState=" + mCardState + " mSupportedMepMode=" + mSupportedMepMode + "]";
 -- 
-2.34.1
+2.43.0
 

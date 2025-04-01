@@ -1,4 +1,4 @@
-From 22657c73422d2a78bfdbfa40155be5dcff35885a Mon Sep 17 00:00:00 2001
+From 5d6235568daad6ed559031440081f9c3a1d7cc2e Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sat, 11 Jan 2025 12:06:12 -0500
 Subject: [PATCH 11/11] Samsung SMSC: When we receive those weird SMSC,
@@ -58,5 +58,5 @@ index 5663dc816b..e470e68ac0 100644
      }
  
 -- 
-2.34.1
+2.43.0
 

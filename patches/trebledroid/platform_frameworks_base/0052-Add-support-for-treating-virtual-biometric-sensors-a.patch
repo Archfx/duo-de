@@ -1,0 +1,49 @@
+From dca00a83f7aabbefa48d5cf818d593095ea174b3 Mon Sep 17 00:00:00 2001
+From: Peter Cai <peter@typeblog.net>
+Date: Sat, 21 Dec 2024 11:04:35 -0500
+Subject: [PATCH 52/53] Add support for treating virtual biometric sensors as
+ real ones
+
+This happens on Unihertz Jelly Max. They forgot to change their sensor
+instance name from "virtual" to something else.
+
+Change-Id: I106d41cd078e6b1e354c72ec35fa240a44397c5e
+---
+ .../fingerprint/FingerprintSensorConfigurations.java       | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/core/java/android/hardware/fingerprint/FingerprintSensorConfigurations.java b/core/java/android/hardware/fingerprint/FingerprintSensorConfigurations.java
+index 48c5887d80d0..bec56d9a69b0 100644
+--- a/core/java/android/hardware/fingerprint/FingerprintSensorConfigurations.java
++++ b/core/java/android/hardware/fingerprint/FingerprintSensorConfigurations.java
+@@ -29,6 +29,7 @@ import android.os.Parcel;
+ import android.os.Parcelable;
+ import android.os.RemoteException;
+ import android.os.ServiceManager;
++import android.os.SystemProperties;
+ import android.util.Log;
+ import android.util.Slog;
+ 
+@@ -172,6 +173,10 @@ public class FingerprintSensorConfigurations implements Parcelable {
+      * @return real fqName
+      */
+     public static String remapFqName(String fqName) {
++        if (SystemProperties.getBoolean("persist.sys.phh.virtual_sensors_are_real", false)) {
++            return fqName;
++        }
++
+         if (!fqName.contains(IFingerprint.DESCRIPTOR + "/virtual")) {
+             return fqName;  //no remap needed for real hardware HAL
+         } else {
+@@ -185,7 +190,7 @@ public class FingerprintSensorConfigurations implements Parcelable {
+      * @return aidl interface
+      */
+     public static IFingerprint getIFingerprint(String fqName) {
+-        if (fqName.contains("virtual")) {
++        if (fqName.contains("virtual") && !SystemProperties.getBoolean("persist.sys.phh.virtual_sensors_are_real", false)) {
+             String fqNameMapped = remapFqName(fqName);
+             Slog.i(TAG, "getIFingerprint fqName is mapped: " + fqName + "->" + fqNameMapped);
+             try {
+-- 
+2.43.0
+

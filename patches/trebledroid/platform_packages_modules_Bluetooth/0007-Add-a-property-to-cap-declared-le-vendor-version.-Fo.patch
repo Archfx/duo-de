@@ -1,7 +1,7 @@
-From 7d170db285874ca073f44fce045ddc38b14483e0 Mon Sep 17 00:00:00 2001
+From 85ddf82781e6b06d00008c26a7854cef78a7c5d8 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Tue, 30 May 2023 17:34:03 -0400
-Subject: [PATCH 7/9] Add a property to cap declared le vendor version. Found
+Subject: [PATCH 7/8] Add a property to cap declared le vendor version. Found
  needed on unisoc
 
 ---
@@ -9,10 +9,10 @@ Subject: [PATCH 7/9] Add a property to cap declared le vendor version. Found
  1 file changed, 13 insertions(+)
 
 diff --git a/system/gd/hci/controller.cc b/system/gd/hci/controller.cc
-index 292c2e4f24..4340028372 100644
+index a34eb1efac..4849071ef6 100644
 --- a/system/gd/hci/controller.cc
 +++ b/system/gd/hci/controller.cc
-@@ -683,6 +683,13 @@ struct Controller::impl {
+@@ -692,6 +692,13 @@ struct Controller::impl {
      }
      vendor_capabilities_.is_supported_ = 0x01;
  
@@ -26,7 +26,7 @@ index 292c2e4f24..4340028372 100644
      // v0.55
      BaseVendorCapabilities base_vendor_capabilities = complete_view.GetBaseVendorCapabilities();
      vendor_capabilities_.max_advt_instances_ = base_vendor_capabilities.max_advt_instances_;
-@@ -702,6 +709,8 @@ struct Controller::impl {
+@@ -711,6 +718,8 @@ struct Controller::impl {
        return;
      }
  
@@ -35,7 +35,7 @@ index 292c2e4f24..4340028372 100644
      // v0.95
      auto v95 = LeGetVendorCapabilitiesComplete095View::Create(complete_view);
      if (!v95.IsValid()) {
-@@ -718,6 +727,8 @@ struct Controller::impl {
+@@ -727,6 +736,8 @@ struct Controller::impl {
        return;
      }
  
@@ -44,7 +44,7 @@ index 292c2e4f24..4340028372 100644
      // v0.96
      auto v96 = LeGetVendorCapabilitiesComplete096View::Create(v95);
      if (!v96.IsValid()) {
-@@ -732,6 +743,8 @@ struct Controller::impl {
+@@ -741,6 +752,8 @@ struct Controller::impl {
        return;
      }
  
@@ -54,5 +54,5 @@ index 292c2e4f24..4340028372 100644
      auto v98 = LeGetVendorCapabilitiesComplete098View::Create(v96);
      if (!v98.IsValid()) {
 -- 
-2.34.1
+2.43.0
 

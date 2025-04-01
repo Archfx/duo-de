@@ -1,4 +1,4 @@
-From 16a7daf3c2ec677c9a2faf7d9bba9f40a4e94cc5 Mon Sep 17 00:00:00 2001
+From 7a3c989fc4a1bb670b87eeaf7db2a63004ad0301 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Tue, 2 Apr 2024 16:53:08 -0400
 Subject: [PATCH 26/28] Flattened apexes no longer exist, we'll deal with it
@@ -49,5 +49,5 @@ index b414946bb..08b839242 100644
                  if (it == properties->end()) {
                      (*properties)[key] = new_value;
 -- 
-2.34.1
+2.43.0
 

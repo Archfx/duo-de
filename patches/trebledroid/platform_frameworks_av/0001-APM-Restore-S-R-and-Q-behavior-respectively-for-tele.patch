@@ -1,4 +1,4 @@
-From 0a6988743a3f1e9ea9d91549b8a9fe1dac047596 Mon Sep 17 00:00:00 2001
+From 0e58860c4e817df267a61ce7ce1eb071c049f6fe Mon Sep 17 00:00:00 2001
 From: Peter Cai <peter@typeblog.net>
 Date: Thu, 18 Aug 2022 15:44:46 -0400
 Subject: [PATCH 01/24] APM: Restore S, R and Q behavior respectively for
@@ -36,10 +36,10 @@ Change-Id: I56d36d2aef4319935cb88a3e4771b23c6d5b2145
  2 files changed, 147 insertions(+), 62 deletions(-)
 
 diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
-index 1f8cedd290..58ba4a6bc2 100644
+index 73b574ccfa..71cb830cb7 100644
 --- a/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
 +++ b/services/audiopolicy/managerdefault/AudioPolicyManager.cpp
-@@ -726,6 +726,17 @@ status_t AudioPolicyManager::updateCallRoutingInternal(
+@@ -746,6 +746,17 @@ status_t AudioPolicyManager::updateCallRoutingInternal(
      ALOGV("%s device rxDevice %s txDevice %s", __func__,
            rxDevices.itemAt(0)->toString().c_str(), txSourceDevice->toString().c_str());
  
@@ -57,7 +57,7 @@ index 1f8cedd290..58ba4a6bc2 100644
      auto telephonyRxModule =
          mHwModules.getModuleForDeviceType(AUDIO_DEVICE_IN_TELEPHONY_RX, AUDIO_FORMAT_DEFAULT);
      auto telephonyTxModule =
-@@ -748,9 +759,20 @@ status_t AudioPolicyManager::updateCallRoutingInternal(
+@@ -768,9 +779,20 @@ status_t AudioPolicyManager::updateCallRoutingInternal(
              ALOGE("%s() no telephony Tx and/or RX device", __func__);
              return INVALID_OPERATION;
          }
@@ -81,7 +81,7 @@ index 1f8cedd290..58ba4a6bc2 100644
      } else {
          // If the RX device is on the primary HW module, then use legacy routing method for
          // voice calls via setOutputDevice() on primary output.
-@@ -774,7 +796,14 @@ status_t AudioPolicyManager::updateCallRoutingInternal(
+@@ -794,7 +816,14 @@ status_t AudioPolicyManager::updateCallRoutingInternal(
          }
          muteWaitMs = setOutputDevices(__func__, mPrimaryOutput, rxDevices, true, delayMs);
      } else { // create RX path audio patch
@@ -97,7 +97,7 @@ index 1f8cedd290..58ba4a6bc2 100644
          // If the TX device is on the primary HW module but RX device is
          // on other HW module, SinkMetaData of telephony input should handle it
          // assuming the device uses audio HAL V5.0 and above
-@@ -789,7 +818,12 @@ status_t AudioPolicyManager::updateCallRoutingInternal(
+@@ -809,7 +838,12 @@ status_t AudioPolicyManager::updateCallRoutingInternal(
                  closeActiveClients(activeDesc);
              }
          }
@@ -111,7 +111,7 @@ index 1f8cedd290..58ba4a6bc2 100644
      } else if (fix_call_audio_patch()) {
          disconnectTelephonyAudioSource(mCallTxSourceClient);
      }
-@@ -799,6 +833,36 @@ status_t AudioPolicyManager::updateCallRoutingInternal(
+@@ -819,6 +853,36 @@ status_t AudioPolicyManager::updateCallRoutingInternal(
      return NO_ERROR;
  }
  
@@ -148,7 +148,7 @@ index 1f8cedd290..58ba4a6bc2 100644
  bool AudioPolicyManager::isDeviceOfModule(
          const sp<DeviceDescriptor>& devDesc, const char *moduleId) const {
      sp<HwModule> module = mHwModules.getModuleFromName(moduleId);
-@@ -5513,83 +5577,101 @@ status_t AudioPolicyManager::createAudioPatchInternal(const struct audio_patch *
+@@ -5636,83 +5700,101 @@ status_t AudioPolicyManager::createAudioPatchInternal(const struct audio_patch *
                  // in config XML to reach the sink so that is can be declared as available.
                  audio_io_handle_t output = AUDIO_IO_HANDLE_NONE;
                  sp<SwAudioOutputDescriptor> outputDesc;
@@ -166,14 +166,14 @@ index 1f8cedd290..58ba4a6bc2 100644
 -                                    : audio_channel_mask_in_to_out(sourceMask);
 -                    config.format = sourceDesc->config().format;
 -                    audio_output_flags_t flags = AUDIO_OUTPUT_FLAG_NONE;
--                    audio_port_handle_t selectedDeviceId = AUDIO_PORT_HANDLE_NONE;
+-                    DeviceIdVector selectedDeviceIds;
 -                    bool isRequestedDeviceForExclusiveUse = false;
 -                    output_type_t outputType;
 -                    bool isSpatialized;
 -                    bool isBitPerfect;
 -                    getOutputForAttrInt(&resultAttr, &output, AUDIO_SESSION_NONE, &attributes,
 -                                        &stream, sourceDesc->uid(), &config, &flags,
--                                        &selectedDeviceId, &isRequestedDeviceForExclusiveUse,
+-                                        &selectedDeviceIds, &isRequestedDeviceForExclusiveUse,
 -                                        nullptr, &outputType, &isSpatialized, &isBitPerfect);
 -                    if (output == AUDIO_IO_HANDLE_NONE) {
 -                        ALOGV("%s no output for device %s",
@@ -219,14 +219,14 @@ index 1f8cedd290..58ba4a6bc2 100644
 +                                        : audio_channel_mask_in_to_out(sourceMask);
 +                        config.format = sourceDesc->config().format;
 +                        audio_output_flags_t flags = AUDIO_OUTPUT_FLAG_NONE;
-+                        audio_port_handle_t selectedDeviceId = AUDIO_PORT_HANDLE_NONE;
++                        DeviceIdVector selectedDeviceIds;
 +                        bool isRequestedDeviceForExclusiveUse = false;
 +                        output_type_t outputType;
 +                        bool isSpatialized;
 +                        bool isBitPerfect;
 +                        getOutputForAttrInt(&resultAttr, &output, AUDIO_SESSION_NONE, &attributes,
 +                                            &stream, sourceDesc->uid(), &config, &flags,
-+                                            &selectedDeviceId, &isRequestedDeviceForExclusiveUse,
++                                            &selectedDeviceIds, &isRequestedDeviceForExclusiveUse,
 +                                            nullptr, &outputType, &isSpatialized, &isBitPerfect);
 +                        if (output == AUDIO_IO_HANDLE_NONE) {
 +                            ALOGV("%s no output for device %s",
@@ -308,10 +308,10 @@ index 1f8cedd290..58ba4a6bc2 100644
                                      AUDIO_STREAM_PATCH;
                          patchBuilder.addSource(srcMixPortConfig);
 diff --git a/services/audiopolicy/managerdefault/AudioPolicyManager.h b/services/audiopolicy/managerdefault/AudioPolicyManager.h
-index 84edf34da4..4b1093cb23 100644
+index 44863eedc2..e8024942fd 100644
 --- a/services/audiopolicy/managerdefault/AudioPolicyManager.h
 +++ b/services/audiopolicy/managerdefault/AudioPolicyManager.h
-@@ -1013,6 +1013,9 @@ protected:
+@@ -1017,6 +1017,9 @@ protected:
  
          SoundTriggerSessionCollection mSoundTriggerSessions;
  
@@ -322,5 +322,5 @@ index 84edf34da4..4b1093cb23 100644
          SourceClientCollection mAudioSources;
  
 -- 
-2.34.1
+2.43.0
 

@@ -1,7 +1,7 @@
-From 0874a8ae4a0a7f19cc73d87be8a870262b48e03e Mon Sep 17 00:00:00 2001
+From 0f9e576d4b50271d973c89718f0ff6b913e28f47 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Thu, 8 Nov 2018 23:04:03 +0100
-Subject: [PATCH 08/54] Re-order services so that it works even without qtaguid
+Subject: [PATCH 08/53] Re-order services so that it works even without qtaguid
 
 Change-Id: I0c0f527b3ae151d45c68f7ac6c205da3f34e74df
 ---
@@ -9,10 +9,10 @@ Change-Id: I0c0f527b3ae151d45c68f7ac6c205da3f34e74df
  1 file changed, 4 insertions(+), 4 deletions(-)
 
 diff --git a/services/core/java/com/android/server/net/NetworkPolicyManagerService.java b/services/core/java/com/android/server/net/NetworkPolicyManagerService.java
-index a6f4c0e597d1..ec810cfa8e93 100644
+index 7de2815eba6b..80816687537c 100644
 --- a/services/core/java/com/android/server/net/NetworkPolicyManagerService.java
 +++ b/services/core/java/com/android/server/net/NetworkPolicyManagerService.java
-@@ -1032,6 +1032,10 @@ public class NetworkPolicyManagerService extends INetworkPolicyManager.Stub {
+@@ -1026,6 +1026,10 @@ public class NetworkPolicyManagerService extends INetworkPolicyManager.Stub {
          Trace.traceBegin(Trace.TRACE_TAG_NETWORK, "systemReady");
          final int oldPriority = Process.getThreadPriority(Process.myTid());
          try {
@@ -23,7 +23,7 @@ index a6f4c0e597d1..ec810cfa8e93 100644
              // Boost thread's priority during system server init
              Process.setThreadPriority(Process.THREAD_PRIORITY_FOREGROUND);
              if (!isBandwidthControlEnabled()) {
-@@ -1039,10 +1043,6 @@ public class NetworkPolicyManagerService extends INetworkPolicyManager.Stub {
+@@ -1033,10 +1037,6 @@ public class NetworkPolicyManagerService extends INetworkPolicyManager.Stub {
                  return;
              }
  
@@ -35,5 +35,5 @@ index a6f4c0e597d1..ec810cfa8e93 100644
              mUseDifferentDelaysForBackgroundChain = Flags.useDifferentDelaysForBackgroundChain();
              mNeverApplyRulesToCoreUids = Flags.neverApplyRulesToCoreUids();
 -- 
-2.34.1
+2.43.0
 

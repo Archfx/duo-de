@@ -1,4 +1,4 @@
-From c6502e65830ec53820b9a7f45f1041bf1f8de749 Mon Sep 17 00:00:00 2001
+From bae92a3ade68e6c026ed434769f5a1c427cd9ea6 Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Sun, 20 Oct 2024 21:15:08 +0100
 Subject: [PATCH 27/28] Revert "init: remove session keyring workaround for old
@@ -15,7 +15,7 @@ This reverts commit 5d7c35ce205f1b4afadd6a1725c0b5e03962a97c.
  6 files changed, 28 insertions(+)
 
 diff --git a/init/Android.bp b/init/Android.bp
-index 18a79d6c4..1f295223d 100644
+index ed19b4b86..dd3c2e120 100644
 --- a/init/Android.bp
 +++ b/init/Android.bp
 @@ -185,6 +185,7 @@ libinit_cc_defaults {
@@ -27,10 +27,10 @@ index 18a79d6c4..1f295223d 100644
          "liblogwrap",
          "liblp",
 diff --git a/init/builtins.cpp b/init/builtins.cpp
-index 4eec12262..65cd427b0 100644
+index a5222bb0d..2d100e733 100644
 --- a/init/builtins.cpp
 +++ b/init/builtins.cpp
-@@ -596,6 +596,9 @@ static Result<void> queue_fs_event(int code) {
+@@ -597,6 +597,9 @@ static Result<void> queue_fs_event(int code) {
      } else if (code == FS_MGR_MNTALL_DEV_FILE_ENCRYPTED ||
                 code == FS_MGR_MNTALL_DEV_IS_METADATA_ENCRYPTED ||
                 code == FS_MGR_MNTALL_DEV_NEEDS_METADATA_ENCRYPTION) {
@@ -97,7 +97,7 @@ index 8cfd597d9..cb3700a7f 100644
          "libprocessgroup",
          "libselinux",
 diff --git a/init/init.cpp b/init/init.cpp
-index 6c8089926..8eabb2e23 100644
+index 5b0b0ddee..6eceed8e9 100644
 --- a/init/init.cpp
 +++ b/init/init.cpp
 @@ -52,6 +52,7 @@
@@ -108,7 +108,7 @@ index 6c8089926..8eabb2e23 100644
  #include <libavb/libavb.h>
  #include <libgsi/libgsi.h>
  #include <libsnapshot/snapshot.h>
-@@ -966,6 +967,11 @@ int SecondStageMain(int argc, char** argv) {
+@@ -962,6 +963,11 @@ int SecondStageMain(int argc, char** argv) {
                     << " to /proc/1/oom_score_adj: " << result.error();
      }
  
@@ -121,5 +121,5 @@ index 6c8089926..8eabb2e23 100644
      close(open("/dev/.booting", O_WRONLY | O_CREAT | O_CLOEXEC, 0000));
  
 -- 
-2.34.1
+2.43.0
 

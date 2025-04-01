@@ -1,4 +1,4 @@
-From 52f8abeab5d7cbbbcd2722116aa5b0d413c340c9 Mon Sep 17 00:00:00 2001
+From ea3a5656bddb7f76a7df92bdb68da38020590b4a Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Mon, 27 Dec 2021 18:00:43 -0500
 Subject: [PATCH 07/14] powermanager: Add support Samsung miscpower HAL
@@ -55,7 +55,7 @@ index ab66336738..32cc39b76b 100644
      static sp<hardware::power::V1_0::IPower> loadHidlV1_0Locked()
              EXCLUSIVE_LOCKS_REQUIRED(gHalMutex);
 diff --git a/include/powermanager/PowerHalWrapper.h b/include/powermanager/PowerHalWrapper.h
-index 6e347a9ce9..cd55e584e3 100644
+index 42901821bc..0df2f2c4a0 100644
 --- a/include/powermanager/PowerHalWrapper.h
 +++ b/include/powermanager/PowerHalWrapper.h
 @@ -30,6 +30,7 @@
@@ -66,7 +66,7 @@ index 6e347a9ce9..cd55e584e3 100644
  
  #include <utility>
  
-@@ -151,8 +152,10 @@ protected:
+@@ -153,8 +154,10 @@ protected:
  // Wrapper for the AIDL Power HAL.
  class AidlHalWrapper : public EmptyHalWrapper {
  public:
@@ -79,7 +79,7 @@ index 6e347a9ce9..cd55e584e3 100644
      ~AidlHalWrapper() override = default;
  
      HalResult<void> setBoost(aidl::android::hardware::power::Boost boost,
-@@ -179,6 +182,7 @@ private:
+@@ -182,6 +185,7 @@ private:
      std::mutex mBoostMutex;
      std::mutex mModeMutex;
      std::shared_ptr<aidl::android::hardware::power::IPower> mHandle;
@@ -87,7 +87,7 @@ index 6e347a9ce9..cd55e584e3 100644
      std::array<HalSupport,
                 static_cast<int32_t>(
                         *(ndk::enum_range<aidl::android::hardware::power::Boost>().end() - 1)) +
-@@ -191,6 +195,34 @@ private:
+@@ -194,6 +198,34 @@ private:
              mModeSupportedArray GUARDED_BY(mModeMutex) = {HalSupport::UNKNOWN};
  };
  
@@ -143,7 +143,7 @@ index 4f65e77462..b999756aae 100644
  
      whole_static_libs: [
 diff --git a/services/powermanager/PowerHalController.cpp b/services/powermanager/PowerHalController.cpp
-index 40fd097491..d1987fbdaa 100644
+index 0ba1909a44..2af4f21348 100644
 --- a/services/powermanager/PowerHalController.cpp
 +++ b/services/powermanager/PowerHalController.cpp
 @@ -20,6 +20,7 @@
@@ -229,10 +229,10 @@ index ea284c36d8..2f5a857a18 100644
  
  int32_t PowerHalLoader::getAidlVersion() {
 diff --git a/services/powermanager/PowerHalWrapper.cpp b/services/powermanager/PowerHalWrapper.cpp
-index bd6685cbad..82a623dd8b 100644
+index 068c23f94a..e8ff81f9ee 100644
 --- a/services/powermanager/PowerHalWrapper.cpp
 +++ b/services/powermanager/PowerHalWrapper.cpp
-@@ -222,6 +222,10 @@ HalResult<void> AidlHalWrapper::setMode(Aidl::Mode mode, bool enabled) {
+@@ -228,6 +228,10 @@ HalResult<void> AidlHalWrapper::setMode(Aidl::Mode mode, bool enabled) {
      std::unique_lock<std::mutex> lock(mModeMutex);
      size_t idx = static_cast<size_t>(mode);
  
@@ -243,7 +243,7 @@ index bd6685cbad..82a623dd8b 100644
      // Quick return if mode is not supported by HAL
      if (idx >= mModeSupportedArray.size() || mModeSupportedArray[idx] == HalSupport::OFF) {
          ALOGV("Skipped setMode %s because %s", toString(mode).c_str(), getUnsupportedMessage());
-@@ -284,6 +288,72 @@ const char* AidlHalWrapper::getUnsupportedMessage() {
+@@ -296,6 +300,72 @@ const char* AidlHalWrapper::getUnsupportedMessage() {
      return "Power HAL doesn't support it";
  }
  
@@ -317,7 +317,7 @@ index bd6685cbad..82a623dd8b 100644
  
  } // namespace power
 diff --git a/services/surfaceflinger/CompositionEngine/Android.bp b/services/surfaceflinger/CompositionEngine/Android.bp
-index b4ac9ba741..b2aae239f5 100644
+index 82eafd4fa8..581d24effe 100644
 --- a/services/surfaceflinger/CompositionEngine/Android.bp
 +++ b/services/surfaceflinger/CompositionEngine/Android.bp
 @@ -40,6 +40,7 @@ cc_defaults {
@@ -327,7 +327,7 @@ index b4ac9ba741..b2aae239f5 100644
 +        "vendor.samsung.hardware.miscpower@2.0",
      ],
      static_libs: [
-         "libmath",
+         "libguiflags",
 -- 
-2.34.1
+2.43.0
 

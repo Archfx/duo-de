@@ -1,4 +1,4 @@
-From 0817ede612aebc8c81b807f4391d0fcf462d0f7b Mon Sep 17 00:00:00 2001
+From b5db976f0427e027398961971990420bc7e785e8 Mon Sep 17 00:00:00 2001
 From: Luca Stefani <luca.stefani.ge1@gmail.com>
 Date: Wed, 9 Sep 2020 12:43:54 +0200
 Subject: [PATCH] libfscrypt: Bail out if we can't open directory
@@ -31,5 +31,5 @@ index 4c756b18..f3b106e9 100644
  
      bool already_encrypted = fscrypt_is_encrypted(fd);
 -- 
-2.34.1
+2.43.0
 

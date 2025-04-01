@@ -1,4 +1,4 @@
-From 9c7fbc34a8224297698e009c8dbfdc840a304383 Mon Sep 17 00:00:00 2001
+From e7e52bdcc3734a68239cd6a631a63e53ff694229 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Wed, 23 Oct 2024 09:51:50 -0400
 Subject: [PATCH 11/12] Fix conflicting sepolicy for compaction_proactiveness
@@ -9,7 +9,7 @@ Subject: [PATCH 11/12] Fix conflicting sepolicy for compaction_proactiveness
  1 file changed, 9 insertions(+)
 
 diff --git a/libsepol/cil/src/cil_post.c b/libsepol/cil/src/cil_post.c
-index f781f788..d05f7482 100644
+index 9b0a51dc..09d8b8e1 100644
 --- a/libsepol/cil/src/cil_post.c
 +++ b/libsepol/cil/src/cil_post.c
 @@ -518,6 +518,15 @@ static int cil_post_genfscon_context_compare(const void *a, const void *b)
@@ -29,5 +29,5 @@ index f781f788..d05f7482 100644
              if(strcmp(a_genfscon->path_str, "/") == 0)
                  bypass = 1;
 -- 
-2.34.1
+2.43.0
 

@@ -1,4 +1,4 @@
-From d9aa944fbd9da2157f1d7058e26e64ec16a06d04 Mon Sep 17 00:00:00 2001
+From 5821e3f57e91fa66ea07af25fed27c97bb625e37 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Tue, 5 Jan 2021 23:44:00 +0100
 Subject: [PATCH 03/14] unshared_oob didn't exist in O/P, so detect its
@@ -22,5 +22,5 @@ index 7399681c3e..9d5b73eae2 100644
    rm -rf /data/media/0/Android/obb/test_probe
    exit 0
 -- 
-2.34.1
+2.43.0
 

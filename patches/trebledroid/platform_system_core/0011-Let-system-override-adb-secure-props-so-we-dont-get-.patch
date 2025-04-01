@@ -1,4 +1,4 @@
-From a3f1a5ff873979bc5ce9f213daed58bc27d84cd9 Mon Sep 17 00:00:00 2001
+From 3f63f97d5668030ef115bdb8905e0d7ee502f2c6 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Fri, 9 Dec 2022 13:57:10 -0500
 Subject: [PATCH 11/28] Let system override adb/secure props, so we dont get
@@ -22,5 +22,5 @@ index ff7a62688..7b3861534 100644
                      } else {
                          it->second = value;
 -- 
-2.34.1
+2.43.0
 

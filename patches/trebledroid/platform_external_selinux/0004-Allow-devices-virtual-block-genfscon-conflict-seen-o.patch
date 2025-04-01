@@ -1,4 +1,4 @@
-From cfa000cd6d11e0399cd2d5a43e16f77bcab1cced Mon Sep 17 00:00:00 2001
+From 2377a324534838593c80416cdeb8c43df355ffbd Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Fri, 6 Sep 2019 15:07:25 +0200
 Subject: [PATCH 04/12] Allow /devices/virtual/block/ genfscon conflict (seen
@@ -10,7 +10,7 @@ Change-Id: I06e4e9d5b82d61a8aeab595b47e2589249675895
  1 file changed, 17 insertions(+), 1 deletion(-)
 
 diff --git a/libsepol/cil/src/cil_post.c b/libsepol/cil/src/cil_post.c
-index ac99997f..c57250c9 100644
+index d63a5496..b462649d 100644
 --- a/libsepol/cil/src/cil_post.c
 +++ b/libsepol/cil/src/cil_post.c
 @@ -498,7 +498,23 @@ static int cil_post_genfscon_context_compare(const void *a, const void *b)
@@ -39,5 +39,5 @@ index ac99997f..c57250c9 100644
  
  static int cil_post_netifcon_context_compare(const void *a, const void *b)
 -- 
-2.34.1
+2.43.0
 

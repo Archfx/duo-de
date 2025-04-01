@@ -1,4 +1,4 @@
-From 556c76104ce2237af9e03bb510e85c4e20e723f2 Mon Sep 17 00:00:00 2001
+From be7d2826aa651531b669417851776cb95d4e2088 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Thu, 22 Oct 2020 23:22:46 +0200
 Subject: [PATCH 02/14] Matching an input with a display uses uniqueId
@@ -15,7 +15,7 @@ Change-Id: Ifcbc8329d54386f58e013270d9888316c0f516b6
  1 file changed, 4 insertions(+), 1 deletion(-)
 
 diff --git a/services/inputflinger/reader/InputDevice.cpp b/services/inputflinger/reader/InputDevice.cpp
-index 6185f1ab9e..050373f1e0 100644
+index 5e42d57f06..e0717f258c 100644
 --- a/services/inputflinger/reader/InputDevice.cpp
 +++ b/services/inputflinger/reader/InputDevice.cpp
 @@ -304,7 +304,10 @@ std::list<NotifyArgs> InputDevice::configureInternal(nsecs_t when,
@@ -31,5 +31,5 @@ index 6185f1ab9e..050373f1e0 100644
                  const std::unordered_map<std::string, uint8_t>& ports =
                          readerConfig.inputPortToDisplayPortAssociations;
 -- 
-2.34.1
+2.43.0
 

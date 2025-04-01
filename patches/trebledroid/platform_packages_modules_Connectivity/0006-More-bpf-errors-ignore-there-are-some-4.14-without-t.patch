@@ -1,4 +1,4 @@
-From 9e4619998cb2e165e780487cb6ca0aaa05ed2630 Mon Sep 17 00:00:00 2001
+From eeca9c8751349a71715a2adb5840639432202056 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Wed, 15 May 2024 05:56:59 -0400
 Subject: [PATCH 6/8] More bpf errors ignore -- there are some 4.14 without the
@@ -9,10 +9,10 @@ Subject: [PATCH 6/8] More bpf errors ignore -- there are some 4.14 without the
  1 file changed, 3 insertions(+), 4 deletions(-)
 
 diff --git a/bpf/loader/NetBpfLoad.cpp b/bpf/loader/NetBpfLoad.cpp
-index 7f3b2bc7f7..ab49cc35d2 100644
+index 56e4eed355..1c504edace 100644
 --- a/bpf/loader/NetBpfLoad.cpp
 +++ b/bpf/loader/NetBpfLoad.cpp
-@@ -1579,8 +1579,7 @@ static int doLoad(char** argv, char * const envp[]) {
+@@ -1586,8 +1586,7 @@ static int doLoad(char** argv, char * const envp[]) {
          // but we need 0 (enabled)
          // (this writeFile is known to fail on at least 4.19, but always defaults to 0 on
          // pre-5.13, on 5.13+ it depends on CONFIG_BPF_UNPRIV_DEFAULT_OFF)
@@ -22,7 +22,7 @@ index 7f3b2bc7f7..ab49cc35d2 100644
      }
  
      if (isAtLeastU) {
-@@ -1595,12 +1594,12 @@ static int doLoad(char** argv, char * const envp[]) {
+@@ -1602,12 +1601,12 @@ static int doLoad(char** argv, char * const envp[]) {
          //  kernel does not have CONFIG_BPF_JIT=y)
          // BPF_JIT is required by R VINTF (which means 4.14/4.19/5.4 kernels),
          // but 4.14/4.19 were released with P & Q, and only 5.4 is new in R+.
@@ -38,5 +38,5 @@ index 7f3b2bc7f7..ab49cc35d2 100644
  
      // Create all the pin subdirectories
 -- 
-2.34.1
+2.43.0
 

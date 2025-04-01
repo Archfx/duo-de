@@ -1,4 +1,4 @@
-From f9cd58be19e6df41a8454e0e1b3c6d5ec5fbeb09 Mon Sep 17 00:00:00 2001
+From 35ce533fe3745c2185d10e997fd8ebd599af9fd7 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sat, 19 Feb 2022 08:20:25 -0500
 Subject: [PATCH 2/2] Add new mechanism to fake vendor props on a per-process
@@ -132,5 +132,5 @@ index e0d38a822..60974e8ae 100644
  
  static bool is_appcompat_override(const char* name) {
 -- 
-2.34.1
+2.43.0
 

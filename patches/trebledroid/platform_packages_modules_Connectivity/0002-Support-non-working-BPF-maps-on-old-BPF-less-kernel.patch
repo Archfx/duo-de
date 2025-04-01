@@ -1,4 +1,4 @@
-From a500d1d2089e0b06cd90b7b75a171954d9ea3f8e Mon Sep 17 00:00:00 2001
+From 914691f9d019d37aeaff561e4c791476a0717ff4 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Wed, 26 Oct 2022 18:11:10 -0400
 Subject: [PATCH 2/8] Support non-working BPF maps on old BPF-less kernel
@@ -52,10 +52,10 @@ index 1037bebf29..b8e8991c57 100644
  
      Result<Key> getFirstKey() const {
 diff --git a/bpf/loader/NetBpfLoad.cpp b/bpf/loader/NetBpfLoad.cpp
-index f36945891b..7f3b2bc7f7 100644
+index 4834b09ab5..56e4eed355 100644
 --- a/bpf/loader/NetBpfLoad.cpp
 +++ b/bpf/loader/NetBpfLoad.cpp
-@@ -1410,6 +1410,7 @@ static int doLoad(char** argv, char * const envp[]) {
+@@ -1418,6 +1418,7 @@ static int doLoad(char** argv, char * const envp[]) {
      const bool isAtLeastU = (effective_api_level >= __ANDROID_API_U__);
      const bool isAtLeastV = (effective_api_level >= __ANDROID_API_V__);
      const bool isAtLeastW = (effective_api_level >  __ANDROID_API_V__);  // TODO: switch to W
@@ -63,7 +63,7 @@ index f36945891b..7f3b2bc7f7 100644
  
      const int first_api_level = GetIntProperty("ro.board.first_api_level", effective_api_level);
  
-@@ -1445,26 +1446,26 @@ static int doLoad(char** argv, char * const envp[]) {
+@@ -1453,26 +1454,26 @@ static int doLoad(char** argv, char * const envp[]) {
  
      if (!isAtLeastT) {
          ALOGE("Impossible - not reachable on Android <T.");
@@ -94,7 +94,7 @@ index f36945891b..7f3b2bc7f7 100644
      }
  
      // Technically already required by U, but only enforce on V+
-@@ -1483,7 +1484,7 @@ static int doLoad(char** argv, char * const envp[]) {
+@@ -1491,7 +1492,7 @@ static int doLoad(char** argv, char * const envp[]) {
      // Various known ABI layout issues, particularly wrt. bpf and ipsec/xfrm.
      if (isAtLeastV && isKernel32Bit() && isX86()) {
          ALOGE("Android V requires X86 kernel to be 64-bit.");
@@ -103,7 +103,7 @@ index f36945891b..7f3b2bc7f7 100644
      }
  
      if (isAtLeastV) {
-@@ -1568,7 +1569,7 @@ static int doLoad(char** argv, char * const envp[]) {
+@@ -1575,7 +1576,7 @@ static int doLoad(char** argv, char * const envp[]) {
      if (!isEng() && !isUser() && !isUserdebug()) {
          ALOGE("Failed to determine the build type: got %s, want 'eng', 'user', or 'userdebug'",
                getBuildType().c_str());
@@ -112,7 +112,7 @@ index f36945891b..7f3b2bc7f7 100644
      }
  
      if (runningAsRoot) {
-@@ -1620,23 +1621,16 @@ static int doLoad(char** argv, char * const envp[]) {
+@@ -1627,23 +1628,16 @@ static int doLoad(char** argv, char * const envp[]) {
      // Load all ELF objects, create programs and maps, and pin them
      for (const auto& location : locations) {
          if (loadAllElfObjects(bpfloader_ver, location) != 0) {
@@ -226,10 +226,10 @@ index d3e331ec81..541b8c8f01 100644
      if (!configuration.ok()) {
          ALOGE("Cannot read the old configuration from map: %s",
 diff --git a/service-t/src/com/android/server/net/NetworkStatsService.java b/service-t/src/com/android/server/net/NetworkStatsService.java
-index 294a85a8db..88f9b74fd4 100644
+index fb712a18ec..01ba86cb35 100644
 --- a/service-t/src/com/android/server/net/NetworkStatsService.java
 +++ b/service-t/src/com/android/server/net/NetworkStatsService.java
-@@ -450,12 +450,12 @@ public class NetworkStatsService extends INetworkStatsService.Stub {
+@@ -451,12 +451,12 @@ public class NetworkStatsService extends INetworkStatsService.Stub {
       * mActiveUidCounterSet to avoid accessing kernel too frequently.
       */
      private SparseIntArray mActiveUidCounterSet = new SparseIntArray();
@@ -248,7 +248,7 @@ index 294a85a8db..88f9b74fd4 100644
  
      /** Data layer operation counters for splicing into other structures. */
      private NetworkStats mUidOperations = new NetworkStats(0L, 10);
-@@ -674,12 +674,16 @@ public class NetworkStatsService extends INetworkStatsService.Stub {
+@@ -682,12 +682,16 @@ public class NetworkStatsService extends INetworkStatsService.Stub {
                  mNetworkStatsSubscriptionsMonitor);
          mLocationPermissionChecker = mDeps.makeLocationPermissionChecker(mContext);
          mInterfaceMapHelper = mDeps.makeBpfInterfaceMapHelper();
@@ -271,7 +271,7 @@ index 294a85a8db..88f9b74fd4 100644
          // To prevent any possible races, the flag is not allowed to change until rebooting.
          mSupportEventLogger = mDeps.supportEventLogger(mContext);
          if (mSupportEventLogger) {
-@@ -2796,6 +2800,7 @@ public class NetworkStatsService extends INetworkStatsService.Stub {
+@@ -2871,6 +2875,7 @@ public class NetworkStatsService extends INetworkStatsService.Stub {
       * @param uid
       */
      private void deleteKernelTagData(int uid) {
@@ -428,5 +428,5 @@ index 44868b2db7..8c11e115cc 100644
              final short config = sDataSaverEnabledMap.getValue(DATA_SAVER_ENABLED_KEY).val;
              // Any non-zero value converted from short to boolean is true by convention.
 -- 
-2.34.1
+2.43.0
 

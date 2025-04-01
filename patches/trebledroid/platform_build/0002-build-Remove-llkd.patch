@@ -1,4 +1,4 @@
-From 87e112969b0d48269beafc978b66dd6676471f4c Mon Sep 17 00:00:00 2001
+From 240ecad2ecc784b2c3447afdb2b82f8725134a97 Mon Sep 17 00:00:00 2001
 From: Andy CrossGate Yan <GeForce8800Ultra@gmail.com>
 Date: Thu, 14 Oct 2021 12:20:52 +0000
 Subject: [PATCH 2/3] build: Remove llkd
@@ -11,7 +11,7 @@ Change-Id: I29384a820a0c07b29d3f11d7039bed40eeaee926
  1 file changed, 1 deletion(-)
 
 diff --git a/target/product/base_system.mk b/target/product/base_system.mk
-index 586d2b896b..521d562eb1 100644
+index a78c023a36..5ce66134ed 100644
 --- a/target/product/base_system.mk
 +++ b/target/product/base_system.mk
 @@ -212,7 +212,6 @@ PRODUCT_PACKAGES += \
@@ -19,9 +19,9 @@ index 586d2b896b..521d562eb1 100644
      libwilhelm \
      linker \
 -    llkd \
+     llndk_libs \
      lmkd \
      LocalTransport \
-     locksettings \
 -- 
-2.34.1
+2.43.0
 

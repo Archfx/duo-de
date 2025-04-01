@@ -1,4 +1,4 @@
-From 8e25f6af06ba8ecfd0352f006262eb132804db0d Mon Sep 17 00:00:00 2001
+From afe2bc734320d480db832980d97f604579137641 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Tue, 18 Oct 2022 16:08:09 -0400
 Subject: [PATCH 4/6] Exfat can be mounted with "exfat" kernel fs driver, or
@@ -9,7 +9,7 @@ Subject: [PATCH 4/6] Exfat can be mounted with "exfat" kernel fs driver, or
  1 file changed, 8 insertions(+), 3 deletions(-)
 
 diff --git a/fs/Exfat.cpp b/fs/Exfat.cpp
-index 48fa6a37..ae39e87e 100644
+index 64441784..e2c47136 100644
 --- a/fs/Exfat.cpp
 +++ b/fs/Exfat.cpp
 @@ -35,7 +35,9 @@ static const char* kFsckPath = "/system/bin/fsck.exfat";
@@ -43,5 +43,5 @@ index 48fa6a37..ae39e87e 100644
      }
  
 -- 
-2.34.1
+2.43.0
 
