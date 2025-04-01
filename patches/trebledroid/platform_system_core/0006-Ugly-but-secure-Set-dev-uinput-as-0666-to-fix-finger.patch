@@ -1,4 +1,4 @@
-From 70303dc0f38b709a92edb250abb50708e00a5b1f Mon Sep 17 00:00:00 2001
+From de8388a5f181b873036be0ba741b4315993b09df Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Fri, 1 Nov 2019 18:22:13 +0100
 Subject: [PATCH 06/28] Ugly but secure: Set /dev/uinput as 0666 to fix
@@ -28,5 +28,5 @@ index 3927501a4..d0ab3f7bb 100644
  /dev/tty0                 0660   root       system
  /dev/graphics/*           0660   root       graphics
 -- 
-2.34.1
+2.43.0
 

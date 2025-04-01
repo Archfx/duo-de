@@ -1,4 +1,4 @@
-From 99e70cbfc5077ac4c5823530ac3aad46d186c1ae Mon Sep 17 00:00:00 2001
+From 55babd30973aac722762ceb954acc327bf9c3adc Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Wed, 18 Oct 2023 17:44:59 -0400
 Subject: [PATCH] Don't crash when we get no DeviceLockManager
@@ -25,5 +25,5 @@ index 93540aec..4916c823 100644
  
      private SystemDeviceLockManagerImpl() {
 -- 
-2.34.1
+2.43.0
 

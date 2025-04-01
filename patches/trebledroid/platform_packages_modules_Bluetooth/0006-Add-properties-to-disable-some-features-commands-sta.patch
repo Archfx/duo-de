@@ -1,7 +1,7 @@
-From f0158f8a9d0e97b7e97168524ba3a670af0a6073 Mon Sep 17 00:00:00 2001
+From 7af330446d9ba5e3009024f7cedc944138c96617 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sat, 27 May 2023 06:41:32 -0400
-Subject: [PATCH 6/9] Add properties to disable some features/commands/states
+Subject: [PATCH 6/8] Add properties to disable some features/commands/states
  that the ble chip declared but doesnt actually support
 
 ---
@@ -9,10 +9,10 @@ Subject: [PATCH 6/9] Add properties to disable some features/commands/states
  1 file changed, 69 insertions(+), 4 deletions(-)
 
 diff --git a/system/gd/hci/controller.cc b/system/gd/hci/controller.cc
-index 3a4ab17dfb..292c2e4f24 100644
+index eaba7da848..a34eb1efac 100644
 --- a/system/gd/hci/controller.cc
 +++ b/system/gd/hci/controller.cc
-@@ -19,6 +19,7 @@
+@@ -20,6 +20,7 @@
  #include <bluetooth/log.h>
  #include <com_android_bluetooth_flags.h>
  
@@ -20,7 +20,7 @@ index 3a4ab17dfb..292c2e4f24 100644
  #include <future>
  #include <memory>
  #include <string>
-@@ -36,6 +37,8 @@
+@@ -35,6 +36,8 @@
  #include "sysprops/sysprops_module.h"
  #endif
  
@@ -29,7 +29,7 @@ index 3a4ab17dfb..292c2e4f24 100644
  namespace bluetooth {
  namespace hci {
  
-@@ -350,7 +353,23 @@ struct Controller::impl {
+@@ -359,7 +362,23 @@ struct Controller::impl {
      ASSERT(complete_view.IsValid());
      ErrorCode status = complete_view.GetStatus();
      log::assert_that(status == ErrorCode::SUCCESS, "Status {}", ErrorCodeText(status));
@@ -54,7 +54,7 @@ index 3a4ab17dfb..292c2e4f24 100644
    }
  
    void read_local_extended_features_complete_handler(std::promise<void> promise,
-@@ -360,7 +379,25 @@ struct Controller::impl {
+@@ -369,7 +388,25 @@ struct Controller::impl {
      ErrorCode status = complete_view.GetStatus();
      log::assert_that(status == ErrorCode::SUCCESS, "Status {}", ErrorCodeText(status));
      uint8_t page_number = complete_view.GetPageNumber();
@@ -81,7 +81,7 @@ index 3a4ab17dfb..292c2e4f24 100644
      if (page_number == 0 && local_version_information_.manufacturer_name_ == LMP_COMPID_INTEL &&
          local_version_information_.lmp_version_ == LmpVersion::V_4_2 &&
          local_version_information_.lmp_subversion_ == LMP_SUBVERSION_INTEL_AC7265) {
-@@ -523,7 +560,21 @@ struct Controller::impl {
+@@ -532,7 +569,21 @@ struct Controller::impl {
      ASSERT(complete_view.IsValid());
      ErrorCode status = complete_view.GetStatus();
      log::assert_that(status == ErrorCode::SUCCESS, "Status {}", status, ErrorCodeText(status));
@@ -104,7 +104,7 @@ index 3a4ab17dfb..292c2e4f24 100644
    }
  
    void le_read_supported_states_handler(CommandCompleteView view) {
-@@ -531,7 +582,21 @@ struct Controller::impl {
+@@ -540,7 +591,21 @@ struct Controller::impl {
      ASSERT(complete_view.IsValid());
      ErrorCode status = complete_view.GetStatus();
      log::assert_that(status == ErrorCode::SUCCESS, "Status {}", ErrorCodeText(status));
@@ -128,5 +128,5 @@ index 3a4ab17dfb..292c2e4f24 100644
  
    void le_read_accept_list_size_handler(CommandCompleteView view) {
 -- 
-2.34.1
+2.43.0
 

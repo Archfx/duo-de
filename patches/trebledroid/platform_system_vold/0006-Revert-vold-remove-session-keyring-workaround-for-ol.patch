@@ -1,4 +1,4 @@
-From e95143750b31315cd782b23acc08ca70af0970ab Mon Sep 17 00:00:00 2001
+From 21f7836f73fc1df783b84e79e55abecad9359d81 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Fri, 18 Oct 2024 17:26:04 -0400
 Subject: [PATCH 6/6] Revert "vold: remove session keyring workaround for old
@@ -25,10 +25,10 @@ index ba3267ca..ffa63af9 100644
          "liblogwrap",
          "libselinux",
 diff --git a/FsCrypt.cpp b/FsCrypt.cpp
-index 758ec9dc..7baf5cc5 100644
+index ea455a81..28f511b6 100644
 --- a/FsCrypt.cpp
 +++ b/FsCrypt.cpp
-@@ -48,6 +48,7 @@
+@@ -49,6 +49,7 @@
  #include <cutils/properties.h>
  
  #include <fscrypt/fscrypt.h>
@@ -36,7 +36,7 @@ index 758ec9dc..7baf5cc5 100644
  #include <libdm/dm.h>
  
  #include <android-base/file.h>
-@@ -73,6 +74,7 @@ using android::vold::retrieveOrGenerateKey;
+@@ -74,6 +75,7 @@ using android::vold::retrieveOrGenerateKey;
  using android::vold::SetDefaultAcl;
  using android::vold::SetQuotaInherit;
  using android::vold::SetQuotaProjectId;
@@ -44,7 +44,7 @@ index 758ec9dc..7baf5cc5 100644
  using namespace android::fscrypt;
  using namespace android::dm;
  
-@@ -629,6 +631,27 @@ bool fscrypt_create_user_keys(userid_t user_id, bool ephemeral) {
+@@ -682,6 +684,27 @@ bool fscrypt_create_user_keys(userid_t user_id, bool ephemeral) {
      return true;
  }
  
@@ -72,7 +72,7 @@ index 758ec9dc..7baf5cc5 100644
  // Evicts all the user's keys of one type from all volumes (internal and adoptable).
  // This evicts either CE keys or DE keys, depending on which map is passed.
  static bool evict_user_keys(std::map<userid_t, UserPolicies>& policy_map, userid_t user_id) {
-@@ -641,6 +664,7 @@ static bool evict_user_keys(std::map<userid_t, UserPolicies>& policy_map, userid
+@@ -694,6 +717,7 @@ static bool evict_user_keys(std::map<userid_t, UserPolicies>& policy_map, userid
              success &= android::vold::evictKey(BuildDataPath(volume_uuid), policy);
          }
          policy_map.erase(it);
@@ -282,5 +282,5 @@ index cc1a1f98..17a234e6 100644
  
  // Retrieves the key from the named directory, or generates it if it doesn't
 -- 
-2.34.1
+2.43.0
 

@@ -1,4 +1,4 @@
-From c54ac5da91f61c84d65cd73bd05d2ac2d8406150 Mon Sep 17 00:00:00 2001
+From 40718ace462730729734ca84ae1e6d16b5fe1798 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sat, 16 Apr 2022 14:30:14 -0400
 Subject: [PATCH 17/24] Add a prop to change Samsung flash strength
@@ -9,7 +9,7 @@ Subject: [PATCH 17/24] Add a prop to change Samsung flash strength
  2 files changed, 21 insertions(+), 1 deletion(-)
 
 diff --git a/services/camera/libcameraservice/Android.bp b/services/camera/libcameraservice/Android.bp
-index 3e1857edc4..2d87ea19e5 100644
+index 7176678cb9..09fe3fe924 100644
 --- a/services/camera/libcameraservice/Android.bp
 +++ b/services/camera/libcameraservice/Android.bp
 @@ -86,6 +86,8 @@ cc_defaults {
@@ -19,10 +19,10 @@ index 3e1857edc4..2d87ea19e5 100644
 +        "vendor.samsung.hardware.camera.device@5.0",
 +        "vendor.samsung.hardware.camera.device@4.0",
          "android.hardware.common-V2-ndk",
+         "android.hardware.common-V2-cpp",
          "android.hardware.common.fmq-V1-ndk",
-         "camera_platform_flags_c_lib",
 diff --git a/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp b/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp
-index 9ebd3e906e..0c7d21e31a 100644
+index a6189fd02f..5da6a32e59 100644
 --- a/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp
 +++ b/services/camera/libcameraservice/common/hidl/HidlProviderInfo.cpp
 @@ -31,6 +31,8 @@
@@ -34,7 +34,7 @@ index 9ebd3e906e..0c7d21e31a 100644
  
  namespace {
  const bool kEnableLazyHal(property_get_bool("ro.camera.enableLazyHal", false));
-@@ -808,7 +810,23 @@ HidlProviderInfo::HidlDeviceInfo3::HidlDeviceInfo3(
+@@ -831,7 +833,23 @@ HidlProviderInfo::HidlDeviceInfo3::HidlDeviceInfo3(
  status_t HidlProviderInfo::HidlDeviceInfo3::setTorchMode(bool enabled) {
      using hardware::camera::common::V1_0::TorchMode;
      const sp<hardware::camera::device::V3_2::ICameraDevice> interface = startDeviceInterface();
@@ -60,5 +60,5 @@ index 9ebd3e906e..0c7d21e31a 100644
  }
  
 -- 
-2.34.1
+2.43.0
 

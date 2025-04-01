@@ -1,4 +1,4 @@
-From 48cd3adfcaf83beebe4301982261706a34da5855 Mon Sep 17 00:00:00 2001
+From 932c49db883cfddf43e4ac952575901243d11e34 Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Thu, 20 Jun 2024 12:38:58 +0100
 Subject: [PATCH 7/8] Revert "netdupdatable: add back abort() on init() fail"
@@ -24,5 +24,5 @@ index 3b15916398..8b9e5a759c 100644
      return 0;
  }
 -- 
-2.34.1
+2.43.0
 

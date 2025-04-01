@@ -1,4 +1,4 @@
-From 452c713a6867a7c57370a1690dd7b9c99b783169 Mon Sep 17 00:00:00 2001
+From aaa7f137b0c2ed0d7336a2f79c5b7cf28ed3cd7c Mon Sep 17 00:00:00 2001
 From: Michael Bestas <mkbestas@gmail.com>
 Date: Fri, 15 Mar 2024 14:59:21 +0200
 Subject: [PATCH 5/8] netd: Remove <4.14 kernel restrictions
@@ -9,7 +9,7 @@ Change-Id: I4d4abbacd6b9589260de06663e2143bc37d8ea0f
  1 file changed, 9 deletions(-)
 
 diff --git a/bpf/netd/BpfHandler.cpp b/bpf/netd/BpfHandler.cpp
-index deee1867bb..0f0c35f825 100644
+index 7091347fbf..5954531b12 100644
 --- a/bpf/netd/BpfHandler.cpp
 +++ b/bpf/netd/BpfHandler.cpp
 @@ -76,15 +76,6 @@ static Status initPrograms(const char* cg2_path) {
@@ -29,5 +29,5 @@ index deee1867bb..0f0c35f825 100644
      // U mandates this mount point (though it should also be the case on T)
      if (modules::sdklevel::IsAtLeastU() && !!strcmp(cg2_path, "/sys/fs/cgroup")) {
 -- 
-2.34.1
+2.43.0
 

@@ -1,4 +1,4 @@
-From 27e09ebf0cdd39ca60d5fc583c3563a9abcf3ed0 Mon Sep 17 00:00:00 2001
+From e0ad70765594d2d0a6b80e6e0784ec9281175e21 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Wed, 7 Feb 2024 05:06:32 -0500
 Subject: [PATCH 22/24] Include Samsung AIDL camera ids
@@ -9,10 +9,10 @@ Subject: [PATCH 22/24] Include Samsung AIDL camera ids
  2 files changed, 22 insertions(+)
 
 diff --git a/services/camera/libcameraservice/Android.bp b/services/camera/libcameraservice/Android.bp
-index 2d87ea19e5..b2807ecd08 100644
+index 09fe3fe924..ecd54db749 100644
 --- a/services/camera/libcameraservice/Android.bp
 +++ b/services/camera/libcameraservice/Android.bp
-@@ -115,6 +115,7 @@ cc_defaults {
+@@ -117,6 +117,7 @@ cc_defaults {
          "android.hardware.camera.provider-V3-ndk",
          "vendor.samsung.hardware.camera.provider@3.0",
          "vendor.samsung.hardware.camera.provider@4.0",
@@ -21,10 +21,10 @@ index 2d87ea19e5..b2807ecd08 100644
          "libbinderthreadstateutils",
          "libcameraservice_device_independent",
 diff --git a/services/camera/libcameraservice/common/aidl/AidlProviderInfo.cpp b/services/camera/libcameraservice/common/aidl/AidlProviderInfo.cpp
-index 4bfe11d5c6..a640286a0a 100644
+index 88998c674d..9f8fd37e1d 100644
 --- a/services/camera/libcameraservice/common/aidl/AidlProviderInfo.cpp
 +++ b/services/camera/libcameraservice/common/aidl/AidlProviderInfo.cpp
-@@ -33,6 +33,8 @@
+@@ -34,6 +34,8 @@
  #include <utils/SessionConfigurationUtils.h>
  #include <utils/Trace.h>
  
@@ -33,7 +33,7 @@ index 4bfe11d5c6..a640286a0a 100644
  namespace {
  const bool kEnableLazyHal(property_get_bool("ro.camera.enableLazyHal", false));
  } // anonymous namespace
-@@ -172,6 +174,25 @@ status_t AidlProviderInfo::initializeAidlProvider(
+@@ -173,6 +175,25 @@ status_t AidlProviderInfo::initializeAidlProvider(
          return mapToStatusT(status);
      }
  
@@ -60,5 +60,5 @@ index 4bfe11d5c6..a640286a0a 100644
          uint16_t major, minor;
          std::string type, id;
 -- 
-2.34.1
+2.43.0
 

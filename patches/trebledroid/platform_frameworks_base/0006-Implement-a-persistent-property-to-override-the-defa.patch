@@ -1,7 +1,7 @@
-From 15630ac4f42f8fc8bb29c6acea1ab87dfada6d92 Mon Sep 17 00:00:00 2001
+From 9bcdc6238e8bdc4186e35b1d8f266a2d66826ab9 Mon Sep 17 00:00:00 2001
 From: Peter Cai <peter@typeblog.net>
 Date: Wed, 1 Jun 2022 16:56:20 -0400
-Subject: [PATCH 06/54] Implement a persistent property to override the default
+Subject: [PATCH 06/53] Implement a persistent property to override the default
  primary camera (0)
 
 Change-Id: I49b45d00bf71d7932591b3516d49a680e1b6568b
@@ -35,10 +35,10 @@ index ca3e3d2ad61b..4bef5c4d00e4 100644
          CameraInfo cameraInfo = new CameraInfo();
          for (int i = 0; i < numberOfCameras; i++) {
 diff --git a/core/java/android/hardware/camera2/CameraManager.java b/core/java/android/hardware/camera2/CameraManager.java
-index 21627920f598..e2aa460c1165 100644
+index aba2345f28d8..c04a5589a696 100644
 --- a/core/java/android/hardware/camera2/CameraManager.java
 +++ b/core/java/android/hardware/camera2/CameraManager.java
-@@ -2424,6 +2424,15 @@ public final class CameraManager {
+@@ -2565,6 +2565,15 @@ public final class CameraManager {
                              return s1.compareTo(s2);
                          }
                      }});
@@ -55,5 +55,5 @@ index 21627920f598..e2aa460c1165 100644
  
          private boolean shouldHideCamera(int currentDeviceId, int devicePolicy,
 -- 
-2.34.1
+2.43.0
 

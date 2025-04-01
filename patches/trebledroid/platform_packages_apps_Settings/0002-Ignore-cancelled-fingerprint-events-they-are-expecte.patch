@@ -1,4 +1,4 @@
-From c12f24a9797a5608a1c28487185b7c22abb16ab5 Mon Sep 17 00:00:00 2001
+From 39b9c247e26432b75bbf19793537dd2ca38a209d Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Mon, 2 May 2022 17:44:28 -0400
 Subject: [PATCH 2/4] Ignore cancelled fingerprint events, they are expected,
@@ -10,10 +10,10 @@ Subject: [PATCH 2/4] Ignore cancelled fingerprint events, they are expected,
  2 files changed, 4 insertions(+)
 
 diff --git a/src/com/android/settings/biometrics/fingerprint/FingerprintEnrollEnrolling.java b/src/com/android/settings/biometrics/fingerprint/FingerprintEnrollEnrolling.java
-index b32ab4f7350..a77845f7ed0 100644
+index 2cbf8d089ff..da5200ba463 100644
 --- a/src/com/android/settings/biometrics/fingerprint/FingerprintEnrollEnrolling.java
 +++ b/src/com/android/settings/biometrics/fingerprint/FingerprintEnrollEnrolling.java
-@@ -815,6 +815,9 @@ public class FingerprintEnrollEnrolling extends BiometricsEnrollEnrolling {
+@@ -860,6 +860,9 @@ public class FingerprintEnrollEnrolling extends BiometricsEnrollEnrolling {
  
      @Override
      public void onEnrollmentError(int errMsgId, CharSequence errString) {
@@ -36,5 +36,5 @@ index aeb0dac97c4..82d1e9c07d6 100644
              proceedToEnrolling(false /* cancelEnrollment */);
          } else {
 -- 
-2.34.1
+2.43.0
 

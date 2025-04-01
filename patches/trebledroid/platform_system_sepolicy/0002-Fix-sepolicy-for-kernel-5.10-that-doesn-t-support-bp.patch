@@ -1,4 +1,4 @@
-From 186be3e7b7aa608fff47e2ad6fa69d63378c5fa3 Mon Sep 17 00:00:00 2001
+From 0ae6166f274f1facfde59b5d8f4ea103a7ee5cc5 Mon Sep 17 00:00:00 2001
 From: danielzhang130 <37479705+danielzhang130@users.noreply.github.com>
 Date: Fri, 12 Apr 2024 13:01:08 -0400
 Subject: [PATCH 2/2] Fix sepolicy for kernel < 5.10 that doesn't support bpf
@@ -27,5 +27,5 @@ index 4450e02ba..d7dda3aed 100644
  allow network_stack self:bpf map_create;
  allow network_stack { bpfloader netd network_stack system_server }:bpf { map_read map_write };
 -- 
-2.34.1
+2.43.0
 

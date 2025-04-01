@@ -1,4 +1,4 @@
-From 92552a12f49eaa78af63bc5dcbdf6c9360f5f404 Mon Sep 17 00:00:00 2001
+From 1ce5c31bcc421fc59432ace6e989678a9f37474b Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Thu, 17 Oct 2024 06:59:48 -0400
 Subject: [PATCH 8/8] Additional bpf prevent-crash
@@ -34,10 +34,10 @@ index 408294ce6d..287116a076 100644
          final long blockingMatches = (uidRuleConfig & ~uidMatch & sMaskDropIfUnset)
                  | (uidRuleConfig & uidMatch & sMaskDropIfSet);
 diff --git a/service-t/src/com/android/server/net/NetworkStatsService.java b/service-t/src/com/android/server/net/NetworkStatsService.java
-index 88f9b74fd4..de20793b1c 100644
+index 01ba86cb35..8db8bab1d8 100644
 --- a/service-t/src/com/android/server/net/NetworkStatsService.java
 +++ b/service-t/src/com/android/server/net/NetworkStatsService.java
-@@ -3313,7 +3313,8 @@ public class NetworkStatsService extends INetworkStatsService.Stub {
+@@ -3391,7 +3391,8 @@ public class NetworkStatsService extends INetworkStatsService.Stub {
          try {
              return mStatsFactory.readNetworkStatsDetail(uid, ifaces, tag);
          } catch (IOException e) {
@@ -60,5 +60,5 @@ index 8c11e115cc..2f8fbab52f 100644
              // Key of uid permission map is appId
              // TODO: Rename map name
 -- 
-2.34.1
+2.43.0
 

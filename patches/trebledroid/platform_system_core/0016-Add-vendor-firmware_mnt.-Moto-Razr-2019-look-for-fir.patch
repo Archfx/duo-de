@@ -1,4 +1,4 @@
-From c6cbba6c0f22d4aa2a5d7d9ebc1f2684baf7f5fe Mon Sep 17 00:00:00 2001
+From b4638b67fca80ca7e677815a9a440cbd5007ac18 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Tue, 11 Jul 2023 14:52:40 -0400
 Subject: [PATCH 16/28] Add /vendor/firmware_mnt. Moto Razr 2019 look for
@@ -22,5 +22,5 @@ index d0ab3f7bb..39e8fe9eb 100644
  
  subsystem graphics
 -- 
-2.34.1
+2.43.0
 

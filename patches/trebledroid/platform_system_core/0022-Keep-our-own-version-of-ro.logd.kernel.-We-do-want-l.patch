@@ -1,4 +1,4 @@
-From d7b92ae01a8af84ec6094e9fb8f774039854e747 Mon Sep 17 00:00:00 2001
+From d8cd5ba0baec5540642c4ba666a8ce4a5fe0f9a6 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sat, 25 Nov 2023 09:51:14 -0500
 Subject: [PATCH 22/28] Keep our own version of ro.logd.kernel. We do want
@@ -22,5 +22,5 @@ index 8c0cc6442..554f61771 100644
                      } else {
                          it->second = value;
 -- 
-2.34.1
+2.43.0
 

@@ -1,4 +1,4 @@
-From a019cea30f9795adcedc207e9937cc507f8a1419 Mon Sep 17 00:00:00 2001
+From 972923143274c68bec961a7c1ad62a19aa732163 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Wed, 13 Oct 2021 10:56:52 -0400
 Subject: [PATCH] Support no-bpf usecase
@@ -9,7 +9,7 @@ Change-Id: I75a427a2a41aa4ab1104ad88a891bef0dc2d9c91
  1 file changed, 1 insertion(+), 2 deletions(-)
 
 diff --git a/loader/Loader.cpp b/loader/Loader.cpp
-index cf6bf36..d3606a8 100644
+index 09e2e17..217cf8c 100644
 --- a/loader/Loader.cpp
 +++ b/loader/Loader.cpp
 @@ -1002,8 +1002,7 @@ void legacyBpfLoader() {
@@ -23,5 +23,5 @@ index cf6bf36..d3606a8 100644
      }
  }
 -- 
-2.34.1
+2.43.0
 

@@ -1,4 +1,4 @@
-From 613eea002a11f50d9008b5543a08400ed49333c9 Mon Sep 17 00:00:00 2001
+From 1156c00b1b3b6b169969875c579b687907821785 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Wed, 31 Mar 2021 23:32:37 +0200
 Subject: [PATCH 03/12] Workaround device/phh/treble conflict with SELinux
@@ -18,10 +18,10 @@ simply ignore them.
  3 files changed, 28 insertions(+), 6 deletions(-)
 
 diff --git a/libsepol/cil/src/cil_binary.c b/libsepol/cil/src/cil_binary.c
-index c8144a5a..a4010342 100644
+index 3d920182..c1ebb12f 100644
 --- a/libsepol/cil/src/cil_binary.c
 +++ b/libsepol/cil/src/cil_binary.c
-@@ -511,13 +511,17 @@ int cil_typealias_to_policydb(policydb_t *pdb, struct cil_alias *cil_alias)
+@@ -512,13 +512,17 @@ int cil_typealias_to_policydb(policydb_t *pdb, struct cil_alias *cil_alias)
  	type_datum_init(sepol_alias);
  
  	rc = __cil_get_sepol_type_datum(pdb, DATUM(cil_alias->actual), &sepol_type);
@@ -40,7 +40,7 @@ index c8144a5a..a4010342 100644
  		goto exit;
  	}
  	sepol_alias->s.value = sepol_type->s.value;
-@@ -4074,7 +4078,7 @@ static int __cil_node_to_policydb(struct cil_tree_node *node, void *extra_args)
+@@ -4103,7 +4107,7 @@ static int __cil_node_to_policydb(struct cil_tree_node *node, void *extra_args)
  
  exit:
  	if (rc != SEPOL_OK) {
@@ -50,7 +50,7 @@ index c8144a5a..a4010342 100644
  	return rc;
  }
 diff --git a/libsepol/cil/src/cil_build_ast.c b/libsepol/cil/src/cil_build_ast.c
-index 56dac891..6e9dae82 100644
+index 19fbb04e..6740b8f1 100644
 --- a/libsepol/cil/src/cil_build_ast.c
 +++ b/libsepol/cil/src/cil_build_ast.c
 @@ -161,7 +161,7 @@ int cil_add_decl_to_symtab(struct cil_db *db, symtab_t *symtab, hashtab_key_t ke
@@ -79,7 +79,7 @@ index 56dac891..6e9dae82 100644
  		/* multiple_decls is enabled and works for this datum type, add node */
  		cil_list_append(prev->nodes, CIL_NODE, node);
 diff --git a/libsepol/cil/src/cil_resolve_ast.c b/libsepol/cil/src/cil_resolve_ast.c
-index b8ca533b..db34dd0f 100644
+index 6c5b6338..1e0e58b6 100644
 --- a/libsepol/cil/src/cil_resolve_ast.c
 +++ b/libsepol/cil/src/cil_resolve_ast.c
 @@ -519,7 +519,13 @@ static int cil_resolve_aliasactual(struct cil_tree_node *current, struct cil_db
@@ -112,5 +112,5 @@ index b8ca533b..db34dd0f 100644
  	}
  
 -- 
-2.34.1
+2.43.0
 

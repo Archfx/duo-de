@@ -1,4 +1,4 @@
-From 82c227bd2f398e32eed60d42eee15b9e122468e3 Mon Sep 17 00:00:00 2001
+From a65bd8e3929444a1c1fd4c23f3302d8c2ee43c1c Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Tue, 7 May 2024 22:44:25 +0000
 Subject: [PATCH] Dont abort if the DnsHelper failed to init on BPF-less kernel
@@ -21,5 +21,5 @@ index 04c59212..b881a68e 100644
  
      IsUidBlockedFn f =
 -- 
-2.34.1
+2.43.0
 

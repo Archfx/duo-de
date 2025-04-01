@@ -1,4 +1,4 @@
-From f9d8719fea0b202d1714e8af6e7786f47299195e Mon Sep 17 00:00:00 2001
+From 6e69ece3df1aaca0abbd6cc392d389c0ea95377d Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Wed, 21 Feb 2024 16:21:51 -0500
 Subject: [PATCH 09/11] Initialize Samsung HIDL ISehRadio. Fixes 5G on S20
@@ -12,22 +12,22 @@ Subject: [PATCH 09/11] Initialize Samsung HIDL ISehRadio. Fixes 5G on S20
  4 files changed, 127 insertions(+), 4 deletions(-)
 
 diff --git a/Android.bp b/Android.bp
-index c9ac926a03..6847ab094b 100644
+index 047c8e7cbb..02f130b336 100644
 --- a/Android.bp
 +++ b/Android.bp
-@@ -82,6 +82,7 @@ java_library {
-         "android.hardware.radio-V1.4-java",
-         "android.hardware.radio-V1.5-java",
-         "android.hardware.radio-V1.6-java",
+@@ -91,6 +91,7 @@ java_library {
+         "android.hardware.radio.sim-V4-java",
+         "android.hardware.radio.voice-V4-java",
+         "vendor.samsung.hardware.radio.network-V1-java",
 +        "vendor.samsung.hardware.radio-V2.2-java",
-         "android.hardware.radio.config-V3-java",
-         "android.hardware.radio.data-V3-java",
-         "android.hardware.radio.ims-V2-java",
+         "voip-common",
+         "ims-common",
+         "unsupportedappusage",
 diff --git a/src/java/com/android/internal/telephony/RIL.java b/src/java/com/android/internal/telephony/RIL.java
-index f539486239..782ba77dba 100644
+index c5d39b0587..dc5a8ff2d8 100644
 --- a/src/java/com/android/internal/telephony/RIL.java
 +++ b/src/java/com/android/internal/telephony/RIL.java
-@@ -841,6 +841,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
+@@ -847,6 +847,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
                  return null;
              } else {
                  IBinder binder;
@@ -35,7 +35,7 @@ index f539486239..782ba77dba 100644
                  switch (service) {
                      case HAL_SERVICE_DATA:
                          if (mMockModem == null) {
-@@ -899,7 +900,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
+@@ -905,7 +906,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
                              mHalVersion.put(service, ((RadioNetworkProxy) serviceProxy).setAidl(
                                      mHalVersion.get(service),
                                      android.hardware.radio.network.IRadioNetwork.Stub
@@ -45,10 +45,10 @@ index f539486239..782ba77dba 100644
                          break;
                      case HAL_SERVICE_SIM:
 diff --git a/src/java/com/android/internal/telephony/RadioNetworkProxy.java b/src/java/com/android/internal/telephony/RadioNetworkProxy.java
-index b8f5164680..ff937454cd 100644
+index 2b91c8b2a6..c3e679887f 100644
 --- a/src/java/com/android/internal/telephony/RadioNetworkProxy.java
 +++ b/src/java/com/android/internal/telephony/RadioNetworkProxy.java
-@@ -32,6 +32,7 @@ import java.util.ArrayList;
+@@ -34,6 +34,7 @@ import java.util.ArrayList;
  import java.util.List;
  import java.util.stream.Collectors;
  
@@ -56,7 +56,7 @@ index b8f5164680..ff937454cd 100644
  import vendor.samsung.hardware.radio.network.ISehRadioNetworkIndication;
  import vendor.samsung.hardware.radio.network.ISehRadioNetworkResponse;
  import vendor.samsung.hardware.radio.network.ISehRadioNetwork;
-@@ -46,6 +47,10 @@ import vendor.samsung.hardware.radio.network.SehRoamingNetworkInfo;
+@@ -48,6 +49,10 @@ import vendor.samsung.hardware.radio.network.SehRoamingNetworkInfo;
  import vendor.samsung.hardware.radio.network.SehSignalBar;
  import vendor.samsung.hardware.radio.network.SehVendorConfiguration;
  
@@ -67,7 +67,7 @@ index b8f5164680..ff937454cd 100644
  /**
   * A holder for IRadioNetwork.
   * Use getAidl to get IRadioNetwork and call the AIDL implementations of the HAL APIs.
-@@ -81,7 +86,7 @@ public class RadioNetworkProxy extends RadioServiceProxy {
+@@ -83,7 +88,7 @@ public class RadioNetworkProxy extends RadioServiceProxy {
       * @return updated HAL version
       */
      public HalVersion setAidl(HalVersion halVersion,
@@ -76,7 +76,7 @@ index b8f5164680..ff937454cd 100644
          HalVersion version = halVersion;
          try {
              version = RIL.getServiceHalVersion(network.getInterfaceVersion());
-@@ -165,7 +170,7 @@ public class RadioNetworkProxy extends RadioServiceProxy {
+@@ -167,7 +172,7 @@ public class RadioNetworkProxy extends RadioServiceProxy {
              };
  
              var samsungResponse = new ISehRadioNetworkResponse.Stub() {
@@ -85,7 +85,7 @@ index b8f5164680..ff937454cd 100644
                      android.util.Log.e("PHH-Radio", v);
                  }
                  public void emergencyControlResponse(SehRadioResponseInfo info) {}
-@@ -207,7 +212,7 @@ public class RadioNetworkProxy extends RadioServiceProxy {
+@@ -209,7 +214,7 @@ public class RadioNetworkProxy extends RadioServiceProxy {
              var samsungHal =
                  ISehRadioNetwork.Stub.asInterface(
                          android.os.ServiceManager.waitForDeclaredService(
@@ -94,7 +94,7 @@ index b8f5164680..ff937454cd 100644
              samsungHal.setResponseFunctions(samsungResponse, samsungIndication);
              var conf = new SehVendorConfiguration[1];
              conf[0] = new SehVendorConfiguration();
-@@ -800,6 +805,117 @@ public class RadioNetworkProxy extends RadioServiceProxy {
+@@ -804,6 +809,117 @@ public class RadioNetworkProxy extends RadioServiceProxy {
          }
      }
  
@@ -227,5 +227,5 @@ index 02fc751484..fa02d5202b 100644
 +    }
  }
 -- 
-2.34.1
+2.43.0
 

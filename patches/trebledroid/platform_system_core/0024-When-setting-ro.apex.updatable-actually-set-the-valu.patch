@@ -1,4 +1,4 @@
-From 821c916238c42854486f6da4dbf2c37c2a6ad721 Mon Sep 17 00:00:00 2001
+From c090de313b0fb391cdc0a983184a535589974f4c Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Thu, 25 Jan 2024 15:20:10 -0500
 Subject: [PATCH 24/28] When setting ro.apex.updatable, actually set the value
@@ -46,5 +46,5 @@ index b18a51269..b414946bb 100644
  		}
              } else {
 -- 
-2.34.1
+2.43.0
 

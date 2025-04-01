@@ -1,4 +1,4 @@
-From c24825500071645602f5fc88e44c0f0b33d11bd8 Mon Sep 17 00:00:00 2001
+From 3b0b2365b216f0147df00e822c231fb09c75f68f Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Tue, 1 Feb 2022 13:48:35 +0000
 Subject: [PATCH 07/28] Revert "Set /system/xbin permissions to 750."
@@ -24,5 +24,5 @@ index 2e4b9b475..9da8b58c3 100644
      { 00750, AID_ROOT,         AID_SYSTEM,       0, "system_ext/apex/com.android.tethering/bin/for-system" },
      { 00751, AID_ROOT,         AID_SHELL,        0, "system_ext/bin" },
 -- 
-2.34.1
+2.43.0
 

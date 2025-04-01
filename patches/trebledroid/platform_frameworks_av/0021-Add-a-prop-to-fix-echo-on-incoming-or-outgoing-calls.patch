@@ -1,4 +1,4 @@
-From a15dcae6ab1abacaca3758aef64a8c8fb453c4f1 Mon Sep 17 00:00:00 2001
+From 95faf176a282dc3ab8e48e68340996db946939d0 Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Sun, 5 Nov 2023 15:18:03 +0000
 Subject: [PATCH 21/24] Add a prop to fix echo on incoming or outgoing calls
@@ -42,5 +42,5 @@ index 26edcaa1c4..059e4adfa1 100644
                  if (false && !mIgnoreVendorExtensions) {
                      ALOGE("%s: no source found with name \"%s\"", __func__, devTag);
 -- 
-2.34.1
+2.43.0
 

@@ -1,4 +1,4 @@
-From 786eefc26e983d310691ed02d3303fa3d77a1fea Mon Sep 17 00:00:00 2001
+From eb1a5ab6980a4ce74ffc2450d80f71afd89a6a2e Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Fri, 6 Oct 2023 08:25:11 -0400
 Subject: [PATCH 1/2] Revert "Remove 28.0 compat support"
@@ -705,7 +705,7 @@ Change-Id: I2b0c61ced1f9651f74da85d1228d7260cc782c80
  create mode 100644 private/compat/28.0/28.0.ignore.cil
 
 diff --git a/compat/Android.bp b/compat/Android.bp
-index f09fb2137..a71a68b95 100644
+index 28936dd53..72390fcc0 100644
 --- a/compat/Android.bp
 +++ b/compat/Android.bp
 @@ -23,6 +23,13 @@ package {
@@ -34544,5 +34544,5 @@ index 000000000..7213f9542
 +    vrflinger_vsync_service
 +    watchdogd_tmpfs))
 -- 
-2.34.1
+2.43.0
 
