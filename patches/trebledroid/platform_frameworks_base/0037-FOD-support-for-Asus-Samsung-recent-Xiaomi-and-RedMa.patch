@@ -1,7 +1,7 @@
-From 2722149457c9e835f74b2c832d3183865006ed91 Mon Sep 17 00:00:00 2001
+From 4fd47b77373da8fa534f82d32cbf1e624d243cf2 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sun, 18 Dec 2022 18:20:40 -0500
-Subject: [PATCH 37/53] FOD support for Asus, Samsung recent Xiaomi and
+Subject: [PATCH 37/56] FOD support for Asus, Samsung recent Xiaomi and
  RedMagic 8 devices
 
 Thanks Asus for providing a free device to make this support
@@ -29,11 +29,10 @@ Change-Id: I7af81218276c60afbfea6dac702c7bcd584f397a
 ---
  packages/SystemUI/Android.bp                  |   4 +
  .../systemui/biometrics/UdfpsController.java  |  76 ++++-
- .../biometrics/UdfpsControllerOverlay.kt      |   7 +-
  services/core/Android.bp                      |   5 +
  .../server/biometrics/AuthService.java        | 306 +++++++++++++++++-
  .../fingerprint/aidl/FingerprintProvider.java |  23 ++
- 6 files changed, 408 insertions(+), 13 deletions(-)
+ 5 files changed, 402 insertions(+), 12 deletions(-)
 
 diff --git a/packages/SystemUI/Android.bp b/packages/SystemUI/Android.bp
 index 3d250fd82473..0497029b2a3c 100644
@@ -217,31 +216,6 @@ index a9133e45e93f..26feaf7a09f0 100644
              if (isOptical()) {
                  for (Callback cb : mCallbacks) {
                      cb.onFingerUp();
-diff --git a/packages/SystemUI/src/com/android/systemui/biometrics/UdfpsControllerOverlay.kt b/packages/SystemUI/src/com/android/systemui/biometrics/UdfpsControllerOverlay.kt
-index 51eb13947d40..ca7d2d4f33c0 100644
---- a/packages/SystemUI/src/com/android/systemui/biometrics/UdfpsControllerOverlay.kt
-+++ b/packages/SystemUI/src/com/android/systemui/biometrics/UdfpsControllerOverlay.kt
-@@ -157,7 +157,9 @@ constructor(
-                     WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
-                 flags =
-                     (Utils.FINGERPRINT_OVERLAY_LAYOUT_PARAM_FLAGS or
--                        WindowManager.LayoutParams.FLAG_SPLIT_TOUCH)
-+                        WindowManager.LayoutParams.FLAG_SPLIT_TOUCH) or
-+                        WindowManager.LayoutParams.FLAG_DIM_BEHIND
-+                dimAmount = 0.0f
-                 privateFlags =
-                     WindowManager.LayoutParams.PRIVATE_FLAG_TRUSTED_OVERLAY or
-                         WindowManager.LayoutParams.PRIVATE_FLAG_EXCLUDE_FROM_SCREEN_MAGNIFICATION
-@@ -205,6 +207,9 @@ constructor(
-                             }
- 
-                             addViewNowOrLater(this, null)
-+                            dimUpdate = {
-+                                windowManager.updateViewLayout(this, coreLayoutParams.updateDimensions(animation).apply { dimAmount = it })
-+                            }
-                             when (requestReason) {
-                                 REASON_AUTH_KEYGUARD ->
-                                     UdfpsTouchOverlayBinder.bind(
 diff --git a/services/core/Android.bp b/services/core/Android.bp
 index 950882bb5c9c..253d644e007e 100644
 --- a/services/core/Android.bp

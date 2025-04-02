@@ -1,4 +1,4 @@
-From 943c46e64b767cf3e55c8e47481108c0cdb65cbe Mon Sep 17 00:00:00 2001
+From e9443915ac84e3d0693c3ea693455577b047d458 Mon Sep 17 00:00:00 2001
 From: Luca Stefani <luca.stefani.ge1@gmail.com>
 Date: Fri, 1 Nov 2019 23:17:08 +0100
 Subject: [PATCH 2/3] Specify we read and write launcher settings

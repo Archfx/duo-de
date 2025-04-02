@@ -1,7 +1,7 @@
-From 6fa0fa3be8c6b9872643a2e82e69b7b47398887c Mon Sep 17 00:00:00 2001
+From cb743647be1dff587539e4d871abbd039bf7ae3c Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Wed, 21 Feb 2024 16:19:47 -0500
-Subject: [PATCH 47/53] Include vendor.samsung.hardware.radio-V2.2-java HIDL in
+Subject: [PATCH 47/56] Include vendor.samsung.hardware.radio-V2.2-java HIDL in
  base libs, will be used by f/o/telephony
 
 ---

@@ -1,4 +1,4 @@
-From 990e22c107d7144f41c83b39a6e48f2f89248e10 Mon Sep 17 00:00:00 2001
+From f7c568accbeda263954c6494083da15f9506cfb8 Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Tue, 21 Feb 2023 22:51:12 +0000
 Subject: [PATCH 1/2] Import vendor/gapps
@@ -8,7 +8,7 @@ Subject: [PATCH 1/2] Import vendor/gapps
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/generate.sh b/generate.sh
-index 9c20eb5..8fbb16b 100644
+index 461eff1..1e63d8c 100644
 --- a/generate.sh
 +++ b/generate.sh
 @@ -26,7 +26,7 @@ for part in a ab;do
