@@ -1,4 +1,4 @@
-From 1423a40a59b5d849e6161a3e7cdf0de003dcbad9 Mon Sep 17 00:00:00 2001
+From c2957f4297b97e6d9e87b0491d4fff8c792f1529 Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Wed, 25 Dec 2019 12:34:05 +0200
 Subject: [PATCH 2/2] Rework securize tweak
@@ -9,22 +9,22 @@ Subject: [PATCH 2/2] Rework securize tweak
  2 files changed, 30 insertions(+), 20 deletions(-)
 
 diff --git a/base.mk b/base.mk
-index 22525cd..8c0f2be 100644
+index a29e402..1928cdc 100644
 --- a/base.mk
 +++ b/base.mk
-@@ -177,7 +177,6 @@ PRODUCT_PACKAGES += \
- 	resetprop_phh
+@@ -168,7 +168,6 @@ PRODUCT_PACKAGES += \
+     resetprop_phh
  
  PRODUCT_COPY_FILES += \
--	device/phh/treble/phh-securize.sh:system/bin/phh-securize.sh \
- 	device/phh/treble/files/ota.sh:system/bin/ota.sh \
+-    device/phh/treble/phh-securize.sh:system/bin/phh-securize.sh \
+     device/phh/treble/files/ota.sh:system/bin/ota.sh \
  
  PRODUCT_COPY_FILES += \
 diff --git a/rw-system.sh b/rw-system.sh
-index 1e47287..d591190 100644
+index 055c2cd..6903559 100644
 --- a/rw-system.sh
 +++ b/rw-system.sh
-@@ -768,32 +768,59 @@ copyprop() {
+@@ -785,32 +785,59 @@ copyprop() {
          resetprop_phh "$1" "$(getprop "$2")"
      fi
  }
@@ -87,14 +87,14 @@ index 1e47287..d591190 100644
      (getprop ro.vendor.build.security_patch; getprop ro.keymaster.xxx.security_patch) |sort |tail -n 1 |while read v;do
          [ -n "$v" ] && resetprop_phh ro.build.version.security_patch "$v"
      done
-@@ -812,22 +839,6 @@ if [ -f /system/phh/secure ] || [ -f /metadata/phh/secure ];then
+@@ -839,22 +866,6 @@ if [ -f /system/phh/secure ] || [ -f /metadata/phh/secure ];then
  
      resetprop_phh ro.adb.secure 1
  
 -    # Hide system/xbin/su
 -    mount /mnt/phh/empty_dir /system/xbin
 -    mount /mnt/phh/empty_dir /system/app/me.phh.superuser
--    mount /system/phh/empty /system/xbin/phh-su
+-    mount /mnt/phh/empty /system/xbin/phh-su
 -else
 -    mkdir /mnt/phh/xbin
 -    chmod 0755 /mnt/phh/xbin

@@ -1,4 +1,4 @@
-From 2a1172b9978b881b0df6cc000447088f915b02c8 Mon Sep 17 00:00:00 2001
+From 7d029fd5c37fa76e764c23d378faa310c38d3d4b Mon Sep 17 00:00:00 2001
 From: Anay Wadhera <anay1018@gmail.com>
 Date: Tue, 28 Dec 2021 19:34:15 +0900
 Subject: [PATCH 3/3] ThemePicker: Bring back fonts, icon pack, shape
@@ -35,28 +35,28 @@ Change-Id: I60b24f0cd8e898cb6d43ad190cad99a73cb7b2bb
  res/values/dimens.xml                         |   1 +
  .../model/ResourceConstants.java              |   2 -
  .../customization/model/font/FontManager.java | 149 ++++++
- .../customization/model/font/FontOption.java  | 102 ++++
+ .../customization/model/font/FontOption.java  | 101 ++++
  .../model/font/FontOptionProvider.java        | 102 ++++
- .../model/font/FontSectionController.java     | 110 ++++
+ .../model/font/FontSectionController.java     | 108 ++++
  .../model/iconpack/IconPackManager.java       | 141 ++++++
- .../model/iconpack/IconPackOption.java        | 167 +++++++
+ .../model/iconpack/IconPackOption.java        | 166 +++++++
  .../iconpack/IconPackOptionProvider.java      | 145 ++++++
- .../iconpack/IconPackSectionController.java   | 109 ++++
+ .../iconpack/IconPackSectionController.java   | 108 ++++
  .../model/iconshape/IconShapeManager.java     | 137 +++++
- .../model/iconshape/IconShapeOption.java      | 140 ++++++
+ .../model/iconshape/IconShapeOption.java      | 141 ++++++
  .../iconshape/IconShapeOptionProvider.java    | 163 ++++++
- .../iconshape/IconShapeSectionController.java |  95 ++++
+ .../iconshape/IconShapeSectionController.java |  94 ++++
  .../model/theme/ShapeAppIcon.java             |  32 ++
  .../module/DefaultCustomizationSections.java  |  22 +
  .../picker/WallpaperPreviewer.java            | 279 +++++++++++
- .../picker/font/FontFragment.java             | 206 ++++++++
+ .../picker/font/FontFragment.java             | 205 ++++++++
  .../picker/font/FontSectionView.java          |  12 +
  .../picker/iconpack/IconPackFragment.java     | 205 ++++++++
  .../picker/iconpack/IconPackSectionView.java  |  12 +
  .../picker/iconshape/IconShapeFragment.java   | 202 ++++++++
  .../iconshape/IconShapeSectionView.java       |  12 +
  .../widget/OptionSelectorController.java      | 470 ++++++++++++++++++
- 43 files changed, 3988 insertions(+), 2 deletions(-)
+ 43 files changed, 3982 insertions(+), 2 deletions(-)
  create mode 100644 res/drawable/check_circle_accent_24dp.xml
  create mode 100644 res/drawable/check_circle_grey_large.xml
  create mode 100644 res/drawable/ic_check_24dp.xml
@@ -1195,7 +1195,7 @@ index 00000000..850714f3
 +        android:marqueeRepeatLimit="marquee_forever"/>
 +</LinearLayout>
 diff --git a/res/values/dimens.xml b/res/values/dimens.xml
-index 6a923d9a..910eb7e7 100644
+index 4f1062fa..90a5dbbf 100644
 --- a/res/values/dimens.xml
 +++ b/res/values/dimens.xml
 @@ -33,6 +33,7 @@
@@ -1376,10 +1376,10 @@ index 00000000..0f51b24c
 +}
 diff --git a/src/com/android/customization/model/font/FontOption.java b/src/com/android/customization/model/font/FontOption.java
 new file mode 100644
-index 00000000..05e3ad4a
+index 00000000..9f9d3d48
 --- /dev/null
 +++ b/src/com/android/customization/model/font/FontOption.java
-@@ -0,0 +1,102 @@
+@@ -0,0 +1,101 @@
 +/*
 + * Copyright (C) 2019 The Android Open Source Project
 + *
@@ -1407,13 +1407,12 @@ index 00000000..05e3ad4a
 +import android.widget.ImageView;
 +import android.widget.TextView;
 +
-+import com.android.wallpaper.R;
-+import com.android.wallpaper.util.ResourceUtils;
-+
 +import com.android.customization.model.CustomizationManager;
 +import com.android.customization.model.CustomizationOption;
 +import com.android.customization.model.ResourceConstants;
 +import com.android.customization.model.theme.OverlayManagerCompat;
++import com.android.themepicker.R;
++import com.android.wallpaper.util.ResourceUtils;
 +
 +import java.util.ArrayList;
 +import java.util.HashMap;
@@ -1484,7 +1483,7 @@ index 00000000..05e3ad4a
 +}
 diff --git a/src/com/android/customization/model/font/FontOptionProvider.java b/src/com/android/customization/model/font/FontOptionProvider.java
 new file mode 100644
-index 00000000..226fcdf8
+index 00000000..84404b40
 --- /dev/null
 +++ b/src/com/android/customization/model/font/FontOptionProvider.java
 @@ -0,0 +1,102 @@
@@ -1521,7 +1520,7 @@ index 00000000..226fcdf8
 +
 +import com.android.customization.model.ResourceConstants;
 +import com.android.customization.model.theme.OverlayManagerCompat;
-+import com.android.wallpaper.R;
++import com.android.themepicker.R;
 +
 +import java.util.ArrayList;
 +import java.util.HashMap;
@@ -1592,10 +1591,10 @@ index 00000000..226fcdf8
 +}
 diff --git a/src/com/android/customization/model/font/FontSectionController.java b/src/com/android/customization/model/font/FontSectionController.java
 new file mode 100644
-index 00000000..95c2c9b7
+index 00000000..63c7b2f6
 --- /dev/null
 +++ b/src/com/android/customization/model/font/FontSectionController.java
-@@ -0,0 +1,110 @@
+@@ -0,0 +1,108 @@
 +/*
 + * Copyright (C) 2021 The Android Open Source Project
 + *
@@ -1625,15 +1624,13 @@ index 00000000..95c2c9b7
 +import com.android.customization.model.CustomizationManager.Callback;
 +import com.android.customization.model.CustomizationManager.OptionsFetchedListener;
 +import com.android.customization.model.CustomizationOption;
-+import com.android.customization.widget.OptionSelectorController;
-+import com.android.customization.widget.OptionSelectorController.OptionSelectedListener;
-+
-+import com.android.wallpaper.R;
-+import com.android.wallpaper.model.CustomizationSectionController;
-+import com.android.wallpaper.util.LaunchUtils;
-+
 +import com.android.customization.picker.font.FontFragment;
 +import com.android.customization.picker.font.FontSectionView;
++import com.android.customization.widget.OptionSelectorController;
++import com.android.customization.widget.OptionSelectorController.OptionSelectedListener;
++import com.android.themepicker.R;
++import com.android.wallpaper.model.CustomizationSectionController;
++import com.android.wallpaper.util.LaunchUtils;
 +
 +import java.util.List;
 +
@@ -1855,10 +1852,10 @@ index 00000000..affdc73e
 +}
 diff --git a/src/com/android/customization/model/iconpack/IconPackOption.java b/src/com/android/customization/model/iconpack/IconPackOption.java
 new file mode 100644
-index 00000000..ba83e1ad
+index 00000000..0f0da152
 --- /dev/null
 +++ b/src/com/android/customization/model/iconpack/IconPackOption.java
-@@ -0,0 +1,167 @@
+@@ -0,0 +1,166 @@
 +/*
 + * Copyright (C) 2019 The Android Open Source Project
 + *
@@ -1893,13 +1890,12 @@ index 00000000..ba83e1ad
 +import android.widget.ImageView;
 +import android.widget.TextView;
 +
-+import com.android.wallpaper.R;
-+import com.android.wallpaper.util.ResourceUtils;
-+
 +import com.android.customization.model.CustomizationManager;
 +import com.android.customization.model.CustomizationOption;
 +import com.android.customization.model.ResourceConstants;
 +import com.android.customization.model.theme.OverlayManagerCompat;
++import com.android.themepicker.R;
++import com.android.wallpaper.util.ResourceUtils;
 +
 +import java.util.ArrayList;
 +import java.util.HashMap;
@@ -2028,7 +2024,7 @@ index 00000000..ba83e1ad
 +}
 diff --git a/src/com/android/customization/model/iconpack/IconPackOptionProvider.java b/src/com/android/customization/model/iconpack/IconPackOptionProvider.java
 new file mode 100644
-index 00000000..ef251820
+index 00000000..dabbdb9f
 --- /dev/null
 +++ b/src/com/android/customization/model/iconpack/IconPackOptionProvider.java
 @@ -0,0 +1,145 @@
@@ -2066,7 +2062,7 @@ index 00000000..ef251820
 +
 +import com.android.customization.model.ResourceConstants;
 +import com.android.customization.model.theme.OverlayManagerCompat;
-+import com.android.wallpaper.R;
++import com.android.themepicker.R;
 +
 +import java.util.ArrayList;
 +import java.util.HashMap;
@@ -2179,10 +2175,10 @@ index 00000000..ef251820
 +}
 diff --git a/src/com/android/customization/model/iconpack/IconPackSectionController.java b/src/com/android/customization/model/iconpack/IconPackSectionController.java
 new file mode 100644
-index 00000000..c84d5ed9
+index 00000000..c0256a7d
 --- /dev/null
 +++ b/src/com/android/customization/model/iconpack/IconPackSectionController.java
-@@ -0,0 +1,109 @@
+@@ -0,0 +1,108 @@
 +/*
 + * Copyright (C) 2021 The Android Open Source Project
 + *
@@ -2216,8 +2212,7 @@ index 00000000..c84d5ed9
 +import com.android.customization.picker.iconpack.IconPackSectionView;
 +import com.android.customization.widget.OptionSelectorController;
 +import com.android.customization.widget.OptionSelectorController.OptionSelectedListener;
-+
-+import com.android.wallpaper.R;
++import com.android.themepicker.R;
 +import com.android.wallpaper.model.CustomizationSectionController;
 +import com.android.wallpaper.util.LaunchUtils;
 +
@@ -2437,10 +2432,10 @@ index 00000000..3ab510cb
 +}
 diff --git a/src/com/android/customization/model/iconshape/IconShapeOption.java b/src/com/android/customization/model/iconshape/IconShapeOption.java
 new file mode 100644
-index 00000000..f9624fb9
+index 00000000..7cd34434
 --- /dev/null
 +++ b/src/com/android/customization/model/iconshape/IconShapeOption.java
-@@ -0,0 +1,140 @@
+@@ -0,0 +1,141 @@
 +/*
 + * Copyright (C) 2019 The Android Open Source Project
 + *
@@ -2476,13 +2471,12 @@ index 00000000..f9624fb9
 +
 +import androidx.core.graphics.ColorUtils;
 +
-+import com.android.customization.model.theme.ShapeAppIcon;
-+import com.android.wallpaper.R;
-+import com.android.wallpaper.util.ResourceUtils;
-+
 +import com.android.customization.model.CustomizationManager;
 +import com.android.customization.model.CustomizationOption;
 +import com.android.customization.model.theme.OverlayManagerCompat;
++import com.android.customization.model.theme.ShapeAppIcon;
++import com.android.themepicker.R;
++import com.android.wallpaper.util.ResourceUtils;
 +
 +import java.util.List;
 +import java.util.Objects;
@@ -2524,10 +2518,12 @@ index 00000000..f9624fb9
 +        }
 +
 +        Resources.Theme theme = view.getContext().getTheme();
-+        int borderWidth = 2 * res.getDimensionPixelSize(R.dimen.option_border_width);
++        int borderWidth = 2 * res.getDimensionPixelSize(
++                com.android.wallpaper.R.dimen.option_border_width);
 +
 +        Drawable background = mShape.getDrawable(0);
-+        background.setTintList(res.getColorStateList(R.color.option_border_color, theme));
++        background.setTintList(res.getColorStateList(
++                com.android.wallpaper.R.color.option_border_color, theme));
 +
 +        ShapeDrawable foreground = (ShapeDrawable) mShape.getDrawable(1);
 +
@@ -2583,7 +2579,7 @@ index 00000000..f9624fb9
 +}
 diff --git a/src/com/android/customization/model/iconshape/IconShapeOptionProvider.java b/src/com/android/customization/model/iconshape/IconShapeOptionProvider.java
 new file mode 100644
-index 00000000..6324cb2a
+index 00000000..4d8804dc
 --- /dev/null
 +++ b/src/com/android/customization/model/iconshape/IconShapeOptionProvider.java
 @@ -0,0 +1,163 @@
@@ -2632,7 +2628,7 @@ index 00000000..6324cb2a
 +import com.android.customization.model.theme.OverlayManagerCompat;
 +import com.android.customization.model.theme.ShapeAppIcon;
 +import com.android.customization.widget.DynamicAdaptiveIconDrawable;
-+import com.android.wallpaper.R;
++import com.android.themepicker.R;
 +
 +import java.util.ArrayList;
 +import java.util.List;
@@ -2752,10 +2748,10 @@ index 00000000..6324cb2a
 +}
 diff --git a/src/com/android/customization/model/iconshape/IconShapeSectionController.java b/src/com/android/customization/model/iconshape/IconShapeSectionController.java
 new file mode 100644
-index 00000000..3741cc17
+index 00000000..0656893a
 --- /dev/null
 +++ b/src/com/android/customization/model/iconshape/IconShapeSectionController.java
-@@ -0,0 +1,95 @@
+@@ -0,0 +1,94 @@
 +/*
 + * Copyright (C) 2021 The Android Open Source Project
 + *
@@ -2785,8 +2781,7 @@ index 00000000..3741cc17
 +import com.android.customization.model.CustomizationManager.OptionsFetchedListener;
 +import com.android.customization.picker.iconshape.IconShapeFragment;
 +import com.android.customization.picker.iconshape.IconShapeSectionView;
-+
-+import com.android.wallpaper.R;
++import com.android.themepicker.R;
 +import com.android.wallpaper.model.CustomizationSectionController;
 +
 +import java.util.List;
@@ -3217,10 +3212,10 @@ index 00000000..18bc89c7
 +}
 diff --git a/src/com/android/customization/picker/font/FontFragment.java b/src/com/android/customization/picker/font/FontFragment.java
 new file mode 100644
-index 00000000..fccbab8c
+index 00000000..b07c34c7
 --- /dev/null
 +++ b/src/com/android/customization/picker/font/FontFragment.java
-@@ -0,0 +1,206 @@
+@@ -0,0 +1,205 @@
 +/*
 + * Copyright (C) 2018 The Android Open Source Project
 + *
@@ -3255,17 +3250,16 @@ index 00000000..fccbab8c
 +import com.android.customization.model.CustomizationManager.Callback;
 +import com.android.customization.model.CustomizationManager.OptionsFetchedListener;
 +import com.android.customization.model.CustomizationOption;
++import com.android.customization.model.font.FontOption;
++import com.android.customization.model.font.FontManager;
 +import com.android.customization.model.theme.OverlayManagerCompat;
 +import com.android.customization.module.logging.ThemesUserEventLogger;
 +import com.android.customization.picker.WallpaperPreviewer;
 +import com.android.customization.widget.OptionSelectorController;
 +import com.android.customization.widget.OptionSelectorController.CheckmarkStyle;
-+import com.android.wallpaper.R;
++import com.android.themepicker.R;
 +import com.android.wallpaper.picker.AppbarFragment;
 +import com.android.wallpaper.widget.BottomActionBar;
-+
-+import com.android.customization.model.font.FontOption;
-+import com.android.customization.model.font.FontManager;
 +
 +import java.util.List;
 +
@@ -3447,7 +3441,7 @@ index 00000000..f1c76b85
 +}
 diff --git a/src/com/android/customization/picker/iconpack/IconPackFragment.java b/src/com/android/customization/picker/iconpack/IconPackFragment.java
 new file mode 100644
-index 00000000..88951812
+index 00000000..6808dc3d
 --- /dev/null
 +++ b/src/com/android/customization/picker/iconpack/IconPackFragment.java
 @@ -0,0 +1,205 @@
@@ -3492,7 +3486,7 @@ index 00000000..88951812
 +import com.android.customization.picker.WallpaperPreviewer;
 +import com.android.customization.widget.OptionSelectorController;
 +import com.android.customization.widget.OptionSelectorController.CheckmarkStyle;
-+import com.android.wallpaper.R;
++import com.android.themepicker.R;
 +import com.android.wallpaper.picker.AppbarFragment;
 +import com.android.wallpaper.widget.BottomActionBar;
 +
@@ -3676,7 +3670,7 @@ index 00000000..7e626f50
 +}
 diff --git a/src/com/android/customization/picker/iconshape/IconShapeFragment.java b/src/com/android/customization/picker/iconshape/IconShapeFragment.java
 new file mode 100644
-index 00000000..257bb390
+index 00000000..057c68cc
 --- /dev/null
 +++ b/src/com/android/customization/picker/iconshape/IconShapeFragment.java
 @@ -0,0 +1,202 @@
@@ -3718,7 +3712,7 @@ index 00000000..257bb390
 +import com.android.customization.model.theme.OverlayManagerCompat;
 +import com.android.customization.widget.OptionSelectorController;
 +import com.android.customization.widget.OptionSelectorController.CheckmarkStyle;
-+import com.android.wallpaper.R;
++import com.android.themepicker.R;
 +import com.android.wallpaper.picker.AppbarFragment;
 +import com.android.wallpaper.widget.BottomActionBar;
 +
@@ -3902,7 +3896,7 @@ index 00000000..654b0d08
 +}
 diff --git a/src/com/android/customization/widget/OptionSelectorController.java b/src/com/android/customization/widget/OptionSelectorController.java
 new file mode 100644
-index 00000000..6eb052c0
+index 00000000..e307bc3a
 --- /dev/null
 +++ b/src/com/android/customization/widget/OptionSelectorController.java
 @@ -0,0 +1,470 @@
@@ -3951,7 +3945,7 @@ index 00000000..6eb052c0
 +
 +import com.android.customization.model.CustomizationManager;
 +import com.android.customization.model.CustomizationOption;
-+import com.android.wallpaper.R;
++import com.android.themepicker.R;
 +
 +import java.util.HashSet;
 +import java.util.List;
