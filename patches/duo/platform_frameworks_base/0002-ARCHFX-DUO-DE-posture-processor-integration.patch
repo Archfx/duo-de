@@ -1,23 +1,23 @@
-From e22a67ef10063404a9aefcf1c46b3123430efed2 Mon Sep 17 00:00:00 2001
+From 7b9a2d416c67e8047be7593c29c606e3e0d87867 Mon Sep 17 00:00:00 2001
 From: Archfx <cybx@live.com>
-Date: Sun, 5 Jan 2025 00:00:36 -0500
+Date: Tue, 1 Apr 2025 18:02:48 -0400
 Subject: [PATCH] ARCHFX/DUO-DE posture processor integration
 
-Change-Id: I4525b14c3cd6944547a7e3dc800642016c674c95
+Change-Id: I3bbb47e9cd7060478bbbd84c15e6817a84a9ddaf
 ---
  .../display/DisplayManagerGlobal.java         | 17 +++++++++++++++++
- .../hardware/display/IDisplayManager.aidl     |  3 +++
- .../window/common/CommonFoldingFeature.java   |  2 +-
+ .../hardware/display/IDisplayManager.aidl     |  4 ++++
+ .../common/layout/CommonFoldingFeature.java   |  2 +-
  .../server/display/DisplayManagerService.java | 19 +++++++++++++++++++
  .../policy/DeviceStateProviderImpl.java       |  6 ++++++
  .../java/com/android/server/SystemServer.java | 15 +++++++++++++++
- 6 files changed, 61 insertions(+), 1 deletion(-)
+ 6 files changed, 62 insertions(+), 1 deletion(-)
 
 diff --git a/core/java/android/hardware/display/DisplayManagerGlobal.java b/core/java/android/hardware/display/DisplayManagerGlobal.java
-index 85197221e651..d5a7eb19ff71 100644
+index ffa546067eff..fc36a561ad41 100644
 --- a/core/java/android/hardware/display/DisplayManagerGlobal.java
 +++ b/core/java/android/hardware/display/DisplayManagerGlobal.java
-@@ -34,6 +34,8 @@ import android.content.res.Resources;
+@@ -40,6 +40,8 @@ import android.content.res.Resources;
  import android.graphics.ColorSpace;
  import android.graphics.Point;
  import android.hardware.OverlayProperties;
@@ -26,20 +26,20 @@ index 85197221e651..d5a7eb19ff71 100644
  import android.hardware.display.DisplayManager.DisplayListener;
  import android.hardware.graphics.common.DisplayDecorationSupport;
  import android.media.projection.IMediaProjection;
-@@ -119,6 +121,9 @@ public final class DisplayManagerGlobal {
+@@ -155,6 +157,9 @@ public final class DisplayManagerGlobal {
      @UnsupportedAppUsage
      private static DisplayManagerGlobal sInstance;
-
+ 
 +    @UnsupportedAppUsage
 +    private static IDisplayManager sDisplayManagerService;
 +
      // Guarded by mLock
      private boolean mDispatchNativeCallbacks = false;
      private float mNativeCallbackReportedRefreshRate;
-@@ -189,6 +194,18 @@ public final class DisplayManagerGlobal {
+@@ -234,6 +239,18 @@ public final class DisplayManagerGlobal {
          }
      }
-
+ 
 +    @UnsupportedAppUsage
 +    public static IDisplayManager getDisplayManagerService() {
 +        synchronized (DisplayManagerGlobal.class) {
@@ -56,39 +56,40 @@ index 85197221e651..d5a7eb19ff71 100644
       * Get information about a particular logical display.
       *
 diff --git a/core/java/android/hardware/display/IDisplayManager.aidl b/core/java/android/hardware/display/IDisplayManager.aidl
-index b7c02b0d0720..527a232e742e 100644
+index 4fbdf7f5afc8..dc7d7f7431c9 100644
 --- a/core/java/android/hardware/display/IDisplayManager.aidl
 +++ b/core/java/android/hardware/display/IDisplayManager.aidl
-@@ -220,6 +220,9 @@ interface IDisplayManager {
+@@ -221,6 +221,10 @@ interface IDisplayManager {
      // Query for DISPLAY_DECORATION support.
      DisplayDecorationSupport getDisplayDecorationSupport(int displayId);
-
+ 
 +    // set display offsets for logical display
 +    void setDisplayOffsets(int displayId, int x, int y);
++
 +
      // This method is to support behavior that was calling hidden APIs. The caller was requesting
      // to set the layerStack after the display was created, which is not something we support in
      // DMS. This should be deleted in V release.
-diff --git a/libs/WindowManager/Jetpack/src/androidx/window/common/CommonFoldingFeature.java b/libs/WindowManager/Jetpack/src/androidx/window/common/CommonFoldingFeature.java
-index e37dea4dfd69..9803ba1f0af8 100644
+diff --git a/libs/WindowManager/Jetpack/src/androidx/window/common/layout/CommonFoldingFeature.java b/libs/WindowManager/Jetpack/src/androidx/window/common/layout/CommonFoldingFeature.java
+index 252974dd474e..ee88b9400f7c 100644
 --- a/libs/WindowManager/Jetpack/src/androidx/window/common/layout/CommonFoldingFeature.java
 +++ b/libs/WindowManager/Jetpack/src/androidx/window/common/layout/CommonFoldingFeature.java
-@@ -213,7 +213,7 @@ public final class CommonFoldingFeature {
-     private final Rect mRect;
-
-     CommonFoldingFeature(int type, @State int state, @NonNull Rect rect) {
+@@ -215,7 +215,7 @@ public final class CommonFoldingFeature {
+ 
+     @VisibleForTesting
+     public CommonFoldingFeature(int type, @State int state, @NonNull Rect rect) {
 -        assertReportableState(state);
 +        // assertReportableState(state);
          this.mType = type;
          this.mState = state;
          if (rect.width() == 0 && rect.height() == 0) {
 diff --git a/services/core/java/com/android/server/display/DisplayManagerService.java b/services/core/java/com/android/server/display/DisplayManagerService.java
-index ae33b83b49dc..dd17b0108e66 100644
+index 452dc5f97d12..749016071f10 100644
 --- a/services/core/java/com/android/server/display/DisplayManagerService.java
 +++ b/services/core/java/com/android/server/display/DisplayManagerService.java
-@@ -4874,6 +4874,25 @@ public final class DisplayManagerService extends SystemService {
+@@ -5363,6 +5363,25 @@ public final class DisplayManagerService extends SystemService {
+                 mDisplayTopologyCoordinator.setTopology(topology);
              }
-             return ddc.getDefaultDozeBrightness();
          }
 +
 +        @Override
@@ -110,16 +111,16 @@ index ae33b83b49dc..dd17b0108e66 100644
 +            }
 +        }
      }
-
+ 
      @VisibleForTesting
 diff --git a/services/core/java/com/android/server/policy/DeviceStateProviderImpl.java b/services/core/java/com/android/server/policy/DeviceStateProviderImpl.java
-index 453c6ef41437..ec7fcecdf573 100644
+index e75f852eb437..eb2c64db63eb 100644
 --- a/services/core/java/com/android/server/policy/DeviceStateProviderImpl.java
 +++ b/services/core/java/com/android/server/policy/DeviceStateProviderImpl.java
-@@ -765,6 +765,12 @@ public final class DeviceStateProviderImpl implements DeviceStateProvider,
+@@ -770,6 +770,12 @@ public final class DeviceStateProviderImpl implements DeviceStateProvider,
              return configFileFromDataDir;
          }
-
+ 
 +        final File configFileFromSystemDir = Environment.buildPath(Environment.getRootDirectory(),
 +                VENDOR_CONFIG_FILE_PATH, CONFIG_FILE_NAME);
 +        if (configFileFromSystemDir .exists()) {
@@ -130,13 +131,13 @@ index 453c6ef41437..ec7fcecdf573 100644
                  VENDOR_CONFIG_FILE_PATH, CONFIG_FILE_NAME);
          if (configFileFromVendorDir.exists()) {
 diff --git a/services/java/com/android/server/SystemServer.java b/services/java/com/android/server/SystemServer.java
-index 107c2947c550..92e85837b8de 100644
+index 92dbf63b3cf7..df6114fb4248 100644
 --- a/services/java/com/android/server/SystemServer.java
 +++ b/services/java/com/android/server/SystemServer.java
-@@ -2951,6 +2951,14 @@ public final class SystemServer implements Dumpable {
+@@ -3076,6 +3076,14 @@ public final class SystemServer implements Dumpable {
          }
          t.traceEnd();
-
+ 
 +        t.traceBegin("PostureProcessorService");
 +        try {
 +            startPostureProcessor(context);
@@ -145,13 +146,13 @@ index 107c2947c550..92e85837b8de 100644
 +        }
 +        t.traceEnd();
 +
-         t.traceBegin("GameManagerService");
-         mSystemServiceManager.startService(GameManagerService.Lifecycle.class);
-         t.traceEnd();
-@@ -3460,6 +3468,13 @@ public final class SystemServer implements Dumpable {
+         if (!isWatch || !android.server.Flags.removeGameManagerServiceFromWear()) {
+             t.traceBegin("GameManagerService");
+             mSystemServiceManager.startService(GameManagerService.Lifecycle.class);
+@@ -3598,6 +3606,13 @@ public final class SystemServer implements Dumpable {
          t.traceEnd();
      }
-
+ 
 +    private static void startPostureProcessor(Context context) {
 +        PackageManagerInternal pm = LocalServices.getService(PackageManagerInternal.class);
 +        Intent intent = new Intent();
@@ -162,6 +163,6 @@ index 107c2947c550..92e85837b8de 100644
      private static void startSystemUi(Context context, WindowManagerService windowManager) {
          PackageManagerInternal pm = LocalServices.getService(PackageManagerInternal.class);
          Intent intent = new Intent();
---
+-- 
 2.34.1
 

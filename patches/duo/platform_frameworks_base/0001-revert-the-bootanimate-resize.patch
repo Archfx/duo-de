@@ -1,66 +1,45 @@
-From 5482d1cd1ee36e1533446ab9815f7dbffce29e5e Mon Sep 17 00:00:00 2001
+From 1d4c12e8c4daa7ac7c8a6bff42f7de85a8a4bfde Mon Sep 17 00:00:00 2001
 From: Archfx <cybx@live.com>
-Date: Sat, 7 Dec 2024 01:06:14 -0500
+Date: Tue, 1 Apr 2025 17:51:44 -0400
 Subject: [PATCH] revert the bootanimate resize
 
-Change-Id: I772bc0029f6808e6f320e6d23a45eba4ce8541b3
+Change-Id: I887cb776f34bd02f4e140be61d316fadc9f01f0e
 ---
- cmds/bootanimation/BootAnimation.cpp | 42 ++++++++++++++--------------
- 1 file changed, 21 insertions(+), 21 deletions(-)
+ cmds/bootanimation/BootAnimation.cpp | 21 ---------------------
+ 1 file changed, 21 deletions(-)
 
 diff --git a/cmds/bootanimation/BootAnimation.cpp b/cmds/bootanimation/BootAnimation.cpp
-index d2611e25f9d2..040d782482a9 100644
+index 349652c8fc76..efcdf83c4da2 100644
 --- a/cmds/bootanimation/BootAnimation.cpp
 +++ b/cmds/bootanimation/BootAnimation.cpp
-@@ -618,27 +618,27 @@ status_t BootAnimation::readyToRun() {
-     mFlingerSurface = s;
-     mTargetInset = -1;
-
--    if ( mAnimation != nullptr ) {
--        SLOGE("Got screen size %d, animation size %d", mWidth, mAnimation->width);
--        int origWidth = mAnimation->width;
--        if ( mAnimation->width*2 < mWidth ) {
--            SLOGE("Making animation bigger");
--            mAnimation->width *= 2;
--            mAnimation->height *= 2;
--        } else if ( mWidth < mAnimation->width ) {
--            SLOGE("Making animation smaller");
--            mAnimation->width /= 2;
--            mAnimation->height /= 2;
--        }
--        for (Animation::Part& part : mAnimation->parts) {
--            for(auto& frame: part.frames) {
--                if(frame.trimWidth == origWidth && frame.trimX == 0 && frame.trimY == 0) {
--                    frame.trimWidth = mAnimation->width;
--                    frame.trimHeight = mAnimation->height;
+@@ -578,27 +578,6 @@ status_t BootAnimation::initDisplaysAndSurfaces() {
+         display.initHeight = display.height = h;
+         mTargetInset = -1;
+ 
+-        if ( mAnimation != nullptr ) {
+-            SLOGE("Got screen size %d, animation size %d", mWidth, mAnimation->width);
+-            int origWidth = mAnimation->width;
+-            if ( mAnimation->width*2 < mWidth ) {
+-                SLOGE("Making animation bigger");
+-                mAnimation->width *= 2;
+-                mAnimation->height *= 2;
+-            } else if ( mWidth < mAnimation->width ) {
+-                SLOGE("Making animation smaller");
+-                mAnimation->width /= 2;
+-                mAnimation->height /= 2;
+-            }
+-            for (Animation::Part& part : mAnimation->parts) {
+-                for(auto& frame: part.frames) {
+-                    if(frame.trimWidth == origWidth && frame.trimX == 0 && frame.trimY == 0) {
+-                        frame.trimWidth = mAnimation->width;
+-                        frame.trimHeight = mAnimation->height;
+-                    }
 -                }
 -            }
 -        }
--    }
-+    // if ( mAnimation != nullptr ) {
-+    //     SLOGE("Got screen size %d, animation size %d", mWidth, mAnimation->width);
-+    //     int origWidth = mAnimation->width;
-+    //     if ( mAnimation->width*2 < mWidth ) {
-+    //         SLOGE("Making animation bigger");
-+    //         mAnimation->width *= 2;
-+    //         mAnimation->height *= 2;
-+    //     } else if ( mWidth < mAnimation->width ) {
-+    //         SLOGE("Making animation smaller");
-+    //         mAnimation->width /= 2;
-+    //         mAnimation->height /= 2;
-+    //     }
-+    //     for (Animation::Part& part : mAnimation->parts) {
-+    //         for(auto& frame: part.frames) {
-+    //             if(frame.trimWidth == origWidth && frame.trimX == 0 && frame.trimY == 0) {
-+    //                 frame.trimWidth = mAnimation->width;
-+    //                 frame.trimHeight = mAnimation->height;
-+    //             }
-+    //         }
-+    //     }
-+    // }
-
-     // Rotate the boot animation according to the value specified in the sysprop
-     // ro.bootanim.set_orientation_<display_id>. Four values are supported: ORIENTATION_0,
---
+ 
+         // Rotate the boot animation according to the value specified in the sysprop
+         // ro.bootanim.set_orientation_<display_id>. Four values are supported: ORIENTATION_0,
+-- 
 2.34.1
 

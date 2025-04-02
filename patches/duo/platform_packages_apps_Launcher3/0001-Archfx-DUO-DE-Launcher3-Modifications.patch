@@ -1,21 +1,21 @@
-From 550671e384eb91080a8df02694adf04abeaa6c08 Mon Sep 17 00:00:00 2001
+From dfec2d1ff48940192d4f7b032b025a8bcfb69e8c Mon Sep 17 00:00:00 2001
 From: Archfx <cybx@live.com>
-Date: Tue, 7 Jan 2025 13:57:55 -0500
-Subject: [PATCH] Archfx DUO-DE Launcher Modifications
+Date: Wed, 2 Apr 2025 10:20:19 -0400
+Subject: [PATCH] Archfx DUO-DE Launcher3 Modifications
 
-Change-Id: I6fd513dede9cfc80993613ac760f78ad72568237
+Change-Id: I26f9e98f60c3eb24cc255a33a2b2fc07949b4891
 ---
  AndroidManifest.xml                           |  8 +++
  .../res/xml/indexable_launcher_prefs.xml      |  2 +-
- res/values/strings.xml                        |  5 ++
- res/xml/launcher_preferences.xml              | 19 +++++-
+ res/values/strings.xml                        |  6 ++
+ res/xml/launcher_preferences.xml              | 18 +++++-
  src/com/android/launcher3/DeviceProfile.java  | 10 ++-
  .../android/launcher3/LauncherAppState.java   | 19 ++++++
- .../allapps/AllAppsTransitionController.java  | 23 +++++++
+ .../allapps/AllAppsTransitionController.java  | 27 ++++++++
  .../touch/WorkspaceTouchListener.java         | 56 ++++++++++++++++
- .../util/ActivityOptionsWrapper.java          | 65 +++++++++++++++++++
+ .../util/ActivityOptionsWrapper.java          | 64 +++++++++++++++++++
  .../launcher3/views/ActivityContext.java      |  3 +
- 10 files changed, 206 insertions(+), 4 deletions(-)
+ 10 files changed, 209 insertions(+), 4 deletions(-)
 
 diff --git a/AndroidManifest.xml b/AndroidManifest.xml
 index 89291c1ff9..1317970450 100644
@@ -24,7 +24,7 @@ index 89291c1ff9..1317970450 100644
 @@ -72,5 +72,13 @@
                  android:value="${packageName}.grid_control" />
          </activity>
-
+ 
 +        <!-- Receiver for restart intent by Archfx -->
 +        <receiver android:name=".RestartReceiver"
 +            android:exported="true">
@@ -46,16 +46,17 @@ index b4740e5b51..aa1fd4d461 100644
 -        android:defaultValue="false"
 +        android:defaultValue="true"
          android:persistent="true" />
-
+ 
  </PreferenceScreen>
 diff --git a/res/values/strings.xml b/res/values/strings.xml
-index 9d0602169c..49f214531a 100644
+index cdfbefea64..aad4015339 100644
 --- a/res/values/strings.xml
 +++ b/res/values/strings.xml
-@@ -510,4 +510,9 @@
+@@ -533,4 +533,10 @@
      <string name="ps_add_button_label">Install</string>
      <!-- Content description for install app icon -->
      <string name="ps_add_button_content_description">Install apps to Private Space</string>
++
 +    <!-- DUO-DE Strings for the app launch mode -->
 +    <string name="allow_freeform_mode_tablet">Tablet Mode Floating Windows</string>
 +    <string name="allow_freeform_mode_tablet_desc">Enable desktop mode in Book and Slate Postures</string>
@@ -63,10 +64,10 @@ index 9d0602169c..49f214531a 100644
 +    <string name="allow_freeform_mode_phone_desc">Enable desktop mode in Tent, Ramp, and Brochure Postures</string>
  </resources>
 diff --git a/res/xml/launcher_preferences.xml b/res/xml/launcher_preferences.xml
-index 284ab9e718..9e89b83a41 100644
+index 284ab9e718..25c5a05e1c 100644
 --- a/res/xml/launcher_preferences.xml
 +++ b/res/xml/launcher_preferences.xml
-@@ -45,9 +45,26 @@
+@@ -45,9 +45,25 @@
          android:key="pref_allowRotation"
          android:title="@string/allow_rotation_title"
          android:summary="@string/allow_rotation_desc"
@@ -75,7 +76,7 @@ index 284ab9e718..9e89b83a41 100644
          android:persistent="true"
          launcher:logIdOn="615"
          launcher:logIdOff="616" />
-
+ 
 +    <SwitchPreference
 +        android:key="allow_freeform_mode_tablet"
 +        android:title="@string/allow_freeform_mode_tablet"
@@ -92,25 +93,24 @@ index 284ab9e718..9e89b83a41 100644
 +        android:summary="@string/allow_freeform_mode_phone_desc"
 +        />
 +
-+
  </androidx.preference.PreferenceScreen>
 diff --git a/src/com/android/launcher3/DeviceProfile.java b/src/com/android/launcher3/DeviceProfile.java
-index 483f5f84d2..68fcdbc608 100644
+index 6ef5e8a236..12440a67b3 100644
 --- a/src/com/android/launcher3/DeviceProfile.java
 +++ b/src/com/android/launcher3/DeviceProfile.java
-@@ -74,6 +74,8 @@ import java.io.PrintWriter;
+@@ -78,6 +78,8 @@ import java.io.PrintWriter;
  import java.util.Locale;
  import java.util.function.Consumer;
-
+ 
 +import com.android.quickstep.util.TriggerSwipeUpTouchTracker;
 +
  @SuppressLint("NewApi")
  public class DeviceProfile {
-
-@@ -828,8 +830,12 @@ public class DeviceProfile {
+ 
+@@ -833,8 +835,12 @@ public class DeviceProfile {
          }
-
-         if (isTablet) {
+ 
+         if (shouldShowAllAppsOnSheet()) {
 -            allAppsPadding.top = mInsets.top;
 -            allAppsShiftRange = heightPx;
 +            float allAppsHeightScale = 0.7f;
@@ -123,13 +123,13 @@ index 483f5f84d2..68fcdbc608 100644
              allAppsPadding.top = 0;
              allAppsShiftRange =
 diff --git a/src/com/android/launcher3/LauncherAppState.java b/src/com/android/launcher3/LauncherAppState.java
-index 15641ab516..02ee22eb1e 100644
+index a53238da3a..3696bcf357 100644
 --- a/src/com/android/launcher3/LauncherAppState.java
 +++ b/src/com/android/launcher3/LauncherAppState.java
-@@ -92,6 +92,14 @@ public class LauncherAppState implements SafeCloseable {
+@@ -99,6 +99,14 @@ public class LauncherAppState implements SafeCloseable {
          return mContext;
      }
-
+ 
 +    public void restartLauncher(Context context) {
 +        // Restart the launcher
 +        MODEL_EXECUTOR.execute(() -> {
@@ -141,10 +141,10 @@ index 15641ab516..02ee22eb1e 100644
      @SuppressWarnings("NewApi")
      public LauncherAppState(Context context) {
          this(context, LauncherFiles.APP_ICONS_DB);
-@@ -106,6 +114,17 @@ public class LauncherAppState implements SafeCloseable {
+@@ -113,6 +121,17 @@ public class LauncherAppState implements SafeCloseable {
              }
          });
-
+ 
 +        // Add RestartReceiver to listen for restart intent
 +        SimpleBroadcastReceiver restartReceiver = new SimpleBroadcastReceiver(UI_HELPER_EXECUTOR, intent -> {
 +            if ("com.thain.duo.LAUNCHER_RESTART".equals(intent.getAction())) {
@@ -160,13 +160,13 @@ index 15641ab516..02ee22eb1e 100644
          LauncherApps launcherApps = mContext.getSystemService(LauncherApps.class);
          launcherApps.registerCallback(callbacks);
 diff --git a/src/com/android/launcher3/allapps/AllAppsTransitionController.java b/src/com/android/launcher3/allapps/AllAppsTransitionController.java
-index c6852e015c..f849c951f2 100644
+index 8554de566d..78b11fe9b6 100644
 --- a/src/com/android/launcher3/allapps/AllAppsTransitionController.java
 +++ b/src/com/android/launcher3/allapps/AllAppsTransitionController.java
-@@ -65,6 +65,13 @@ import com.android.launcher3.util.Themes;
- import com.android.launcher3.util.VibratorWrapper;
- import com.android.launcher3.views.ScrimView;
-
+@@ -65,6 +65,13 @@ import com.android.launcher3.views.ScrimView;
+ 
+ import com.google.android.msdl.data.model.MSDLToken;
+ 
 +import com.android.launcher3.allapps.ActivityAllAppsContainerView;
 +import com.android.launcher3.R;
 +import android.widget.FrameLayout;
@@ -177,15 +177,19 @@ index c6852e015c..f849c951f2 100644
  /**
   * Handles AllApps view transition.
   * 1) Slides all apps view using direct manipulation
-@@ -218,6 +225,22 @@ public class AllAppsTransitionController
+@@ -217,6 +224,26 @@ public class AllAppsTransitionController
          }
-
-         mIsTablet = dp.isTablet;
+ 
+         mShouldShowAllAppsOnSheet = dp.shouldShowAllAppsOnSheet();
++
 +        if (mLauncher.getStateManager().getState() == ALL_APPS) {
 +            resetAllAppsMargins();
 +        }
 +    }
 +
++    /**
++     * Resets the margins of all apps view to full screen for ARCHFX/DUO-DE.
++     */
 +    private void resetAllAppsMargins() {
 +        ActivityAllAppsContainerView<Launcher> mAppsView = mLauncher.findViewById(R.id.apps_view);
 +        View mBottomSheetBackground = mLauncher.findViewById(R.id.bottom_sheet_background);
@@ -198,10 +202,10 @@ index c6852e015c..f849c951f2 100644
 +        mAppsView.setLayoutParams(params);
 +        mBottomSheetBackground.setLayoutParams(backgroundParams);
      }
-
+ 
      /**
 diff --git a/src/com/android/launcher3/touch/WorkspaceTouchListener.java b/src/com/android/launcher3/touch/WorkspaceTouchListener.java
-index 0ff10c26a5..062923fa8a 100644
+index 0ff10c26a5..4c13d71503 100644
 --- a/src/com/android/launcher3/touch/WorkspaceTouchListener.java
 +++ b/src/com/android/launcher3/touch/WorkspaceTouchListener.java
 @@ -47,6 +47,17 @@ import com.android.launcher3.logger.LauncherAtom;
@@ -219,7 +223,7 @@ index 0ff10c26a5..062923fa8a 100644
 +import android.util.DisplayMetrics;
 +import android.widget.FrameLayout;
 +import android.widget.RelativeLayout;
-
+ 
  /**
   * Helper class to handle touch on empty space in workspace and show options popup on long press
 @@ -92,6 +103,9 @@ public class WorkspaceTouchListener extends GestureDetector.SimpleOnGestureListe
@@ -229,13 +233,13 @@ index 0ff10c26a5..062923fa8a 100644
 +            boolean isXTouch = (ev.getX() < 1344) ? false : true;
 +            mLauncher.getDeviceProfile().initialX = isXTouch;
 +            alignAllApps(isXTouch);
-
+ 
              if (handleLongPress) {
                  // Check if the event is not near the edges
 @@ -187,6 +201,48 @@ public class WorkspaceTouchListener extends GestureDetector.SimpleOnGestureListe
                  && mLauncher.isInState(NORMAL);
      }
-
+ 
 +    private void alignAllApps(boolean initialX) {
 +         WindowManager windowManager = (WindowManager) mLauncher.getSystemService(Context.WINDOW_SERVICE);
 +         DisplayMetrics displayMetrics = new DisplayMetrics();
@@ -254,7 +258,7 @@ index 0ff10c26a5..062923fa8a 100644
 +             // Align to right or left based on initialX
 +             if (initialX) {
 +                 params.gravity = Gravity.END;
-+                 backgroundParams.leftMargin = (screenWidth / 2) + 5;
++                 backgroundParams.leftMargin = (screenWidth / 2)  5;
 +                 backgroundParams.rightMargin = -(screenWidth / 2);
 +             } else {
 +                 params.gravity = Gravity.START;
@@ -282,18 +286,18 @@ index 0ff10c26a5..062923fa8a 100644
          mLongPressState = STATE_CANCELLED;
      }
 diff --git a/src/com/android/launcher3/util/ActivityOptionsWrapper.java b/src/com/android/launcher3/util/ActivityOptionsWrapper.java
-index 17ff2a96b7..1dd226c079 100644
+index 17ff2a96b7..0f8c2f648e 100644
 --- a/src/com/android/launcher3/util/ActivityOptionsWrapper.java
 +++ b/src/com/android/launcher3/util/ActivityOptionsWrapper.java
-@@ -15,10 +15,24 @@
+@@ -15,10 +15,25 @@
   */
  package com.android.launcher3.util;
-
+ 
 +import static com.android.launcher3.LauncherState.NORMAL;
-
+ 
  import android.app.ActivityOptions;
  import android.os.Bundle;
-
+ 
 +import com.android.launcher3.LauncherFiles;
 +import android.os.Build;
 +import android.graphics.Rect;
@@ -307,22 +311,22 @@ index 17ff2a96b7..1dd226c079 100644
 +import com.android.launcher3.Launcher;
 +import com.android.quickstep.util.TriggerSwipeUpTouchTracker;
 +
++
  /**
   * A wrapper around {@link ActivityOptions} to allow custom functionality in launcher
   */
-@@ -27,6 +41,7 @@ public class ActivityOptionsWrapper {
+@@ -27,6 +42,7 @@ public class ActivityOptionsWrapper {
      public final ActivityOptions options;
      // Called when the app launch animation is complete
      public final RunnableList onEndCallback;
 +    private Context context;
-
+ 
      public ActivityOptionsWrapper(ActivityOptions options, RunnableList onEndCallback) {
          this.options = options;
-@@ -37,6 +52,56 @@ public class ActivityOptionsWrapper {
+@@ -37,6 +53,54 @@ public class ActivityOptionsWrapper {
       * @see {@link ActivityOptions#toBundle()}
       */
      public Bundle toBundle() {
-+
 +        String mode = "freeform";
 +        int windowMode;
 +        Boolean isTabletMode = ActivityContext.lookupContext(this.context).getDeviceProfile().isTablet;
@@ -330,7 +334,7 @@ index 17ff2a96b7..1dd226c079 100644
 +        Boolean initialX = ActivityContext.lookupContext(this.context).getDeviceProfile().initialX;
 +
 +        int xValue = (initialX == true && isTabletMode && widthPx>2500) ? 1394 : 50;
-+        Rect rect = new Rect(xValue, 120, 1244 + xValue , 1710);
++        Rect rect = new Rect(xValue, 120, 1244  xValue , 1710);
 +
 +        if (this.context != null) {
 +            SharedPreferences pref = this.context.getSharedPreferences(LauncherFiles.SHARED_PREFERENCES_KEY, Context.MODE_PRIVATE);
@@ -367,7 +371,6 @@ index 17ff2a96b7..1dd226c079 100644
 +        } catch (Exception e) {
 +            e.printStackTrace();
 +        }
-+
          return options.toBundle();
      }
 +
@@ -376,10 +379,10 @@ index 17ff2a96b7..1dd226c079 100644
 +    }
  }
 diff --git a/src/com/android/launcher3/views/ActivityContext.java b/src/com/android/launcher3/views/ActivityContext.java
-index d3160e0db3..c587347cd1 100644
+index b8481c5fb8..fa6ae78d18 100644
 --- a/src/com/android/launcher3/views/ActivityContext.java
 +++ b/src/com/android/launcher3/views/ActivityContext.java
-@@ -362,6 +362,8 @@ public interface ActivityContext {
+@@ -388,6 +388,8 @@ public interface ActivityContext {
      default RunnableList sendPendingIntentWithAnimation(
              @NonNull View v, PendingIntent intent, @Nullable ItemInfo item) {
          ActivityOptionsWrapper options = getActivityLaunchOptions(v, item);
@@ -388,7 +391,7 @@ index d3160e0db3..c587347cd1 100644
          try {
              intent.send(null, 0, null, null, null, null, options.toBundle());
              if (item != null) {
-@@ -406,6 +408,7 @@ public interface ActivityContext {
+@@ -432,6 +434,7 @@ public interface ActivityContext {
                  : makeDefaultActivityOptions(item != null && item.animationType == DEFAULT_NO_ICON
                          ? SPLASH_SCREEN_STYLE_SOLID_COLOR : -1 /* SPLASH_SCREEN_STYLE_UNDEFINED */);
          UserHandle user = item == null ? null : item.user;
@@ -396,6 +399,6 @@ index d3160e0db3..c587347cd1 100644
          Bundle optsBundle = options.toBundle();
          // Prepare intent
          intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
---
+-- 
 2.34.1
 

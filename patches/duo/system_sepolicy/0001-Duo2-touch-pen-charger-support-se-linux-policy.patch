@@ -1,50 +1,54 @@
-From c3a18666a9eb99d3d3635d95207c510de7cdf558 Mon Sep 17 00:00:00 2001
+From fa0a3eff07c9c6c22a6ed4da979e4f71f4a87a7d Mon Sep 17 00:00:00 2001
 From: Archfx <cybx@live.com>
-Date: Tue, 7 Jan 2025 14:02:57 -0500
+Date: Wed, 2 Apr 2025 10:27:06 -0400
 Subject: [PATCH] Duo2 touch pen charger support se-linux policy
 
-Change-Id: I087e67e44cf0c4924753fe91bd4d9dea5217fae4
+Change-Id: I7bf7c92739725b8ee8422e21999e4212c83c14e0
 ---
- private/file.te        | 2 ++
+ private/file.te        | 4 ++++
  private/genfs_contexts | 3 +++
  private/system_app.te  | 3 +++
- 3 files changed, 8 insertions(+)
+ 3 files changed, 10 insertions(+)
 
 diff --git a/private/file.te b/private/file.te
-index 70b8523bc..0a65a7f1b 100644
+index 189fb4789..8f8df3537 100644
 --- a/private/file.te
 +++ b/private/file.te
-@@ -215,6 +215,8 @@ type storage_area_content_file, file_type, data_file_type, core_data_file_type,
+@@ -222,6 +222,10 @@ type storage_area_content_file, file_type, data_file_type, core_data_file_type,
  # /data/misc_ce/userId/storage_area_keys
  type storage_area_key_file, file_type, data_file_type, core_data_file_type;
  
 +# definition for duo2 touch pen charger
 +type ms_pen_charger_file, file_type, data_file_type, core_data_file_type;
++
++
+ # /metadata/tradeinmode files
+ type tradeinmode_metadata_file, file_type;
  
- # Types added in 202504 in public/file.te
- until_board_api(202504, `
 diff --git a/private/genfs_contexts b/private/genfs_contexts
-index b8b724739..39747b84f 100644
+index 3ff1012b7..54e7be8dc 100644
 --- a/private/genfs_contexts
 +++ b/private/genfs_contexts
-@@ -338,3 +338,6 @@ genfscon bpf /netd_shared u:object_r:fs_bpf_netd_shared:s0
+@@ -339,3 +339,6 @@ genfscon bpf /netd_shared u:object_r:fs_bpf_netd_shared:s0
  genfscon bpf /tethering u:object_r:fs_bpf_tethering:s0
  genfscon bpf /vendor u:object_r:fs_bpf_vendor:s0
  genfscon bpf /uprobestats u:object_r:fs_bpf_uprobestats:s0
 +
 +# duo2 touch pen charger allow read and write
 +genfscon sysfs /devices/platform/soc/soc:surface_util/ms_pen_charger/ms_pen_charger u:object_r:ms_pen_charger_file:s0
+\ No newline at end of file
 diff --git a/private/system_app.te b/private/system_app.te
-index 0b6ffe264..4cd70fb13 100644
+index 93be46f0a..04ad1604a 100644
 --- a/private/system_app.te
 +++ b/private/system_app.te
-@@ -199,3 +199,6 @@ neverallow { domain -init -system_app } drm_forcel3_prop:property_service set;
- 
- allow system_app vendor_boot_ota_file:dir { r_dir_perms };
- allow system_app vendor_boot_ota_file:file { r_file_perms };
+@@ -203,3 +203,6 @@ allow system_app vendor_boot_ota_file:file { r_file_perms };
+ # allow system_app to read system_dlkm_file for /system_dlkm/etc/NOTICE.xml.gz
+ allow system_app system_dlkm_file:dir search;
+ allow system_app system_dlkm_file:file { getattr open read };
 +
 +# duo2 touch pen charger allow read and write
 +allow system_app ms_pen_charger_file:file { r_file_perms w_file_perms };
+\ No newline at end of file
 -- 
 2.34.1
 

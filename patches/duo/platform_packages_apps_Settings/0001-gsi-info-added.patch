@@ -1,31 +1,33 @@
-From eb1a1db73368f3b74a0c4da2c3ce4a1b1518fc69 Mon Sep 17 00:00:00 2001
+From f791cbe791c4da5dd3fd067bfb69b73b4e100a27 Mon Sep 17 00:00:00 2001
 From: Archfx <cybx@live.com>
-Date: Sat, 4 Jan 2025 23:11:33 -0500
+Date: Wed, 2 Apr 2025 10:23:18 -0400
 Subject: [PATCH] gsi info added
 
-Change-Id: Iecce1200b721b36630f9fb26b946ce00bf3e12e6
+Change-Id: I82ca76a22465444eee432382aadd51275d120e4d
 ---
  res/values/strings.xml     | 3 +++
  res/xml/my_device_info.xml | 7 +++++++
  2 files changed, 10 insertions(+)
 
 diff --git a/res/values/strings.xml b/res/values/strings.xml
-index 5550aa4aec9..2163becb2d3 100644
+index 8f9136838b8..7e6584ffc40 100644
 --- a/res/values/strings.xml
 +++ b/res/values/strings.xml
-@@ -13679,4 +13679,7 @@
-
+@@ -13891,6 +13891,9 @@
      <!-- Text for Search bar of Settings home screen [CHAR LIMIT=34] -->
      <string name="homepage_search">Search Settings</string>
-+
+ 
 +    <string name="gsi_info">System Image</string>
-+    <string name="gsi_info_summary">ARCHFX/DUO-DE A15 (archfx.me/duo-de)</string>
- </resources>
++    <string name="gsi_info_summary">ARCHFX/DUO-DE A15b (archfx.me/duo-de)</string>
++
+     <!-- Keywords for contacts storage item [CHAR LIMIT=NONE] -->
+     <string name="keywords_contacts_storage">contacts, storage, account</string>
+     <!-- Text for Contacts Storage Settings title [CHAR LIMIT=50]-->
 diff --git a/res/xml/my_device_info.xml b/res/xml/my_device_info.xml
-index aec064b599f..edc6408efd7 100644
+index 1a9e646b509..0c2a500153a 100644
 --- a/res/xml/my_device_info.xml
 +++ b/res/xml/my_device_info.xml
-@@ -234,6 +234,13 @@
+@@ -236,6 +236,13 @@
              android:summary="@string/summary_placeholder"
              settings:enableCopying="true"
              settings:controller="com.android.settings.deviceinfo.BuildNumberPreferenceController"/>
@@ -37,8 +39,8 @@ index aec064b599f..edc6408efd7 100644
 +            android:summary="@string/gsi_info_summary"
 +            settings:enableCopying="true"/>
      </PreferenceCategory>
-
+ 
  </PreferenceScreen>
---
+-- 
 2.34.1
 
