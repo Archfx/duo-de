@@ -1,15 +1,15 @@
-From 1d4c12e8c4daa7ac7c8a6bff42f7de85a8a4bfde Mon Sep 17 00:00:00 2001
+From 6c57e15d20bf289b9c40ff8be926eabc65167379 Mon Sep 17 00:00:00 2001
 From: Archfx <cybx@live.com>
-Date: Tue, 1 Apr 2025 17:51:44 -0400
+Date: Wed, 2 Apr 2025 13:48:16 -0400
 Subject: [PATCH] revert the bootanimate resize
 
-Change-Id: I887cb776f34bd02f4e140be61d316fadc9f01f0e
+Change-Id: I4ae6848a38d2acf8da5095c427f14bbae09620e3
 ---
  cmds/bootanimation/BootAnimation.cpp | 21 ---------------------
  1 file changed, 21 deletions(-)
 
 diff --git a/cmds/bootanimation/BootAnimation.cpp b/cmds/bootanimation/BootAnimation.cpp
-index 349652c8fc76..efcdf83c4da2 100644
+index 51201754d3bc..efcdf83c4da2 100644
 --- a/cmds/bootanimation/BootAnimation.cpp
 +++ b/cmds/bootanimation/BootAnimation.cpp
 @@ -578,27 +578,6 @@ status_t BootAnimation::initDisplaysAndSurfaces() {
@@ -17,13 +17,13 @@ index 349652c8fc76..efcdf83c4da2 100644
          mTargetInset = -1;
  
 -        if ( mAnimation != nullptr ) {
--            SLOGE("Got screen size %d, animation size %d", mWidth, mAnimation->width);
+-            SLOGE("Got screen size %d, animation size %d", display.width, mAnimation->width);
 -            int origWidth = mAnimation->width;
--            if ( mAnimation->width*2 < mWidth ) {
+-            if ( mAnimation->width*2 < display.width ) {
 -                SLOGE("Making animation bigger");
 -                mAnimation->width *= 2;
 -                mAnimation->height *= 2;
--            } else if ( mWidth < mAnimation->width ) {
+-            } else if ( display.width < mAnimation->width ) {
 -                SLOGE("Making animation smaller");
 -                mAnimation->width /= 2;
 -                mAnimation->height /= 2;
