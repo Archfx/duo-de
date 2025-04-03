@@ -258,7 +258,7 @@ index 0ff10c26a5..4c13d71503 100644
 +             // Align to right or left based on initialX
 +             if (initialX) {
 +                 params.gravity = Gravity.END;
-+                 backgroundParams.leftMargin = (screenWidth / 2)  5;
++                 backgroundParams.leftMargin = (screenWidth / 2) + 5;
 +                 backgroundParams.rightMargin = -(screenWidth / 2);
 +             } else {
 +                 params.gravity = Gravity.START;
@@ -334,7 +334,7 @@ index 17ff2a96b7..0f8c2f648e 100644
 +        Boolean initialX = ActivityContext.lookupContext(this.context).getDeviceProfile().initialX;
 +
 +        int xValue = (initialX == true && isTabletMode && widthPx>2500) ? 1394 : 50;
-+        Rect rect = new Rect(xValue, 120, 1244  xValue , 1710);
++        Rect rect = new Rect(xValue, 120, 1244 + xValue , 1710);
 +
 +        if (this.context != null) {
 +            SharedPreferences pref = this.context.getSharedPreferences(LauncherFiles.SHARED_PREFERENCES_KEY, Context.MODE_PRIVATE);
