@@ -1,4 +1,4 @@
-From 538b3c37af8ba2d7b78909dc6d5af72757c93ed7 Mon Sep 17 00:00:00 2001
+From 84d8191722fe75b127e7fa610b52976854344e9e Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Mon, 12 Aug 2019 23:08:26 +0200
 Subject: [PATCH 10/56] Add support for samsung touch, physical and hover
