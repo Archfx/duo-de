@@ -1,4 +1,4 @@
-From 72fbc34682ca14b3b35c61f1bad12673d2bbbc08 Mon Sep 17 00:00:00 2001
+From d8cb813b6acff0c64e5375fdb4c002b9ebdf883c Mon Sep 17 00:00:00 2001
 From: Andy CrossGate Yan <GeForce8800Ultra@gmail.com>
 Date: Wed, 2 Aug 2023 20:59:53 +0800
 Subject: [PATCH 33/56] Restore getSimStateForSlotIndex in SubscriptionManager
