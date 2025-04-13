@@ -1,4 +1,4 @@
-From 69aa04bf981845bd1842f4bf5d2f75b39431e892 Mon Sep 17 00:00:00 2001
+From 2e938fd5d58c7a032a65cfbebc3174a495d71d32 Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Wed, 2 Apr 2025 15:35:04 +0100
 Subject: [PATCH 56/56] Revert "FOD support for Asus, Samsung recent Xiaomi and
