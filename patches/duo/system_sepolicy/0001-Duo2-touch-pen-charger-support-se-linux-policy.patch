@@ -29,26 +29,26 @@ diff --git a/private/genfs_contexts b/private/genfs_contexts
 index 3ff1012b7..54e7be8dc 100644
 --- a/private/genfs_contexts
 +++ b/private/genfs_contexts
-@@ -339,3 +339,6 @@ genfscon bpf /netd_shared u:object_r:fs_bpf_netd_shared:s0
+@@ -339,3 +339,7 @@ genfscon bpf /netd_shared u:object_r:fs_bpf_netd_shared:s0
  genfscon bpf /tethering u:object_r:fs_bpf_tethering:s0
  genfscon bpf /vendor u:object_r:fs_bpf_vendor:s0
  genfscon bpf /uprobestats u:object_r:fs_bpf_uprobestats:s0
 +
 +# duo2 touch pen charger allow read and write
 +genfscon sysfs /devices/platform/soc/soc:surface_util/ms_pen_charger/ms_pen_charger u:object_r:ms_pen_charger_file:s0
-\ No newline at end of file
++
 diff --git a/private/system_app.te b/private/system_app.te
 index 93be46f0a..04ad1604a 100644
 --- a/private/system_app.te
 +++ b/private/system_app.te
-@@ -203,3 +203,6 @@ allow system_app vendor_boot_ota_file:file { r_file_perms };
+@@ -203,3 +203,7 @@ allow system_app vendor_boot_ota_file:file { r_file_perms };
  # allow system_app to read system_dlkm_file for /system_dlkm/etc/NOTICE.xml.gz
  allow system_app system_dlkm_file:dir search;
  allow system_app system_dlkm_file:file { getattr open read };
 +
 +# duo2 touch pen charger allow read and write
 +allow system_app ms_pen_charger_file:file { r_file_perms w_file_perms };
-\ No newline at end of file
++
 -- 
 2.34.1
 

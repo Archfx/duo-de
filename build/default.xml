@@ -2,6 +2,8 @@
 <manifest>
   <remote name="github" fetch="https://github.com" />
   <remote name="gitlab" fetch="https://gitlab.com" />
+  <remote name="azure" fetch="https://ponces26.visualstudio.com/DefaultCollection/vendor_gapps/_git" />
+  
 
   <!-- TrebleDroid -->
   <!-- <project name="TrebleDroid/device_phh_treble" path="device/phh/treble" remote="github" revision="android-15.0" />
@@ -36,7 +38,8 @@
 
   <project path="treble_adapter" name="ponces/treble_adapter" remote="github" revision="master" />
 
-  <project path="vendor/gapps" name="ponces/vendor_gapps" remote="gitlab" revision="android-15.0" clone-depth="1" />
+  <!-- <project path="vendor/gapps" name="ponces/vendor_gapps" remote="gitlab" revision="android-15.0" clone-depth="1" /> -->
+  <project path="vendor/gapps" name="vendor_gapps" remote="azure" revision="android-15.0" clone-depth="1" />
   <project path="vendor/hardware_overlay" name="TrebleDroid/vendor_hardware_overlay" remote="github" revision="pie" />
   <project path="vendor/interfaces" name="TrebleDroid/vendor_interfaces" remote="github" revision="android-15.0" />
   <project path="vendor/magisk" name="phhusson/vendor_magisk" remote="github" revision="android-10.0" />
