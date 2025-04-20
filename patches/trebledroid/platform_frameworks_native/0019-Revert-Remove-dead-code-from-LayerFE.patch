@@ -1,0 +1,97 @@
+From 7485c9ccd486057ba0bb6260ec7257b8fc6a122b Mon Sep 17 00:00:00 2001
+From: Peter Cai <peter@typeblog.net>
+Date: Sun, 16 Mar 2025 13:25:10 -0400
+Subject: [PATCH 19/19] Revert "Remove dead code from LayerFE"
+
+This reverts commit 330571240ff3d44fdbecbe513309d73ba82404e6.
+
+Change-Id: If3af99ec76a8c595dcd1ea22965f2d126d74a315
+---
+ .../CompositionEngine/include/compositionengine/LayerFE.h   | 3 +++
+ .../include/compositionengine/mock/LayerFE.h                | 3 +++
+ services/surfaceflinger/LayerFE.cpp                         | 6 ++++++
+ services/surfaceflinger/LayerFE.h                           | 3 +++
+ 4 files changed, 15 insertions(+)
+
+diff --git a/services/surfaceflinger/CompositionEngine/include/compositionengine/LayerFE.h b/services/surfaceflinger/CompositionEngine/include/compositionengine/LayerFE.h
+index cda4edc216..8199c929e5 100644
+--- a/services/surfaceflinger/CompositionEngine/include/compositionengine/LayerFE.h
++++ b/services/surfaceflinger/CompositionEngine/include/compositionengine/LayerFE.h
+@@ -148,6 +148,9 @@ public:
+     virtual std::optional<LayerSettings> prepareClientComposition(
+             ClientCompositionTargetSettings&) const = 0;
+ 
++    // Called after the layer is displayed to update the presentation fence
++    virtual void onLayerDisplayed(ftl::SharedFuture<FenceResult>, ui::LayerStack layerStack) = 0;
++
+     // Initializes a promise for a buffer release fence and provides the future for that
+     // fence. This should only be called when a promise has not yet been created, or
+     // after the previous promise has already been fulfilled. Attempting to call this
+diff --git a/services/surfaceflinger/CompositionEngine/include/compositionengine/mock/LayerFE.h b/services/surfaceflinger/CompositionEngine/include/compositionengine/mock/LayerFE.h
+index 272fa3eef7..a236ebf180 100644
+--- a/services/surfaceflinger/CompositionEngine/include/compositionengine/mock/LayerFE.h
++++ b/services/surfaceflinger/CompositionEngine/include/compositionengine/mock/LayerFE.h
+@@ -50,6 +50,9 @@ public:
+                        std::optional<compositionengine::LayerFE::LayerSettings>(
+                                compositionengine::LayerFE::ClientCompositionTargetSettings&));
+ 
++    MOCK_METHOD(void, onLayerDisplayed, (ftl::SharedFuture<FenceResult>, ui::LayerStack),
++                (override));
++
+     MOCK_METHOD0(createReleaseFenceFuture, ftl::Future<FenceResult>());
+     MOCK_METHOD1(setReleaseFence, void(const FenceResult&));
+     MOCK_METHOD0(getReleaseFencePromiseStatus, LayerFE::ReleaseFencePromiseStatus());
+diff --git a/services/surfaceflinger/LayerFE.cpp b/services/surfaceflinger/LayerFE.cpp
+index de64b271f5..012aa32c30 100644
+--- a/services/surfaceflinger/LayerFE.cpp
++++ b/services/surfaceflinger/LayerFE.cpp
+@@ -28,6 +28,7 @@
+ #include "SurfaceFlinger.h"
+ #include "common/FlagManager.h"
+ #include "ui/FenceResult.h"
++#include "ui/LayerStack.h"
+ 
+ namespace android {
+ 
+@@ -355,6 +356,11 @@ CompositionResult LayerFE::stealCompositionResult() {
+     return result;
+ }
+ 
++void LayerFE::onLayerDisplayed(ftl::SharedFuture<FenceResult> futureFenceResult,
++                               ui::LayerStack layerStack) {
++    mCompositionResult.releaseFences.emplace_back(std::move(futureFenceResult), layerStack);
++}
++
+ const char* LayerFE::getDebugName() const {
+     return mName.c_str();
+ }
+diff --git a/services/surfaceflinger/LayerFE.h b/services/surfaceflinger/LayerFE.h
+index 9483aebafa..ce6d27a91a 100644
+--- a/services/surfaceflinger/LayerFE.h
++++ b/services/surfaceflinger/LayerFE.h
+@@ -25,12 +25,14 @@
+ #include "compositionengine/LayerFE.h"
+ #include "compositionengine/LayerFECompositionState.h"
+ #include "renderengine/LayerSettings.h"
++#include "ui/LayerStack.h"
+ 
+ #include <ftl/future.h>
+ 
+ namespace android {
+ 
+ struct CompositionResult {
++    std::vector<std::pair<ftl::SharedFuture<FenceResult>, ui::LayerStack>> releaseFences;
+     sp<Fence> lastClientCompositionFence = nullptr;
+     bool wasPictureProfileCommitted = false;
+     // TODO(b/337330263): Why does LayerFE coming from SF have a null composition state?
+@@ -46,6 +48,7 @@ public:
+     // compositionengine::LayerFE overrides
+     const compositionengine::LayerFECompositionState* getCompositionState() const override;
+     bool onPreComposition(bool updatingOutputGeometryThisFrame) override;
++    void onLayerDisplayed(ftl::SharedFuture<FenceResult>, ui::LayerStack) override;
+     const char* getDebugName() const override;
+     int32_t getSequence() const override;
+     bool hasRoundedCorners() const override;
+-- 
+2.43.0
+
