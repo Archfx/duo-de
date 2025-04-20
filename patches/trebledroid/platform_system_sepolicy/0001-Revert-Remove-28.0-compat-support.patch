@@ -1,4 +1,4 @@
-From eb1a5ab6980a4ce74ffc2450d80f71afd89a6a2e Mon Sep 17 00:00:00 2001
+From 9ebdb38cc4e7c8c49b4989e5a32411a30ab8e87c Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Fri, 6 Oct 2023 08:25:11 -0400
 Subject: [PATCH 1/2] Revert "Remove 28.0 compat support"
@@ -7,7 +7,8 @@ This reverts commit d16612cd8aed0de2ca889174f1a7033137260ecd.
 
 Change-Id: I2b0c61ced1f9651f74da85d1228d7260cc782c80
 ---
- compat/Android.bp                             |   62 +
+ Android.bp                                    |    8 +
+ compat/Android.bp                             |   68 +
  prebuilts/api/28.0/Android.bp                 |  111 +
  prebuilts/api/28.0/private/access_vectors     |  726 +++++
  prebuilts/api/28.0/private/adbd.te            |  148 +
@@ -355,7 +356,8 @@ Change-Id: I2b0c61ced1f9651f74da85d1228d7260cc782c80
  private/compat/28.0/28.0.cil                  | 1745 +++++++++++
  private/compat/28.0/28.0.compat.cil           |   15 +
  private/compat/28.0/28.0.ignore.cil           |  160 +
- 348 files changed, 31690 insertions(+)
+ treble_sepolicy_tests_for_release/Android.bp  |   26 +
+ 350 files changed, 31730 insertions(+)
  create mode 100644 prebuilts/api/28.0/Android.bp
  create mode 100644 prebuilts/api/28.0/private/access_vectors
  create mode 100644 prebuilts/api/28.0/private/adbd.te
@@ -704,8 +706,69 @@ Change-Id: I2b0c61ced1f9651f74da85d1228d7260cc782c80
  create mode 100644 private/compat/28.0/28.0.compat.cil
  create mode 100644 private/compat/28.0/28.0.ignore.cil
 
+diff --git a/Android.bp b/Android.bp
+index 558810cb8..82a597c45 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -105,6 +105,8 @@ phony {
+         "plat_sepolicy_genfs_202504.cil",
+         "plat_service_contexts",
+         "secilc",
++        "plat_28.0.cil",
++        "28.0.compat.cil",
+         "plat_29.0.cil",
+         "29.0.compat.cil",
+         "plat_30.0.cil",
+@@ -987,6 +989,7 @@ phony {
+         "system_ext_sepolicy.cil",
+     ] + [
+         //"ifdef HAS_SYSTEM_EXT_SEPOLICY" check included in .cil
++        "system_ext_28.0.cil",
+         "system_ext_29.0.cil",
+         "system_ext_30.0.cil",
+         "system_ext_31.0.cil",
+@@ -1016,6 +1019,7 @@ phony {
+         "system_ext_mac_permissions.xml",
+         "system_ext_bug_map",
+         // $(addprefix system_ext_,$(addsuffix .compat.cil,$(PLATFORM_SEPOLICY_COMPAT_VERSIONS))) \
++        "system_ext_28.0.compat.cil",
+         "system_ext_29.0.compat.cil",
+         "system_ext_30.0.compat.cil",
+         "system_ext_31.0.compat.cil",
+@@ -1040,6 +1044,7 @@ phony {
+         "product_mapping_file",
+         "product_sepolicy.cil",
+         // "ifdef HAS_PRODUCT_PUBLIC_SEPOLICY" check included in .cil
++        "product_28.0.cil",
+         "product_29.0.cil",
+         "product_30.0.cil",
+         "product_31.0.cil",
+@@ -1142,6 +1147,7 @@ phony {
+ phony {
+     name: "selinux_policy_system",
+     required: [
++        "28.0.compat.cil",
+         "29.0.compat.cil",
+         "30.0.compat.cil",
+         "31.0.compat.cil",
+@@ -1150,6 +1156,7 @@ phony {
+         "34.0.compat.cil",
+         "build_sepolicy",
+         "fuzzer_bindings_test",
++        "plat_28.0.cil",
+         "plat_29.0.cil",
+         "plat_30.0.cil",
+         "plat_31.0.cil",
+@@ -1193,6 +1200,7 @@ phony {
+             "sepolicy_compat_test",
+             "sepolicy_test",
+             "sepolicy_dev_type_test",
++            "treble_sepolicy_tests_28.0",
+             "treble_sepolicy_tests_29.0",
+             "treble_sepolicy_tests_30.0",
+             "treble_sepolicy_tests_31.0",
 diff --git a/compat/Android.bp b/compat/Android.bp
-index 28936dd53..72390fcc0 100644
+index 28936dd53..0b201a586 100644
 --- a/compat/Android.bp
 +++ b/compat/Android.bp
 @@ -23,6 +23,13 @@ package {
@@ -750,7 +813,7 @@ index 28936dd53..72390fcc0 100644
  se_build_files {
      name: "29.0.board.ignore.map",
      srcs: [
-@@ -128,6 +149,13 @@ se_build_files {
+@@ -128,6 +149,14 @@ se_build_files {
      ],
  }
  
@@ -759,12 +822,13 @@ index 28936dd53..72390fcc0 100644
 +    stem: "28.0.cil",
 +    bottom_half: [":28.0.board.compat.map{.plat_private}"],
 +    top_half: "plat_29.0.cil",
++    version: "28.0",
 +}
 +
  se_cil_compat_map {
      name: "plat_29.0.cil",
      stem: "29.0.cil",
-@@ -168,6 +196,14 @@ se_cil_compat_map {
+@@ -168,6 +197,15 @@ se_cil_compat_map {
      version: "33.0",
  }
  
@@ -774,12 +838,13 @@ index 28936dd53..72390fcc0 100644
 +    bottom_half: [":28.0.board.compat.map{.system_ext_private}"],
 +    top_half: "system_ext_29.0.cil",
 +    system_ext_specific: true,
++    version: "28.0",
 +}
 +
  se_cil_compat_map {
      name: "system_ext_29.0.cil",
      stem: "29.0.cil",
-@@ -213,6 +249,14 @@ se_cil_compat_map {
+@@ -213,6 +251,15 @@ se_cil_compat_map {
      version: "33.0",
  }
  
@@ -789,12 +854,13 @@ index 28936dd53..72390fcc0 100644
 +    bottom_half: [":28.0.board.compat.map{.product_private}"],
 +    top_half: "product_29.0.cil",
 +    product_specific: true,
++    version: "28.0",
 +}
 +
  se_cil_compat_map {
      name: "product_29.0.cil",
      stem: "29.0.cil",
-@@ -258,6 +302,12 @@ se_cil_compat_map {
+@@ -258,6 +305,13 @@ se_cil_compat_map {
      version: "33.0",
  }
  
@@ -802,24 +868,26 @@ index 28936dd53..72390fcc0 100644
 +    name: "28.0.ignore.cil",
 +    bottom_half: [":28.0.board.ignore.map{.plat_private}"],
 +    top_half: "29.0.ignore.cil",
++    version: "28.0",
 +}
 +
  se_cil_compat_map {
      name: "29.0.ignore.cil",
      bottom_half: [":29.0.board.ignore.map{.plat_private}"],
-@@ -357,6 +407,11 @@ se_cil_compat_map {
+@@ -357,6 +411,12 @@ se_cil_compat_map {
      version: "33.0",
  }
  
 +se_compat_cil {
 +    name: "28.0.compat.cil",
 +    srcs: [":28.0.board.compat.cil{.plat_private}"],
++    version: "28.0",
 +}
 +
  se_compat_cil {
      name: "29.0.compat.cil",
      srcs: [":29.0.board.compat.cil{.plat_private}"],
-@@ -387,6 +442,13 @@ se_compat_cil {
+@@ -387,6 +447,14 @@ se_compat_cil {
      version: "33.0",
  }
  
@@ -828,6 +896,7 @@ index 28936dd53..72390fcc0 100644
 +    srcs: [":28.0.board.compat.cil{.system_ext_private}"],
 +    stem: "28.0.compat.cil",
 +    system_ext_specific: true,
++    version: "28.0",
 +}
 +
  se_compat_cil {
@@ -34543,6 +34612,43 @@ index 000000000..7213f9542
 +    vndk_prop
 +    vrflinger_vsync_service
 +    watchdogd_tmpfs))
+diff --git a/treble_sepolicy_tests_for_release/Android.bp b/treble_sepolicy_tests_for_release/Android.bp
+index 7756cbb82..ffa0f8740 100644
+--- a/treble_sepolicy_tests_for_release/Android.bp
++++ b/treble_sepolicy_tests_for_release/Android.bp
+@@ -23,6 +23,32 @@ package {
+ // Tests for Treble compatibility of current platform policy and vendor policy of
+ // given release version.
+ //////////////////////////////////
++java_genrule {
++    name: "28.0_mapping.combined.cil",
++    srcs: [
++        ":plat_28.0.cil",
++        ":28.0.ignore.cil",
++    ],
++    out: ["28.0_mapping.combined.cil"],
++    cmd: "cat $(location :plat_28.0.cil) $(location :28.0.ignore.cil) > $(out)",
++}
++
++java_genrule {
++    name: "treble_sepolicy_tests_28.0",
++    srcs: [
++        ":28.0_plat_policy.cil",
++        ":28.0_mapping.combined.cil",
++        ":28.0_plat_pub_policy.cil",
++    ],
++    tools: ["treble_sepolicy_tests"],
++    out: ["treble_sepolicy_tests_28.0"],
++    cmd: "$(location treble_sepolicy_tests) " +
++        "-b $(location :28.0_plat_pub_policy.cil) " +
++        "-m $(location :28.0_mapping.combined.cil) " +
++        "-o $(location :28.0_plat_policy.cil) && " +
++        "touch $(out)",
++}
++
+ java_genrule {
+     name: "29.0_mapping.combined.cil",
+     srcs: [
 -- 
 2.43.0
 
