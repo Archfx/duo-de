@@ -106,13 +106,13 @@ index 000000000..a87e012f1
 +    }
 +
 +    private static void spoofBuildGms() {
-+        setPropValue("PRODUCT", "comet_beta");
-+        setPropValue("DEVICE", "comet");
++        setPropValue("PRODUCT", "tegu_beta");
++        setPropValue("DEVICE", "tegu");
 +        setPropValue("MANUFACTURER", "Google");
 +        setPropValue("BRAND", "google");
-+        setPropValue("MODEL", "Pixel 9 Pro Fold");
-+        setPropValue("FINGERPRINT", "google/comet_beta/comet:Baklava/BP22.250124.010/13116449:user/release-keys");
-+        setPropValue("VERSION.SECURITY_PATCH", "2025-02-05");
++        setPropValue("MODEL", "Pixel 9a");
++        setPropValue("FINGERPRINT", "google/tegu_beta/tegu:16/BP22.250325.007/13352765:user/release-keys");
++        setPropValue("VERSION.SECURITY_PATCH", "2025-04-05");
 +        setPropValue("VERSION.DEVICE_INITIAL_SDK_INT", "32");
 +    }
 +
