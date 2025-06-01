@@ -1,7 +1,7 @@
 From 2e938fd5d58c7a032a65cfbebc3174a495d71d32 Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Wed, 2 Apr 2025 15:35:04 +0100
-Subject: [PATCH 56/56] Revert "FOD support for Asus, Samsung recent Xiaomi and
+Subject: [PATCH 56/57] Revert "FOD support for Asus, Samsung recent Xiaomi and
  RedMagic 8 devices"
 
 This reverts commit 4fd47b77373da8fa534f82d32cbf1e624d243cf2.
