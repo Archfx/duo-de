@@ -1,4 +1,6 @@
-# Surface-duo Dual Experience [duo-de][A15]
+# Surface-duo Dual Experience [duo-de][A16]
+
+[![Typing SVG](https://readme-typing-svg.herokuapp.com?font=Ubuntu&pause=1000&color=F71D0C&center=true&vCenter=true&width=435&lines=Android+16+Work-in-progress)](https://git.io/typing-svg)
 
 
 <img align="left" width="120" height="auto" alt="" src="images/delogo.svg"/>

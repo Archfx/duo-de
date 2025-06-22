@@ -2,7 +2,7 @@
 
 echo
 echo "--------------------------------------"
-echo "          AOSP 15.0 Buildbot          "
+echo "          AOSP 16.0 Buildbot          "
 echo "                  by                  "
 echo "                ponces                "
 echo "--------------------------------------"
@@ -19,7 +19,8 @@ BUILD_DIR=$PWD/duo-de/builds
 
 initRepos() {
     echo "--> Initializing workspace"
-    repo init -u https://android.googlesource.com/platform/manifest -b android-15.0.0_r32 --git-lfs
+    
+    repo init -u https://android.googlesource.com/platform/manifest -b android-16.0.0_r2 --git-lfs
     echo
 
     echo "--> Preparing local manifest"
@@ -78,7 +79,7 @@ buildTrebleApp() {
 
 buildVariant() {
     echo "--> Building $1"
-    lunch "$1"-bp1a-userdebug
+    lunch "$1"-bp2a-userdebug
     make -j$(nproc --all) installclean
     make -j$(nproc --all) systemimage
     make -j$(nproc --all) target-files-package otatools
@@ -123,7 +124,7 @@ generatePackages() {
         [[ "$filename" == *"_a64"* ]] && arch="arm32_binder64" || arch="arm64"
         [[ "$filename" == *"_bvN"* ]] && variant="vanilla" || variant="gapps"
         [[ "$filename" == *"-vndklite"* ]] && vndk="-vndklite" || vndk=""
-        name="aosp-${arch}-ab-${variant}${vndk}-15.0-$buildDate"
+        name="aosp-${arch}-ab-${variant}${vndk}-16.0-$buildDate"
         xz -cv "$file" -T0 > $BUILD_DIR/"$name".img.xz
     done
     rm -rf $BUILD_DIR/system-*.img
@@ -136,7 +137,7 @@ generateOta() {
     buildDate="$(date +%Y%m%d)"
     timestamp="$START"
     json="{\"version\": \"$version\",\"date\": \"$timestamp\",\"variants\": ["
-    find $BUILD_DIR/ -name "aosp-*-15.0-$buildDate.img.xz" | sort | {
+    find $BUILD_DIR/ -name "aosp-*-16.0-$buildDate.img.xz" | sort | {
         while read file; do
             filename="$(basename $file)"
             [[ "$filename" == *"-arm32"* ]] && arch="a64" || arch="arm64"

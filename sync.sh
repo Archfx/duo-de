@@ -2,7 +2,7 @@
 
 echo
 echo "--------------------------------------"
-echo "          AOSP 14.0 Syncbot           "
+echo "          AOSP 16.0 Syncbot           "
 echo "                  by                  "
 echo "                ponces                "
 echo "--------------------------------------"
@@ -11,7 +11,7 @@ echo
 set -e
 
 BL=$PWD/treble_aosp
-TD="android-14.0"
+TD="android-16.0"
 
 initRepos() {
     echo "--> Getting latest upstream version"

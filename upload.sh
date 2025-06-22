@@ -2,7 +2,7 @@
 
 echo
 echo "--------------------------------------"
-echo "         AOSP 15.0 Uploadbot          "
+echo "         AOSP 16.0 Uploadbot          "
 echo "                  by                  "
 echo "                ArchFX                "
 echo "--------------------------------------"
