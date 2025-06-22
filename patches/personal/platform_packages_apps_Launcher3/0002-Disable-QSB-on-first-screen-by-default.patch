@@ -1,4 +1,4 @@
-From 05a32c6c193ca8c7f7b9d508b284e6235a74a10b Mon Sep 17 00:00:00 2001
+From 3183b90fe5c0802487272f293bc8c055aa6e6da1 Mon Sep 17 00:00:00 2001
 From: Arne Coucheron <arco68@gmail.com>
 Date: Wed, 28 Jun 2017 02:20:46 +0200
 Subject: [PATCH 2/3] Disable QSB on first screen by default
@@ -22,5 +22,5 @@ index 6d4f56d655..2630ec130f 100644
      /**
       * Flag to state if the widget on the top of the first screen should be shown.
 -- 
-2.34.1
+2.43.0
 

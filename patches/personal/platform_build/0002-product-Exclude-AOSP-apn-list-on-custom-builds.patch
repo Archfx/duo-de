@@ -1,4 +1,4 @@
-From e38da8c1aa80ac5ec327cb6fa3aba867caa11871 Mon Sep 17 00:00:00 2001
+From 8347690252a472e2b6101b50d045df8b78f122ff Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Tue, 26 Dec 2023 17:01:46 +0000
 Subject: [PATCH 2/2] product: Exclude AOSP apn list on custom builds
@@ -35,5 +35,5 @@ index d8a54cd7f3..5470ad2be5 100644
  
  $(call inherit-product, $(SRC_TARGET_DIR)/product/aosp_base.mk)
 -- 
-2.34.1
+2.43.0
 

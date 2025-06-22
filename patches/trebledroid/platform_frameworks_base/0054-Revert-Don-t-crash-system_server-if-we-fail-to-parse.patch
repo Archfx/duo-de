@@ -1,4 +1,4 @@
-From e45f2aa0a65b02016b0addc858cd4147f3f37b17 Mon Sep 17 00:00:00 2001
+From 8b10b585a99d5ae17e285490c6675c2e99e810db Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Wed, 2 Apr 2025 15:33:22 +0100
 Subject: [PATCH 54/57] Revert "Don't crash system_server if we fail to parse

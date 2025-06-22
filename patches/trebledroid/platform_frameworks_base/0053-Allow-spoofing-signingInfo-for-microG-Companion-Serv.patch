@@ -1,4 +1,4 @@
-From 90a49874a4deac7c3981a2a8c96ae46a1d1277b8 Mon Sep 17 00:00:00 2001
+From bb860ccc58a1cf028e9977a3b5dfce8011268087 Mon Sep 17 00:00:00 2001
 From: Jonathan Klee <jonathan.klee@e.email>
 Date: Thu, 12 Dec 2024 15:27:57 +0100
 Subject: [PATCH 53/57] Allow spoofing signingInfo for microG
@@ -14,7 +14,7 @@ Signed-off-by: althafvly <althafvly@gmail.com>
  1 file changed, 13 insertions(+)
 
 diff --git a/services/core/java/com/android/server/pm/ComputerEngine.java b/services/core/java/com/android/server/pm/ComputerEngine.java
-index f9df4d3b11e4..8c04daae28be 100644
+index e73128ce30a5..14836d6bcc6c 100644
 --- a/services/core/java/com/android/server/pm/ComputerEngine.java
 +++ b/services/core/java/com/android/server/pm/ComputerEngine.java
 @@ -170,6 +170,7 @@ import java.io.FileOutputStream;

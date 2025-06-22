@@ -1,4 +1,4 @@
-From 45f7eba3579ed4180769ffd4011d9b2569c50328 Mon Sep 17 00:00:00 2001
+From 2d52dc64c1c1518858f1af99a0e0911f700ccb59 Mon Sep 17 00:00:00 2001
 From: Michael W <baddaemon87@gmail.com>
 Date: Wed, 6 Apr 2022 21:57:11 +0200
 Subject: [PATCH 1/3] ThemePicker: Override WallpaperCropper
@@ -12,10 +12,10 @@ Change-Id: I49421ff17649c8ada4511035b776070dbf4e854a
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/Android.bp b/Android.bp
-index 58e64136..140d4346 100644
+index 5efee517..be7e93e6 100644
 --- a/Android.bp
 +++ b/Android.bp
-@@ -140,6 +140,6 @@ android_app {
+@@ -151,6 +151,6 @@ android_app {
      platform_apis: true,
      manifest: "AndroidManifest.xml",
      additional_manifests: [":WallpaperPicker2_Manifest"],
@@ -24,5 +24,5 @@ index 58e64136..140d4346 100644
      static_libs: ["ThemePickerApplicationLib"],
  }
 -- 
-2.34.1
+2.43.0
 

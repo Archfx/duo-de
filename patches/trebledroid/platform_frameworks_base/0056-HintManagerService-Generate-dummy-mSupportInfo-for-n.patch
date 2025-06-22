@@ -1,7 +1,7 @@
-From 21d2db22c1fafad6c43db726d179676a434d8ce0 Mon Sep 17 00:00:00 2001
+From 10211667ee1ac465ea9691a89fcbb32702a809d3 Mon Sep 17 00:00:00 2001
 From: electimon <electimon@gmail.com>
 Date: Tue, 1 Apr 2025 14:00:10 -0400
-Subject: [PATCH 57/57] HintManagerService: Generate dummy mSupportInfo for non
+Subject: [PATCH 56/57] HintManagerService: Generate dummy mSupportInfo for non
  power AIDL devices
 
 * Before it would generate dummy info when the IPower AIDL version
@@ -17,19 +17,19 @@ Signed-off-by: electimon <electimon@gmail.com>
  1 file changed, 5 insertions(+)
 
 diff --git a/services/core/java/com/android/server/power/hint/HintManagerService.java b/services/core/java/com/android/server/power/hint/HintManagerService.java
-index 987a84994451..c204efedd30e 100644
+index 1cf24fcd8594..b84ddc956b11 100644
 --- a/services/core/java/com/android/server/power/hint/HintManagerService.java
 +++ b/services/core/java/com/android/server/power/hint/HintManagerService.java
-@@ -297,6 +297,8 @@ public final class HintManagerService extends SystemService {
-         mUsesFmq = false;
-         if (mPowerHal != null) {
-             mSupportInfo = getSupportInfo();
+@@ -335,6 +335,8 @@ public final class HintManagerService extends SystemService {
+             } catch (RemoteException e) {
+                 throw new IllegalStateException("Could not contact PowerHAL!", e);
+             }
 +        } else {
 +            mSupportInfo = getDummySupportInfo();
          }
          mDefaultCpuHeadroomCalculationWindowMillis =
                  new CpuHeadroomParamsInternal().calculationWindowMillis;
-@@ -323,7 +325,10 @@ public final class HintManagerService extends SystemService {
+@@ -379,7 +381,10 @@ public final class HintManagerService extends SystemService {
          } catch (RemoteException e) {
              throw new IllegalStateException("Could not contact PowerHAL!", e);
          }
@@ -38,8 +38,8 @@ index 987a84994451..c204efedd30e 100644
  
 +    private SupportInfo getDummySupportInfo() {
          SupportInfo supportInfo = new SupportInfo();
-         supportInfo.headroom = new SupportInfo.HeadroomSupportInfo();
-         supportInfo.headroom.isCpuSupported = false;
+         supportInfo.usesSessions = isHintSessionSupported();
+         // Global boosts & modes aren't currently relevant for HMS clients
 -- 
 2.43.0
 

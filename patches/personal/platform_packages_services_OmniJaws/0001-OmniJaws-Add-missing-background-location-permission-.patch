@@ -1,4 +1,4 @@
-From 9c6657e30a64ece15c497ca9106cd8251e5b9c6b Mon Sep 17 00:00:00 2001
+From 97a87259d69ac9363000c2778befe33b3c9ac7a9 Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Mon, 23 Sep 2024 15:50:58 +0100
 Subject: [PATCH] OmniJaws: Add missing background location permission request
@@ -43,5 +43,5 @@ index c63492b..874ce9e 100644
              if (force) {
                  forceRefreshWeatherSettings();
 -- 
-2.34.1
+2.43.0
 

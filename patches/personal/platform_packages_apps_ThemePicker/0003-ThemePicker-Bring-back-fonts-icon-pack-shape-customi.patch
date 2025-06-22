@@ -1,4 +1,4 @@
-From 7d029fd5c37fa76e764c23d378faa310c38d3d4b Mon Sep 17 00:00:00 2001
+From 45fc7247f8c224f35f89840a61884a46f410431a Mon Sep 17 00:00:00 2001
 From: Anay Wadhera <anay1018@gmail.com>
 Date: Tue, 28 Dec 2021 19:34:15 +0900
 Subject: [PATCH 3/3] ThemePicker: Bring back fonts, icon pack, shape
@@ -98,7 +98,7 @@ Change-Id: I60b24f0cd8e898cb6d43ad190cad99a73cb7b2bb
  create mode 100644 src/com/android/customization/widget/OptionSelectorController.java
 
 diff --git a/AndroidManifest.xml b/AndroidManifest.xml
-index 95f5b0ef..d5c18f4d 100755
+index 5f74c5a7..d7619721 100755
 --- a/AndroidManifest.xml
 +++ b/AndroidManifest.xml
 @@ -21,6 +21,7 @@
@@ -1195,7 +1195,7 @@ index 00000000..850714f3
 +        android:marqueeRepeatLimit="marquee_forever"/>
 +</LinearLayout>
 diff --git a/res/values/dimens.xml b/res/values/dimens.xml
-index 4f1062fa..90a5dbbf 100644
+index 531523ba..d686f470 100644
 --- a/res/values/dimens.xml
 +++ b/res/values/dimens.xml
 @@ -33,6 +33,7 @@
@@ -4371,5 +4371,5 @@ index 00000000..e307bc3a
 +    }
 +}
 -- 
-2.34.1
+2.43.0
 

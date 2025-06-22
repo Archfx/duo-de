@@ -1,4 +1,4 @@
-From 4227d7747bd734357ca1b4f7b32162e759e2248b Mon Sep 17 00:00:00 2001
+From f4130284d9134668fdcb892f61a22e025d0adbe1 Mon Sep 17 00:00:00 2001
 From: Victor Bo <bvoid@yandex.ru>
 Date: Sat, 14 Dec 2019 23:46:34 +0200
 Subject: [PATCH 1/2] Remove su from vanilla builds
@@ -8,10 +8,10 @@ Subject: [PATCH 1/2] Remove su from vanilla builds
  1 file changed, 1 deletion(-)
 
 diff --git a/target/product/base_system.mk b/target/product/base_system.mk
-index a78c023a36..71dc21e470 100644
+index 5c4ef33284..551510c4d1 100644
 --- a/target/product/base_system.mk
 +++ b/target/product/base_system.mk
-@@ -528,7 +528,6 @@ PRODUCT_PACKAGES_DEBUG := \
+@@ -535,7 +535,6 @@ PRODUCT_PACKAGES_DEBUG := \
      ss \
      start_with_lockagent \
      strace \
@@ -20,5 +20,5 @@ index a78c023a36..71dc21e470 100644
      tracepath \
      tracepath6 \
 -- 
-2.34.1
+2.43.0
 
