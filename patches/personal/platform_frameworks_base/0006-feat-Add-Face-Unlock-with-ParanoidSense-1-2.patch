@@ -1,4 +1,4 @@
-From 213d3208b980c3b88a9a555679c30351362fda6e Mon Sep 17 00:00:00 2001
+From 004243f8a97760791ffd6a01afec13cfdb208f8e Mon Sep 17 00:00:00 2001
 From: Chris Crump <chriscrawford893@gmail.com>
 Date: Tue, 1 Nov 2022 17:27:48 -0400
 Subject: [PATCH 6/8] feat: Add Face Unlock with ParanoidSense (1/2)
@@ -140,7 +140,7 @@ index 3242149eed92..e79d4d88a0a6 100644
          pw.println("  bouncerShowing: $bouncerShowing")
          pw.println("  altBouncerShowing:" +
 diff --git a/services/core/Android.bp b/services/core/Android.bp
-index 8a983f9e071d..2784ca242975 100644
+index 3a5714bf699e..308cfc761eaf 100644
 --- a/services/core/Android.bp
 +++ b/services/core/Android.bp
 @@ -264,6 +264,7 @@ java_library_static {
@@ -148,11 +148,11 @@ index 8a983f9e071d..2784ca242975 100644
          "uprobestats_flags_java_lib",
          "clipboard_flags_lib",
 +        "vendor.aospa.biometrics.face",
-     ],
-     javac_shard_size: 50,
-     javacflags: [
+         // HIDL
+         "vendor.mediatek.hardware.mtkpower-V1.1-java",
+         "vendor.samsung.hardware.sysinput-V1.2-java",
 diff --git a/services/core/java/com/android/server/biometrics/AuthService.java b/services/core/java/com/android/server/biometrics/AuthService.java
-index b6768c9c087a..b920d3093269 100644
+index aaf31edc7806..b3374f680731 100644
 --- a/services/core/java/com/android/server/biometrics/AuthService.java
 +++ b/services/core/java/com/android/server/biometrics/AuthService.java
 @@ -71,6 +71,7 @@ import com.android.internal.R;
@@ -163,7 +163,7 @@ index b6768c9c087a..b920d3093269 100644
  import com.android.server.biometrics.sensors.face.FaceService;
  import com.android.server.biometrics.sensors.fingerprint.FingerprintService;
  import com.android.server.companion.virtual.VirtualDeviceManagerInternal;
-@@ -838,7 +839,8 @@ public class AuthService extends SystemService {
+@@ -958,7 +959,8 @@ public class AuthService extends SystemService {
              final String[] hidlConfigStrings, final Context context,
              final IFaceService faceService, final BiometricHandlerProvider handlerProvider) {
          if ((hidlConfigStrings == null || hidlConfigStrings.length == 0)

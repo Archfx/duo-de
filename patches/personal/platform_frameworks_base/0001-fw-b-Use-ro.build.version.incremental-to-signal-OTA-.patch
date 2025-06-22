@@ -1,4 +1,4 @@
-From 65b1d0cae0fe8ab86885f475567515177e44f74c Mon Sep 17 00:00:00 2001
+From a8fe44b453f76cd56efd6f0114e2f7276b69bfa0 Mon Sep 17 00:00:00 2001
 From: dhacker29 <dhackerdvm@gmail.com>
 Date: Tue, 24 Nov 2015 01:53:47 -0500
 Subject: [PATCH 1/8] fw/b: Use ro.build.version.incremental to signal OTA
@@ -99,10 +99,10 @@ index b60812c1bb53..9e1843f3a91e 100644
              }
  
 diff --git a/services/core/java/com/android/server/pm/PackageManagerServiceUtils.java b/services/core/java/com/android/server/pm/PackageManagerServiceUtils.java
-index 2ecdb0b1a02a..d9d935a20058 100644
+index 2714a7963b63..a07b37819b9d 100644
 --- a/services/core/java/com/android/server/pm/PackageManagerServiceUtils.java
 +++ b/services/core/java/com/android/server/pm/PackageManagerServiceUtils.java
-@@ -1383,8 +1383,6 @@ public class PackageManagerServiceUtils {
+@@ -1394,8 +1394,6 @@ public class PackageManagerServiceUtils {
          // that starts with "eng." to signify that this is an engineering build and not
          // destined for release.
          if (isUserDebugBuild && incrementalVersion.startsWith("eng.")) {
@@ -111,7 +111,7 @@ index 2ecdb0b1a02a..d9d935a20058 100644
              // Heuristic: If the /system directory has been modified recently due to an "adb sync"
              // or a regular make, then blow away the cache. Note that mtimes are *NOT* reliable
              // in general and should not be used for production changes. In this specific case,
-@@ -1392,6 +1390,7 @@ public class PackageManagerServiceUtils {
+@@ -1403,6 +1401,7 @@ public class PackageManagerServiceUtils {
              File frameworkDir =
                      new File(Environment.getRootDirectory(), "framework");
              if (cacheDir.lastModified() < frameworkDir.lastModified()) {
