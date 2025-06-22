@@ -1,4 +1,4 @@
-From 21f7836f73fc1df783b84e79e55abecad9359d81 Mon Sep 17 00:00:00 2001
+From 0c38f122e1c4ed6baba3c26ca187f1f0ebd5c3cf Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Fri, 18 Oct 2024 17:26:04 -0400
 Subject: [PATCH 6/6] Revert "vold: remove session keyring workaround for old
@@ -13,10 +13,10 @@ This reverts commit 0e87a83cbacd7ccb47873df1b555598f94e6a287.
  4 files changed, 153 insertions(+)
 
 diff --git a/Android.bp b/Android.bp
-index ba3267ca..ffa63af9 100644
+index bef64710..5511d44c 100644
 --- a/Android.bp
 +++ b/Android.bp
-@@ -62,6 +62,7 @@ cc_defaults {
+@@ -63,6 +63,7 @@ cc_defaults {
          "libincfs",
          "libhidlbase",
          "libkeymint_support",

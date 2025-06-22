@@ -1,4 +1,4 @@
-From 78f678c1c2fa3bf18cfcb641296b0776c603eab9 Mon Sep 17 00:00:00 2001
+From 457d2ee70d9c58cee8c492baed320d9fc5bc6993 Mon Sep 17 00:00:00 2001
 From: Danny Lin <danny@kdrag0n.dev>
 Date: Mon, 11 Oct 2021 20:48:44 -0700
 Subject: [PATCH 1/3] Expose themed icon setting in ThemePicker
@@ -11,10 +11,10 @@ Change-Id: I44e9288c3de13a3604b7a03857ec400753317d9a
  3 files changed, 9 insertions(+)
 
 diff --git a/AndroidManifest.xml b/AndroidManifest.xml
-index 517bd6d70e..89291c1ff9 100644
+index 1bce9b3757..030c67b22e 100644
 --- a/AndroidManifest.xml
 +++ b/AndroidManifest.xml
-@@ -67,6 +67,9 @@
+@@ -68,6 +68,9 @@
              <meta-data
                  android:name="com.android.launcher3.grid.control"
                  android:value="${packageName}.grid_control" />
@@ -25,10 +25,10 @@ index 517bd6d70e..89291c1ff9 100644
  
      </application>
 diff --git a/go/AndroidManifest-launcher.xml b/go/AndroidManifest-launcher.xml
-index 2223036a7a..c7562f114e 100644
+index bef7180cb5..acabf988a8 100644
 --- a/go/AndroidManifest-launcher.xml
 +++ b/go/AndroidManifest-launcher.xml
-@@ -65,6 +65,9 @@
+@@ -66,6 +66,9 @@
              <meta-data
                  android:name="com.android.launcher3.grid.control"
                  android:value="${packageName}.grid_control" />
@@ -39,10 +39,10 @@ index 2223036a7a..c7562f114e 100644
  
      </application>
 diff --git a/quickstep/AndroidManifest-launcher.xml b/quickstep/AndroidManifest-launcher.xml
-index c6e2d8cb74..1d7405e345 100644
+index d6aa886d8c..080c4d6048 100644
 --- a/quickstep/AndroidManifest-launcher.xml
 +++ b/quickstep/AndroidManifest-launcher.xml
-@@ -65,6 +65,9 @@
+@@ -66,6 +66,9 @@
              <meta-data
                  android:name="com.android.launcher3.grid.control"
                  android:value="${packageName}.grid_control" />
@@ -53,5 +53,5 @@ index c6e2d8cb74..1d7405e345 100644
  
      </application>
 -- 
-2.34.1
+2.43.0
 

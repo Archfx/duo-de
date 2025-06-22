@@ -1,4 +1,4 @@
-From 15b015db9f9372e21e1fd0d689a19f5ef7d56355 Mon Sep 17 00:00:00 2001
+From 449a04de94105c1a7c7095c4b9b1c2fd47993a45 Mon Sep 17 00:00:00 2001
 From: LuK1337 <priv.luk@gmail.com>
 Date: Fri, 27 May 2022 01:13:39 +0200
 Subject: [PATCH 4/8] SystemUI: Add left padding for keyguard slices
@@ -10,7 +10,7 @@ Change-Id: I2735028472aa46bad412c69948936fb30c5fa36c
  1 file changed, 6 insertions(+), 3 deletions(-)
 
 diff --git a/packages/SystemUI/src/com/android/keyguard/KeyguardSliceView.java b/packages/SystemUI/src/com/android/keyguard/KeyguardSliceView.java
-index 7b5325d4e..d8be862e1 100644
+index 7b5325d4eaa6..d8be862e19ac 100644
 --- a/packages/SystemUI/src/com/android/keyguard/KeyguardSliceView.java
 +++ b/packages/SystemUI/src/com/android/keyguard/KeyguardSliceView.java
 @@ -49,6 +49,7 @@ import com.android.internal.annotations.VisibleForTesting;
@@ -41,5 +41,5 @@ index 7b5325d4e..d8be862e1 100644
  
          @Override
 -- 
-2.34.1
+2.43.0
 

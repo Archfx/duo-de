@@ -1,4 +1,4 @@
-From a3557b34b6fb14f34a7f6319130973fd3020edfb Mon Sep 17 00:00:00 2001
+From 5ec9d948cf9a3158c2b110f6fbc3d35b24dfa78b Mon Sep 17 00:00:00 2001
 From: LuK1337 <priv.luk@gmail.com>
 Date: Mon, 19 Feb 2024 16:20:04 +0100
 Subject: [PATCH 48/57] Allow signature spoofing for microG Companion/Services
@@ -21,7 +21,7 @@ Change-Id: I8fc82ed266a2cc59636b662c7ea7e29c94f509b5
  2 files changed, 49 insertions(+)
 
 diff --git a/services/core/java/com/android/server/pm/AppsFilterImpl.java b/services/core/java/com/android/server/pm/AppsFilterImpl.java
-index cc4c2b5bf893..57263da936d6 100644
+index 068d68d25017..befbf15e7793 100644
 --- a/services/core/java/com/android/server/pm/AppsFilterImpl.java
 +++ b/services/core/java/com/android/server/pm/AppsFilterImpl.java
 @@ -36,6 +36,7 @@ import static com.android.server.pm.AppsFilterUtils.canQueryAsUpdateOwner;
@@ -32,7 +32,7 @@ index cc4c2b5bf893..57263da936d6 100644
  
  import android.annotation.NonNull;
  import android.annotation.Nullable;
-@@ -599,6 +600,7 @@ public final class AppsFilterImpl extends AppsFilterLocked implements Watchable,
+@@ -604,6 +605,7 @@ public final class AppsFilterImpl extends AppsFilterLocked implements Watchable,
              newIsForceQueryable = mForceQueryable.contains(newPkgSetting.getAppId())
                              /* shared user that is already force queryable */
                              || newPkgSetting.isForceQueryableOverride() /* adb override */
@@ -41,7 +41,7 @@ index cc4c2b5bf893..57263da936d6 100644
                              || newPkg.isForceQueryable()
                              || ArrayUtils.contains(mForceQueryableByDevicePackageNames,
 diff --git a/services/core/java/com/android/server/pm/ComputerEngine.java b/services/core/java/com/android/server/pm/ComputerEngine.java
-index be2f58dc276c..f9df4d3b11e4 100644
+index 38ac0473d1a3..e73128ce30a5 100644
 --- a/services/core/java/com/android/server/pm/ComputerEngine.java
 +++ b/services/core/java/com/android/server/pm/ComputerEngine.java
 @@ -103,6 +103,7 @@ import android.content.pm.UserPackage;

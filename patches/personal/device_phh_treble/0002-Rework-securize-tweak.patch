@@ -1,4 +1,4 @@
-From c2957f4297b97e6d9e87b0491d4fff8c792f1529 Mon Sep 17 00:00:00 2001
+From 8692a43ad5c56add5250e939db4586487705ec46 Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Wed, 25 Dec 2019 12:34:05 +0200
 Subject: [PATCH 2/2] Rework securize tweak
@@ -21,10 +21,10 @@ index a29e402..1928cdc 100644
  
  PRODUCT_COPY_FILES += \
 diff --git a/rw-system.sh b/rw-system.sh
-index 055c2cd..6903559 100644
+index 3e25c0b..d2ef432 100644
 --- a/rw-system.sh
 +++ b/rw-system.sh
-@@ -785,32 +785,59 @@ copyprop() {
+@@ -790,32 +790,59 @@ copyprop() {
          resetprop_phh "$1" "$(getprop "$2")"
      fi
  }
@@ -87,7 +87,7 @@ index 055c2cd..6903559 100644
      (getprop ro.vendor.build.security_patch; getprop ro.keymaster.xxx.security_patch) |sort |tail -n 1 |while read v;do
          [ -n "$v" ] && resetprop_phh ro.build.version.security_patch "$v"
      done
-@@ -839,22 +866,6 @@ if [ -f /system/phh/secure ] || [ -f /metadata/phh/secure ];then
+@@ -844,22 +871,6 @@ if [ -f /system/phh/secure ] || [ -f /metadata/phh/secure ];then
  
      resetprop_phh ro.adb.secure 1
  
@@ -111,5 +111,5 @@ index 055c2cd..6903559 100644
      f=/vendor/lib$abi/libstagefright_foundation.so
      if [ -f "$f" ];then
 -- 
-2.34.1
+2.43.0
 
