@@ -1,7 +1,7 @@
-From 2d2294a73949e8d45c900a3f19e27f3171c10a4e Mon Sep 17 00:00:00 2001
+From 58d1e2724825f74784b6279d4f2561afa0761cd1 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Sun, 18 Dec 2022 18:20:40 -0500
-Subject: [PATCH 37/57] FOD support for Asus, Samsung recent Xiaomi and
+Subject: [PATCH 37/55] FOD support for Asus, Samsung recent Xiaomi and
  RedMagic 8 devices
 
 Thanks Asus for providing a free device to make this support
@@ -28,11 +28,11 @@ Co-authored-by: Peter Cai <peter@typeblog.net>
 Change-Id: I7af81218276c60afbfea6dac702c7bcd584f397a
 ---
  packages/SystemUI/Android.bp                  |   4 +
- .../systemui/biometrics/UdfpsController.java  |  76 ++++-
+ .../systemui/biometrics/UdfpsController.java  |  77 ++++-
  services/core/Android.bp                      |   5 +
  .../server/biometrics/AuthService.java        | 306 +++++++++++++++++-
  .../fingerprint/aidl/FingerprintProvider.java |  23 ++
- 5 files changed, 402 insertions(+), 12 deletions(-)
+ 5 files changed, 403 insertions(+), 12 deletions(-)
 
 diff --git a/packages/SystemUI/Android.bp b/packages/SystemUI/Android.bp
 index 2b17ae48132c..33847f1d1acc 100644
@@ -50,17 +50,17 @@ index 2b17ae48132c..33847f1d1acc 100644
      libs: [
          "keepanno-annotations",
 diff --git a/packages/SystemUI/src/com/android/systemui/biometrics/UdfpsController.java b/packages/SystemUI/src/com/android/systemui/biometrics/UdfpsController.java
-index 9064966b25c6..e594bb4140f0 100644
+index 9064966b25c6..d05447a661ec 100644
 --- a/packages/SystemUI/src/com/android/systemui/biometrics/UdfpsController.java
 +++ b/packages/SystemUI/src/com/android/systemui/biometrics/UdfpsController.java
-@@ -43,6 +43,7 @@ import android.hardware.fingerprint.FingerprintSensorProperties;
- import android.hardware.fingerprint.FingerprintSensorPropertiesInternal;
- import android.hardware.fingerprint.IUdfpsOverlayController;
- import android.hardware.fingerprint.IUdfpsOverlayControllerCallback;
+@@ -37,6 +37,7 @@ import android.graphics.Rect;
+ import android.hardware.biometrics.BiometricFingerprintConstants;
+ import android.hardware.biometrics.BiometricPrompt;
+ import android.hardware.biometrics.SensorProperties;
 +import android.hardware.display.ColorDisplayManager;
- import android.hardware.input.InputManager;
- import android.os.Build;
- import android.os.CancellationSignal;
+ import android.hardware.display.DisplayManager;
+ import android.hardware.fingerprint.FingerprintManager;
+ import android.hardware.fingerprint.FingerprintSensorProperties;
 @@ -50,6 +51,7 @@ import android.os.Handler;
  import android.os.Looper;
  import android.os.PowerManager;
@@ -91,10 +91,10 @@ index 9064966b25c6..e594bb4140f0 100644
      private final boolean mIgnoreRefreshRate;
      private final KeyguardTransitionInteractor mKeyguardTransitionInteractor;
  
-@@ -256,6 +264,46 @@ public class UdfpsController implements DozeReceiver, Dumpable {
-             mScreenOn = false;
+@@ -257,6 +265,47 @@ public class UdfpsController implements DozeReceiver, Dumpable {
          }
      };
+ 
 +    // Nubia 6 series fingerprint control command
 +    // cmd = 13 -> finger down
 +    // cmd = 14 -> after UI ready
@@ -135,10 +135,11 @@ index 9064966b25c6..e594bb4140f0 100644
 +            return null;
 +        }
 +    };
- 
++
      @Override
      public void dump(@NonNull PrintWriter pw, @NonNull String[] args) {
-@@ -700,7 +748,8 @@ public class UdfpsController implements DozeReceiver, Dumpable {
+         final int touchConfigId = mContext.getResources().getInteger(
+@@ -700,7 +749,8 @@ public class UdfpsController implements DozeReceiver, Dumpable {
              @NonNull UdfpsOverlayInteractor udfpsOverlayInteractor,
              @NonNull PowerInteractor powerInteractor,
              @Application CoroutineScope scope,
@@ -148,7 +149,7 @@ index 9064966b25c6..e594bb4140f0 100644
          mContext = context;
          mExecution = execution;
          mVibrator = vibrator;
-@@ -747,6 +796,7 @@ public class UdfpsController implements DozeReceiver, Dumpable {
+@@ -747,6 +797,7 @@ public class UdfpsController implements DozeReceiver, Dumpable {
          mInputManager = inputManager;
          mSelectedUserInteractor = selectedUserInteractor;
          mKeyguardTransitionInteractor = keyguardTransitionInteractor;
@@ -156,7 +157,7 @@ index 9064966b25c6..e594bb4140f0 100644
  
          mTouchProcessor = singlePointerTouchProcessor;
          mSessionTracker = sessionTracker;
-@@ -818,7 +868,10 @@ public class UdfpsController implements DozeReceiver, Dumpable {
+@@ -818,7 +869,10 @@ public class UdfpsController implements DozeReceiver, Dumpable {
              Log.d(TAG, "showUdfpsOverlay | the overlay is already showing");
              return;
          }
@@ -168,7 +169,7 @@ index 9064966b25c6..e594bb4140f0 100644
          mOverlay = overlay;
          final int requestReason = overlay.getRequestReason();
          if (requestReason == REASON_AUTH_KEYGUARD
-@@ -1047,6 +1100,10 @@ public class UdfpsController implements DozeReceiver, Dumpable {
+@@ -1047,6 +1101,10 @@ public class UdfpsController implements DozeReceiver, Dumpable {
              return;
          }
          if (isOptical()) {
@@ -179,12 +180,12 @@ index 9064966b25c6..e594bb4140f0 100644
              mLatencyTracker.onActionStart(ACTION_UDFPS_ILLUMINATE);
          }
          // Refresh screen timeout and boost process priority if possible.
-@@ -1076,12 +1133,19 @@ public class UdfpsController implements DozeReceiver, Dumpable {
+@@ -1076,12 +1134,19 @@ public class UdfpsController implements DozeReceiver, Dumpable {
                      mUdfpsDisplayMode.enable(() -> dispatchOnUiReady(requestId));
              }
          }
 +        if(SystemProperties.get("ro.vendor.build.fingerprint").contains("nubia/NX669")) {
-+          processCmd(13, 0, 0, new byte[0], 0);
++            processCmd(13, 0, 0, new byte[0], 0);
 +        }
  
          if (isOptical()) {
@@ -193,13 +194,13 @@ index 9064966b25c6..e594bb4140f0 100644
              }
          }
 +        if(SystemProperties.get("ro.vendor.build.fingerprint").contains("nubia/NX669")) {
-+          processCmd(14, 0, 0, new byte[0], 0);
++            processCmd(14, 0, 0, new byte[0], 0);
 +        }
 +
      }
  
      private void onFingerUp(long requestId, @NonNull View view) {
-@@ -1115,8 +1179,16 @@ public class UdfpsController implements DozeReceiver, Dumpable {
+@@ -1115,8 +1180,16 @@ public class UdfpsController implements DozeReceiver, Dumpable {
          mActivePointerId = MotionEvent.INVALID_POINTER_ID;
          mAcquiredReceived = false;
          if (mOnFingerDown) {
@@ -233,7 +234,7 @@ index a7d9b4ba57c3..2f42bca26fa7 100644
      javac_shard_size: 50,
      javacflags: [
 diff --git a/services/core/java/com/android/server/biometrics/AuthService.java b/services/core/java/com/android/server/biometrics/AuthService.java
-index bc9684974fca..0d8856945a33 100644
+index bc9684974fca..4ee16e47fcc5 100644
 --- a/services/core/java/com/android/server/biometrics/AuthService.java
 +++ b/services/core/java/com/android/server/biometrics/AuthService.java
 @@ -79,6 +79,25 @@ import java.util.ArrayList;
@@ -538,7 +539,7 @@ index bc9684974fca..0d8856945a33 100644
                  resetLockoutRequiresChallenge);
      }
 +
-+   private static boolean samsungHasCmd(String cmd) {
++    private static boolean samsungHasCmd(String cmd) {
 +        try {
 +            File f = new File("/sys/devices/virtual/sec/tsp/cmd_list");
 +            if(!f.exists()) return false;

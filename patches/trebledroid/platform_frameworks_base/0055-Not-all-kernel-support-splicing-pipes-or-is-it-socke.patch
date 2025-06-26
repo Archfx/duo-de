@@ -1,7 +1,7 @@
-From 343a9a549c01d2b34b9c467933e56f64b4fbe6e8 Mon Sep 17 00:00:00 2001
+From 0e5c2dc6b4ed27952a8dbe0f47efe90f07182e2e Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Mon, 16 Jun 2025 17:19:47 -0400
-Subject: [PATCH 57/57] Not all kernel support splicing pipes (or is it
+Subject: [PATCH 55/55] Not all kernel support splicing pipes (or is it
  sockets?), so gracefully fallback to dumb userspace copy when splice() fails
 
 Fixes adb install on Pixel 1
