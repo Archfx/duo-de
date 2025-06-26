@@ -1,7 +1,7 @@
-From bb860ccc58a1cf028e9977a3b5dfce8011268087 Mon Sep 17 00:00:00 2001
+From 44bd0c75938612340a9a23764156a4ff4025d19d Mon Sep 17 00:00:00 2001
 From: Jonathan Klee <jonathan.klee@e.email>
 Date: Thu, 12 Dec 2024 15:27:57 +0100
-Subject: [PATCH 53/57] Allow spoofing signingInfo for microG
+Subject: [PATCH 53/55] Allow spoofing signingInfo for microG
  Companion/Services
 
 - Spoof PackageInfo signingInfo + signatures so that
