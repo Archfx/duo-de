@@ -31,7 +31,7 @@ createRelease() {
 
 uploadAssets() {
     buildDate="$(date +%Y%m%d)"
-    find $BD/ -name "aosp-*-15.0-$buildDate.img.xz" | while read file; do
+    find $BD/ -name "aosp-*-16.0-$buildDate.img.xz" | while read file; do
         echo "--> Uploading $(basename $file)"
         gh release upload "$TAG" "$file" --repo "$GUSER/$GREPO"
         echo
@@ -43,7 +43,7 @@ updateOta() {
     echo "--> Updating OTA file"
     git add config/ota.json
     git commit -m "build: Bump OTA to $TAG"
-    git push --set-upstream origin main-15
+    git push --set-upstream origin main-16
     echo
     cd ..
 }
@@ -52,7 +52,7 @@ START=$(date +%s)
 
 createRelease
 uploadAssets
-# [ "$SKIPOTA" = false ] && updateOta
+[ "$SKIPOTA" = false ] && updateOta
 
 END=$(date +%s)
 ELAPSEDM=$(($(($END-$START))/60))
