@@ -1,7 +1,81 @@
-From 213d3208b980c3b88a9a555679c30351362fda6e Mon Sep 17 00:00:00 2001
-From: Chris Crump <chriscrawford893@gmail.com>
-Date: Tue, 1 Nov 2022 17:27:48 -0400
-Subject: [PATCH 6/8] feat: Add Face Unlock with ParanoidSense (1/2)
+From b8a9952b1013480bdd5294661f98a769af118a4a Mon Sep 17 00:00:00 2001
+From: Alberto Ponces <ponces26@gmail.com>
+Date: Wed, 2 Jul 2025 16:24:36 +0100
+Subject: [PATCH 4/7] base: Initial SenseProvider for FaceSense service
+
+Squashed commit of the following:
+
+commit 90a61a3f28e0efa07825462064fb60fcd73e2684
+Author: jhenrique09 <jhsv09@gmail.com>
+Date:   Mon, 14 Feb 2022 14:14:38 -0300
+
+    SenseProvider: Allow our face unlock to be used on third-party apps
+
+    Change-Id: Ib9041442572885ceda3afbafd23f8e89226b0364
+    Signed-off-by: someone5678 <59456192+someone5678@users.noreply.github.com>
+
+commit a1ad68b01469f76400b9719c8dd56240f8f2c9f9
+Author: Pranav Vashi <neobuddy89@gmail.com>
+Date:   Mon, 14 Oct 2024 17:04:40 +0530
+
+    services: Force load FaceSense providers
+
+    * Current AOSP implementation checks if HIDL/AIDL configs available and
+    skips registering providers if configs not available.
+    * Fix NPE case in BiometricScheduler by replicating old path.
+
+    Signed-off-by: Pranav Vashi <neobuddy89@gmail.com>
+    Signed-off-by: AnierinB <anierin@evolution-x.org>
+
+commit 6c53e551ee4d98caccc154e1c10e107e624ccf33
+Author: Adithya R <gh0strider.2k18.reborn@gmail.com>
+Date:   Sun, 31 Dec 2023 16:10:00 +0530
+
+    FaceSense: Vibrate on successful authentication
+
+    Bring back T behaviour after 0d09e5b0ba7f6365d79eafe92f4227f4228d9c85.
+
+    Change-Id: If93fb382d07b00466a8ae30b1ea968488785c4f6
+    Signed-off-by: Pranav Vashi <neobuddy89@gmail.com>
+
+commit 658305c3ffdb9f0f5d8bd1f2279bb0adf12785f5
+Author: someone5678 <someone5678@users.noreply.github.com>
+Date:   Mon, 8 Jan 2024 18:42:13 +0900
+
+    FaceService: Conditionally add ParanoidSense
+
+    * We allows devices to use their own FaceService as ParanoidSense has weak modality
+    * To make above impl complete, conditionally add ParanoidSense and un-comment AIDL provider support
+
+    Change-Id: I7321580b87499f4020d3b080779e2f9cb1a6fce6
+    Signed-off-by: Pranav Vashi <neobuddy89@gmail.com>
+    Signed-off-by: AnierinB <anierin@evolution-x.org>
+
+commit b851c7c04e31016d89e26dde8f325d282bc5b370
+Author: Chris Crump <chriscrawford893@gmail.com>
+Date:   Sat, 25 Nov 2023 11:35:30 +0000
+
+    base: Initial SenseProvider for FaceSense service
+
+    Thanks to Tobi to figure out the fix for FaceSense needing a reboot to work after registering a face model.
+    Also thanks to someone5678 for fixing compile on QPR1.
+
+    neobuddy89: Updated for A15.
+
+    Squashed:
+
+        From: COSMIC <rayavanindra@gmail.com>
+        Date: Fri, 13 Dec 2024 13:38:26 +0530
+        Subject: services: Adapt face sense to A15-QPR1
+
+        Signed-off-by: Pranav Vashi <neobuddy89@gmail.com>
+
+    Change-Id: I1b83429a793a50fba292a38dbf5aa8a54ae5ace3
+    Co-authored-by: Adithya R <gh0strider.2k18.reborn@gmail.com>
+    Co-authored-by: Tobias Merkel <stylogey@gmail.com>
+    Co-authored-by: someone5678 <someone5678@users.noreply.github.com>
+    Co-authored-by: aswin7469 <aswinas@pixysos.com>
+    Signed-off-by: Pranav Vashi <neobuddy89@gmail.com>
 
 Co-authored-by: Chris Crump <chriscrawford893@gmail.com>
 Co-authored-by: Adithya R <gh0strider.2k18.reborn@gmail.com>
@@ -9,6 +83,7 @@ Co-authored-by: Tobias Merkel <stylogey@gmail.com>
 Co-authored-by: someone5678 <someone5678@users.noreply.github.com>
 Co-authored-by: aswin7469 <aswinas@pixysos.com>
 Co-authored-by: Pranav Vashi <neobuddy89@gmail.com>
+Co-authored-by: jhenrique09 <jhsv09@gmail.com>
 Change-Id: I05fa784d9f7f978be9f5944900a97ad7df19f59e
 ---
  .../privacy/AppOpsPrivacyItemMonitor.kt       |    8 +
@@ -16,10 +91,14 @@ Change-Id: I05fa784d9f7f978be9f5944900a97ad7df19f59e
  .../phone/KeyguardBypassController.kt         |   11 +-
  services/core/Android.bp                      |    1 +
  .../server/biometrics/AuthService.java        |    4 +-
+ .../server/biometrics/AuthSession.java        |    5 +
+ .../server/biometrics/BiometricService.java   |   20 +-
+ .../server/biometrics/PreAuthInfo.java        |    5 +
+ .../sensors/AuthenticationClient.java         |    2 +-
  .../sensors/BiometricScheduler.java           |    4 +
  .../biometrics/sensors/face/FaceService.java  |   26 +-
  .../face/sense/BiometricTestSessionImpl.java  |  234 ++++
- .../face/sense/FaceAuthenticationClient.java  |  232 ++++
+ .../face/sense/FaceAuthenticationClient.java  |  234 ++++
  .../sensors/face/sense/FaceEnrollClient.java  |  134 ++
  .../sense/FaceGenerateChallengeClient.java    |  111 ++
  .../face/sense/FaceGetFeatureClient.java      |  101 ++
@@ -33,7 +112,7 @@ Change-Id: I05fa784d9f7f978be9f5944900a97ad7df19f59e
  .../sensors/face/sense/SenseProvider.java     | 1113 +++++++++++++++++
  .../sensors/face/sense/SenseUtils.java        |   61 +
  .../sensors/face/sense/TestHal.java           |  144 +++
- 22 files changed, 2698 insertions(+), 7 deletions(-)
+ 26 files changed, 2716 insertions(+), 23 deletions(-)
  create mode 100644 services/core/java/com/android/server/biometrics/sensors/face/sense/BiometricTestSessionImpl.java
  create mode 100644 services/core/java/com/android/server/biometrics/sensors/face/sense/FaceAuthenticationClient.java
  create mode 100644 services/core/java/com/android/server/biometrics/sensors/face/sense/FaceEnrollClient.java
@@ -140,7 +219,7 @@ index 3242149eed92..e79d4d88a0a6 100644
          pw.println("  bouncerShowing: $bouncerShowing")
          pw.println("  altBouncerShowing:" +
 diff --git a/services/core/Android.bp b/services/core/Android.bp
-index 8a983f9e071d..2784ca242975 100644
+index 3a5714bf699e..308cfc761eaf 100644
 --- a/services/core/Android.bp
 +++ b/services/core/Android.bp
 @@ -264,6 +264,7 @@ java_library_static {
@@ -148,14 +227,14 @@ index 8a983f9e071d..2784ca242975 100644
          "uprobestats_flags_java_lib",
          "clipboard_flags_lib",
 +        "vendor.aospa.biometrics.face",
-     ],
-     javac_shard_size: 50,
-     javacflags: [
+         // HIDL
+         "vendor.mediatek.hardware.mtkpower-V1.1-java",
+         "vendor.samsung.hardware.sysinput-V1.2-java",
 diff --git a/services/core/java/com/android/server/biometrics/AuthService.java b/services/core/java/com/android/server/biometrics/AuthService.java
-index b6768c9c087a..b920d3093269 100644
+index e5e786c67813..ace05e9dee81 100644
 --- a/services/core/java/com/android/server/biometrics/AuthService.java
 +++ b/services/core/java/com/android/server/biometrics/AuthService.java
-@@ -71,6 +71,7 @@ import com.android.internal.R;
+@@ -72,6 +72,7 @@ import com.android.internal.R;
  import com.android.internal.annotations.VisibleForTesting;
  import com.android.internal.util.ArrayUtils;
  import com.android.server.SystemService;
@@ -163,7 +242,7 @@ index b6768c9c087a..b920d3093269 100644
  import com.android.server.biometrics.sensors.face.FaceService;
  import com.android.server.biometrics.sensors.fingerprint.FingerprintService;
  import com.android.server.companion.virtual.VirtualDeviceManagerInternal;
-@@ -838,7 +839,8 @@ public class AuthService extends SystemService {
+@@ -1045,7 +1046,8 @@ public class AuthService extends SystemService {
              final String[] hidlConfigStrings, final Context context,
              final IFaceService faceService, final BiometricHandlerProvider handlerProvider) {
          if ((hidlConfigStrings == null || hidlConfigStrings.length == 0)
@@ -172,6 +251,138 @@ index b6768c9c087a..b920d3093269 100644
 +                && !SenseUtils.canUseProvider()) {
              Slog.d(TAG, "No face sensors.");
              return;
+         }
+diff --git a/services/core/java/com/android/server/biometrics/AuthSession.java b/services/core/java/com/android/server/biometrics/AuthSession.java
+index 6eade1cbf9bd..9b97032e7dba 100644
+--- a/services/core/java/com/android/server/biometrics/AuthSession.java
++++ b/services/core/java/com/android/server/biometrics/AuthSession.java
+@@ -72,6 +72,8 @@ import java.util.List;
+ import java.util.Random;
+ import java.util.function.Function;
+ 
++import com.android.server.biometrics.sensors.face.sense.SenseUtils;
++
+ /**
+  * Class that defines the states of an authentication session invoked via
+  * {@link android.hardware.biometrics.BiometricPrompt}, as well as all of the necessary
+@@ -375,6 +377,9 @@ public final class AuthSession implements IBinder.DeathRecipient {
+     }
+ 
+     private boolean isConfirmationRequired(BiometricSensor sensor) {
++        if (sensor.modality == TYPE_FACE && SenseUtils.canUseProvider()) {
++            return true;
++        }
+         return sensor.confirmationSupported()
+                 && (sensor.confirmationAlwaysRequired(mUserId)
+                 || mPreAuthInfo.confirmationRequested);
+diff --git a/services/core/java/com/android/server/biometrics/BiometricService.java b/services/core/java/com/android/server/biometrics/BiometricService.java
+index cf5fa9699ca9..3ed950013f3d 100644
+--- a/services/core/java/com/android/server/biometrics/BiometricService.java
++++ b/services/core/java/com/android/server/biometrics/BiometricService.java
+@@ -105,6 +105,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
+ import java.util.concurrent.atomic.AtomicLong;
+ import java.util.function.Supplier;
+ 
++import com.android.server.biometrics.sensors.face.sense.SenseUtils;
++
+ /**
+  * System service that arbitrates the modality for BiometricPrompt to use.
+  */
+@@ -245,10 +247,6 @@ public class BiometricService extends SystemService {
+         private static final boolean DEFAULT_MANDATORY_BIOMETRICS_REQUIREMENTS_SATISFIED_STATUS =
+                 true;
+ 
+-        // Some devices that shipped before S already have face-specific settings. Instead of
+-        // migrating, which is complicated, let's just keep using the existing settings.
+-        private final boolean mUseLegacyFaceOnlySettings;
+-
+         // Only used for legacy face-only devices
+         private final Uri FACE_UNLOCK_KEYGUARD_ENABLED =
+                 Settings.Secure.getUriFor(Settings.Secure.FACE_UNLOCK_KEYGUARD_ENABLED);
+@@ -315,11 +313,6 @@ public class BiometricService extends SystemService {
+             final boolean hasFace = context.getPackageManager()
+                     .hasSystemFeature(PackageManager.FEATURE_FACE);
+ 
+-            // Use the legacy setting on face-only devices that shipped on or before Q
+-            mUseLegacyFaceOnlySettings =
+-                    Build.VERSION.DEVICE_INITIAL_SDK_INT <= Build.VERSION_CODES.Q
+-                    && hasFace && !hasFingerprint;
+-
+             addBiometricListenersForMandatoryBiometrics(context, fingerprintManager, faceManager);
+             updateContentObserver();
+         }
+@@ -327,7 +320,7 @@ public class BiometricService extends SystemService {
+         public void updateContentObserver() {
+             mContentResolver.unregisterContentObserver(this);
+ 
+-            if (mUseLegacyFaceOnlySettings) {
++            if (SenseUtils.canUseProvider()) {
+                 mContentResolver.registerContentObserver(FACE_UNLOCK_KEYGUARD_ENABLED,
+                         false /* notifyForDescendants */,
+                         this /* observer */,
+@@ -474,7 +467,7 @@ public class BiometricService extends SystemService {
+                 }
+             } else {
+                 if (!mBiometricEnabledOnKeyguard.containsKey(userId)) {
+-                    if (mUseLegacyFaceOnlySettings) {
++                    if (SenseUtils.canUseProvider()) {
+                         onChange(true /* selfChange */, FACE_UNLOCK_KEYGUARD_ENABLED, userId);
+                     } else {
+                         onChange(true /* selfChange */, BIOMETRIC_KEYGUARD_ENABLED, userId);
+@@ -502,7 +495,7 @@ public class BiometricService extends SystemService {
+                 }
+             } else {
+                 if (!mBiometricEnabledForApps.containsKey(userId)) {
+-                    if (mUseLegacyFaceOnlySettings) {
++                    if (SenseUtils.canUseProvider()) {
+                         onChange(true /* selfChange */, FACE_UNLOCK_APP_ENABLED, userId);
+                     } else {
+                         onChange(true /* selfChange */, BIOMETRIC_APP_ENABLED, userId);
+@@ -1800,9 +1793,6 @@ public class BiometricService extends SystemService {
+     }
+ 
+     private void dumpInternal(PrintWriter pw) {
+-        pw.println("Legacy Settings: " + mSettingObserver.mUseLegacyFaceOnlySettings);
+-        pw.println();
+-
+         pw.println("Sensors:");
+         for (BiometricSensor sensor : mSensors) {
+             pw.println(" " + sensor);
+diff --git a/services/core/java/com/android/server/biometrics/PreAuthInfo.java b/services/core/java/com/android/server/biometrics/PreAuthInfo.java
+index 6fab7e620277..5fd86d5032f8 100644
+--- a/services/core/java/com/android/server/biometrics/PreAuthInfo.java
++++ b/services/core/java/com/android/server/biometrics/PreAuthInfo.java
+@@ -44,6 +44,8 @@ import java.lang.annotation.RetentionPolicy;
+ import java.util.ArrayList;
+ import java.util.List;
+ 
++import com.android.server.biometrics.sensors.face.sense.SenseUtils;
++
+ /**
+  * Class representing the calling client's request. Additionally, derives/calculates
+  * preliminary info that would be useful in helping serve this request. Note that generating
+@@ -285,6 +287,9 @@ class PreAuthInfo {
+ 
+     private static boolean isEnabledForApp(BiometricService.SettingObserver settingObserver,
+             @BiometricAuthenticator.Modality int modality, int userId) {
++        if (modality == TYPE_FINGERPRINT && SenseUtils.canUseProvider()){
++            return true;
++        }
+         return settingObserver.getEnabledForApps(userId, modality);
+     }
+ 
+diff --git a/services/core/java/com/android/server/biometrics/sensors/AuthenticationClient.java b/services/core/java/com/android/server/biometrics/sensors/AuthenticationClient.java
+index 8a9858548806..e7e082140c81 100644
+--- a/services/core/java/com/android/server/biometrics/sensors/AuthenticationClient.java
++++ b/services/core/java/com/android/server/biometrics/sensors/AuthenticationClient.java
+@@ -115,7 +115,7 @@ public abstract class AuthenticationClient<T, O extends AuthenticateOptions>
+     }
+ 
+     @LockoutTracker.LockoutMode
+-    private int handleFailedAttempt(int userId) {
++    protected int handleFailedAttempt(int userId) {
+         if (mLockoutTracker != null) {
+             mLockoutTracker.addFailedAttemptForUser(getTargetUserId());
          }
 diff --git a/services/core/java/com/android/server/biometrics/sensors/BiometricScheduler.java b/services/core/java/com/android/server/biometrics/sensors/BiometricScheduler.java
 index e8786be4d8e6..986fee9dd5b8 100644
@@ -500,10 +711,10 @@ index 000000000000..90dc55a7ed50
 +}
 diff --git a/services/core/java/com/android/server/biometrics/sensors/face/sense/FaceAuthenticationClient.java b/services/core/java/com/android/server/biometrics/sensors/face/sense/FaceAuthenticationClient.java
 new file mode 100644
-index 000000000000..e14e5d60ecdd
+index 000000000000..3a370f698bcc
 --- /dev/null
 +++ b/services/core/java/com/android/server/biometrics/sensors/face/sense/FaceAuthenticationClient.java
-@@ -0,0 +1,232 @@
+@@ -0,0 +1,234 @@
 +/*
 + * Copyright (C) 2020 The Android Open Source Project
 + * Copyright (C) 2023 Paranoid Android
@@ -659,7 +870,9 @@ index 000000000000..e14e5d60ecdd
 +        mCallback.onClientFinished(this, true /* success */);
 +    }
 +
-+    public @LockoutTracker.LockoutMode int handleFailedAttempt(int userId) {
++    @LockoutTracker.LockoutMode
++    @Override
++    protected int handleFailedAttempt(int userId) {
 +        @LockoutTracker.LockoutMode final int lockoutMode =
 +                getLockoutTracker().getLockoutModeForUser(userId);
 +        final PerformanceTracker performanceTracker =
@@ -1663,7 +1876,7 @@ index 000000000000..78e291e2e66e
 +}
 diff --git a/services/core/java/com/android/server/biometrics/sensors/face/sense/SenseProvider.java b/services/core/java/com/android/server/biometrics/sensors/face/sense/SenseProvider.java
 new file mode 100644
-index 000000000000..2ee729ee6bf5
+index 000000000000..eda1a51c084f
 --- /dev/null
 +++ b/services/core/java/com/android/server/biometrics/sensors/face/sense/SenseProvider.java
 @@ -0,0 +1,1113 @@
@@ -2058,7 +2271,7 @@ index 000000000000..2ee729ee6bf5
 +    }
 +
 +    public SenseProvider(Context context, BiometricStateCallback biometricStateCallback, FaceSensorPropertiesInternal sensorProps, LockoutResetDispatcher lockoutResetDispatcher) {
-+        this(context, biometricStateCallback, sensorProps, lockoutResetDispatcher, new BiometricScheduler(0, null));
++        this(context, biometricStateCallback, sensorProps, lockoutResetDispatcher, new BiometricScheduler<>(0, null));
 +    }
 +
 +    private synchronized ISenseService getDaemon() {

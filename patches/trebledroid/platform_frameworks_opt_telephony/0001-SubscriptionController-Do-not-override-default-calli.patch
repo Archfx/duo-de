@@ -1,7 +1,7 @@
 From d0308bee3ef9b6508bcf9a156c4ecce69ca518c9 Mon Sep 17 00:00:00 2001
 From: Peter Cai <peter@typeblog.net>
 Date: Mon, 5 Sep 2022 14:02:37 -0400
-Subject: [PATCH 01/11] SubscriptionController: Do not override default calling
+Subject: [PATCH 01/12] SubscriptionController: Do not override default calling
  account from third-party apps
 
 When the user has selected a calling account from a third-party app as

@@ -1,15 +1,11 @@
-From 0b699c5821cc7d4e54e9196095624fb35fc8a5d2 Mon Sep 17 00:00:00 2001
+From 0d27252700621a6c1e930863980f131903562c13 Mon Sep 17 00:00:00 2001
 From: Chris Crump <chriscrawford893@gmail.com>
-Date: Fri, 17 Mar 2023 20:48:46 +0100
-Subject: [PATCH 2/2] feat: Add Face Unlock with ParanoidSense (2/2)
+Date: Sun, 30 Oct 2022 04:04:59 -0400
+Subject: [PATCH 1/2] Export FaceEnrollFinish activity to Sense
 
-Co-authored-by: Chris Crump <chriscrawford893@gmail.com>
-Co-authored-by: Adithya R <gh0strider.2k18.reborn@gmail.com>
-Co-authored-by: Tobias Merkel <stylogey@gmail.com>
-Co-authored-by: someone5678 <someone5678@users.noreply.github.com>
-Co-authored-by: aswin7469 <aswinas@pixysos.com>
-Co-authored-by: Pranav Vashi <neobuddy89@gmail.com>
-Change-Id: I05fa784d9f7f978be9f5944900a97ad7df19f59e
+Sense calls this activity after enroll is completed
+
+Change-Id: I4d756d9eb91f07bf86f2a96deee465aa256608fc
 ---
  AndroidManifest.xml | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
