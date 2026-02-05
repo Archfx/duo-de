@@ -1,13 +1,18 @@
-From 8a1eae2b80956a878cde567be498c51197b27bcf Mon Sep 17 00:00:00 2001
+From a82890949a60acf552f4f8d053a55ccc05ed1fe8 Mon Sep 17 00:00:00 2001
 From: Alberto Ponces <ponces26@gmail.com>
 Date: Thu, 9 Nov 2023 12:33:55 +0100
-Subject: [PATCH 7/8] gmscompat: Change attestation and instrumentation to pass
- SafetyNet and Play Integrity API.
+Subject: [PATCH 6/7] gmscompat: Change attestation and instrumentation to pass
+ Play Integrity API
 
 Original work by @kdrag0n.
 Updated by many people like @dereference23, @Stallix, @dyneteve, @neobuddy89 and @jhenrique09.
 Adapted by @iceows for his own AOSP A13 GSI.
 Adapted by @ponces based on the work of @chiteroman to pass newest Play Integrity API.
+
+Co-authored-by: Danny Lin <danny@kdrag0n.dev>
+Co-authored-by: chiteroman <querveros999@gmail.com>
+Co-authored-by: Pranav Vashi <neobuddy89@gmail.com>
+Change-Id: Ie2bd62a381a387455eccdf36023891d767b318c3
 ---
  core/java/android/app/Instrumentation.java    |  4 +
  .../internal/gmscompat/AttestationHooks.java  | 89 +++++++++++++++++++
@@ -46,7 +51,7 @@ index 19fecb9bf7c2..c49360e55135 100644
  
 diff --git a/core/java/com/android/internal/gmscompat/AttestationHooks.java b/core/java/com/android/internal/gmscompat/AttestationHooks.java
 new file mode 100644
-index 000000000000..ce9dfa7dde77
+index 000000000000..6b5de1e5af4f
 --- /dev/null
 +++ b/core/java/com/android/internal/gmscompat/AttestationHooks.java
 @@ -0,0 +1,89 @@
@@ -111,8 +116,8 @@ index 000000000000..ce9dfa7dde77
 +        setPropValue("MANUFACTURER", "Google");
 +        setPropValue("BRAND", "google");
 +        setPropValue("MODEL", "Pixel 9a");
-+        setPropValue("FINGERPRINT", "google/tegu_beta/tegu:16/BP31.250502.008.A1/13572937:user/release-keys");
-+        setPropValue("VERSION.SECURITY_PATCH", "2025-05-05");
++        setPropValue("FINGERPRINT", "google/tegu_beta/tegu:16/BP31.250610.004/13769805:user/release-keys");
++        setPropValue("VERSION.SECURITY_PATCH", "2025-07-05");
 +        setPropValue("VERSION.DEVICE_INITIAL_SDK_INT", "32");
 +    }
 +

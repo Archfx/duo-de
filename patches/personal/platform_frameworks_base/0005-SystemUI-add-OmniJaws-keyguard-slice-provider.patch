@@ -1,0 +1,867 @@
+From a21851e3bf4a1d94912c3e7a09a567721d735bb9 Mon Sep 17 00:00:00 2001
+From: Alberto Ponces <ponces26@gmail.com>
+Date: Mon, 7 Jul 2025 23:20:26 +0100
+Subject: [PATCH 5/7] SystemUI: add OmniJaws keyguard slice provider
+
+Squashed commit of the following:
+
+commit 28b4f364f6ec2622262884df1726dd82a7a43346
+Author: rmp22 <195054967+rmp22@users.noreply.github.com>
+Date:   Wed, 16 Jul 2025 06:36:55 +0800
+
+     OmniJaws: Memory leaks solution
+
+     Change-Id: If8977698f05824b3ba245a165d86ab9a50791781
+     Signed-off-by: Pranav Vashi <neobuddy89@gmail.com>
+
+commit 9b90432059fb56ec18a4a074f0c9d23a1cebea9d
+Author: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date:   Thu, 20 Mar 2025 16:18:58 +0200
+
+    SystemUI: don't hide date text on lockscreen when media is playing
+
+    This change also moves media info below alarm and DND info to improve transition animation between
+    always-on-display and lockscreen.
+
+    Signed-off-by: Pranav Vashi <neobuddy89@gmail.com>
+
+commit e6c204c89f3006cd46efa1ecaea873f74df53373
+Author: Pranav Vashi <neobuddy89@gmail.com>
+Date:   Tue, 10 Dec 2024 23:35:51 +0530
+
+    OmniJawsClient: Clean up unnecessary check
+
+    Signed-off-by: Pranav Vashi <neobuddy89@gmail.com>
+
+commit c9de7aeb2d08f188713507cf2e1a56941e734668
+Author: minaripenguin <minaripenguin@users.noreply.github.com>
+Date:   Thu, 12 Sep 2024 21:36:35 +0800
+
+    OmnijawsClient: Fix memory leak
+
+    Signed-off-by: minaripenguin <minaripenguin@users.noreply.github.com>
+    Signed-off-by: Pranav Vashi <neobuddy89@gmail.com>
+
+commit 8913d1ce7816eed0b4cde0616d290f51e8299001
+Author: Pranav Vashi <neobuddy89@gmail.com>
+Date:   Sat, 7 Sep 2024 21:02:59 +0530
+
+    OmnijawsClient: Close cursor to avoid memory leak
+
+    Signed-off-by: Pranav Vashi <neobuddy89@gmail.com>
+
+commit 9b15362a925aef7e123b458fa610734de921623f
+Author: Pranav Vashi <neobuddy89@gmail.com>
+Date:   Fri, 1 Dec 2023 08:08:09 +0530
+
+    OmnijawsClient: Fix widget theme [1/2]
+
+    Signed-off-by: Pranav Vashi <neobuddy89@gmail.com>
+
+commit c09f5fdbcef5119324768c0e817ecdbb50d29362
+Author: Pranav Vashi <neobuddy89@gmail.com>
+Date:   Sun, 18 Sep 2022 10:02:41 +0530
+
+    OmnijawsClient: Use new google icon set by default
+
+    Signed-off-by: Pranav Vashi <neobuddy89@gmail.com>
+
+commit 5723945d86762daa8778c0b44b30dec26973c504
+Author: LuK1337 <priv.luk@gmail.com>
+Date:   Fri, 27 May 2022 01:13:39 +0200
+
+    SystemUI: Add left padding for keyguard slices
+
+    Fixes: https://gitlab.com/LineageOS/issues/android/-/issues/4620
+    Change-Id: I2735028472aa46bad412c69948936fb30c5fa36c
+
+commit 6fd9150a0fdb5ce36bf8d09855d9fce8d1047d27
+Author: maxwen <max.weninger@gmail.com>
+Date:   Fri, 11 Feb 2022 17:56:05 +0100
+
+    SystemUI: update OmniJawsClient
+
+    Change-Id: I26dcfaa103258ac126eb1c80c3aac1cdda26fdff
+
+commit d66e3b9b32bf6ab190a568c5f2a657a972f38c75
+Author: maxwen <max.weninger@gmail.com>
+Date:   Sat, 6 Nov 2021 20:40:52 +0100
+
+    SystemUI: add enablement settings for OmniJaws keyguard slice provider
+
+    Change-Id: Ic3a386fae8ca63708628cd0b5d5dfe359743e539
+
+commit c87b520b58733b063dd875972e90c85ad09c84f9
+Author: maxwen <max.weninger@gmail.com>
+Date:   Fri, 22 Oct 2021 14:55:26 +0200
+
+    crdroid: Add OmniJawsClient
+
+    @neobuddy89:
+    Cleaned up version from https://github.com/omnirom/android_packages_apps_OmniLib
+    Keeping it accessible for weather client packages as well as SystemUI package.
+
+    Change-Id: Ifadfaa7f4438e3bde52f116f002a7a5273790184
+    Signed-off-by: Pranav Vashi <neobuddy89@gmail.com>
+
+commit 54ebaee67e0cc588a6cc2e43ec7313e971b82aec
+Author: maxwen <max.weninger@gmail.com>
+Date:   Tue, 19 Oct 2021 00:45:31 +0200
+
+    SystemUI: add OmniJaws keyguard slice provider
+
+    Change-Id: Ic74dc968bde4efa4560c3d56df4f7d8c9244793d
+
+Change-Id: I138c0dc94f08142f6614659037a501d6ae8909b1
+Co-authored-by: maxwen <max.weninger@gmail.com>
+Co-authored-by: LuK1337 <priv.luk@gmail.com>
+Co-authored-by: Pranav Vashi <neobuddy89@gmail.com>
+Co-authored-by: minaripenguin <minaripenguin@users.noreply.github.com>
+Co-authored-by: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Co-authored-by: rmp22 <195054967+rmp22@users.noreply.github.com>
+---
+ core/java/android/provider/Settings.java      |   5 +
+ .../internal/util/crdroid/OmniJawsClient.java | 383 ++++++++++++++++++
+ data/etc/com.android.systemui.xml             |   1 +
+ packages/SystemUI/AndroidManifest.xml         |   4 +
+ .../android/keyguard/KeyguardSliceView.java   |  22 +-
+ .../keyguard/KeyguardSliceProvider.java       | 117 +++++-
+ 6 files changed, 521 insertions(+), 11 deletions(-)
+ create mode 100644 core/java/com/android/internal/util/crdroid/OmniJawsClient.java
+
+diff --git a/core/java/android/provider/Settings.java b/core/java/android/provider/Settings.java
+index e7bca1419418..e2bba3be3d13 100644
+--- a/core/java/android/provider/Settings.java
++++ b/core/java/android/provider/Settings.java
+@@ -6508,6 +6508,11 @@ public final class Settings {
+          * the setting value. See an example above.
+          */
+ 
++        /**
++         * @hide
++         */
++        public static final String LOCKSCREEN_WEATHER_ENABLED = "lockscreen_weather_enabled";
++
+         /**
+          * Keys we no longer back up under the current schema, but want to continue to
+          * process when restoring historical backup datasets.
+diff --git a/core/java/com/android/internal/util/crdroid/OmniJawsClient.java b/core/java/com/android/internal/util/crdroid/OmniJawsClient.java
+new file mode 100644
+index 000000000000..60509ec40295
+--- /dev/null
++++ b/core/java/com/android/internal/util/crdroid/OmniJawsClient.java
+@@ -0,0 +1,383 @@
++/*
++* Copyright (C) 2021 The OmniROM Project
++* Copyright (C) 2025 AxionOS Project
++*
++* This program is free software: you can redistribute it and/or modify
++* it under the terms of the GNU General Public License as published by
++* the Free Software Foundation, either version 2 of the License, or
++* (at your option) any later version.
++*
++* This program is distributed in the hope that it will be useful,
++* but WITHOUT ANY WARRANTY; without even the implied warranty of
++* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++* GNU General Public License for more details.
++*
++* You should have received a copy of the GNU General Public License
++* along with this program. If not, see <http://www.gnu.org/licenses/>.
++*
++*/
++package com.android.internal.util.crdroid;
++
++import android.content.*;
++import android.content.pm.PackageManager;
++import android.content.pm.PackageManager.NameNotFoundException;
++import android.content.res.Resources;
++import android.database.Cursor;
++import android.graphics.Color;
++import android.graphics.drawable.ColorDrawable;
++import android.graphics.drawable.Drawable;
++import android.net.Uri;
++import android.provider.Settings;
++import android.text.TextUtils;
++import android.util.Log;
++
++import java.lang.ref.WeakReference;
++import java.text.DecimalFormat;
++import java.text.SimpleDateFormat;
++import java.util.*;
++
++public class OmniJawsClient {
++
++    private static final String TAG = "OmniJawsClient";
++    private static final boolean DEBUG = false;
++
++    public static final String SERVICE_PACKAGE = "org.omnirom.omnijaws";
++    public static final Uri WEATHER_URI = Uri.parse("content://org.omnirom.omnijaws.provider/weather");
++    public static final Uri SETTINGS_URI = Uri.parse("content://org.omnirom.omnijaws.provider/settings");
++    public static final String WEATHER_UPDATE = SERVICE_PACKAGE + ".WEATHER_UPDATE";
++    public static final String WEATHER_ERROR = SERVICE_PACKAGE + ".WEATHER_ERROR";
++
++    private static final String ICON_PACKAGE_DEFAULT = "org.omnirom.omnijaws";
++    private static final String ICON_PREFIX_DEFAULT = "google_new_light";
++    private static final String EXTRA_ERROR = "error";
++    public static final int EXTRA_ERROR_NETWORK = 0;
++    public static final int EXTRA_ERROR_LOCATION = 1;
++    public static final int EXTRA_ERROR_DISABLED = 2;
++
++    public static final String[] WEATHER_PROJECTION = {
++            "city", "wind_speed", "wind_direction", "condition_code", "temperature",
++            "humidity", "condition", "forecast_low", "forecast_high", "forecast_condition",
++            "forecast_condition_code", "time_stamp", "forecast_date", "pin_wheel"
++    };
++
++    public static final String[] SETTINGS_PROJECTION = {
++            "enabled", "units", "provider", "setup", "icon_pack"
++    };
++
++    private static final DecimalFormat sNoDigitsFormat = new DecimalFormat("0");
++
++    private static OmniJawsClient sInstance;
++
++    private WeatherInfo mCachedInfo;
++    private Resources mRes;
++    private String mPackageName;
++    private String mIconPrefix;
++    private String mSettingIconPackage;
++    private boolean mMetric;
++
++    private final List<WeakReference<OmniJawsObserver>> mObservers = new ArrayList<>();
++    private WeatherUpdateReceiver mReceiver;
++    private boolean mWeatherReceiverRegistered = false;
++
++    private OmniJawsClient() {}
++
++    public static synchronized OmniJawsClient get() {
++        if (sInstance == null) {
++            sInstance = new OmniJawsClient();
++        }
++        return sInstance;
++    }
++
++    public interface OmniJawsObserver {
++        void weatherUpdated();
++        void weatherError(int errorReason);
++        default void updateSettings() {}
++    }
++
++    private class WeatherUpdateReceiver extends BroadcastReceiver {
++        @Override public void onReceive(Context context, Intent intent) {
++            String action = intent.getAction();
++            pruneDeadObservers();
++            for (WeakReference<OmniJawsObserver> ref : mObservers) {
++                OmniJawsObserver obs = ref.get();
++                if (obs == null) continue;
++                if (WEATHER_UPDATE.equals(action)) {
++                    obs.weatherUpdated();
++                } else if (WEATHER_ERROR.equals(action)) {
++                    obs.weatherError(intent.getIntExtra(EXTRA_ERROR, 0));
++                }
++            }
++        }
++    }
++
++    public WeatherInfo getWeatherInfo() {
++        return mCachedInfo;
++    }
++
++    public void queryWeather(Context context) {
++        if (!isOmniJawsEnabled(context)) {
++            Log.w(TAG, "queryWeather while disabled");
++            mCachedInfo = null;
++            return;
++        }
++
++        try (Cursor weatherCursor = context.getContentResolver().query(
++                WEATHER_URI, WEATHER_PROJECTION, null, null, null)) {
++
++            if (weatherCursor != null && weatherCursor.getCount() > 0) {
++                mCachedInfo = new WeatherInfo();
++                List<DayForecast> forecasts = new ArrayList<>();
++
++                for (int i = 0; i < weatherCursor.getCount(); i++) {
++                    weatherCursor.moveToPosition(i);
++                    if (i == 0) {
++                        mCachedInfo.city = weatherCursor.getString(0);
++                        mCachedInfo.windSpeed = getFormattedValue(weatherCursor.getFloat(1));
++                        mCachedInfo.windDirection = weatherCursor.getInt(2) + "\u00b0";
++                        mCachedInfo.conditionCode = weatherCursor.getInt(3);
++                        mCachedInfo.temp = getFormattedValue(weatherCursor.getFloat(4));
++                        mCachedInfo.humidity = weatherCursor.getString(5);
++                        mCachedInfo.condition = weatherCursor.getString(6);
++                        mCachedInfo.timeStamp = Long.parseLong(weatherCursor.getString(11));
++                        mCachedInfo.pinWheel = weatherCursor.getString(13);
++                    } else {
++                        DayForecast day = new DayForecast();
++                        day.low = getFormattedValue(weatherCursor.getFloat(7));
++                        day.high = getFormattedValue(weatherCursor.getFloat(8));
++                        day.condition = weatherCursor.getString(9);
++                        day.conditionCode = weatherCursor.getInt(10);
++                        day.date = weatherCursor.getString(12);
++                        forecasts.add(day);
++                    }
++                }
++                mCachedInfo.forecasts = forecasts;
++            }
++        } catch (Exception e) {
++            Log.e(TAG, "queryWeather: weather", e);
++        }
++
++        try (Cursor settingsCursor = context.getContentResolver().query(
++                SETTINGS_URI, SETTINGS_PROJECTION, null, null, null)) {
++
++            if (settingsCursor != null && settingsCursor.moveToFirst()) {
++                mMetric = settingsCursor.getInt(1) == 0;
++                if (mCachedInfo != null) {
++                    mCachedInfo.tempUnits = getTemperatureUnit();
++                    mCachedInfo.windUnits = getWindUnit();
++                    mCachedInfo.provider = settingsCursor.getString(2);
++                    mCachedInfo.iconPack = settingsCursor.getString(4);
++                }
++            }
++        } catch (Exception e) {
++            Log.e(TAG, "queryWeather: settings", e);
++        }
++
++        updateSettings(context);
++    }
++
++    private void updateSettings(Context context) {
++        String iconPack = (mCachedInfo != null) ? mCachedInfo.iconPack : null;
++        if (iconPack == null || TextUtils.isEmpty(iconPack)) {
++            loadDefaultIconsPackage(context);
++        } else if (!iconPack.equals(mSettingIconPackage)) {
++            mSettingIconPackage = iconPack;
++            loadCustomIconPackage(context);
++        }
++    }
++
++    private void loadDefaultIconsPackage(Context context) {
++        mPackageName = ICON_PACKAGE_DEFAULT;
++        mIconPrefix = ICON_PREFIX_DEFAULT;
++        mSettingIconPackage = mPackageName + "." + mIconPrefix;
++        try {
++            mRes = context.getPackageManager().getResourcesForApplication(mPackageName);
++        } catch (Exception e) {
++            Log.w(TAG, "No default icon package found");
++            mRes = null;
++        }
++    }
++
++    private void loadCustomIconPackage(Context context) {
++        int idx = mSettingIconPackage.lastIndexOf(".");
++        if (idx == -1) {
++            loadDefaultIconsPackage(context);
++            return;
++        }
++        mPackageName = mSettingIconPackage.substring(0, idx);
++        mIconPrefix = mSettingIconPackage.substring(idx + 1);
++        try {
++            mRes = context.getPackageManager().getResourcesForApplication(mPackageName);
++        } catch (Exception e) {
++            Log.w(TAG, "Icon pack loading failed, fallback to default");
++            loadDefaultIconsPackage(context);
++        }
++    }
++
++    private static String getFormattedValue(float value) {
++        if (Float.isNaN(value)) return "-";
++        String result = sNoDigitsFormat.format(value);
++        return result.equals("-0") ? "0" : result;
++    }
++
++    public boolean isOmniJawsEnabled(Context context) {
++        if (!isAvailableApp(context, SERVICE_PACKAGE)) return false;
++
++        try (Cursor c = context.getContentResolver().query(
++                SETTINGS_URI, SETTINGS_PROJECTION, null, null, null)) {
++            return c != null && c.moveToFirst() && c.getInt(0) == 1;
++        } catch (Exception e) {
++            Log.e(TAG, "isOmniJawsEnabled", e);
++            return false;
++        }
++    }
++
++    private boolean isAvailableApp(Context context, String pkg) {
++        try {
++            PackageManager pm = context.getPackageManager();
++            pm.getPackageInfo(pkg, PackageManager.GET_ACTIVITIES);
++            int state = pm.getApplicationEnabledSetting(pkg);
++            return state != PackageManager.COMPONENT_ENABLED_STATE_DISABLED
++                    && state != PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER;
++        } catch (NameNotFoundException | IllegalArgumentException e) {
++            return false;
++        }
++    }
++
++    public void addObserver(Context context, OmniJawsObserver observer) {
++        if (observer == null) return;
++        removeObserver(context, observer);
++        mObservers.add(new WeakReference<>(observer));
++        registerReceiverIfNeeded(context);
++    }
++
++    public void removeObserver(Context context, OmniJawsObserver observer) {
++        if (observer == null) return;
++        Iterator<WeakReference<OmniJawsObserver>> it = mObservers.iterator();
++        while (it.hasNext()) {
++            OmniJawsObserver o = it.next().get();
++            if (o == null || o == observer) {
++                it.remove();
++            }
++        }
++        if (mObservers.isEmpty()) {
++            unregisterReceiver(context);
++        }
++    }
++
++    private void pruneDeadObservers() {
++        try {
++            mObservers.removeIf(ref -> ref.get() == null);
++        } catch (Exception e) {
++            Log.w(TAG, "Exception occured while pruning, ignoring");
++        }
++    }
++
++    private void registerReceiverIfNeeded(Context context) {
++        if (!mWeatherReceiverRegistered && !mObservers.isEmpty()) {
++            if (mReceiver != null) {
++                try {
++                    context.unregisterReceiver(mReceiver);
++                } catch (Exception ignored) {}
++            }
++            mReceiver = new WeatherUpdateReceiver();
++            IntentFilter filter = new IntentFilter();
++            filter.addAction(WEATHER_UPDATE);
++            filter.addAction(WEATHER_ERROR);
++            context.registerReceiver(mReceiver, filter, Context.RECEIVER_EXPORTED);
++            mWeatherReceiverRegistered = true;
++        }
++    }
++
++    private void unregisterReceiver(Context context) {
++        if (mWeatherReceiverRegistered && mReceiver != null) {
++            try {
++                context.unregisterReceiver(mReceiver);
++            } catch (Exception ignored) {}
++            mWeatherReceiverRegistered = false;
++        }
++    }
++
++    private String getTemperatureUnit() {
++        return mMetric ? "\u00b0C" : "\u00b0F";
++    }
++
++    private String getWindUnit() {
++        return mMetric ? "km/h" : "mph";
++    }
++
++    public Drawable getWeatherConditionImage(Context context, int conditionCode) {
++        if (mRes == null) {
++            loadDefaultIconsPackage(context);
++        }
++        try {
++            int resId = mRes.getIdentifier(mIconPrefix + "_" + conditionCode, "drawable", mPackageName);
++            Drawable d = mRes.getDrawable(resId, null);
++            return d != null ? d : getDefaultConditionImage(context);
++        } catch (Exception e) {
++            Log.e(TAG, "getWeatherConditionImage", e);
++            return getDefaultConditionImage(context);
++        }
++    }
++
++    private Drawable getDefaultConditionImage(Context context) {
++        try {
++            Resources res = context.getPackageManager().getResourcesForApplication(ICON_PACKAGE_DEFAULT);
++            int resId = res.getIdentifier(ICON_PREFIX_DEFAULT + "_na", "drawable", ICON_PACKAGE_DEFAULT);
++            Drawable d = res.getDrawable(resId, null);
++            return d != null ? d : new ColorDrawable(Color.RED);
++        } catch (Exception e) {
++            return new ColorDrawable(Color.RED);
++        }
++    }
++
++    public Drawable getResOmni(Context context, String iconOmni) {
++        if (mRes == null) loadDefaultIconsPackage(context);
++        try {
++            int resId = mRes.getIdentifier(iconOmni, "drawable", mPackageName);
++            Drawable d = mRes.getDrawable(resId, null);
++            return d != null ? d : new ColorDrawable(Color.RED);
++        } catch (Exception e) {
++            Log.e(TAG, "getResOmni", e);
++            return new ColorDrawable(Color.RED);
++        }
++    }
++
++    public static class WeatherInfo {
++        public String city;
++        public String windSpeed;
++        public String windDirection;
++        public int conditionCode;
++        public String temp;
++        public String humidity;
++        public String condition;
++        public Long timeStamp;
++        public List<DayForecast> forecasts;
++        public String tempUnits;
++        public String windUnits;
++        public String provider;
++        public String pinWheel;
++        public String iconPack;
++
++        public String getLastUpdateTime() {
++            return new SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new Date(timeStamp));
++        }
++
++        @Override
++        public String toString() {
++            return city + " @ " + new Date(timeStamp) + " | " + condition + " | " + temp;
++        }
++    }
++
++    public static class DayForecast {
++        public String low;
++        public String high;
++        public int conditionCode;
++        public String condition;
++        public String date;
++
++        @Override
++        public String toString() {
++            return "[" + date + " - " + low + "/" + high + " - " + condition + "]";
++        }
++    }
++}
+diff --git a/data/etc/com.android.systemui.xml b/data/etc/com.android.systemui.xml
+index 3eadf3b94515..f0714a630ec3 100644
+--- a/data/etc/com.android.systemui.xml
++++ b/data/etc/com.android.systemui.xml
+@@ -16,6 +16,7 @@
+   -->
+ <permissions>
+     <privapp-permissions package="com.android.systemui">
++        <permission name="android.permission.ACCESS_FINE_LOCATION"/>
+         <permission name="android.permission.CAPTURE_AUDIO_OUTPUT"/>
+         <permission name="android.permission.ALLOW_SLIPPERY_TOUCHES"/>
+         <permission name="android.permission.BATTERY_STATS"/>
+diff --git a/packages/SystemUI/AndroidManifest.xml b/packages/SystemUI/AndroidManifest.xml
+index f628a420d8fa..a380f2a2025e 100644
+--- a/packages/SystemUI/AndroidManifest.xml
++++ b/packages/SystemUI/AndroidManifest.xml
+@@ -404,6 +404,10 @@
+     <protected-broadcast android:name="com.android.systemui.action.ACTION_LAUNCH_MEDIA_OUTPUT_BROADCAST_DIALOG" />
+     <protected-broadcast android:name="com.android.systemui.STARTED" />
+ 
++    <!-- OmniJaws -->
++    <uses-permission android:name="org.omnirom.omnijaws.READ_WEATHER" />
++    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
++
+     <application
+         android:name=".SystemUIApplication"
+         android:persistent="true"
+diff --git a/packages/SystemUI/src/com/android/keyguard/KeyguardSliceView.java b/packages/SystemUI/src/com/android/keyguard/KeyguardSliceView.java
+index 7b5325d4eaa6..130f984be3db 100644
+--- a/packages/SystemUI/src/com/android/keyguard/KeyguardSliceView.java
++++ b/packages/SystemUI/src/com/android/keyguard/KeyguardSliceView.java
+@@ -49,6 +49,7 @@ import com.android.internal.annotations.VisibleForTesting;
+ import com.android.internal.graphics.ColorUtils;
+ import com.android.settingslib.Utils;
+ import com.android.systemui.res.R;
++import com.android.systemui.keyguard.KeyguardSliceProvider;
+ import com.android.systemui.util.wakelock.KeepAwakeAnimationListener;
+ 
+ import java.io.PrintWriter;
+@@ -162,14 +163,18 @@ public class KeyguardSliceView extends LinearLayout {
+             RowContent rc = (RowContent) subItems.get(i);
+             SliceItem item = rc.getSliceItem();
+             final Uri itemTag = item.getSlice().getUri();
++            final boolean isWeatherSlice = itemTag.toString().equals(KeyguardSliceProvider.KEYGUARD_WEATHER_URI);
+             // Try to reuse the view if already exists in the layout
+             KeyguardSliceTextView button = mRow.findViewWithTag(itemTag);
+             if (button == null) {
+                 button = new KeyguardSliceTextView(mContext);
++                button.setShouldTintDrawable(!isWeatherSlice);
+                 button.setTextColor(blendedColor);
+                 button.setTag(itemTag);
+                 final int viewIndex = i - (mHasHeader ? 1 : 0);
+                 mRow.addView(button, viewIndex);
++            } else {
++                button.setShouldTintDrawable(!isWeatherSlice);
+             }
+ 
+             PendingIntent pendingIntent = null;
+@@ -423,12 +428,18 @@ public class KeyguardSliceView extends LinearLayout {
+         @StyleRes
+         private static int sStyleId = R.style.TextAppearance_Keyguard_Secondary;
+ 
++        private boolean shouldTintDrawable = true;
++
+         KeyguardSliceTextView(Context context) {
+             super(context, null /* attrs */, 0 /* styleAttr */, sStyleId);
+             onDensityOrFontScaleChanged();
+             setEllipsize(TruncateAt.END);
+         }
+ 
++        public void setShouldTintDrawable(boolean shouldTintDrawable){
++            this.shouldTintDrawable = shouldTintDrawable;
++        }
++
+         public void onDensityOrFontScaleChanged() {
+             updatePadding();
+         }
+@@ -445,13 +456,15 @@ public class KeyguardSliceView extends LinearLayout {
+ 
+         private void updatePadding() {
+             boolean hasText = !TextUtils.isEmpty(getText());
++            boolean isDate = Uri.parse(KeyguardSliceProvider.KEYGUARD_DATE_URI).equals(getTag());
+             int padding = (int) getContext().getResources()
+                     .getDimension(R.dimen.widget_horizontal_padding) / 2;
++            int iconPadding = (int) mContext.getResources()
++                    .getDimension(R.dimen.widget_icon_padding);
+             // orientation is vertical, so add padding to top & bottom
+-            setPadding(0, padding, 0, hasText ? padding : 0);
++            setPadding(!isDate ? iconPadding : 0, padding, 0, hasText ? padding : 0);
+ 
+-            setCompoundDrawablePadding((int) mContext.getResources()
+-                    .getDimension(R.dimen.widget_icon_padding));
++            setCompoundDrawablePadding(iconPadding);
+         }
+ 
+         @Override
+@@ -469,6 +482,9 @@ public class KeyguardSliceView extends LinearLayout {
+         }
+ 
+         private void updateDrawableColors() {
++            if (!shouldTintDrawable) {
++                return;
++            }
+             final int color = getCurrentTextColor();
+             for (Drawable drawable : getCompoundDrawables()) {
+                 if (drawable != null) {
+diff --git a/packages/SystemUI/src/com/android/systemui/keyguard/KeyguardSliceProvider.java b/packages/SystemUI/src/com/android/systemui/keyguard/KeyguardSliceProvider.java
+index 9ade5036b9a8..a732efe5eef6 100644
+--- a/packages/SystemUI/src/com/android/systemui/keyguard/KeyguardSliceProvider.java
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/KeyguardSliceProvider.java
+@@ -24,6 +24,7 @@ import android.content.ContentResolver;
+ import android.content.Context;
+ import android.content.Intent;
+ import android.content.IntentFilter;
++import android.database.ContentObserver;
+ import android.graphics.Typeface;
+ import android.graphics.drawable.Icon;
+ import android.icu.text.DateFormat;
+@@ -33,6 +34,7 @@ import android.media.session.PlaybackState;
+ import android.net.Uri;
+ import android.os.Handler;
+ import android.os.Trace;
++import android.os.UserHandle;
+ import android.provider.Settings;
+ import android.service.notification.ZenModeConfig;
+ import android.text.TextUtils;
+@@ -45,8 +47,10 @@ import androidx.slice.SliceProvider;
+ import androidx.slice.builders.ListBuilder;
+ import androidx.slice.builders.ListBuilder.RowBuilder;
+ import androidx.slice.builders.SliceAction;
++import androidx.slice.widget.SliceViewUtil;
+ 
+ import com.android.internal.annotations.VisibleForTesting;
++import com.android.internal.util.crdroid.OmniJawsClient;
+ import com.android.keyguard.KeyguardUpdateMonitor;
+ import com.android.keyguard.KeyguardUpdateMonitorCallback;
+ import com.android.systemui.SystemUIAppComponentFactoryBase;
+@@ -80,7 +84,7 @@ import javax.inject.Inject;
+ public class KeyguardSliceProvider extends SliceProvider implements
+         NextAlarmController.NextAlarmChangeCallback, ZenModeController.Callback,
+         NotificationMediaManager.MediaListener, StatusBarStateController.StateListener,
+-        SystemUIAppComponentFactoryBase.ContextInitializer {
++        SystemUIAppComponentFactoryBase.ContextInitializer, OmniJawsClient.OmniJawsObserver {
+ 
+     private static final String TAG = "KgdSliceProvider";
+ 
+@@ -96,6 +100,8 @@ public class KeyguardSliceProvider extends SliceProvider implements
+             "content://com.android.systemui.keyguard/media";
+     public static final String KEYGUARD_ACTION_URI =
+             "content://com.android.systemui.keyguard/action";
++    public static final String KEYGUARD_WEATHER_URI =
++            "content://com.android.systemui.keyguard/weather";
+ 
+     /**
+      * Only show alarms that will ring within N hours.
+@@ -157,6 +163,11 @@ public class KeyguardSliceProvider extends SliceProvider implements
+     @Background
+     Handler mBgHandler;
+ 
++    protected final Uri mWeatherUri;
++    private OmniJawsClient.WeatherInfo mWeatherData;
++    private SettingsObserver mSettingsObserver;
++    private boolean mShowWeatherSlice;
++
+     /**
+      * Receiver responsible for time ticking and updating the date format.
+      */
+@@ -195,6 +206,34 @@ public class KeyguardSliceProvider extends SliceProvider implements
+                 }
+             };
+ 
++    class SettingsObserver extends ContentObserver {
++        SettingsObserver(Handler handler) {
++            super(handler);
++        }
++
++        void observe() {
++            mContentResolver.registerContentObserver(Settings.System.getUriFor(
++                    Settings.System.LOCKSCREEN_WEATHER_ENABLED), false, this,
++                    UserHandle.USER_ALL);
++            updateShowWeatherSlice();
++        }
++
++        void unobserve() {
++            mContentResolver.unregisterContentObserver(this);
++        }
++
++        void updateShowWeatherSlice() {
++            mShowWeatherSlice = Settings.System.getIntForUser(mContentResolver,
++                    Settings.System.LOCKSCREEN_WEATHER_ENABLED,
++                    0, UserHandle.USER_CURRENT) != 0;
++        }
++
++        @Override
++        public void onChange(boolean selfChange) {
++            updateShowWeatherSlice();
++        }
++    }
++
+     public static KeyguardSliceProvider getAttachedInstance() {
+         return KeyguardSliceProvider.sInstance;
+     }
+@@ -208,6 +247,7 @@ public class KeyguardSliceProvider extends SliceProvider implements
+         mAlarmUri = Uri.parse(KEYGUARD_NEXT_ALARM_URI);
+         mDndUri = Uri.parse(KEYGUARD_DND_URI);
+         mMediaUri = Uri.parse(KEYGUARD_MEDIA_URI);
++        mWeatherUri = Uri.parse(KEYGUARD_WEATHER_URI);
+     }
+ 
+     @AnyThread
+@@ -219,14 +259,14 @@ public class KeyguardSliceProvider extends SliceProvider implements
+             synchronized (this) {
+                 ListBuilder builder = new ListBuilder(getContext(), mSliceUri,
+                         ListBuilder.INFINITY);
+-                if (needsMediaLocked()) {
+-                    addMediaLocked(builder);
+-                } else {
+-                    builder.addRow(new RowBuilder(mDateUri).setTitle(mLastText));
+-                }
++                builder.addRow(new RowBuilder(mDateUri).setTitle(mLastText));
++                addWeatherLocked(builder);
+                 addNextAlarmLocked(builder);
+                 addZenModeLocked(builder);
+                 addPrimaryActionLocked(builder);
++                if (needsMediaLocked()) {
++                    addMediaLocked(builder);
++                }
+                 slice = builder.build();
+             }
+         } catch (IllegalStateException e) {
+@@ -251,8 +291,11 @@ public class KeyguardSliceProvider extends SliceProvider implements
+         if (TextUtils.isEmpty(mMediaTitle)) {
+             return;
+         }
+-        listBuilder.setHeader(new ListBuilder.HeaderBuilder(mHeaderUri).setTitle(mMediaTitle));
+-
++        {
++            var titleBuilder = new RowBuilder(mHeaderUri);
++            titleBuilder.setTitle(mMediaTitle);
++            listBuilder.addRow(titleBuilder);
++        }
+         if (!TextUtils.isEmpty(mMediaArtist)) {
+             RowBuilder albumBuilder = new RowBuilder(mMediaUri);
+             albumBuilder.setTitle(mMediaArtist);
+@@ -292,6 +335,17 @@ public class KeyguardSliceProvider extends SliceProvider implements
+         builder.addRow(alarmRowBuilder);
+     }
+ 
++    protected void addWeatherLocked(ListBuilder builder) {
++        if (!mShowWeatherSlice || !OmniJawsClient.get().isOmniJawsEnabled(getContext()) || mWeatherData == null) {
++            return;
++        }
++        IconCompat weatherIcon = SliceViewUtil.createIconFromDrawable(OmniJawsClient.get().getWeatherConditionImage(getContext(), mWeatherData.conditionCode));
++        RowBuilder weatherRowBuilder = new RowBuilder(mWeatherUri)
++                .setTitle(mWeatherData.temp + mWeatherData.tempUnits)
++                .addEndItem(weatherIcon, ListBuilder.ICON_IMAGE);
++        builder.addRow(weatherRowBuilder);
++    }
++
+     /**
+      * Add zen mode (DND) icon to slice if it's enabled.
+      * @param builder The slice builder.
+@@ -342,6 +396,9 @@ public class KeyguardSliceProvider extends SliceProvider implements
+             KeyguardSliceProvider.sInstance = this;
+             registerClockUpdate();
+             updateClockLocked();
++            mSettingsObserver = new SettingsObserver(mHandler);
++            mSettingsObserver.observe();
++            enableWeatherUpdates();
+         }
+         return true;
+     }
+@@ -358,6 +415,8 @@ public class KeyguardSliceProvider extends SliceProvider implements
+                 mKeyguardUpdateMonitor.removeCallback(mKeyguardUpdateMonitorCallback);
+                 getContext().unregisterReceiver(mIntentReceiver);
+             }
++            disableWeatherUpdates();
++            mSettingsObserver.unobserve();
+             KeyguardSliceProvider.sInstance = null;
+         }
+     }
+@@ -560,4 +619,46 @@ public class KeyguardSliceProvider extends SliceProvider implements
+             SystemUIAppComponentFactoryBase.ContextAvailableCallback callback) {
+         mContextAvailableCallback = callback;
+     }
++
++    private void enableWeatherUpdates() {
++        OmniJawsClient.get().addObserver(getContext(), this);
++        queryAndUpdateWeather();
++    }
++
++    private void disableWeatherUpdates() {
++        if (OmniJawsClient.get() != null) {
++            OmniJawsClient.get().removeObserver(getContext(), this);
++        }
++    }
++
++    @Override
++    public void weatherError(int errorReason) {
++        // since this is shown in ambient and lock screen
++        // it would look bad to show every error since the
++        // screen-on revovery of the service had no chance
++        // to run fast enough
++        // so only show the disabled state
++        if (errorReason == OmniJawsClient.EXTRA_ERROR_DISABLED) {
++            mWeatherData = null;
++            notifyChange();
++        }
++    }
++
++    @Override
++    public void weatherUpdated() {
++        queryAndUpdateWeather();
++    }
++
++    @Override
++    public void updateSettings() {
++        queryAndUpdateWeather();
++    }
++
++    private void queryAndUpdateWeather() {
++        if (OmniJawsClient.get() != null) {
++            OmniJawsClient.get().queryWeather(getContext());
++            mWeatherData = OmniJawsClient.get().getWeatherInfo();
++            notifyChange();
++        }
++    }
+ }
+-- 
+2.43.0
+

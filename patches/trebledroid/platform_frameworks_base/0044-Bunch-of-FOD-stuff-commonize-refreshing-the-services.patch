@@ -1,7 +1,7 @@
-From 3dbf0c65fba434477d13decda887e952358e2d3a Mon Sep 17 00:00:00 2001
+From e6f4b1dbae2e95b2142a48086997bc9f8ee81c54 Mon Sep 17 00:00:00 2001
 From: Pierre-Hugues Husson <phh@phh.me>
 Date: Mon, 29 Jan 2024 17:15:38 -0500
-Subject: [PATCH 44/57] Bunch of FOD stuff -- commonize refreshing the
+Subject: [PATCH 44/55] Bunch of FOD stuff -- commonize refreshing the
  services, start supporting AIDL Samsung
 
 ---
@@ -9,7 +9,7 @@ Subject: [PATCH 44/57] Bunch of FOD stuff -- commonize refreshing the
  1 file changed, 137 insertions(+), 19 deletions(-)
 
 diff --git a/services/core/java/com/android/server/biometrics/AuthService.java b/services/core/java/com/android/server/biometrics/AuthService.java
-index 0d8856945a33..bba3664df1bb 100644
+index 4ee16e47fcc5..e5e786c67813 100644
 --- a/services/core/java/com/android/server/biometrics/AuthService.java
 +++ b/services/core/java/com/android/server/biometrics/AuthService.java
 @@ -42,6 +42,7 @@ import android.hardware.biometrics.IAuthService;
