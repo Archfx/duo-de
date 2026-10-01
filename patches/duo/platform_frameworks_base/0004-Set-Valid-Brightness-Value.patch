@@ -1,0 +1,19 @@
+From d79f4433506dfa0d3a12dd9250894a5cc33fd412 Mon Sep 17 00:00:00 2001
+From: ethan <ethangoh98@gmail.com>
+Date: Thu, 1 October 2026 4:31:32 +1100
+Subject: [PATCH] setting valid brightness value which was causing a crash
+
+project frameworks/base/
+diff --git a/packages/SystemUI/src/com/android/systemui/brightness/ui/viewmodel/BrightnessSliderViewModel.kt b/packages/SystemUI/src/com/android/systemui/brightness/ui/viewmodel/BrightnessSliderViewModel.kt
+index ed1cef3fccaf..c21517e5dacf 100644
+--- a/packages/SystemUI/src/com/android/systemui/brightness/ui/viewmodel/BrightnessSliderViewModel.kt
++++ b/packages/SystemUI/src/com/android/systemui/brightness/ui/viewmodel/BrightnessSliderViewModel.kt
+@@ -130,7 +130,7 @@ constructor(
+     }
+ 
+     companion object {
+-        val initialValue = GammaBrightness(-1)
++        val initialValue = GammaBrightness(0)
+ 
+         private val icons =
+             BrightnessIcons(

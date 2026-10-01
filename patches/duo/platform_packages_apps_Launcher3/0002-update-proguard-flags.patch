@@ -1,0 +1,26 @@
+From d79f4433506dfa0d3a12dd9250894a5cc33fd412 Mon Sep 17 00:00:00 2001
+From: ethan <ethangoh98@gmail.com>
+Date: Thu, 1 October 2026 4:37:32 +1100
+Subject: [PATCH] Add rules to prevent classes being thrown out.
+
+project packages/apps/Launcher3/
+diff --git a/proguard.flags b/proguard.flags
+index c0a0042e81..bf611563ef 100644
+--- a/proguard.flags
++++ b/proguard.flags
+@@ -59,3 +59,14 @@
+ -keep class com.android.internal.protolog.** {
+   *;
+ }
++
++# Keep Launcher3 ResourceBasedOverride classes and their constructors intact
++-keep class * implements com.android.launcher3.util.ResourceBasedOverride {
++    public void <init>(...);
++}
++-keep class com.android.launcher3.taskbar.TaskbarModelCallbacksFactory {
++    public void <init>(...);
++}
++-keep class * extends com.android.launcher3.taskbar.TaskbarViewCallbacksFactory {
++    public void <init>(android.content.Context);
++}
+\ No newline at end of file
