@@ -2,8 +2,6 @@
 <manifest>
   <remote name="github" fetch="https://github.com" />
   <remote name="gitlab" fetch="https://gitlab.com" />
-  <remote name="opengapps" fetch="https://github.com/opengapps/"  />
-  <remote name="opengapps-gitlab" fetch="https://gitlab.opengapps.org/opengapps/"  />
 
   <!-- TrebleDroid -->
   <!-- <project name="TrebleDroid/device_phh_treble" path="device/phh/treble" remote="github" revision="android-15.0" />
@@ -18,12 +16,9 @@
   <!-- ponces -->
   <!-- <project name="ponces/android_packages_apps_ParanoidSense" path="packages/apps/ParanoidSense" remote="github" revision="vauxite" /> -->
   <!-- <project name="ponces/treble_adapter" path="treble_adapter" remote="github" revision="master" /> -->
-  <!-- <project name="ponces/vendor_gapps" path="vendor/gapps" remote="gitlab" revision="android-15.0" clone-depth="1" />
-  <project name="ponces/vendor_ponces" path="vendor/ponces" remote="github" revision="android-15.0" /> -->
   <project path="packages/apps/ParanoidSense" name="Ethanol10/android_packages_apps_ParanoidSense" remote="github" revision="beryl" />
   <project path="packages/apps/QcRilAm" name="AndyCGYan/android_packages_apps_QcRilAm" remote="github" revision="master" />
   <project path="packages/services/OmniJaws" name="crdroidandroid/android_packages_services_OmniJaws" remote="github" revision="16.0-qpr1" />
-
 
   <!-- duo specifics -->
   <project name="Archfx/duoOverlays" path="packages/thain/rro_overlays" remote="github" revision="main" />
@@ -38,17 +33,9 @@
 
   <project path="treble_adapter" name="ponces/treble_adapter" remote="github" revision="master" />
 
-  <!-- <project path="vendor/gapps" name="ponces/vendor_gapps" remote="gitlab" revision="android-15.0" clone-depth="1" /> -->
-  <!-- <project path="vendor/gapps" name="Ethanol10/vendor_gapps" remote="github" revision="baklava" clone-depth="1" /> -->
   <project path="vendor/hardware_overlay" name="TrebleDroid/vendor_hardware_overlay" remote="github" revision="pie" />
   <project path="vendor/interfaces" name="TrebleDroid/vendor_interfaces" remote="github" revision="android-16.0" />
   <project path="vendor/magisk" name="phhusson/vendor_magisk" remote="github" revision="android-10.0" />
   <project path="vendor/ponces" name="Ethanol10/vendor_ponces" remote="github" revision="android-16.0" />
-
-  <!-- GApps -->
-  <project path="vendor/opengapps/build" name="aosp_build" revision="master" remote="opengapps" />
-  <project path="vendor/opengapps/sources/all" name="all" clone-depth="1" revision="master" remote="opengapps-gitlab" />
-  <!-- arm64 depends on arm -->
-  <project path="vendor/opengapps/sources/arm" name="arm" clone-depth="1" revision="master" remote="opengapps-gitlab" />
-  <project path="vendor/opengapps/sources/arm64" name="arm64" clone-depth="1" revision="master" remote="opengapps-gitlab" />
 </manifest>
+  
