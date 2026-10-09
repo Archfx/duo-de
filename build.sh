@@ -79,7 +79,7 @@ buildTrebleApp() {
 
 buildVariant() {
     echo "--> Building $1"
-    lunch "$1"-bp2a-eng
+    lunch "$1"-bp2a-userdebug
     make -j$(nproc --all) installclean
     make -j$(nproc --all) systemimage
     # make -j$(nproc --all) target-files-package otatools
@@ -105,8 +105,8 @@ buildVariants() {
     # buildVariant treble_a64_bvN
     # buildVariant treble_a64_bgN
     
-    buildVariant treble_arm64_bgN
-    # buildVariant treble_arm64_bvN    
+    # buildVariant treble_arm64_bgN
+    buildVariant treble_arm64_bvN    
  
     # buildVndkliteVariant treble_a64_bvN
     # buildVndkliteVariant treble_a64_bgN
