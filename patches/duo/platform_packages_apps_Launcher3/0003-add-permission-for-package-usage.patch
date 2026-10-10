@@ -1,0 +1,32 @@
+From d79f4433506dfa0d3a12dd9250894a5cc33fd412 Mon Sep 17 00:00:00 2001
+From: ethan <ethangoh98@gmail.com>
+Date: Thu, 10 October 2026 8:43:02 +1100
+Subject: [PATCH] Sign Launcher3 with platform key, Grant PACKAGE_USAGE_STATS
+
+diff --git a/Android.bp b/Android.bp
+index 2c4fb37908..7328153cc1 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -581,6 +581,8 @@ android_app {
+     min_sdk_version: "current",
+     target_sdk_version: "current",
+ 
++    certificate: "platform", 
++    
+     privileged: true,
+     system_ext_specific: true,
+     overrides: [
+diff --git a/AndroidManifest-common.xml b/AndroidManifest-common.xml
+index f728b76176..b6d016c321 100644
+--- a/AndroidManifest-common.xml
++++ b/AndroidManifest-common.xml
+@@ -65,6 +65,9 @@
+     <uses-permission android:name="${applicationId}.permission.READ_SETTINGS" />
+     <uses-permission android:name="${applicationId}.permission.WRITE_SETTINGS" />
+ 
++    <!-- Added for Launcher3 App prediction -->
++    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"/>
++    
+     <application
+         android:backupAgent="com.android.launcher3.LauncherBackupAgent"
+         android:name="com.android.launcher3.LauncherApplication"

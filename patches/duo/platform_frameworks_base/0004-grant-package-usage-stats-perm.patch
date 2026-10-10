@@ -1,0 +1,13 @@
+
+project frameworks/base/
+diff --git a/data/etc/com.android.launcher3.xml b/data/etc/com.android.launcher3.xml
+index 47e2e3844bb9..9db4bda56c70 100644
+--- a/data/etc/com.android.launcher3.xml
++++ b/data/etc/com.android.launcher3.xml
+@@ -27,5 +27,6 @@
+         <permission name="android.permission.STOP_APP_SWITCHES"/>
+         <permission name="android.permission.ACCESS_SHORTCUTS"/>
+         <permission name="android.permission.ACCESS_HIDDEN_PROFILES_FULL"/>
++        <permission name="android.permission.PACKAGE_USAGE_STATS"/>
+     </privapp-permissions>
+ </permissions>

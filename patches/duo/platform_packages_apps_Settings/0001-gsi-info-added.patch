@@ -18,7 +18,7 @@ index 8f9136838b8..7e6584ffc40 100644
      <string name="homepage_search">Search Settings</string>
  
 +    <string name="gsi_info">System Image</string>
-+    <string name="gsi_info_summary">ARCHFX/DUO-DE A15b (archfx.me/duo-de)</string>
++    <string name="gsi_info_summary">ARCHFX/DUO-DE A16b (archfx.me/duo-de)</string>
 +
      <!-- Keywords for contacts storage item [CHAR LIMIT=NONE] -->
      <string name="keywords_contacts_storage">contacts, storage, account</string>
