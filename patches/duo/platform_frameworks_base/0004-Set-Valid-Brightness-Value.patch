@@ -3,7 +3,6 @@ From: ethan <ethangoh98@gmail.com>
 Date: Thu, 1 October 2026 4:31:32 +1100
 Subject: [PATCH] setting valid brightness value which was causing a crash
 
-project frameworks/base/
 diff --git a/packages/SystemUI/src/com/android/systemui/brightness/ui/viewmodel/BrightnessSliderViewModel.kt b/packages/SystemUI/src/com/android/systemui/brightness/ui/viewmodel/BrightnessSliderViewModel.kt
 index ed1cef3fccaf..c21517e5dacf 100644
 --- a/packages/SystemUI/src/com/android/systemui/brightness/ui/viewmodel/BrightnessSliderViewModel.kt

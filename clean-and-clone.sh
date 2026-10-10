@@ -16,6 +16,20 @@ export BUILD_NUMBER="$(date +%y%m%d)"
 BUILD_ROOT="$PWD"
 BUILD_DIR=$PWD/duo-de/builds
 
+ABORT_REBASE_PATCHING=false
+
+while getopts "r" opt; do
+    case ${opt} in
+        r )
+            ABORT_REBASE_PATCHING=true
+            ;;
+        \? )
+            echo "Invalid option: -$OPTARG" >&2
+            exit 1
+            ;;
+    esac
+done
+
 
 initRepos() {
     echo "--> Initializing workspace"
@@ -34,7 +48,9 @@ syncRepos() {
     echo "--> Syncing repos"
     repo forall -c 'git clean -fdx'
     repo forall -c "git reset --hard HEAD"
-    # repo forall -c 'git rebase --abort 2>/dev/null; git am --abort 2>/dev/null'
+    if [ "$ABORT_REBASE_PATCHING" == "true" ]; then
+        repo forall -c 'git rebase --abort 2>/dev/null; git am --abort 2>/dev/null'
+    fi
     repo sync -c --force-sync --no-clone-bundle --no-tags -j$(nproc --all)
     echo
 }

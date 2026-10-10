@@ -16,6 +16,21 @@ export BUILD_NUMBER="$(date +%y%m%d)"
 BUILD_ROOT="$PWD"
 BUILD_DIR=$PWD/duo-de/builds
 
+SIGN_IMG=false
+
+while getopts "s" opt; do
+    case ${opt} in
+        s )
+            SIGN_IMG=true
+            echo "Signing Release, will extend script execution by approximately 15 min!"
+            sleep 3s
+            ;;
+        \? )
+            echo "Invalid option: -$OPTARG" >&2
+            exit 1
+            ;;
+    esac
+done
 
 initRepos() {
     echo "--> Initializing workspace"
@@ -82,9 +97,11 @@ buildVariant() {
     lunch "$1"-bp2a-userdebug
     make -j$(nproc --all) installclean
     make -j$(nproc --all) systemimage
-    # make -j$(nproc --all) target-files-package otatools
-    # bash $BUILD_ROOT/sign.sh "../archfx-priv/keys" $OUT/signed-target_files.zip
-    # unzip -jqo $OUT/signed-target_files.zip IMAGES/system.img -d $OUT
+    if [ "$SIGN_IMG" == "true" ]; then
+        make -j$(nproc --all) target-files-package otatools
+        bash $BUILD_ROOT/sign.sh "../archfx-priv/keys" $OUT/signed-target_files.zip
+        unzip -jqo $OUT/signed-target_files.zip IMAGES/system.img -d $OUT
+    fi
     mv $OUT/system.img $BUILD_DIR/system-"$1".img
 
     echo "image copied to $BUILD_DIR/system-"$1".img"

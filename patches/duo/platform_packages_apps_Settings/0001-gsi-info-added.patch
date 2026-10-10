@@ -13,13 +13,12 @@ diff --git a/res/values/strings.xml b/res/values/strings.xml
 index 8f9136838b8..7e6584ffc40 100644
 --- a/res/values/strings.xml
 +++ b/res/values/strings.xml
-@@ -13891,6 +13891,9 @@
+@@ -13891,6 +13891,8 @@
      <!-- Text for Search bar of Settings home screen [CHAR LIMIT=34] -->
      <string name="homepage_search">Search Settings</string>
  
 +    <string name="gsi_info">System Image</string>
 +    <string name="gsi_info_summary">ARCHFX/DUO-DE A16b (archfx.me/duo-de)</string>
-+
      <!-- Keywords for contacts storage item [CHAR LIMIT=NONE] -->
      <string name="keywords_contacts_storage">contacts, storage, account</string>
      <!-- Text for Contacts Storage Settings title [CHAR LIMIT=50]-->
@@ -27,11 +26,10 @@ diff --git a/res/xml/my_device_info.xml b/res/xml/my_device_info.xml
 index 1a9e646b509..0c2a500153a 100644
 --- a/res/xml/my_device_info.xml
 +++ b/res/xml/my_device_info.xml
-@@ -236,6 +236,13 @@
+@@ -236,6 +236,12 @@
              android:summary="@string/summary_placeholder"
              settings:enableCopying="true"
              settings:controller="com.android.settings.deviceinfo.BuildNumberPreferenceController"/>
-+
 +        <Preference
 +            android:key="gsi_info"
 +            android:order="54"

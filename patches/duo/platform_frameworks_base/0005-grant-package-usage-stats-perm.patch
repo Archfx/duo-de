@@ -1,5 +1,8 @@
+From d79f4433506dfa0d3a12dd9250894a5cc33fd412 Mon Sep 17 00:00:00 2001
+From: ethan <ethangoh98@gmail.com>
+Date: Thu, 1 October 2026 4:31:32 +1100
+Subject: [PATCH] Add Permission to frameworks to see package usage stats.
 
-project frameworks/base/
 diff --git a/data/etc/com.android.launcher3.xml b/data/etc/com.android.launcher3.xml
 index 47e2e3844bb9..9db4bda56c70 100644
 --- a/data/etc/com.android.launcher3.xml
