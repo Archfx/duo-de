@@ -125,6 +125,43 @@ fastboot reboot
 8. Enable the ideal `Treble Settings` as outlined [here](https://github.com/Archfx/duo-de/discussions/81). 
 9. If you wish to see future updates and feature improvements, consider _starring_ (★) the project—it motivates the development of new releases!
 
+## Migrating back to 12L
+
+Ethanol10:
+I've tested this on a Duo 2, seems to work fairly consistently. You will LOSE all your data when doing this so please backup if you can!
+
+1. Retrieve your Surface recovery image: https://support.microsoft.com/en-us/surface-recovery-image
+2. Follow the script below
+``` shell
+# Boot to fastboot 
+adb reboot fastboot
+
+# Delete all partitions that DUO-DE resides on
+fastboot delete-logical-partition system_ext_a
+fastboot delete-logical-partition system_ext_b
+fastboot delete-logical-partition product_a
+fastboot delete-logical-partition product_b
+fastboot delete-logical-partition system_b
+fastboot delete-logical-partition system_a
+
+# Move to Recovery
+fastboot reboot recovery
+```
+3. Navigate using Vol Up/Down to "Apply update from ADB"
+4. Run the following commands
+```shell
+# replace <surface recovery image location> with file location, e.g windows would be C:/platform-tools/
+# surface_recovery.zip
+adb sideload <surface recovery image location>
+```
+5. Wipe Data
+6. Reboot
+
+Usually, one time isn't enough and you'll end up with a bootloop, follow the steps to get back into recovery to repeat from step 2.
+1. Hold Power and as soon as the device vibrates, hold Volume down
+2. Use volume buttons to select Recovery Mode and press Power to confirm
+3. When the Android logo shows up with No command underneath it, press and hold the power button, then press volume up, and release the power button. It can be a bit finnicky so experiment a little bit (try not to hold the power button for a long time you'll hard reset.)
+4. You should be back in recovery, continue earlier steps from step 2.
 
 ## Issues
 Any issues, please 
