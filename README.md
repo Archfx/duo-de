@@ -48,8 +48,7 @@ Both options will prompt you to open the second application to share the screen.
 ## Surface Duo 2 Status
 
 While DUO-DE works smoothly on both [Surface Duo (Gen1)](https://support.microsoft.com/en-us/surface/surface-duo-1st-gen-features-and-specs-13f2bba9-2b5d-8802-b021-abf26539eef8) and [Surface Duo 2](https://support.microsoft.com/en-us/surface/surface-duo-2-features-01e772a5-3272-4e2f-b0cd-53b5b73e8d21), some of the extra functionalities of Duo2 (like ultrawide or zoom sensors of cameras, surface pen charging) require a lot of reverse engineering work. The Duo2 reverse engineering work is led by [Ethanol10](https://github.com/Ethanol10). Currently, we have extracted lot of information about Duo2, however realizing them as features would take time due to the amount of development and testing required. Discussions related to reverse engineering Duo2 are available [here](https://github.com/Archfx/duo-de/discussions/54).
-> Note: Duo2 has a unresolved touch screen issue ([#136](https://github.com/Archfx/duo-de/issues/136)). We are working on fixing this along with the reverse engineering work.
-> Update: Releases after v2024.12.16 support surface pen wireless charging
+> Update: Releases after v2024.12.16 support surface pen wireless charging with the appropriate pen case
 
 ## Benchmarks
 
