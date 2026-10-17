@@ -1,0 +1,18 @@
+From d79f4433506dfa0d3a12dd9250894a5cc33fd412 Mon Sep 17 00:00:00 2001
+From: ethan <ethangoh98@gmail.com>
+Date: Thu, 10 October 2026 8:44:32 +1100
+Subject: [PATCH] Set Launcher3 as default for config_recentsComponentName for GApps
+
+diff --git a/common/rro_overlays/GmsConfigOverlay/res/values/config.xml b/common/rro_overlays/GmsConfigOverlay/res/values/config.xml
+index 6a42416..26b011e 100644
+--- a/common/rro_overlays/GmsConfigOverlay/res/values/config.xml
++++ b/common/rro_overlays/GmsConfigOverlay/res/values/config.xml
+@@ -378,7 +378,7 @@
+           to fetching and presenting recent tasks. The default configuration uses Launcehr3QuickStep as default launcher and points to
+           the corresponding recents component. When using a different default launcher, change this appropriately or use the default
+           systemui implementation: com.android.systemui/.recents.RecentsActivity -->
+-    <string name="config_recentsComponentName" translatable="false">com.google.android.apps.nexuslauncher/com.android.quickstep.RecentsActivity</string>
++    <string name="config_recentsComponentName" translatable="false">com.android.launcher3/com.android.quickstep.RecentsActivity</string>
+ 
+     <!-- Define device configs on boot -->
+     <string-array name="global_device_configs_override">

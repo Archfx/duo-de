@@ -22,4 +22,3 @@ index 8f24152..50912a8 100644
  				if [ "$apps" == "gapps-go" ];then
 -- 
 2.43.0
-

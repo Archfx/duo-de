@@ -13,14 +13,28 @@ set -e
 
 export BUILD_NUMBER="$(date +%y%m%d)"
 
-BUILD_ROOT="$PWD/treble_aosp"
+BUILD_ROOT="$PWD"
 BUILD_DIR=$PWD/duo-de/builds
+KEYS_DIR=$PWD/../archfx-priv/keys
 
+SIGN_IMG="false"
+
+while getopts "s" opt; do
+    case ${opt} in
+        s )
+            SIGN_IMG="true"
+            ;;
+        \? )
+            echo "Invalid option: -$OPTARG" >&2
+            exit 1
+            ;;
+    esac
+done
 
 initRepos() {
     echo "--> Initializing workspace"
     
-    repo init -u https://android.googlesource.com/platform/manifest -b android-16.0.0_r2 --git-lfs
+    repo init -u https://android.googlesource.com/platform/manifest -b android-16.0.0_r4 --git-lfs
     echo
 
     echo "--> Preparing local manifest"
@@ -33,8 +47,8 @@ initRepos() {
 syncRepos() {
     echo "--> Syncing repos"
     repo forall -c 'git checkout -f' 
-    repo forall -c 'git clean -fd'
-    repo sync -c --force-sync --no-clone-bundle --no-tags -j$(nproc --all) || repo sync -c --force-sync --no-clone-bundle --no-tags -j$(nproc --all)
+    repo forall -c 'git clean -fdx'
+    repo sync -c -n --force-sync --no-clone-bundle --no-tags -j$(nproc --all) || repo sync -c -n --force-sync --no-clone-bundle --no-tags -j$(nproc --all)
     echo
 }
 
@@ -79,12 +93,14 @@ buildTrebleApp() {
 
 buildVariant() {
     echo "--> Building $1"
-    lunch "$1"-bp2a-userdebug
+    lunch "$1"-bp2a-user
     make -j$(nproc --all) installclean
     make -j$(nproc --all) systemimage
-    make -j$(nproc --all) target-files-package otatools
-    bash $BUILD_ROOT/sign.sh "../archfx-priv/keys" $OUT/signed-target_files.zip
-    unzip -jqo $OUT/signed-target_files.zip IMAGES/system.img -d $OUT
+    if [ "$SIGN_IMG" == "true" ]; then
+        make -j$(nproc --all) target-files-package otatools
+        bash $BUILD_ROOT/sign.sh "../archfx-priv/keys" $OUT/signed-target_files.zip
+        unzip -jqo $OUT/signed-target_files.zip IMAGES/system.img -d $OUT
+    fi
     mv $OUT/system.img $BUILD_DIR/system-"$1".img
 
     echo "image copied to $BUILD_DIR/system-"$1".img"
@@ -106,9 +122,7 @@ buildVariants() {
     # buildVariant treble_a64_bgN
     
     buildVariant treble_arm64_bgN
-    buildVariant treble_arm64_bvN
-    
-    
+    buildVariant treble_arm64_bvN    
  
     # buildVndkliteVariant treble_a64_bvN
     # buildVndkliteVariant treble_a64_bgN
@@ -162,15 +176,25 @@ uploadOTA() {
 
 START=$(date +%s)
 
+if [ "$SIGN_IMG" == "true" ]; then
+    if [ -d $KEYS_DIR ]; then
+        echo "Signing Release, will extend script execution by approximately 15 min!"
+        sleep 3s
+    else
+        echo "No keys found in $KEYS_DIR , aborting"
+        exit 1
+    fi
+fi
+
 # initRepos
 # syncRepos
 # applyPatches
 # setupEnv
 # buildTrebleApp
 # buildVariants
-# generatePackages
-# generateOta
-uploadOTA
+generatePackages
+generateOta
+# uploadOTA
 
 END=$(date +%s)
 ELAPSEDM=$(($(($END-$START))/60))

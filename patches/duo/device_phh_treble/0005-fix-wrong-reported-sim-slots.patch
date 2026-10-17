@@ -1,0 +1,17 @@
+From d79f4433506dfa0d3a12dd9250894a5cc33fd412 Mon Sep 17 00:00:00 2001
+From: ethan <ethangoh98@gmail.com>
+Date: Thu, 1 October 2026 3:27:32 +1100
+Subject: [PATCH] Set a default for number of SIMs on device.
+
+diff --git a/overlay/frameworks/base/core/res/res/values/config.xml b/overlay/frameworks/base/core/res/res/values/config.xml
+index b16c9cf..5b1e1d9 100644
+--- a/overlay/frameworks/base/core/res/res/values/config.xml
++++ b/overlay/frameworks/base/core/res/res/values/config.xml
+@@ -82,4 +82,7 @@
+ 			-2 is invalid so setting will resort to int value specified above.
+ 			Must be in the range specified by minimum and maximum. -->
+ 	<item name="config_screenBrightnessSettingDefaultFloat" format="float" type="dimen">0.5</item>
++
++	<!-- The number of physical SIM slots on the device, eSIM and pSIM inclusive -->
++    <integer name="config_num_physical_slots">2</integer>
+ </resources>
