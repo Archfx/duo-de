@@ -15,15 +15,14 @@ export BUILD_NUMBER="$(date +%y%m%d)"
 
 BUILD_ROOT="$PWD"
 BUILD_DIR=$PWD/duo-de/builds
+KEYS_DIR=$PWD/../archfx-priv/keys
 
-SIGN_IMG=false
+SIGN_IMG="false"
 
 while getopts "s" opt; do
     case ${opt} in
         s )
-            SIGN_IMG=true
-            echo "Signing Release, will extend script execution by approximately 15 min!"
-            sleep 3s
+            SIGN_IMG="true"
             ;;
         \? )
             echo "Invalid option: -$OPTARG" >&2
@@ -94,7 +93,7 @@ buildTrebleApp() {
 
 buildVariant() {
     echo "--> Building $1"
-    lunch "$1"-bp2a-userdebug
+    lunch "$1"-bp2a-user
     make -j$(nproc --all) installclean
     make -j$(nproc --all) systemimage
     if [ "$SIGN_IMG" == "true" ]; then
@@ -123,7 +122,7 @@ buildVariants() {
     # buildVariant treble_a64_bgN
     
     buildVariant treble_arm64_bgN
-    # buildVariant treble_arm64_bvN    
+    buildVariant treble_arm64_bvN    
  
     # buildVndkliteVariant treble_a64_bvN
     # buildVndkliteVariant treble_a64_bgN
@@ -177,14 +176,24 @@ uploadOTA() {
 
 START=$(date +%s)
 
+if [ "$SIGN_IMG" == "true" ]; then
+    if [ -d $KEYS_DIR ]; then
+        echo "Signing Release, will extend script execution by approximately 15 min!"
+        sleep 3s
+    else
+        echo "No keys found in $KEYS_DIR , aborting"
+        exit 1
+    fi
+fi
+
 # initRepos
 # syncRepos
 # applyPatches
-setupEnv
-buildTrebleApp
-buildVariants
-# generatePackages
-# generateOta
+# setupEnv
+# buildTrebleApp
+# buildVariants
+generatePackages
+generateOta
 # uploadOTA
 
 END=$(date +%s)
