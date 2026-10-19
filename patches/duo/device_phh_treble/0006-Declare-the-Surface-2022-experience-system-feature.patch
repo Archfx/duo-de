@@ -1,0 +1,50 @@
+From c3c0c9f803d884977596349f50916deb0da3281a Mon Sep 17 00:00:00 2001
+From: Mike Kostersitz <mkostersitz@mac.com>
+Date: Fri, 16 Oct 2026 20:19:38 +0000
+Subject: [PATCH] Declare the Surface 2022 experience system feature for
+ Microsoft Launcher
+
+Microsoft Launcher enters its Duo (dual screen, hinge aware) mode only when the system
+declares com.microsoft.surface.android.feature.SURFACE_2022_EXPERIENCE. The stock ROM
+declared it in the system partitions that a GSI replaces.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ base.mk                                        |  3 ++-
+ files/com.microsoft.surface.duo_experience.xml | 10 ++++++++++
+ 2 files changed, 12 insertions(+), 1 deletion(-)
+ create mode 100644 files/com.microsoft.surface.duo_experience.xml
+
+diff --git a/base.mk b/base.mk
+index d879228..a38953e 100644
+--- a/base.mk
++++ b/base.mk
+@@ -262,7 +262,8 @@ PRODUCT_EXTRA_VNDK_VERSIONS += 28 29
+ 
+ 
+ PRODUCT_COPY_FILES += \
+-	device/phh/treble/files/com.microsoft.surface.duo_v1.xml:system/etc/permissions/com.microsoft.surface.duo_v1.xml
++	device/phh/treble/files/com.microsoft.surface.duo_v1.xml:system/etc/permissions/com.microsoft.surface.duo_v1.xml \
++	device/phh/treble/files/com.microsoft.surface.duo_experience.xml:system/etc/permissions/com.microsoft.surface.duo_experience.xml
+ 
+ PRODUCT_COPY_FILES += \
+ 	device/phh/treble/files/device_state_configuration.xml:system/etc/devicestate/device_state_configuration.xml
+diff --git a/files/com.microsoft.surface.duo_experience.xml b/files/com.microsoft.surface.duo_experience.xml
+new file mode 100644
+index 0000000..3baece4
+--- /dev/null
++++ b/files/com.microsoft.surface.duo_experience.xml
+@@ -0,0 +1,10 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++    System features that Microsoft Launcher (and other Microsoft apps) read to decide they run on a
++    Surface Duo with the 2022 (Android 12L) experience. The stock ROM declared these in its system
++    partitions, which a GSI replaces. Microsoft Launcher: FeatureFlags.isisDuoA12Device() needs
++    SURFACE_2022_EXPERIENCE; isVLMSupported() accepts either vendor_layout_window_management name.
++-->
++<permissions>
++    <feature name="com.microsoft.surface.android.feature.SURFACE_2022_EXPERIENCE" />
++</permissions>
+-- 
+2.43.0
+
