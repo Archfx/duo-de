@@ -1,0 +1,29 @@
+From 3772fd18dca55ce41652a80fce407f2382e4e814 Mon Sep 17 00:00:00 2001
+From: mkostersitz <spartan114@me.com>
+Date: Sun, 18 Oct 2026 18:43:03 +0000
+Subject: [PATCH] Settings: always show the IMS registration row in SIM status
+
+Change-Id: Ifb7cf5d1b984a41b60e9ec366abf8f2bba6e7d7c
+---
+ .../deviceinfo/simstatus/SimStatusDialogRepository.kt        | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/com/android/settings/deviceinfo/simstatus/SimStatusDialogRepository.kt b/src/com/android/settings/deviceinfo/simstatus/SimStatusDialogRepository.kt
+index 760f8b698f5..7621b3804a1 100644
+--- a/src/com/android/settings/deviceinfo/simstatus/SimStatusDialogRepository.kt
++++ b/src/com/android/settings/deviceinfo/simstatus/SimStatusDialogRepository.kt
+@@ -108,8 +108,9 @@ constructor(
+                     signalStrengthShowUp =
+                         getBoolean(
+                             CarrierConfigManager.KEY_SHOW_SIGNAL_STRENGTH_IN_SIM_STATUS_BOOL),
+-                    imsRegisteredShowUp =
+-                        getBoolean(CarrierConfigManager.KEY_SHOW_IMS_REGISTRATION_STATUS_BOOL),
++                    // GSI: the vendor carrier-config overlay replaces vendor.xml, so the platform
++                    // cannot enable this per carrier; always show the IMS registration row.
++                    imsRegisteredShowUp = true,
+                 )
+             }
+         emit(visibility)
+-- 
+2.43.0
+
