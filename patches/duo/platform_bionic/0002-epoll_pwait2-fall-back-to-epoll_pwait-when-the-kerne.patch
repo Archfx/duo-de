@@ -1,0 +1,40 @@
+From d88ceefc8bef44713b908d2b1b8e406f62945e50 Mon Sep 17 00:00:00 2001
+From: mkostersitz <spartan114@me.com>
+Date: Tue, 20 Oct 2026 00:00:01 +0000
+Subject: [PATCH 2/2] epoll_pwait2: fall back to epoll_pwait when the kernel
+ lacks the syscall
+
+epoll_pwait2() needs Linux 5.11 and fails with ENOSYS on older kernels. Fall back to epoll_pwait() with the timeout rounded up to milliseconds, so callers (libgui BLASTBufferQueue) keep working.
+
+Change-Id: I9ab86479f156be83c4f9c915e9db2950314dd57a
+---
+ libc/bionic/sys_epoll.cpp | 13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/libc/bionic/sys_epoll.cpp b/libc/bionic/sys_epoll.cpp
+index be97818da..4380bf317 100644
+--- a/libc/bionic/sys_epoll.cpp
++++ b/libc/bionic/sys_epoll.cpp
+@@ -80,7 +80,18 @@ int epoll_pwait2_64(int fd, epoll_event* events, int max_events, const timespec*
+     kts_ptr = &kts;
+   }
+ #endif
+-  return __epoll_pwait2(fd, events, max_events, kts_ptr, ss, sizeof(*ss));
++  int result = __epoll_pwait2(fd, events, max_events, kts_ptr, ss, sizeof(*ss));
++  if (result == -1 && errno == ENOSYS) {
++    // Kernels older than 5.11 (the Surface Duo 2 runs 5.4) have no epoll_pwait2(): use epoll_pwait()
++    // with the timeout rounded up to milliseconds.
++    int timeout_ms = -1;
++    if (timeout) {
++      long long ms = static_cast<long long>(timeout->tv_sec) * 1000 + (timeout->tv_nsec + 999999) / 1000000;
++      timeout_ms = ms > 0x7fffffff ? 0x7fffffff : static_cast<int>(ms);
++    }
++    return __epoll_pwait(fd, events, max_events, timeout_ms, ss, sizeof(*ss));
++  }
++  return result;
+ }
+ 
+ int epoll_wait(int fd, struct epoll_event* events, int max_events, int timeout) {
+-- 
+2.43.0
+
