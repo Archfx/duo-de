@@ -1,0 +1,49 @@
+From 0869be1fa3fee3f90f25fd2ee8c45a01f7842dd6 Mon Sep 17 00:00:00 2001
+From: mkostersitz <spartan114@me.com>
+Date: Sun, 18 Oct 2026 19:51:26 +0000
+Subject: [PATCH] Iwlan: skip child SA algorithms the kernel IPsec cannot do
+ (AES-XCBC crashed the app on 5.4 kernels)
+
+Change-Id: I4d896c2c6a45cc1c4a1f1bf2edf4681f99caac0a
+---
+ .../google/android/iwlan/epdg/EpdgChildSaProposal.java   | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/src/com/google/android/iwlan/epdg/EpdgChildSaProposal.java b/src/com/google/android/iwlan/epdg/EpdgChildSaProposal.java
+index b13f2aa..72115b5 100644
+--- a/src/com/google/android/iwlan/epdg/EpdgChildSaProposal.java
++++ b/src/com/google/android/iwlan/epdg/EpdgChildSaProposal.java
+@@ -19,6 +19,8 @@ package com.google.android.iwlan.epdg;
+ import android.net.ipsec.ike.ChildSaProposal;
+ import android.util.Pair;
+ 
++import java.util.Set;
++
+ public class EpdgChildSaProposal extends EpdgSaProposal {
+     private boolean mAddChildSessionRekeyKePayload = false;
+ 
+@@ -75,14 +77,21 @@ public class EpdgChildSaProposal extends EpdgSaProposal {
+             encrAlgos = (isProposed) ? getEncryptionAlgos() : getSupportedEncryptionAlgos();
+         }
+ 
++        // The kernel decides which algorithms IPsec can offload (a 5.4 kernel lacks AES-XCBC and
++        // others); the IKE library throws for a child SA algorithm outside that set, which used to
++        // crash this app. Skip what the kernel cannot do.
++        Set<Integer> kernelEncr = ChildSaProposal.getSupportedEncryptionAlgorithms();
+         for (Pair<Integer, Integer> encrAlgo : encrAlgos) {
++            if (!kernelEncr.contains(encrAlgo.first)) continue;
+             saProposalBuilder.addEncryptionAlgorithm(encrAlgo.first, encrAlgo.second);
+         }
+ 
+         if (!isAead) {
+             int[] integrityAlgos =
+                     (isProposed) ? getIntegrityAlgos() : getSupportedIntegrityAlgos();
++            Set<Integer> kernelInteg = ChildSaProposal.getSupportedIntegrityAlgorithms();
+             for (int integrityAlgo : integrityAlgos) {
++                if (!kernelInteg.contains(integrityAlgo)) continue;
+                 saProposalBuilder.addIntegrityAlgorithm(integrityAlgo);
+             }
+         }
+-- 
+2.43.0
+
