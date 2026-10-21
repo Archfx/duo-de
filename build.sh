@@ -96,7 +96,7 @@ buildVariant() {
     lunch "$1"-bp2a-user
     make -j$(nproc --all) installclean
     make -j$(nproc --all) systemimage
-    if [ "$SIGN_IMG" == "true" ]; then
+    if [ "$SIGN_IMG" == "true" ]; then    
         make -j$(nproc --all) target-files-package otatools
         bash $BUILD_ROOT/sign.sh "../archfx-priv/keys" $OUT/signed-target_files.zip
         unzip -jqo $OUT/signed-target_files.zip IMAGES/system.img -d $OUT
@@ -189,11 +189,11 @@ fi
 # initRepos
 # syncRepos
 # applyPatches
-# setupEnv
-# buildTrebleApp
-# buildVariants
-generatePackages
-generateOta
+setupEnv
+buildTrebleApp
+buildVariants
+# generatePackages
+# generateOta
 # uploadOTA
 
 END=$(date +%s)
