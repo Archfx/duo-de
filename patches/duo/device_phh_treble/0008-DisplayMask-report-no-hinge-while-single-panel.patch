@@ -1,0 +1,53 @@
+From e2d56ebae314acc324f8ce41c7b31586207329d6 Mon Sep 17 00:00:00 2001
+From: Mike Kostersitz <mkostersitz@mac.com>
+Date: Fri, 16 Oct 2026 22:46:25 +0000
+Subject: [PATCH] DisplayMask: report no hinge while the display is resized to
+ a single panel
+
+With one panel active the display is resized to that panel and no hinge is in view; reporting the hinge
+rectangle made Microsoft Launcher choose its landscape layout (dock on the side) on the portrait screen.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ .../microsoft/device/display/DisplayMask.java  | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/surface-sdk/java/com/microsoft/device/display/DisplayMask.java b/surface-sdk/java/com/microsoft/device/display/DisplayMask.java
+index ac3b84d..3dfc518 100644
+--- a/surface-sdk/java/com/microsoft/device/display/DisplayMask.java
++++ b/surface-sdk/java/com/microsoft/device/display/DisplayMask.java
+@@ -77,6 +77,9 @@ public final class DisplayMask {
+     public List<Rect> getBoundingRectsForRotation(int rotation) {
+         int[] g = geometry();
+         if (g == null || mBoundingRects.isEmpty()) return new ArrayList<>();
++        // The hinge is only visible while the content is spanned across both panels. With a single panel
++        // active (display resized to one panel) there is no hinge in view, so report none.
++        if (!isSpanned(g)) return new ArrayList<>();
+         List<Rect> out = new ArrayList<>();
+         out.add(hingeForRotation(g, rotation));
+         return out;
+@@ -88,6 +91,21 @@ public final class DisplayMask {
+         return region;
+     }
+ 
++    /** True unless the default display has been resized to a single panel. */
++    private boolean isSpanned(int[] g) {
++        if (mContext == null) return true;
++        try {
++            DisplayManager dm = mContext.getSystemService(DisplayManager.class);
++            Display d = dm.getDisplay(Display.DEFAULT_DISPLAY);
++            if (d == null) return true;
++            android.util.DisplayMetrics m = new android.util.DisplayMetrics();
++            d.getRealMetrics(m);
++            return Math.max(m.widthPixels, m.heightPixels) >= g[0] - g[3];
++        } catch (RuntimeException e) {
++            return true;
++        }
++    }
++
+     private int currentRotation() {
+         try {
+             if (mContext != null) {
+-- 
+2.43.0
+
