@@ -39,25 +39,36 @@ raw.githubusercontent.com caches `ota.json` for up to about 5 minutes after a pu
    Needs the installed build to contain the verification (N+1 or later).
 6. Clean up: `./restore-ota-json.sh --delete-release <tag>`.
 
-## Test matrix
-| case | how | expected |
-|---|---|---|
-| N -> N+1, same variant (vanilla and GApps) | steps 3-4 | installs, boots N+1, data kept |
-| N+1 -> N+2 (slots alternate) | publish another newer build | installs, old slot deleted after boot |
-| wrong hash | step 5 | refused, system unchanged |
-| "Delete OTA" | Updater menu after an OTA | back on the flashed system |
-| already up to date | publish the installed build | no update offered, no loop |
-| wrong variant | ota.json without the device's flavor | no size/url, no update |
-| interrupted download | airplane mode during the download | error dialog, old slot still boots |
-| truncated image | upload a cut-off `.xz` | refused (xz or hash error), system unchanged |
-| low storage | fill `/data` | clear error, no half-installed slot |
-| reboot during extraction | long-press power mid-download | old slot boots, partial slot removed |
-| new slot that does not boot | publish an image that fails early boot | **no automatic rollback**, recover with fastboot |
+## Test matrix (run on one Surface Duo 2, GApps variant)
+`ota-cases.sh` holds the helpers, `run-cases-*.sh` / `run-case-12*.sh` drive the cases below.
 
-## Recovery (a slot that does not boot)
-Hold Power + Volume Down for the bootloader, then
-`fastboot reboot fastboot`, `fastboot -S 128M flash system_b <image>`, `fastboot -w`, `fastboot reboot`
-(`-w` also clears `/metadata`, which drops the OTA slot). Keep the last known good `.img` from `~/aosp-images/`.
+| # | case | result |
+|---|---|---|
+| 1 | N -> N+1, same variant | PASS: installs, boots N+1, data kept |
+| 2 | N+1 -> N+2 (slots alternate a -> b) | PASS: old slot removed after the next boot |
+| 3 | wrong `sha256` of the image | PASS: refused, system unchanged |
+| 4 | wrong `xz_sha256` of the download | PASS: refused, system unchanged |
+| 5 | already up to date (equal date) | PASS: "Your system is up to date", no loop |
+| 6 | ota.json without the device's variant | was offered with empty size/url and a generic error; fixed by treble_app patch 0008 (no update offered) |
+| 7 | truncated `.xz` | PASS: xz error, system unchanged |
+| 8 | network cut during the download | PASS: error dialog, partial slot removed at the next boot |
+| 9 | "Delete OTA files" | PASS: warns about data loss, back on the flashed system, no `otaphh` slots |
+| 10 | low storage (1.2 GB free) | safe, but the error was generic ("failed to be installed"); patch 0008 checks free space first (4.5 GB) and says so |
+| 11 | kill the Updater / reboot mid-install | PASS: boots the old system, no leftovers |
+| 12 | a new slot that does not boot | **no rollback**, see below |
+
+## Recovery (a slot that does not boot) - tested
+Tested with a valid image whose `/system/bin/init` was removed: it passes both hash checks, the Updater switches slot and
+reboots. About 35 s later the device falls back into the bootloader by itself (no key press). It does not return to the
+old system on its own.
+1. `fastboot reboot fastboot` (fastbootd). `fastboot gsi wipe` does **not** help ("Could not find GSI install"): this OTA is
+   not a standard DSU/GSI install.
+2. `fastboot erase metadata` and `fastboot reboot`. The pointer to the OTA slot lives in `/metadata/phh/img`, so the device
+   boots the flashed `system_b` again. The metadata partition also holds the keys of the encrypted `/data`, so the device then
+   asks for a factory reset: **user data is lost**. There is no way around this without keeping the previous slot until the
+   first successful boot of the new one (not implemented).
+3. Alternatively reflash: `fastboot -S 128M flash system_b <image>`, `fastboot -w`, `fastboot reboot`.
+Keep the last known good `.img` from `~/aosp-images/`.
 
 ## What is published where
 - Test builds: pre-releases on `mkostersitz/duo-de`, never the Archfx repository.

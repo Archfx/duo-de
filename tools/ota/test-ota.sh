@@ -27,7 +27,7 @@ while [ $# -gt 0 ]; do
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
-case "$EXPECT" in success|verify-fail) ;; *) echo "--expect takes success or verify-fail" >&2; exit 2 ;; esac
+case "$EXPECT" in success|verify-fail|fail) ;; *) echo "--expect takes success, verify-fail or fail" >&2; exit 2 ;; esac
 
 LOGDIR="$HERE/logs/$RUN_ID"; mkdir -p "$LOGDIR"
 SUMMARY="$LOGDIR/summary.txt"
@@ -36,6 +36,8 @@ say()  { echo "$(date +%H:%M:%S) $*" | tee -a "$SUMMARY"; }
 ok()   { PASS=$((PASS+1)); say "PASS  $*"; }
 bad()  { FAIL=$((FAIL+1)); say "FAIL  $*"; }
 prop() { adb shell getprop "$1" 2>/dev/null | tr -d '\r'; }
+# name of the device-mapper device backing / (system_b = flashed system, system_otaphh_* = an OTA slot)
+slot() { local src dm; src="$(adb shell "grep ' / ' /proc/mounts | head -1 | cut -d' ' -f1" 2>/dev/null | tr -d '\r')"; case "$src" in *otaphh*) echo "OTA($(adb shell "ls /dev/block/mapper | grep '^system_otaphh_'" 2>/dev/null | tr -d '\r' | tr '\n' ',' | sed 's/,$//'))" ;; *) dm="$src"; adb shell "ls -l /dev/block/mapper | grep ' -> $dm\$' | head -1" 2>/dev/null | tr -d '\r' | awk '{print $(NF-2)}' ;; esac; }
 
 wait_boot() {
   adb wait-for-device
@@ -68,6 +70,26 @@ PY
   adb shell input tap $xy
 }
 
+# a system crash dialog ("... has stopped") hides the Updater: close it
+dismiss_dialogs() {
+  adb shell uiautomator dump /sdcard/ota-ui2.xml >/dev/null 2>&1 || return 0
+  adb pull -q /sdcard/ota-ui2.xml "$LOGDIR/ui2.xml" 2>/dev/null || return 0
+  local xy
+  xy="$(python3 -I - "$LOGDIR/ui2.xml" <<'PY'
+import re, sys, xml.etree.ElementTree as ET
+t = ET.parse(sys.argv[1])
+nodes = list(t.iter("node"))
+if any("has stopped" in n.get("text", "") or "keeps stopping" in n.get("text", "") for n in nodes):
+    for n in nodes:
+        if n.get("text", "") == "Close app":
+            m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", n.get("bounds", ""))
+            if m:
+                a, b, c, d = map(int, m.groups()); print((a + c) // 2, (b + d) // 2)
+PY
+)"
+  if [ -n "$xy" ]; then say "closing a crash dialog before continuing"; adb shell input tap $xy; sleep 1; fi
+}
+
 # ---------------------------------------------------------------- preflight
 say "run $RUN_ID, expectation: $EXPECT"
 adb get-state >/dev/null 2>&1 || { echo "no adb device" >&2; exit 2; }
@@ -75,7 +97,8 @@ BEFORE_DATE="$(prop ro.system.build.date.utc)"
 BEFORE_ID="$(prop ro.build.display.id)"
 FLAVOR="$(prop ro.build.flavor | sed -E 's/-user(debug)?//')"
 URL="$(prop ro.system.ota.json_url)"
-say "device build: $BEFORE_ID, date utc $BEFORE_DATE, flavor $FLAVOR"
+BEFORE_SLOT="$(slot)"
+say "device build: $BEFORE_ID, date utc $BEFORE_DATE, flavor $FLAVOR, running slot: $BEFORE_SLOT"
 say "ota.json url: $URL"
 [ -n "$URL" ] || { bad "ro.system.ota.json_url is empty"; exit 1; }
 curl -fsSL "$URL?cb=$RANDOM" -o "$LOGDIR/ota.json" || { bad "could not fetch $URL"; exit 1; }
@@ -114,6 +137,7 @@ say "Updater opened, waiting for the update button"
 tapped=0
 for i in $(seq 1 30); do
   sleep 2
+  dismiss_dialogs
   if tap_id "id/btn_update"; then tapped=1; break; fi
 done
 if [ "$tapped" = 0 ]; then bad "no update button appeared (see $LOGDIR/ui.xml and the PHH log)"; adb shell screencap -p /sdcard/ota.png && adb pull -q /sdcard/ota.png "$LOGDIR/no-button.png"; exit 1; fi
@@ -137,6 +161,7 @@ case "$EXPECT:$RESULT" in
   verify-fail:failed)
      if grep -q "OtaVerificationException\|hash mismatch" "$LOGDIR/phh-logcat.txt"; then ok "update refused with a hash mismatch"
      else bad "update failed, but not because of verification (see the PHH log)"; fi ;;
+  fail:failed|fail:download-failed) ok "update refused/failed as expected ($RESULT)" ;;
   *) bad "expected $EXPECT but the Updater reported $RESULT" ;;
 esac
 
@@ -150,12 +175,14 @@ sleep 20
 if wait_boot; then ok "device booted again"; else bad "device did not finish booting within 6 minutes: recover with fastboot (see README)"; say "$PASS passed, $FAIL failed"; exit 1; fi
 sleep 15
 AFTER_DATE="$(prop ro.system.build.date.utc)"; AFTER_ID="$(prop ro.build.display.id)"
-say "after reboot: $AFTER_ID, date utc $AFTER_DATE"
+AFTER_SLOT="$(slot)"
+say "after reboot: $AFTER_ID, date utc $AFTER_DATE, running slot: $AFTER_SLOT"
 if [ "$EXPECT" = success ]; then
   WANT_DATE="${INSTALLED_DATE:-$JSON_DATE}"
   [ "$AFTER_DATE" = "$WANT_DATE" ] && ok "running the published build (date $AFTER_DATE)" || bad "build date is $AFTER_DATE, expected $WANT_DATE"
 else
-  [ "$AFTER_DATE" = "$BEFORE_DATE" ] && ok "system unchanged after the refused update" || bad "build date changed to $AFTER_DATE although verification should have failed"
+  [ "$AFTER_DATE" = "$BEFORE_DATE" ] && ok "system unchanged after the refused update" || bad "build date changed to $AFTER_DATE although the update should have failed"
+  [ "$AFTER_SLOT" = "$BEFORE_SLOT" ] && ok "same system slot ($AFTER_SLOT) after the refused update" || bad "system slot changed from $BEFORE_SLOT to $AFTER_SLOT"
 fi
 [ "$(adb shell settings get global ota_test_marker 2>/dev/null | tr -d '\r')" = "$RUN_ID" ] && ok "settings marker survived" || bad "settings marker lost"
 # /sdcard is credential-encrypted: it is only readable after the first unlock following the reboot
