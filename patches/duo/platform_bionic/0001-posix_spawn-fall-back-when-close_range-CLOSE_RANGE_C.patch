@@ -1,0 +1,42 @@
+From 9b3a7dbc737d87056bde00110e4a63870941102d Mon Sep 17 00:00:00 2001
+From: mkostersitz <spartan114@me.com>
+Date: Tue, 20 Oct 2026 00:00:01 +0000
+Subject: [PATCH 1/2] posix_spawn: fall back when
+ close_range(CLOSE_RANGE_CLOEXEC) is not supported by the kernel
+
+POSIX_SPAWN_CLOEXEC_DEFAULT needs close_range(3, ~0U, CLOSE_RANGE_CLOEXEC), which only exists since Linux 5.11. On older kernels it returns ENOSYS and the vfork child exited with 127 before exec, so callers such as netd could not start dnsmasq. Mark the descriptors close-on-exec one by one in that case (async-signal-safe calls only).
+
+Change-Id: Idb492bfac586cc33039172421bd200959d16da0a
+---
+ libc/bionic/spawn.cpp | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/libc/bionic/spawn.cpp b/libc/bionic/spawn.cpp
+index f1b8eb06d..0453b8ed4 100644
+--- a/libc/bionic/spawn.cpp
++++ b/libc/bionic/spawn.cpp
+@@ -154,7 +154,20 @@ static void ApplyAttrs(short flags, const posix_spawnattr_t* attr) {
+ 
+   if ((flags & POSIX_SPAWN_CLOEXEC_DEFAULT) != 0) {
+     // mark all open fds except stdin/out/err as close-on-exec
+-    if (close_range(3, ~0U, CLOSE_RANGE_CLOEXEC)) _exit(127);
++    if (close_range(3, ~0U, CLOSE_RANGE_CLOEXEC)) {
++      // Kernels older than 5.11 (the Surface Duo 2 runs 5.4) lack CLOSE_RANGE_CLOEXEC: mark the fds one
++      // by one. Only async-signal-safe calls here, this runs in the vfork()ed child.
++      if (errno != ENOSYS && errno != EINVAL) _exit(127);
++      struct rlimit rl;
++      int max_fd = 1024;
++      if (getrlimit(RLIMIT_NOFILE, &rl) == 0 && rl.rlim_cur != RLIM_INFINITY) {
++        max_fd = rl.rlim_cur > 65536 ? 65536 : static_cast<int>(rl.rlim_cur);
++      }
++      for (int fd = 3; fd < max_fd; ++fd) {
++        int fd_flags = fcntl(fd, F_GETFD);
++        if (fd_flags != -1) fcntl(fd, F_SETFD, fd_flags | FD_CLOEXEC);
++      }
++    }
+   }
+ }
+ 
+-- 
+2.43.0
+
