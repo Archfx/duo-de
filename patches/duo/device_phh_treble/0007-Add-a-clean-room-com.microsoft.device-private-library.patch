@@ -1,0 +1,332 @@
+From 294d10de0f687f1fb4bcbddd7c354a856b20b749 Mon Sep 17 00:00:00 2001
+From: Mike Kostersitz <mkostersitz@mac.com>
+Date: Fri, 16 Oct 2026 21:50:21 +0000
+Subject: [PATCH] Add a clean-room com.microsoft.device-private library for
+ Microsoft Launcher's dual screen mode
+
+Microsoft Launcher bundles compile-time stubs of com.microsoft.device.display.DisplayMask and
+com.microsoft.device.layoutmanager.PaneManager and expects the platform to provide them (it declares the
+optional library com.microsoft.device-private). Provide a small implementation: DisplayMask returns the Duo
+hinge rectangle per rotation, PaneManager never connects and reports no panes. Also declare the vendor layout
+window management feature the launcher checks to pick its dual screen helper.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ base.mk                                       |   4 +
+ .../com.microsoft.surface.duo_experience.xml  |   1 +
+ surface-sdk/Android.bp                        |  18 +++
+ surface-sdk/com.microsoft.device-private.xml  |   5 +
+ .../microsoft/device/display/DisplayMask.java | 120 ++++++++++++++++++
+ .../device/layoutmanager/PaneManager.java     |  97 ++++++++++++++
+ .../PaneStateChangeListener.java              |   6 +
+ 7 files changed, 251 insertions(+)
+ create mode 100644 surface-sdk/Android.bp
+ create mode 100644 surface-sdk/com.microsoft.device-private.xml
+ create mode 100644 surface-sdk/java/com/microsoft/device/display/DisplayMask.java
+ create mode 100644 surface-sdk/java/com/microsoft/device/layoutmanager/PaneManager.java
+ create mode 100644 surface-sdk/java/com/microsoft/device/layoutmanager/PaneStateChangeListener.java
+
+diff --git a/base.mk b/base.mk
+index a38953e..6cc3cbf 100644
+--- a/base.mk
++++ b/base.mk
+@@ -265,6 +265,10 @@ PRODUCT_COPY_FILES += \
+ 	device/phh/treble/files/com.microsoft.surface.duo_v1.xml:system/etc/permissions/com.microsoft.surface.duo_v1.xml \
+ 	device/phh/treble/files/com.microsoft.surface.duo_experience.xml:system/etc/permissions/com.microsoft.surface.duo_experience.xml
+ 
++PRODUCT_PACKAGES += \
++	com.microsoft.device-private \
++	com.microsoft.device-private.xml
++
+ PRODUCT_COPY_FILES += \
+ 	device/phh/treble/files/device_state_configuration.xml:system/etc/devicestate/device_state_configuration.xml
+ 
+diff --git a/files/com.microsoft.surface.duo_experience.xml b/files/com.microsoft.surface.duo_experience.xml
+index 3baece4..33fab9d 100644
+--- a/files/com.microsoft.surface.duo_experience.xml
++++ b/files/com.microsoft.surface.duo_experience.xml
+@@ -7,4 +7,5 @@
+ -->
+ <permissions>
+     <feature name="com.microsoft.surface.android.feature.SURFACE_2022_EXPERIENCE" />
++    <feature name="com.microsoft.surface.vendor_layout_window_management" />
+ </permissions>
+diff --git a/surface-sdk/Android.bp b/surface-sdk/Android.bp
+new file mode 100644
+index 0000000..d665c10
+--- /dev/null
++++ b/surface-sdk/Android.bp
+@@ -0,0 +1,18 @@
++// Clean-room implementation of the parts of Microsoft's "com.microsoft.device-private" framework library that
++// Microsoft Launcher uses for dual-screen support on the Surface Duo (the launcher ships compile-time stubs only
++// and expects the platform to provide the real classes).
++
++java_library {
++    name: "com.microsoft.device-private",
++    srcs: ["java/**/*.java"],
++    sdk_version: "current",
++    installable: true,
++    system_ext_specific: true,
++}
++
++prebuilt_etc {
++    name: "com.microsoft.device-private.xml",
++    src: "com.microsoft.device-private.xml",
++    sub_dir: "permissions",
++    system_ext_specific: true,
++}
+diff --git a/surface-sdk/com.microsoft.device-private.xml b/surface-sdk/com.microsoft.device-private.xml
+new file mode 100644
+index 0000000..3de728b
+--- /dev/null
++++ b/surface-sdk/com.microsoft.device-private.xml
+@@ -0,0 +1,5 @@
++<?xml version="1.0" encoding="utf-8"?>
++<permissions>
++    <library name="com.microsoft.device-private"
++             file="/system_ext/framework/com.microsoft.device-private.jar" />
++</permissions>
+diff --git a/surface-sdk/java/com/microsoft/device/display/DisplayMask.java b/surface-sdk/java/com/microsoft/device/display/DisplayMask.java
+new file mode 100644
+index 0000000..ac3b84d
+--- /dev/null
++++ b/surface-sdk/java/com/microsoft/device/display/DisplayMask.java
+@@ -0,0 +1,120 @@
++package com.microsoft.device.display;
++
++import android.content.Context;
++import android.graphics.Rect;
++import android.graphics.Region;
++import android.hardware.display.DisplayManager;
++import android.os.Build;
++import android.view.Display;
++import android.view.Surface;
++
++import java.util.ArrayList;
++import java.util.Collections;
++import java.util.List;
++import java.util.Objects;
++
++/**
++ * Hinge geometry of a Surface Duo. API-compatible with the class Microsoft Launcher is compiled against.
++ *
++ * Rectangles are in display coordinates for the requested rotation. Rotation 0 is the natural, wide orientation
++ * (two portrait panels side by side), e.g. 2754 x 1892 on the Duo 2 with the hinge at x 1344..1410.
++ */
++public final class DisplayMask {
++    private final Rect mBounds;
++    private final List<Rect> mBoundingRects;
++    private final Context mContext;
++
++    public DisplayMask(Rect bounds, List<Rect> boundingRects) {
++        this(null, bounds, boundingRects);
++    }
++
++    private DisplayMask(Context context, Rect bounds, List<Rect> boundingRects) {
++        mContext = context == null ? null : context.getApplicationContext();
++        mBounds = bounds == null ? new Rect() : new Rect(bounds);
++        mBoundingRects = new ArrayList<>();
++        if (boundingRects != null) {
++            for (Rect r : boundingRects) mBoundingRects.add(new Rect(r));
++        }
++    }
++
++    public static DisplayMask fromResourcesRect(Context context) {
++        return create(context);
++    }
++
++    public static DisplayMask fromResourcesRectApproximation(Context context) {
++        return create(context);
++    }
++
++    private static DisplayMask create(Context context) {
++        int[] g = geometry();
++        if (g == null) return new DisplayMask(context, new Rect(), Collections.emptyList());
++        List<Rect> rects = new ArrayList<>();
++        rects.add(hingeForRotation(g, Surface.ROTATION_0));
++        return new DisplayMask(context, new Rect(0, 0, g[0], g[1]), rects);
++    }
++
++    /** {width, height, panelWidth, hingeWidth} in the natural orientation, or null for other devices. */
++    private static int[] geometry() {
++        String device = Build.DEVICE == null ? "" : Build.DEVICE.toLowerCase();
++        if (device.equals("duo2")) return new int[] {2754, 1892, 1344, 66};
++        if (device.equals("duo")) return new int[] {2784, 1800, 1350, 84};
++        return null;
++    }
++
++    private static Rect hingeForRotation(int[] g, int rotation) {
++        int width = g[0], height = g[1], panel = g[2], hinge = g[3];
++        if (rotation == Surface.ROTATION_90 || rotation == Surface.ROTATION_270) {
++            return new Rect(0, panel, height, panel + hinge);
++        }
++        return new Rect(panel, 0, panel + hinge, height);
++    }
++
++    /** Hinge rectangles for the current rotation of the default display. */
++    public List<Rect> getBoundingRects() {
++        return getBoundingRectsForRotation(currentRotation());
++    }
++
++    public List<Rect> getBoundingRectsForRotation(int rotation) {
++        int[] g = geometry();
++        if (g == null || mBoundingRects.isEmpty()) return new ArrayList<>();
++        List<Rect> out = new ArrayList<>();
++        out.add(hingeForRotation(g, rotation));
++        return out;
++    }
++
++    public Region getBounds() {
++        Region region = new Region();
++        for (Rect r : getBoundingRects()) region.union(r);
++        return region;
++    }
++
++    private int currentRotation() {
++        try {
++            if (mContext != null) {
++                DisplayManager dm = mContext.getSystemService(DisplayManager.class);
++                Display d = dm.getDisplay(Display.DEFAULT_DISPLAY);
++                if (d != null) return d.getRotation();
++            }
++        } catch (RuntimeException ignored) {
++        }
++        return Surface.ROTATION_0;
++    }
++
++    @Override
++    public boolean equals(Object o) {
++        if (this == o) return true;
++        if (!(o instanceof DisplayMask)) return false;
++        DisplayMask other = (DisplayMask) o;
++        return mBounds.equals(other.mBounds) && mBoundingRects.equals(other.mBoundingRects);
++    }
++
++    @Override
++    public int hashCode() {
++        return Objects.hash(mBounds, mBoundingRects);
++    }
++
++    @Override
++    public String toString() {
++        return "DisplayMask{bounds=" + mBounds + ", boundingRects=" + mBoundingRects + "}";
++    }
++}
+diff --git a/surface-sdk/java/com/microsoft/device/layoutmanager/PaneManager.java b/surface-sdk/java/com/microsoft/device/layoutmanager/PaneManager.java
+new file mode 100644
+index 0000000..1066546
+--- /dev/null
++++ b/surface-sdk/java/com/microsoft/device/layoutmanager/PaneManager.java
+@@ -0,0 +1,97 @@
++package com.microsoft.device.layoutmanager;
++
++import android.content.Context;
++import android.graphics.Rect;
++import android.os.Parcel;
++import android.os.Parcelable;
++
++/**
++ * Client of the vendor layout manager that tells which pane (screen) of a dual screen device is in focus and
++ * occupied. There is no vendor layout manager service on this system, so this implementation never connects and
++ * reports no panes: callers fall back to their own screen handling.
++ */
++public final class PaneManager {
++
++    public interface ServiceConnectionListener {
++        void onServiceConnectionChanged(boolean connected);
++    }
++
++    public static final class PaneState implements Parcelable {
++        private final int mPaneId;
++        private final Rect mTaskPane;
++        private final boolean mInFocus;
++        private final boolean mOccupied;
++
++        public PaneState() {
++            this(0, new Rect(), false, false);
++        }
++
++        private PaneState(int paneId, Rect taskPane, boolean inFocus, boolean occupied) {
++            mPaneId = paneId;
++            mTaskPane = taskPane;
++            mInFocus = inFocus;
++            mOccupied = occupied;
++        }
++
++        public int getPaneId() { return mPaneId; }
++        public Rect getTaskPane() { return new Rect(mTaskPane); }
++        public boolean isInFocus() { return mInFocus; }
++        public boolean isOccupied() { return mOccupied; }
++
++        @Override
++        public int describeContents() { return 0; }
++
++        @Override
++        public void writeToParcel(Parcel dest, int flags) {
++            dest.writeInt(mPaneId);
++            dest.writeParcelable(mTaskPane, flags);
++            dest.writeInt(mInFocus ? 1 : 0);
++            dest.writeInt(mOccupied ? 1 : 0);
++        }
++
++        public static final Creator<PaneState> CREATOR = new Creator<PaneState>() {
++            @Override
++            public PaneState createFromParcel(Parcel in) {
++                int id = in.readInt();
++                Rect r = in.readParcelable(Rect.class.getClassLoader(), Rect.class);
++                boolean focus = in.readInt() != 0;
++                boolean occupied = in.readInt() != 0;
++                return new PaneState(id, r == null ? new Rect() : r, focus, occupied);
++            }
++
++            @Override
++            public PaneState[] newArray(int size) { return new PaneState[size]; }
++        };
++
++        @Override
++        public String toString() {
++            return "PaneState{id=" + mPaneId + ", taskPane=" + mTaskPane + ", inFocus=" + mInFocus
++                    + ", occupied=" + mOccupied + "}";
++        }
++    }
++
++    private PaneStateChangeListener mListener;
++
++    public PaneManager() {
++    }
++
++    /** No service to connect to: the connection listener is intentionally never called. */
++    public void connect(Context context, ServiceConnectionListener listener) {
++    }
++
++    public void disconnect() {
++        mListener = null;
++    }
++
++    public PaneState[] getPaneStates() {
++        return new PaneState[0];
++    }
++
++    public PaneState[] getPaneStatesForKeyboard() {
++        return new PaneState[0];
++    }
++
++    public void setOnPaneStateChangeListener(PaneStateChangeListener listener) {
++        mListener = listener;
++    }
++}
+diff --git a/surface-sdk/java/com/microsoft/device/layoutmanager/PaneStateChangeListener.java b/surface-sdk/java/com/microsoft/device/layoutmanager/PaneStateChangeListener.java
+new file mode 100644
+index 0000000..059059d
+--- /dev/null
++++ b/surface-sdk/java/com/microsoft/device/layoutmanager/PaneStateChangeListener.java
+@@ -0,0 +1,6 @@
++package com.microsoft.device.layoutmanager;
++
++/** Called when the state of a pane changes. */
++public interface PaneStateChangeListener {
++    void onPaneStateChange();
++}
+-- 
+2.43.0
+
