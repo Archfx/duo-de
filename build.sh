@@ -93,7 +93,7 @@ buildTrebleApp() {
 
 buildVariant() {
     echo "--> Building $1"
-    lunch "$1"-bp2a-user
+    lunch "$1"-bp2a-userdebug
     make -j$(nproc --all) installclean
     make -j$(nproc --all) systemimage
     if [ "$SIGN_IMG" == "true" ]; then    
