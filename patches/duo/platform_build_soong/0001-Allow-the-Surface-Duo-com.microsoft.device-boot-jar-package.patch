@@ -1,0 +1,28 @@
+From dc235b48fc41a6ab774c561d77ebedbf6a920e83 Mon Sep 17 00:00:00 2001
+From: Mike Kostersitz <mkostersitz@mac.com>
+Date: Wed, 21 Oct 2026 19:25:17 +0000
+Subject: [PATCH] Allow the Surface Duo com.microsoft.device boot jar package
+
+check_boot_jars rejects packages that are not on the allow list; DUO-DE adds a clean-room com.microsoft.device boot jar
+(com.microsoft.device.display.DisplayMask) like the stock Surface Duo firmware.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Change-Id: I2d81fe86029ed3c26f6f7d6b5285bd6601c675ac
+---
+ scripts/check_boot_jars/package_allowed_list.txt | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/scripts/check_boot_jars/package_allowed_list.txt b/scripts/check_boot_jars/package_allowed_list.txt
+index 38c72b8b3..0a2177e30 100644
+--- a/scripts/check_boot_jars/package_allowed_list.txt
++++ b/scripts/check_boot_jars/package_allowed_list.txt
+@@ -268,3 +268,6 @@ org\.chromium\.arc\..*
+ # Packages used for wear-sdk in Wear OS
+ com\.google\.wear
+ com\.google\.wear\..*
++###################################################
++# Surface Duo (DUO-DE): clean-room com.microsoft.device boot jar
++com\.microsoft\.device\.display
+-- 
+2.43.0
+
