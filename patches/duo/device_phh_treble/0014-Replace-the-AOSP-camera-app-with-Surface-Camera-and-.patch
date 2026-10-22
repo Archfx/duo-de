@@ -1,0 +1,72 @@
+From 29df000fbfc4bca7b761689ba3342159acdfea39 Mon Sep 17 00:00:00 2001
+From: Mike_Kostersitz <mkostersitz@mac.com>
+Date: Thu, 22 Oct 2026 23:03:55 +0000
+Subject: [PATCH 14/14] Replace the AOSP camera app with Surface Camera and
+ grant it its runtime permissions
+
+The Duo's own SurfaceCamera (vendor partition) handles every standard camera intent, including the secure ones used from the lock screen, and works
+with the window-layout and PaneManager changes. Install a default-permissions file for it (camera, microphone, photos and videos) and let that module
+override Camera2, so the AOSP camera is not in the image and Surface Camera is the only handler and therefore the default, instead of the intent chooser
+that appears with two camera apps installed.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ base.mk                                           |  4 +++-
+ surface-sdk/camera/Android.bp                     |  9 +++++++++
+ .../camera/default-permissions-surfacecamera.xml  | 15 +++++++++++++++
+ 3 files changed, 27 insertions(+), 1 deletion(-)
+ create mode 100644 surface-sdk/camera/Android.bp
+ create mode 100644 surface-sdk/camera/default-permissions-surfacecamera.xml
+
+diff --git a/base.mk b/base.mk
+index 9b39f02..29b7151 100644
+--- a/base.mk
++++ b/base.mk
+@@ -297,4 +297,6 @@ PRODUCT_PACKAGES += \
+ PRODUCT_COPY_FILES += \
+ 	vendor/surface/privapp-permissions-duo.xml:system/system_ext/etc/permissions/privapp-permissions-com.thain.duo.xml
+ 
+-$(call inherit-product-if-exists, vendor/surface/prebuilts/bootanimation/bootanimation.mk)
+\ No newline at end of file
++$(call inherit-product-if-exists, vendor/surface/prebuilts/bootanimation/bootanimation.mk)
++
++PRODUCT_PACKAGES += default-permissions-surfacecamera.xml
+diff --git a/surface-sdk/camera/Android.bp b/surface-sdk/camera/Android.bp
+new file mode 100644
+index 0000000..83439dc
+--- /dev/null
++++ b/surface-sdk/camera/Android.bp
+@@ -0,0 +1,9 @@
++// Surface Camera (vendor partition) replaces the AOSP camera app: it handles every standard camera intent, so once Camera2 is gone it is the only
++// handler and therefore the default. This file also grants its runtime permissions on first boot; "overrides" drops Camera2 from the image.
++// (A plain filter-out of Camera2 in base.mk does not work: the package comes from a nested inherited makefile.)
++prebuilt_etc {
++    name: "default-permissions-surfacecamera.xml",
++    src: "default-permissions-surfacecamera.xml",
++    sub_dir: "default-permissions",
++    overrides: ["Camera2"],
++}
+diff --git a/surface-sdk/camera/default-permissions-surfacecamera.xml b/surface-sdk/camera/default-permissions-surfacecamera.xml
+new file mode 100644
+index 0000000..6a1012d
+--- /dev/null
++++ b/surface-sdk/camera/default-permissions-surfacecamera.xml
+@@ -0,0 +1,15 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++    Runtime permissions granted to Surface Camera (SurfaceCamera, vendor partition) on first boot, as the stock Surface Duo ROM does, so a fresh
++    install starts without permission prompts. Location, notifications and contacts are not granted (geotagging is off by default in the app).
++-->
++<exceptions>
++    <exception package="com.microsoft.surface.camera.v2">
++        <permission name="android.permission.CAMERA" fixed="false" />
++        <permission name="android.permission.RECORD_AUDIO" fixed="false" />
++        <permission name="android.permission.READ_MEDIA_IMAGES" fixed="false" />
++        <permission name="android.permission.READ_MEDIA_VIDEO" fixed="false" />
++        <permission name="android.permission.READ_EXTERNAL_STORAGE" fixed="false" />
++        <permission name="android.permission.WRITE_EXTERNAL_STORAGE" fixed="false" />
++    </exception>
++</exceptions>
+-- 
+2.43.0
+
