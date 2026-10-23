@@ -1,0 +1,157 @@
+From 37c32cfac776d22092415467597db35cfcaf83bc Mon Sep 17 00:00:00 2001
+From: Mike Kostersitz <mkostersitz@mac.com>
+Date: Wed, 21 Oct 2026 14:42:08 +0000
+Subject: [PATCH] Updater: offer only matching variants, check free space
+ before creating the OTA slot
+
+existsUpdate() ignored the variant, so an ota.json without an image for this device still offered
+an update (empty size and URL, then a generic error). It now requires a matching variant.
+
+Creating the OTA slot needs about 4 GiB in the dynamic-partition pool on /data. With little free
+space phh-ota-make fails silently and opening /dev/phh-ota then failed with EACCES, shown as the
+generic "failed to be installed". Check the free space first (4.5 GiB) and map a failed open of
+/dev/phh-ota to a storage error with a clear message; the running system is not changed.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ .../java/me/phh/treble/app/UpdaterActivity.kt | 56 ++++++++++++++++++-
+ app/src/main/res/values/strings.xml           |  1 +
+ 2 files changed, 55 insertions(+), 2 deletions(-)
+
+diff --git a/app/src/main/java/me/phh/treble/app/UpdaterActivity.kt b/app/src/main/java/me/phh/treble/app/UpdaterActivity.kt
+index e062fc2..168f1a7 100644
+--- a/app/src/main/java/me/phh/treble/app/UpdaterActivity.kt
++++ b/app/src/main/java/me/phh/treble/app/UpdaterActivity.kt
+@@ -2,6 +2,8 @@ package me.phh.treble.app
+ 
+ import android.app.AlertDialog
+ import android.os.Bundle
++import android.os.Environment
++import android.os.StatFs
+ import android.os.SystemProperties
+ import android.preference.PreferenceActivity
+ import android.text.format.Formatter
+@@ -36,6 +38,7 @@ class UpdaterActivity : PreferenceActivity() {
+     private var hasUpdate = false
+     private var isUpdating = false
+     private var otaJson = JSONObject()
++    private val OTA_REQUIRED_BYTES = 4L * 1024 * 1024 * 1024 + 512L * 1024 * 1024
+ 
+     override fun onCreate(savedInstanceState: Bundle?) {
+         super.onCreate(savedInstanceState)
+@@ -250,6 +253,10 @@ class UpdaterActivity : PreferenceActivity() {
+             Log.e("PHH", "OTA image date: " + otaDate)
+             val buildDate = SystemProperties.get("ro.system.build.date.utc")
+             Log.e("PHH", "System image date: " + buildDate)
++            if (!hasMatchingVariant()) {
++                Log.e("PHH", "OTA json has no variant for this device, ignoring the update")
++                return false
++            }
+             if (otaDate > buildDate) {
+                 Log.e("PHH", "System image date is newer than the currently installed")
+                 return true
+@@ -261,6 +268,29 @@ class UpdaterActivity : PreferenceActivity() {
+         return false
+     }
+ 
++    // An update is only offered when ota.json carries an image for this device's variant.
++    private fun hasMatchingVariant() : Boolean {
++        if (otaJson.length() > 0 && otaJson.has("variants")) {
++            val otaVariants = otaJson.getJSONArray("variants")
++            for (i in 0 until otaVariants.length()) {
++                val otaVariant = otaVariants.get(i) as JSONObject
++                if (otaVariant.optString("name") == getVariant()) {
++                    return true
++                }
++            }
++        }
++        return false
++    }
++
++    // The new slot is created in the dynamic-partition pool on /data, so /data needs room for the
++    // whole decompressed image plus some margin.
++    private fun checkFreeSpace() {
++        val free = StatFs(Environment.getDataDirectory().path).availableBytes
++        if (free < OTA_REQUIRED_BYTES) {
++            throw OtaStorageException(free, OTA_REQUIRED_BYTES)
++        }
++    }
++
+     private fun getVariant() : String {
+         var flavor = SystemProperties.get("ro.build.flavor").replace(Regex("-user(debug)?"), "")
+         val secure = File("/system/phh/secure")
+@@ -350,8 +380,10 @@ class UpdaterActivity : PreferenceActivity() {
+                     httpsConnection.inputStream.use { httpStream ->
+                         var hasSuccess = false
+                         var verificationFailed = false
++                        var storageFailed: OtaStorageException? = null
+                         try {
+                             Log.e("PHH", "OTA image install started")
++                            checkFreeSpace()
+                             prepareOTA()
+                             Log.e("PHH", "New slot created")
+                             Log.e("PHH", "OTA image extracting")
+@@ -364,6 +396,7 @@ class UpdaterActivity : PreferenceActivity() {
+                         } catch (e: Exception) {
+                             Log.e("PHH", "Failed applying OTA image. Error: " + e.toString(), e)
+                             verificationFailed = e is OtaVerificationException
++                            storageFailed = e as? OtaStorageException
+                         }
+                         runOnUiThread(Runnable {
+                             val builder = AlertDialog.Builder(this)
+@@ -374,7 +407,14 @@ class UpdaterActivity : PreferenceActivity() {
+                                 progress_bar.setVisibility(View.GONE)
+                                 progress_text.setVisibility(View.GONE)
+                                 builder.setTitle(getString(R.string.error_dialog_title))
+-                                builder.setMessage(getString(if (verificationFailed) R.string.failed_verify_message else R.string.failed_install_message))
++                                val storage = storageFailed
++                                if (storage != null) {
++                                    builder.setMessage(getString(R.string.failed_storage_message,
++                                        Formatter.formatShortFileSize(this, storage.required),
++                                        Formatter.formatShortFileSize(this, storage.available)))
++                                } else {
++                                    builder.setMessage(getString(if (verificationFailed) R.string.failed_verify_message else R.string.failed_install_message))
++                                }
+                             }
+                             builder.setPositiveButton(android.R.string.ok) { _, _ -> }
+                             builder.show()
+@@ -494,7 +534,15 @@ class UpdaterActivity : PreferenceActivity() {
+             }
+         }
+         val xzOut = XZInputStream(counted)
+-        FileOutputStream("/dev/phh-ota").use { blockDev ->
++        // If the slot could not be created (for instance /data is nearly full), the node is missing or
++        // not writable; report that as a storage problem instead of a generic install failure.
++        val blockDevOut = try {
++            FileOutputStream("/dev/phh-ota")
++        } catch (e: IOException) {
++            throw OtaStorageException(
++                StatFs(Environment.getDataDirectory().path).availableBytes, OTA_REQUIRED_BYTES, e)
++        }
++        blockDevOut.use { blockDev ->
+             val extBuf = ByteArray(1024 * 1024)
+             var totalWritten = 0L
+             while (true) {
+@@ -559,3 +607,7 @@ class UpdaterActivity : PreferenceActivity() {
+ 
+ // Thrown when the downloaded image does not match the hashes published in ota.json.
+ class OtaVerificationException(message: String) : Exception(message)
++
++// Thrown when the new OTA slot cannot be created because /data has too little free space.
++class OtaStorageException(val available: Long, val required: Long, cause: Throwable? = null) :
++    Exception("Not enough free storage for the OTA slot: " + available + " bytes free, " + required + " needed", cause)
+diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
+index 7aa61fb..c4f8b8c 100644
+--- a/app/src/main/res/values/strings.xml
++++ b/app/src/main/res/values/strings.xml
+@@ -18,6 +18,7 @@
+     <string name="success_install_message">New update installed successfully.\nPlease, reboot now.</string>
+     <string name="failed_download_message">New update failed to be downloaded.\nCheck your logs for more information.</string>
+     <string name="failed_verify_message">The new update was downloaded but failed verification.\nYour current system was not changed.</string>
++    <string name="failed_storage_message">Not enough free storage for the update.\nIt needs %1$s, %2$s available. Your current system was not changed.</string>
+     <string name="failed_install_message">New update failed to be installed.\nCheck your logs for more information.</string>
+     <string name="preparing_update_title">Preparing system update</string>
+     <string name="downloading_update_title">Downloading system update</string>
+-- 
+2.43.0
+
