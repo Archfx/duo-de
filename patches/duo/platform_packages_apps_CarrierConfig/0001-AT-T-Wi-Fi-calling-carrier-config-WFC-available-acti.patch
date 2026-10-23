@@ -1,0 +1,46 @@
+From b94fbb44c56c68e5e279c35097b60449a48cf6d5 Mon Sep 17 00:00:00 2001
+From: mkostersitz <spartan114@me.com>
+Date: Mon, 19 Oct 2026 21:33:56 +0000
+Subject: [PATCH] AT&T: Wi-Fi calling carrier config (WFC available, activation
+ app) and versionCode bump so cached configs refresh
+
+Change-Id: I024a030f2ddffd10a292f7bd3400f0dfff50f6a0
+---
+ AndroidManifest.xml                           | 2 +-
+ assets/carrier_config_carrierid_1187_AT&T.xml | 8 ++++++++
+ 2 files changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/AndroidManifest.xml b/AndroidManifest.xml
+index cd03659..2272206 100644
+--- a/AndroidManifest.xml
++++ b/AndroidManifest.xml
+@@ -15,7 +15,7 @@
+ -->
+ 
+ <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+-     android:versionCode="1"
++     android:versionCode="3"
+      android:versionName="1.0.0"
+      package="com.android.carrierconfig">
+ 
+diff --git a/assets/carrier_config_carrierid_1187_AT&T.xml b/assets/carrier_config_carrierid_1187_AT&T.xml
+index e483de7..6e7408d 100644
+--- a/assets/carrier_config_carrierid_1187_AT&T.xml
++++ b/assets/carrier_config_carrierid_1187_AT&T.xml
+@@ -1,5 +1,13 @@
+ <?xml version="1.0" encoding="utf-8" standalone="yes"?>
+ <carrier_config>
++    <boolean name="carrier_wfc_ims_available_bool" value="true"/>
++    <int name="carrier_default_wfc_ims_mode_int" value="1"/>
++    <int name="carrier_default_wfc_ims_roaming_mode_int" value="2"/>
++    <boolean name="editable_wfc_mode_bool" value="true"/>
++    <boolean name="editable_wfc_roaming_mode_bool" value="false"/>
++    <boolean name="carrier_promote_wfc_on_call_fail_bool" value="true"/>
++    <int name="wfc_spn_format_idx_int" value="1"/>
++    <string name="wfc_emergency_address_carrier_app_string">com.google.android.wfcactivation/.WfcActivationActivity</string>
+     <boolean name="allow_hold_call_during_emergency_bool" value="false"/>
+     <boolean name="allow_merging_rtt_calls_bool" value="true"/>
+     <boolean name="carrier_default_wfc_ims_roaming_enabled_bool" value="true" />
+-- 
+2.43.0
+
