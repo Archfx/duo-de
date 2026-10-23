@@ -1,0 +1,137 @@
+From 4475bd9c8f640e06caebcdecadc4d798a1a3699a Mon Sep 17 00:00:00 2001
+From: Mike_Kostersitz <mkostersitz@mac.com>
+Date: Thu, 22 Oct 2026 23:03:55 +0000
+Subject: [PATCH 13/14] PaneManager: report the connection for apps that wait
+ for it (Surface Camera), keep Microsoft Launcher unchanged
+
+Surface Camera's posture manager stays in its Init state until the layout manager connection is reported, so the camera was never opened (black
+preview, no capture). The clean-room PaneManager deliberately never connected (Microsoft Launcher works without a layout manager). Report the
+connection right away for every other package and derive two pane states from the display size (pane 0 left, pane 1 right; a display as wide as
+both screens means the content spans both), and notify the pane state listener when the display changes. Microsoft Launcher keeps the old behaviour.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ .../device/layoutmanager/PaneManager.java     | 77 +++++++++++++++++--
+ 1 file changed, 71 insertions(+), 6 deletions(-)
+
+diff --git a/surface-sdk/java/com/microsoft/device/layoutmanager/PaneManager.java b/surface-sdk/java/com/microsoft/device/layoutmanager/PaneManager.java
+index 1066546..e2aa9eb 100644
+--- a/surface-sdk/java/com/microsoft/device/layoutmanager/PaneManager.java
++++ b/surface-sdk/java/com/microsoft/device/layoutmanager/PaneManager.java
+@@ -2,13 +2,19 @@ package com.microsoft.device.layoutmanager;
+ 
+ import android.content.Context;
+ import android.graphics.Rect;
++import android.hardware.display.DisplayManager;
++import android.os.Build;
++import android.os.Handler;
++import android.os.Looper;
++import android.view.Display;
+ import android.os.Parcel;
+ import android.os.Parcelable;
+ 
+ /**
+  * Client of the vendor layout manager that tells which pane (screen) of a dual screen device is in focus and
+- * occupied. There is no vendor layout manager service on this system, so this implementation never connects and
+- * reports no panes: callers fall back to their own screen handling.
++ * occupied. There is no vendor layout manager service on this system. Microsoft Launcher works without one, so for
++ * it this implementation still never connects and reports no panes. Other apps (Surface Camera) wait for the connection
++ * before they start, so for them it reports "connected" and derives simple pane states from the display size.
+  */
+ public final class PaneManager {
+ 
+@@ -70,28 +76,87 @@ public final class PaneManager {
+         }
+     }
+ 
++    private static final Handler MAIN = new Handler(Looper.getMainLooper());
++
+     private PaneStateChangeListener mListener;
++    private Context mContext;
++    private boolean mConnected;
++    private DisplayManager.DisplayListener mDisplayListener;
+ 
+     public PaneManager() {
+     }
+ 
+-    /** No service to connect to: the connection listener is intentionally never called. */
++    /** Reports the connection as established right away (on the main thread), except for Microsoft Launcher. */
+     public void connect(Context context, ServiceConnectionListener listener) {
++        if (context == null || listener == null) return;
++        if ("com.microsoft.launcher".equals(context.getPackageName())) return;
++        mContext = context.getApplicationContext() != null ? context.getApplicationContext() : context;
++        mConnected = true;
++        MAIN.post(() -> listener.onServiceConnectionChanged(true));
+     }
+ 
+     public void disconnect() {
+-        mListener = null;
++        setOnPaneStateChangeListener(null);
++        mConnected = false;
++        mContext = null;
+     }
+ 
+     public PaneState[] getPaneStates() {
+-        return new PaneState[0];
++        return mConnected ? currentPaneStates() : new PaneState[0];
+     }
+ 
+     public PaneState[] getPaneStatesForKeyboard() {
+-        return new PaneState[0];
++        return getPaneStates();
+     }
+ 
+     public void setOnPaneStateChangeListener(PaneStateChangeListener listener) {
+         mListener = listener;
++        if (mContext != null && mDisplayListener != null) {
++            DisplayManager dm = mContext.getSystemService(DisplayManager.class);
++            if (dm != null) dm.unregisterDisplayListener(mDisplayListener);
++            mDisplayListener = null;
++        }
++        if (listener != null && mConnected && mContext != null) {
++            DisplayManager dm = mContext.getSystemService(DisplayManager.class);
++            if (dm == null) return;
++            mDisplayListener = new DisplayManager.DisplayListener() {
++                @Override public void onDisplayAdded(int displayId) { }
++                @Override public void onDisplayRemoved(int displayId) { }
++                @Override public void onDisplayChanged(int displayId) {
++                    if (displayId == Display.DEFAULT_DISPLAY) {
++                        final PaneStateChangeListener l = mListener;
++                        if (l != null) MAIN.post(l::onPaneStateChange);
++                    }
++                }
++            };
++            dm.registerDisplayListener(mDisplayListener, MAIN);
++        }
++    }
++
++    /**
++     * Pane 0 is the left screen, pane 1 the right one, in the natural (wide) orientation. A display as wide as both screens
++     * means the content spans both panes; a display one screen wide means a single pane, the left one.
++     */
++    private PaneState[] currentPaneStates() {
++        final String device = Build.DEVICE == null ? "" : Build.DEVICE.toLowerCase();
++        final int panel, hinge, height;
++        if (device.equals("duo2")) { panel = 1344; hinge = 66; height = 1892; }
++        else if (device.equals("duo")) { panel = 1350; hinge = 84; height = 1800; }
++        else return new PaneState[0];
++        int longSide = panel;
++        try {
++            DisplayManager dm = mContext.getSystemService(DisplayManager.class);
++            Display d = dm == null ? null : dm.getDisplay(Display.DEFAULT_DISPLAY);
++            if (d != null) {
++                android.util.DisplayMetrics m = new android.util.DisplayMetrics();
++                d.getRealMetrics(m);
++                longSide = Math.max(m.widthPixels, m.heightPixels);
++            }
++        } catch (RuntimeException ignored) {
++        }
++        final boolean spanned = longSide > panel;
++        final PaneState left = new PaneState(0, new Rect(0, 0, panel, height), true, true);
++        final PaneState right = new PaneState(1, new Rect(panel + hinge, 0, 2 * panel + hinge, height), false, spanned);
++        return new PaneState[] {left, right};
+     }
+ }
+-- 
+2.43.0
+
