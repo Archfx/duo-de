@@ -1,0 +1,146 @@
+From 41bbe8ca471c6a09b35f9e3a133d7ace59c59fc2 Mon Sep 17 00:00:00 2001
+From: Mike Kostersitz <mkostersitz@mac.com>
+Date: Thu, 22 Oct 2026 17:14:48 +0000
+Subject: [PATCH] WindowLayoutComponent: fan out to several consumers
+ registered for the same Context
+
+The component keeps one consumer per Context and silently drops a second registration, assuming the Jetpack library registers once per Context and
+fans out itself (androidx.window 1.1+). Older libraries, such as the 1.0.0 bundled in Microsoft's Surface apps, register every consumer
+separately, and the Surface Duo SDK layout view plus the app both listen on the same activity: the second consumer never received a layout, so
+Surface Camera's Getting Started screen stayed empty (black screen). Keep the extra consumers per Context, deliver the current layout to
+them, fan out updates and let one take over if the first is removed.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+
+---
+ .../layout/WindowLayoutComponentImpl.java     | 75 ++++++++++++++++---
+ 1 file changed, 64 insertions(+), 11 deletions(-)
+
+diff --git a/libs/WindowManager/Jetpack/src/androidx/window/extensions/layout/WindowLayoutComponentImpl.java b/libs/WindowManager/Jetpack/src/androidx/window/extensions/layout/WindowLayoutComponentImpl.java
+index 5ce73b908c4c..d64c9fbdc66a 100644
+--- a/libs/WindowManager/Jetpack/src/androidx/window/extensions/layout/WindowLayoutComponentImpl.java
++++ b/libs/WindowManager/Jetpack/src/androidx/window/extensions/layout/WindowLayoutComponentImpl.java
+@@ -74,6 +74,15 @@ public class WindowLayoutComponentImpl implements WindowLayoutComponent {
+     private final Map<Context, DeduplicateConsumer<WindowLayoutInfo>> mWindowLayoutChangeListeners =
+             new ArrayMap<>();
+ 
++    /**
++     * DUO-DE: further consumers registered for a Context that already has one. Jetpack WindowManager before 1.1 (for instance the 1.0.0
++     * bundled in Microsoft's apps) registers every consumer of an activity separately instead of once per Context, and the Surface Duo SDK
++     * layout view and the app itself both listen on the same activity. Dropping the second one left the app waiting forever for a layout.
++     */
++    @GuardedBy("mLock")
++    private final Map<Context, List<DeduplicateConsumer<WindowLayoutInfo>>> mExtraConsumers =
++            new ArrayMap<>();
++
+     @GuardedBy("mLock")
+     private final DeviceStateManagerFoldingFeatureProducer mFoldingFeatureProducer;
+ 
+@@ -163,10 +172,16 @@ public class WindowLayoutComponentImpl implements WindowLayoutComponent {
+     public void addWindowLayoutInfoListener(@NonNull @UiContext Context context,
+             @NonNull Consumer<WindowLayoutInfo> consumer) {
+         synchronized (mLock) {
+-            if (mWindowLayoutChangeListeners.containsKey(context)
+-                    // In theory this method can be called on the same consumer with different
+-                    // context.
+-                    || containsConsumer(consumer)) {
++            // In theory this method can be called on the same consumer with different context.
++            if (containsConsumer(consumer)) {
++                return;
++            }
++            if (mWindowLayoutChangeListeners.containsKey(context)) {
++                // DUO-DE: a second consumer for the same Context (see mExtraConsumers).
++                final DeduplicateConsumer<WindowLayoutInfo> extra = new DeduplicateConsumer<>(consumer);
++                mExtraConsumers.computeIfAbsent(context, c -> new ArrayList<>()).add(extra);
++                mFoldingFeatureProducer.getData((features) ->
++                        extra.accept(getWindowLayoutInfo(context, features)));
+                 return;
+             }
+             assertUiContext(context);
+@@ -221,24 +236,48 @@ public class WindowLayoutComponentImpl implements WindowLayoutComponent {
+     @Override
+     public void removeWindowLayoutInfoListener(@NonNull Consumer<WindowLayoutInfo> consumer) {
+         synchronized (mLock) {
++            // DUO-DE: a further consumer of a Context only needs to be dropped from the list.
++            for (Context context : new ArrayList<>(mExtraConsumers.keySet())) {
++                final List<DeduplicateConsumer<WindowLayoutInfo>> extras = mExtraConsumers.get(context);
++                if (extras.removeIf(c -> c.matchesConsumer(consumer))) {
++                    if (extras.isEmpty()) {
++                        mExtraConsumers.remove(context);
++                    }
++                    return;
++                }
++            }
+             DeduplicateConsumer<WindowLayoutInfo> consumerToRemove = null;
++            Context removedContext = null;
+             for (Context context : mWindowLayoutChangeListeners.keySet()) {
+                 final DeduplicateConsumer<WindowLayoutInfo> deduplicateConsumer =
+                         mWindowLayoutChangeListeners.get(context);
+                 if (!deduplicateConsumer.matchesConsumer(consumer)) {
+                     continue;
+                 }
+-                final IBinder token = context.getWindowContextToken();
+                 consumerToRemove = deduplicateConsumer;
+-                if (token != null) {
+-                    context.unregisterComponentCallbacks(mConfigurationChangeListeners.get(token));
+-                    mConfigurationChangeListeners.remove(token);
+-                }
++                removedContext = context;
+                 break;
+             }
+-            if (consumerToRemove != null) {
+-                mWindowLayoutChangeListeners.values().remove(consumerToRemove);
++            if (consumerToRemove == null) {
++                return;
++            }
++            final List<DeduplicateConsumer<WindowLayoutInfo>> extras =
++                    mExtraConsumers.get(removedContext);
++            if (extras != null && !extras.isEmpty()) {
++                // DUO-DE: another consumer still listens on this Context, it takes over the registration
++                // (and the configuration change listener stays in place).
++                mWindowLayoutChangeListeners.put(removedContext, extras.remove(0));
++                if (extras.isEmpty()) {
++                    mExtraConsumers.remove(removedContext);
++                }
++                return;
++            }
++            final IBinder token = removedContext.getWindowContextToken();
++            if (token != null) {
++                removedContext.unregisterComponentCallbacks(mConfigurationChangeListeners.get(token));
++                mConfigurationChangeListeners.remove(token);
+             }
++            mWindowLayoutChangeListeners.values().remove(consumerToRemove);
+         }
+     }
+ 
+@@ -249,6 +288,13 @@ public class WindowLayoutComponentImpl implements WindowLayoutComponent {
+                 return true;
+             }
+         }
++        for (List<DeduplicateConsumer<WindowLayoutInfo>> extras : mExtraConsumers.values()) {
++            for (DeduplicateConsumer<WindowLayoutInfo> c : extras) {
++                if (c.matchesConsumer(consumer)) {
++                    return true;
++                }
++            }
++        }
+         return false;
+     }
+ 
+@@ -313,6 +359,13 @@ public class WindowLayoutComponentImpl implements WindowLayoutComponent {
+                         context);
+                 WindowLayoutInfo newWindowLayout = getWindowLayoutInfo(context, storedFeatures);
+                 layoutConsumer.accept(newWindowLayout);
++                final List<DeduplicateConsumer<WindowLayoutInfo>> extras =
++                        mExtraConsumers.get(context);
++                if (extras != null) {
++                    for (DeduplicateConsumer<WindowLayoutInfo> extra : new ArrayList<>(extras)) {
++                        extra.accept(newWindowLayout);
++                    }
++                }
+             }
+         }
+     }
+-- 
+2.43.0
+

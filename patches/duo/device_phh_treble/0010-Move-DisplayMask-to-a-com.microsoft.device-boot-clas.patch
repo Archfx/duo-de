@@ -1,0 +1,129 @@
+From 588d2e3cb2c17145f4f5ce95547b1b555096fe08 Mon Sep 17 00:00:00 2001
+From: Mike Kostersitz <mkostersitz@mac.com>
+Date: Wed, 21 Oct 2026 21:32:06 +0000
+Subject: [PATCH 10/12] Move DisplayMask to a com.microsoft.device boot
+ classpath library
+
+Microsoft's apps (Outlook, Teams, Copilot, OneNote, Edge) bundle a compile-only stub of com.microsoft.device.display.DisplayMask (every method
+throws "Stub!") and rely on the platform providing the real class on the boot classpath, where parent-first class loading makes it win. The stock Duo
+firmware shipped it as /system/framework/com.microsoft.device.jar, a platform boot jar listed in bootclasspath.pb. Without it the apps cannot use
+DisplayMask, so the displaymask feature has to stay hidden (see the next commits).
+
+Add a clean-room com.microsoft.device boot jar (PRODUCT_BOOT_JARS_EXTRA) holding DisplayMask, with the five app-facing methods annotated
+@UnsupportedAppUsage (hidden-API flag "unsupported", as in the stock jar), and remove the class from com.microsoft.device-private. Needs the one-line
+package allow-list entry in build/soong (separate patch, platform_build_soong). The displaymask feature stays hidden in this commit.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+
+---
+ base.mk                                         |  6 ++++++
+ surface-sdk/Android.bp                          | 17 +++++++++++++++++
+ .../microsoft/device/display/DisplayMask.java   |  6 ++++++
+ surface-sdk/com.microsoft.device.xml            |  4 ++++
+ 4 files changed, 33 insertions(+)
+ rename surface-sdk/{ => boot}/java/com/microsoft/device/display/DisplayMask.java (96%)
+ create mode 100644 surface-sdk/com.microsoft.device.xml
+
+diff --git a/base.mk b/base.mk
+index 9b39f02..31712bb 100644
+--- a/base.mk
++++ b/base.mk
+@@ -273,6 +273,12 @@ PRODUCT_PACKAGES += \
+ 	com.microsoft.device-private \
+ 	com.microsoft.device-private.xml
+ 
++PRODUCT_BOOT_JARS_EXTRA += com.microsoft.device
++
++PRODUCT_PACKAGES += \
++	com.microsoft.device \
++	com.microsoft.device.xml
++
+ PRODUCT_COPY_FILES += \
+ 	device/phh/treble/files/device_state_configuration.xml:system/etc/devicestate/device_state_configuration.xml
+ 
+diff --git a/surface-sdk/Android.bp b/surface-sdk/Android.bp
+index d665c10..d573e5a 100644
+--- a/surface-sdk/Android.bp
++++ b/surface-sdk/Android.bp
+@@ -16,3 +16,20 @@ prebuilt_etc {
+     sub_dir: "permissions",
+     system_ext_specific: true,
+ }
++
++// Clean-room com.microsoft.device boot classpath library (public DisplayMask), as on the stock Surface Duo firmware.
++// Apps bundle a compile-only stub of DisplayMask and rely on the boot classpath copy winning (parent-first lookup).
++java_library {
++    name: "com.microsoft.device",
++    srcs: ["boot/java/**/*.java"],
++    libs: ["unsupportedappusage"],
++    sdk_version: "current",
++    permitted_packages: ["com.microsoft.device.display"],
++    installable: true,
++}
++
++prebuilt_etc {
++    name: "com.microsoft.device.xml",
++    src: "com.microsoft.device.xml",
++    sub_dir: "permissions",
++}
+diff --git a/surface-sdk/java/com/microsoft/device/display/DisplayMask.java b/surface-sdk/boot/java/com/microsoft/device/display/DisplayMask.java
+similarity index 96%
+rename from surface-sdk/java/com/microsoft/device/display/DisplayMask.java
+rename to surface-sdk/boot/java/com/microsoft/device/display/DisplayMask.java
+index 3dfc518..243fbdf 100644
+--- a/surface-sdk/java/com/microsoft/device/display/DisplayMask.java
++++ b/surface-sdk/boot/java/com/microsoft/device/display/DisplayMask.java
+@@ -1,5 +1,6 @@
+ package com.microsoft.device.display;
+ 
++import android.compat.annotation.UnsupportedAppUsage;
+ import android.content.Context;
+ import android.graphics.Rect;
+ import android.graphics.Region;
+@@ -37,10 +38,12 @@ public final class DisplayMask {
+         }
+     }
+ 
++    @UnsupportedAppUsage
+     public static DisplayMask fromResourcesRect(Context context) {
+         return create(context);
+     }
+ 
++    @UnsupportedAppUsage
+     public static DisplayMask fromResourcesRectApproximation(Context context) {
+         return create(context);
+     }
+@@ -70,10 +73,12 @@ public final class DisplayMask {
+     }
+ 
+     /** Hinge rectangles for the current rotation of the default display. */
++    @UnsupportedAppUsage
+     public List<Rect> getBoundingRects() {
+         return getBoundingRectsForRotation(currentRotation());
+     }
+ 
++    @UnsupportedAppUsage
+     public List<Rect> getBoundingRectsForRotation(int rotation) {
+         int[] g = geometry();
+         if (g == null || mBoundingRects.isEmpty()) return new ArrayList<>();
+@@ -85,6 +90,7 @@ public final class DisplayMask {
+         return out;
+     }
+ 
++    @UnsupportedAppUsage
+     public Region getBounds() {
+         Region region = new Region();
+         for (Rect r : getBoundingRects()) region.union(r);
+diff --git a/surface-sdk/com.microsoft.device.xml b/surface-sdk/com.microsoft.device.xml
+new file mode 100644
+index 0000000..9656b61
+--- /dev/null
++++ b/surface-sdk/com.microsoft.device.xml
+@@ -0,0 +1,4 @@
++<?xml version="1.0" encoding="utf-8"?>
++<permissions>
++    <library name="com.microsoft.device" file="/system/framework/com.microsoft.device.jar" />
++</permissions>
+-- 
+2.43.0
+
