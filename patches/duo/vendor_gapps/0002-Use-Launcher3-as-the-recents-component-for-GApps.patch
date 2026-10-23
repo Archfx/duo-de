@@ -1,7 +1,18 @@
-From d79f4433506dfa0d3a12dd9250894a5cc33fd412 Mon Sep 17 00:00:00 2001
-From: ethan <ethangoh98@gmail.com>
-Date: Thu, 10 October 2026 8:44:32 +1100
-Subject: [PATCH] Set Launcher3 as default for config_recentsComponentName for GApps
+From 0eec9a3f409f73fc96341bd154d3e7b3bb8c3756 Mon Sep 17 00:00:00 2001
+From: Mike Kostersitz <mkostersitz@mac.com>
+Date: Fri, 16 Oct 2026 17:07:50 +0000
+Subject: [PATCH] GApps: use Launcher3 as config_recentsComponentName (Pixel
+ launcher is removed)
+
+On GApps builds Launcher3 creates an app prediction session, which the system only
+allows for callers holding PACKAGE_USAGE_STATS; without it Launcher3 crash-loops
+("Permission Denial: createPredictionSession"). Same approach as Archfx a16-dev
+5b94514.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ common/rro_overlays/GmsConfigOverlay/res/values/config.xml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/common/rro_overlays/GmsConfigOverlay/res/values/config.xml b/common/rro_overlays/GmsConfigOverlay/res/values/config.xml
 index 6a42416..26b011e 100644
@@ -16,3 +27,6 @@ index 6a42416..26b011e 100644
  
      <!-- Define device configs on boot -->
      <string-array name="global_device_configs_override">
+-- 
+2.43.0
+

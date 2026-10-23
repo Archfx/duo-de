@@ -1,0 +1,38 @@
+From 1d697a15e1f803772176838425c3d258f110777c Mon Sep 17 00:00:00 2001
+From: builder <builder@aosp-vm>
+Date: Fri, 9 Oct 2026 18:34:33 +0000
+Subject: [PATCH] Revert "Remove vndk snapshot v30"
+
+This reverts commit 66beb1aa4c288d22f72ce1f32197e43656a67065.
+---
+ target/product/gsi/Android.bp | 1 +
+ target/product/gsi_release.mk | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/target/product/gsi/Android.bp b/target/product/gsi/Android.bp
+index 2fee93eb15..1f1e00df52 100644
+--- a/target/product/gsi/Android.bp
++++ b/target/product/gsi/Android.bp
+@@ -113,6 +113,7 @@ android_filesystem_defaults {
+         ///////////////////////////////////////////
+         // VNDK
+         ///////////////////////////////////////////
++        "com.android.vndk.v30",
+         "com.android.vndk.v31",
+         "com.android.vndk.v32",
+         "com.android.vndk.v33",
+diff --git a/target/product/gsi_release.mk b/target/product/gsi_release.mk
+index 5450271ffa..a4319babc4 100644
+--- a/target/product/gsi_release.mk
++++ b/target/product/gsi_release.mk
+@@ -60,6 +60,7 @@ endif
+ 
+ # Support additional VNDK snapshots
+ PRODUCT_EXTRA_VNDK_VERSIONS := \
++    30 \
+     31 \
+     32 \
+     33 \
+-- 
+2.43.0
+

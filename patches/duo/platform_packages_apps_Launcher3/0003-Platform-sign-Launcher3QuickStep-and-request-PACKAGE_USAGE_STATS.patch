@@ -1,0 +1,46 @@
+From 4469646d4360f2d6368cd6893e379eb450152e7e Mon Sep 17 00:00:00 2001
+From: Mike Kostersitz <mkostersitz@mac.com>
+Date: Fri, 16 Oct 2026 17:08:55 +0000
+Subject: [PATCH] Sign Launcher3QuickStep with the platform key and request
+ PACKAGE_USAGE_STATS
+
+On GApps builds Launcher3 creates an app prediction session, which the system only
+allows for callers holding PACKAGE_USAGE_STATS; without it Launcher3 crash-loops
+("Permission Denial: createPredictionSession"). Same approach as Archfx a16-dev
+5b94514.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Change-Id: I9c398abd18f43ba4339071066f6f675afe4ffda9
+---
+ Android.bp                    | 1 +
+ quickstep/AndroidManifest.xml | 2 ++
+ 2 files changed, 3 insertions(+)
+
+diff --git a/Android.bp b/Android.bp
+index c71e8cf2d8..8882783b03 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -636,6 +636,7 @@ android_app {
+     min_sdk_version: "current",
+     target_sdk_version: "current",
+ 
++    certificate: "platform",
+     privileged: true,
+     system_ext_specific: true,
+     overrides: [
+diff --git a/quickstep/AndroidManifest.xml b/quickstep/AndroidManifest.xml
+index 727f24a290..96431d0c19 100644
+--- a/quickstep/AndroidManifest.xml
++++ b/quickstep/AndroidManifest.xml
+@@ -22,6 +22,8 @@
+      xmlns:tools="http://schemas.android.com/tools"
+      package="com.android.launcher3">
+ 
++    <!-- App prediction (GApps builds) needs usage stats -->
++    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"/>
+     <uses-permission android:name="android.permission.BROADCAST_CLOSE_SYSTEM_DIALOGS" />
+     <uses-permission android:name="android.permission.CONTROL_REMOTE_APP_TRANSITION_ANIMATIONS"/>
+     <uses-permission android:name="android.permission.VIBRATE"/>
+-- 
+2.43.0
+

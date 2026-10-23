@@ -1,0 +1,38 @@
+From 1f224d4afc0fa225cfb97697ea40bdf94d3729c0 Mon Sep 17 00:00:00 2001
+From: builder <builder@aosp-vm>
+Date: Fri, 9 Oct 2026 19:27:58 +0000
+Subject: [PATCH] EGL Loader: remove the unused
+ failToLoadFromDriverSuffixProperty
+
+"Fix loading unnamed GLES" simplifies the fallback condition to `if (!hnd)`, which removes the only read of this variable.
+It is then set but never used, and clang in android-16.0.0_r4 rejects that (-Werror,-Wunused-but-set-variable).
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Change-Id: I98ed97ed386bf0c262593073e3ff9af5d3c1da71
+---
+ opengl/libs/EGL/Loader.cpp | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/opengl/libs/EGL/Loader.cpp b/opengl/libs/EGL/Loader.cpp
+index ad7946c2ec..1d25391141 100644
+--- a/opengl/libs/EGL/Loader.cpp
++++ b/opengl/libs/EGL/Loader.cpp
+@@ -289,7 +289,6 @@ void* Loader::open(egl_connection_t* cnx) {
+     }
+ 
+     // Finally, try to load default driver.
+-    bool failToLoadFromDriverSuffixProperty = false;
+     if (!hnd) {
+         // Start by searching for the library name appended by the system
+         // properties of the GLES userspace driver in both locations.
+@@ -304,7 +303,6 @@ void* Loader::open(egl_connection_t* cnx) {
+             hnd = attempt_to_load_system_driver(cnx, prop.c_str(), true);
+             if (!hnd) {
+                 ALOGD("Failed to load drivers from property %s with value %s", key, prop.c_str());
+-                failToLoadFromDriverSuffixProperty = true;
+             }
+ 
+             // Abort regardless of whether subsequent properties are set, the value must be set
+-- 
+2.43.0
+

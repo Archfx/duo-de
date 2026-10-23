@@ -1,0 +1,31 @@
+From 462562abb5f1ede2d474be97304245f74a127f7f Mon Sep 17 00:00:00 2001
+From: Mike Kostersitz <mkostersitz@mac.com>
+Date: Fri, 16 Oct 2026 17:07:49 +0000
+Subject: [PATCH] Whitelist PACKAGE_USAGE_STATS for Launcher3 (privapp
+ permissions)
+
+On GApps builds Launcher3 creates an app prediction session, which the system only
+allows for callers holding PACKAGE_USAGE_STATS; without it Launcher3 crash-loops
+("Permission Denial: createPredictionSession"). Same approach as Archfx a16-dev
+5b94514.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Change-Id: I0fabf727a67872d27c8fd36d8cab0adf7a652a4d
+---
+ data/etc/com.android.launcher3.xml | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/data/etc/com.android.launcher3.xml b/data/etc/com.android.launcher3.xml
+index 47e2e3844bb9..9db4bda56c70 100644
+--- a/data/etc/com.android.launcher3.xml
++++ b/data/etc/com.android.launcher3.xml
+@@ -27,5 +27,6 @@
+         <permission name="android.permission.STOP_APP_SWITCHES"/>
+         <permission name="android.permission.ACCESS_SHORTCUTS"/>
+         <permission name="android.permission.ACCESS_HIDDEN_PROFILES_FULL"/>
++        <permission name="android.permission.PACKAGE_USAGE_STATS"/>
+     </privapp-permissions>
+ </permissions>
+-- 
+2.43.0
+

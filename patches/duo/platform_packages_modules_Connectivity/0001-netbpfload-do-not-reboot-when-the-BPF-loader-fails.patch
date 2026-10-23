@@ -1,0 +1,33 @@
+From 5895dbe7d4c9d86880b6cc6e4ffc66e29915e129 Mon Sep 17 00:00:00 2001
+From: builder <builder@aosp-vm>
+Date: Wed, 14 Oct 2026 14:04:27 +0000
+Subject: [PATCH] netbpfload: do not reboot when the BPF loader fails (debug /
+ tolerate old-kernel BPF limits on the Duo)
+
+On the Surface Duo 2 (5.4 kernel, R-era vendor) android-16.0.0_r4 reboots about 25 seconds into every boot:
+NetBpfLoad logs "DO NOT EXPECT SYSTEM TO BOOT SUCCESSFULLY", sleeps 20 s, returns 38, and init reboots
+(reboot_on_failure reboot,bpfloader-failed). Letting the boot continue exposes the real error in logcat.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Change-Id: I21fe60d234a48269ef044710388705d7853eb9ef
+---
+ bpf/loader/netbpfload.35rc | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/bpf/loader/netbpfload.35rc b/bpf/loader/netbpfload.35rc
+index a23bd60e10..51e7f0bf9a 100644
+--- a/bpf/loader/netbpfload.35rc
++++ b/bpf/loader/netbpfload.35rc
+@@ -65,5 +65,8 @@ service bpfloader /apex/com.android.tethering/bin/netbpfload
+     #    'cannot prove return value is 0 or 1' or 'unsupported / unknown operation / helper',
+     #    'invalid bpf_context access', etc.
+     #
+-    reboot_on_failure reboot,bpfloader-failed
++    # Duo: do not reboot when the BPF loader fails, so the device boots and the reason can be read
++    # with: adb logcat -s 'bpfloader:*' 'LibBpfLoader:*' 'NetBpfLoad:*' 'NetBpfLoader:*'
++    # (AOSP's own debugging recipe for 'bpfloader-failed' bootloops, see the comment above)
++    # reboot_on_failure reboot,bpfloader-failed
+     override
+-- 
+2.43.0
+

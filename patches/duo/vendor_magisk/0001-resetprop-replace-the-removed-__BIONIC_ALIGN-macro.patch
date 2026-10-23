@@ -1,0 +1,30 @@
+From 27902e5724b2b05003fae65407577341faf9a05f Mon Sep 17 00:00:00 2001
+From: builder <builder@aosp-vm>
+Date: Fri, 9 Oct 2026 22:24:15 +0000
+Subject: [PATCH] resetprop: replace the removed __BIONIC_ALIGN macro with
+ explicit round-up
+
+bionic in android-16.0.0_r4 no longer defines __BIONIC_ALIGN, so prop_area.cpp fails to compile.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ Magisk/native/jni/systemproperties/prop_area.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/Magisk/native/jni/systemproperties/prop_area.cpp b/Magisk/native/jni/systemproperties/prop_area.cpp
+index b834935..62ac429 100644
+--- a/Magisk/native/jni/systemproperties/prop_area.cpp
++++ b/Magisk/native/jni/systemproperties/prop_area.cpp
+@@ -147,7 +147,8 @@ prop_area* prop_area::map_prop_area(const char* filename) {
+ }
+ 
+ void* prop_area::allocate_obj(const size_t size, uint_least32_t* const off) {
+-  const size_t aligned = __BIONIC_ALIGN(size, sizeof(uint_least32_t));
++  // __BIONIC_ALIGN was removed from bionic; this is the same round-up
++  const size_t aligned = (size + sizeof(uint_least32_t) - 1) & ~(sizeof(uint_least32_t) - 1);
+   if (bytes_used_ + aligned > pa_data_size_) {
+     return nullptr;
+   }
+-- 
+2.43.0
+
