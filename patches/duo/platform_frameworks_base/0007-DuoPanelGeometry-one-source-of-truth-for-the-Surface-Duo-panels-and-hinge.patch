@@ -1,0 +1,395 @@
+From cf2337b989734735126a953c8e031a9a85748c56 Mon Sep 17 00:00:00 2001
+From: Michael Kostersitz <mkostersitz@mac.com>
+Date: Fri, 23 Oct 2026 16:58:33 +0000
+Subject: [PATCH] DuoPanelGeometry: one source of truth for the Surface Duo
+ panels and hinge
+
+Pure-Java helper that returns the two panel rects and the hinge band for the
+current display size and rotation (spanned, gapless, single panel), so system UI,
+Launcher3 and the window manager can stop using literals such as 1344 or 2500.
+Same geometry table as the DisplayMask HingeMath (Duo 1350/84/1800, Duo 2
+1344/66/1892). No runtime user yet; this is the base for keeping UI off the
+hinge. Host unit tests: DuoPanelGeometryTests (11 cases, all rotations).
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Change-Id: Idd71e67a9646c6f816812980c112e6f99dd7d1d8
+---
+ core/java/Android.bp                          |   6 +
+ .../internal/policy/DuoPanelGeometry.java     | 139 +++++++++++++
+ core/tests/DuoPanelGeometryTests/Android.bp   |  13 ++
+ .../internal/policy/DuoPanelGeometryTest.java | 183 ++++++++++++++++++
+ 4 files changed, 341 insertions(+)
+ create mode 100644 core/java/com/android/internal/policy/DuoPanelGeometry.java
+ create mode 100644 core/tests/DuoPanelGeometryTests/Android.bp
+ create mode 100644 core/tests/DuoPanelGeometryTests/src/com/android/internal/policy/DuoPanelGeometryTest.java
+
+diff --git a/core/java/Android.bp b/core/java/Android.bp
+index e9a605ad5caf..49b72510b0a2 100644
+--- a/core/java/Android.bp
++++ b/core/java/Android.bp
+@@ -872,3 +872,9 @@ aidl_interface {
+         },
+     },
+ }
++
++// Pure-Java panel/hinge geometry of the Surface Duo; also compiled on the host for its unit tests.
++filegroup {
++    name: "duo-panel-geometry-src",
++    srcs: ["com/android/internal/policy/DuoPanelGeometry.java"],
++}
+diff --git a/core/java/com/android/internal/policy/DuoPanelGeometry.java b/core/java/com/android/internal/policy/DuoPanelGeometry.java
+new file mode 100644
+index 000000000000..b91ad189a9f1
+--- /dev/null
++++ b/core/java/com/android/internal/policy/DuoPanelGeometry.java
+@@ -0,0 +1,139 @@
++/*
++ * Copyright (C) 2026 The Duo-DE Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package com.android.internal.policy;
++
++/**
++ * Where the two panels and the hinge of a Surface Duo are, in the pixels of the current display.
++ *
++ * One source of truth for code that needs to keep things off the hinge or to place windows on a panel, instead of
++ * literals such as 1344 or 2500. Pure arithmetic on ints, so it also compiles and is tested on the host.
++ *
++ * The device is described in its natural (rotation 0) orientation, which for the Duo is the two panels side by side:
++ * panel 0 on the left, the hinge band, panel 1 on the right. Rectangles are returned as {left, top, right, bottom} in
++ * the coordinates of the display at the given rotation, so panel 0 follows the physical left panel as the device turns
++ * (ROTATION_90 puts it at the bottom, ROTATION_180 on the right, ROTATION_270 at the top).
++ *
++ * @hide
++ */
++public final class DuoPanelGeometry {
++    /** Both panels and the hinge band are visible: the display is 2 * panel + hinge long. */
++    public static final int MODE_SPANNED = 0;
++    /** The hinge gap is disabled: the display is exactly two panels long and the seam has no width. */
++    public static final int MODE_GAPLESS = 1;
++    /** One panel is shown: the display is a single panel. */
++    public static final int MODE_SINGLE = 2;
++    /** The display size matches none of the above (another device, a letterboxed or scaled display). */
++    public static final int MODE_UNKNOWN = 3;
++
++    /** Index of the rect for the first panel in the array returned by {@link #layout}. */
++    public static final int PANEL_0 = 0;
++    /** Index of the rect for the second panel in the array returned by {@link #layout}. */
++    public static final int PANEL_1 = 1;
++    /** Index of the hinge band in the array returned by {@link #layout}. */
++    public static final int HINGE = 2;
++
++    /** Physical panel width, hinge band width and panel height of a device, in natural orientation. */
++    public static final class Spec {
++        public final int panel;
++        public final int hinge;
++        public final int height;
++
++        public Spec(int panel, int hinge, int height) {
++            this.panel = panel;
++            this.hinge = hinge;
++            this.height = height;
++        }
++    }
++
++    public static final Spec DUO = new Spec(1350, 84, 1800);
++    public static final Spec DUO2 = new Spec(1344, 66, 1892);
++
++    private DuoPanelGeometry() {
++    }
++
++    /** The geometry for a {@code Build.DEVICE} value, or null when it is not a Surface Duo. */
++    public static Spec forDevice(String device) {
++        if ("duo2".equals(device)) return DUO2;
++        if ("duo".equals(device)) return DUO;
++        return null;
++    }
++
++    /** How a display of the given size relates to the device, whatever its rotation. */
++    public static int mode(Spec spec, int displayWidth, int displayHeight) {
++        if (spec == null) return MODE_UNKNOWN;
++        int longSide = Math.max(displayWidth, displayHeight);
++        int shortSide = Math.min(displayWidth, displayHeight);
++        // One panel is panel x height, so its short side is the panel width, not the height.
++        if (shortSide == spec.panel && longSide == spec.height) return MODE_SINGLE;
++        if (shortSide != spec.height) return MODE_UNKNOWN;
++        if (longSide == 2 * spec.panel + spec.hinge) return MODE_SPANNED;
++        if (longSide == 2 * spec.panel) return MODE_GAPLESS;
++        return MODE_UNKNOWN;
++    }
++
++    /**
++     * The rects {panel 0, panel 1, hinge} for a display of the given size and rotation (Surface.ROTATION_*).
++     * Spanned: both panels and the hinge band. Gapless: both panels and a zero-width hinge rect on the seam.
++     * Single: panel 0 is the whole display, panel 1 and the hinge are empty (all zeros). Unknown: null.
++     */
++    public static int[][] layout(Spec spec, int displayWidth, int displayHeight, int rotation) {
++        int mode = mode(spec, displayWidth, displayHeight);
++        if (mode == MODE_UNKNOWN) return null;
++        if (mode == MODE_SINGLE) {
++            return new int[][] {
++                {0, 0, displayWidth, displayHeight}, {0, 0, 0, 0}, {0, 0, 0, 0}};
++        }
++        int hinge = mode == MODE_SPANNED ? spec.hinge : 0;
++        int w = 2 * spec.panel + hinge;   // natural width
++        int h = spec.height;
++        int[][] natural = {
++            {0, 0, spec.panel, h},
++            {spec.panel + hinge, 0, w, h},
++            {spec.panel, 0, spec.panel + hinge, h}};
++        int[][] out = new int[3][];
++        for (int i = 0; i < 3; i++) out[i] = rotate(natural[i], w, h, rotation);
++        return out;
++    }
++
++    /** True when the rectangle {l,t,r,b} overlaps the hinge band (a zero-width hinge overlaps nothing). */
++    public static boolean intersectsHinge(int[][] layout, int left, int top, int right, int bottom) {
++        if (layout == null) return false;
++        int[] hinge = layout[HINGE];
++        return hinge[0] < hinge[2] && hinge[1] < hinge[3]
++                && left < hinge[2] && right > hinge[0] && top < hinge[3] && bottom > hinge[1];
++    }
++
++    /** Index of the panel containing the point, or -1 when it is on the hinge or outside both. */
++    public static int panelAt(int[][] layout, int x, int y) {
++        if (layout == null) return -1;
++        for (int i = PANEL_0; i <= PANEL_1; i++) {
++            int[] r = layout[i];
++            if (x >= r[0] && x < r[2] && y >= r[1] && y < r[3]) return i;
++        }
++        return -1;
++    }
++
++    /** Maps a rect from the natural (rotation 0, width x height) display to the display at {@code rotation}. */
++    static int[] rotate(int[] r, int w, int h, int rotation) {
++        switch (rotation & 3) {
++            case 1:  return new int[] {r[1], w - r[2], r[3], w - r[0]};
++            case 2:  return new int[] {w - r[2], h - r[3], w - r[0], h - r[1]};
++            case 3:  return new int[] {h - r[3], r[0], h - r[1], r[2]};
++            default: return r.clone();
++        }
++    }
++}
+diff --git a/core/tests/DuoPanelGeometryTests/Android.bp b/core/tests/DuoPanelGeometryTests/Android.bp
+new file mode 100644
+index 000000000000..40af1e5ab804
+--- /dev/null
++++ b/core/tests/DuoPanelGeometryTests/Android.bp
+@@ -0,0 +1,13 @@
++package {
++    default_applicable_licenses: ["frameworks_base_license"],
++}
++
++java_test_host {
++    name: "DuoPanelGeometryTests",
++    srcs: [
++        "src/**/*.java",
++        ":duo-panel-geometry-src",
++    ],
++    static_libs: ["junit"],
++    test_suites: ["general-tests"],
++}
+diff --git a/core/tests/DuoPanelGeometryTests/src/com/android/internal/policy/DuoPanelGeometryTest.java b/core/tests/DuoPanelGeometryTests/src/com/android/internal/policy/DuoPanelGeometryTest.java
+new file mode 100644
+index 000000000000..8e0312e5ab12
+--- /dev/null
++++ b/core/tests/DuoPanelGeometryTests/src/com/android/internal/policy/DuoPanelGeometryTest.java
+@@ -0,0 +1,183 @@
++/*
++ * Copyright (C) 2026 The Duo-DE Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package com.android.internal.policy;
++
++import static com.android.internal.policy.DuoPanelGeometry.HINGE;
++import static com.android.internal.policy.DuoPanelGeometry.MODE_GAPLESS;
++import static com.android.internal.policy.DuoPanelGeometry.MODE_SINGLE;
++import static com.android.internal.policy.DuoPanelGeometry.MODE_SPANNED;
++import static com.android.internal.policy.DuoPanelGeometry.MODE_UNKNOWN;
++import static com.android.internal.policy.DuoPanelGeometry.PANEL_0;
++import static com.android.internal.policy.DuoPanelGeometry.PANEL_1;
++
++import static org.junit.Assert.assertArrayEquals;
++import static org.junit.Assert.assertEquals;
++import static org.junit.Assert.assertFalse;
++import static org.junit.Assert.assertNotNull;
++import static org.junit.Assert.assertNull;
++import static org.junit.Assert.assertTrue;
++
++import org.junit.Test;
++import org.junit.runner.RunWith;
++import org.junit.runners.JUnit4;
++
++/** Host tests for {@link DuoPanelGeometry}. */
++@RunWith(JUnit4.class)
++public class DuoPanelGeometryTest {
++    private static final DuoPanelGeometry.Spec D2 = DuoPanelGeometry.DUO2;   // 1344 + 66 hinge, 1892 high
++    private static final DuoPanelGeometry.Spec D1 = DuoPanelGeometry.DUO;    // 1350 + 84 hinge, 1800 high
++
++    @Test
++    public void forDevice() {
++        assertEquals(D2, DuoPanelGeometry.forDevice("duo2"));
++        assertEquals(D1, DuoPanelGeometry.forDevice("duo"));
++        assertNull(DuoPanelGeometry.forDevice("panther"));
++        assertNull(DuoPanelGeometry.forDevice(null));
++    }
++
++    @Test
++    public void modes() {
++        assertEquals(MODE_SPANNED, DuoPanelGeometry.mode(D2, 2754, 1892));
++        assertEquals(MODE_SPANNED, DuoPanelGeometry.mode(D2, 1892, 2754));
++        assertEquals(MODE_GAPLESS, DuoPanelGeometry.mode(D2, 2688, 1892));
++        assertEquals(MODE_GAPLESS, DuoPanelGeometry.mode(D2, 1892, 2688));
++        assertEquals(MODE_SINGLE, DuoPanelGeometry.mode(D2, 1344, 1892));
++        assertEquals(MODE_SINGLE, DuoPanelGeometry.mode(D2, 1892, 1344));
++        assertEquals(MODE_SPANNED, DuoPanelGeometry.mode(D1, 2784, 1800));
++        assertEquals(MODE_GAPLESS, DuoPanelGeometry.mode(D1, 2700, 1800));
++        assertEquals(MODE_SINGLE, DuoPanelGeometry.mode(D1, 1350, 1800));
++    }
++
++    @Test
++    public void unknownSizesAndDevices() {
++        assertEquals(MODE_UNKNOWN, DuoPanelGeometry.mode(null, 2754, 1892));
++        assertEquals(MODE_UNKNOWN, DuoPanelGeometry.mode(D2, 2754, 1800));   // wrong height
++        assertEquals(MODE_UNKNOWN, DuoPanelGeometry.mode(D2, 2600, 1892));   // letterboxed
++        assertEquals(MODE_UNKNOWN, DuoPanelGeometry.mode(D2, 1080, 1920));
++        assertNull(DuoPanelGeometry.layout(D2, 2600, 1892, 0));
++        assertNull(DuoPanelGeometry.layout(null, 2754, 1892, 0));
++    }
++
++    @Test
++    public void spannedRotation0() {
++        int[][] l = DuoPanelGeometry.layout(D2, 2754, 1892, 0);
++        assertArrayEquals(new int[] {0, 0, 1344, 1892}, l[PANEL_0]);
++        assertArrayEquals(new int[] {1410, 0, 2754, 1892}, l[PANEL_1]);
++        assertArrayEquals(new int[] {1344, 0, 1410, 1892}, l[HINGE]);
++    }
++
++    @Test
++    public void spannedAllRotations() {
++        // 1: panel 0 at the bottom, 2: on the right, 3: at the top
++        int[][] r1 = DuoPanelGeometry.layout(D2, 1892, 2754, 1);
++        assertArrayEquals(new int[] {0, 1410, 1892, 2754}, r1[PANEL_0]);
++        assertArrayEquals(new int[] {0, 0, 1892, 1344}, r1[PANEL_1]);
++        assertArrayEquals(new int[] {0, 1344, 1892, 1410}, r1[HINGE]);
++        int[][] r2 = DuoPanelGeometry.layout(D2, 2754, 1892, 2);
++        assertArrayEquals(new int[] {1410, 0, 2754, 1892}, r2[PANEL_0]);
++        assertArrayEquals(new int[] {0, 0, 1344, 1892}, r2[PANEL_1]);
++        assertArrayEquals(new int[] {1344, 0, 1410, 1892}, r2[HINGE]);
++        int[][] r3 = DuoPanelGeometry.layout(D2, 1892, 2754, 3);
++        assertArrayEquals(new int[] {0, 0, 1892, 1344}, r3[PANEL_0]);
++        assertArrayEquals(new int[] {0, 1410, 1892, 2754}, r3[PANEL_1]);
++        assertArrayEquals(new int[] {0, 1344, 1892, 1410}, r3[HINGE]);
++    }
++
++    @Test
++    public void panelsAndHingeTileTheDisplay() {
++        for (DuoPanelGeometry.Spec s : new DuoPanelGeometry.Spec[] {D1, D2}) {
++            for (int rot = 0; rot < 4; rot++) {
++                int w = 2 * s.panel + s.hinge;
++                int h = s.height;
++                boolean portrait = (rot & 1) == 1;
++                int dw = portrait ? h : w;
++                int dh = portrait ? w : h;
++                int[][] l = DuoPanelGeometry.layout(s, dw, dh, rot);
++                assertNotNull(l);
++                long area = 0;
++                for (int[] r : l) area += (long) (r[2] - r[0]) * (r[3] - r[1]);
++                assertEquals("rot " + rot, (long) dw * dh, area);
++                for (int[] r : l) {
++                    assertTrue(r[0] >= 0 && r[1] >= 0 && r[2] <= dw && r[3] <= dh);
++                }
++            }
++        }
++    }
++
++    @Test
++    public void gaplessHasZeroWidthSeam() {
++        int[][] l = DuoPanelGeometry.layout(D2, 2688, 1892, 0);
++        assertArrayEquals(new int[] {0, 0, 1344, 1892}, l[PANEL_0]);
++        assertArrayEquals(new int[] {1344, 0, 2688, 1892}, l[PANEL_1]);
++        assertArrayEquals(new int[] {1344, 0, 1344, 1892}, l[HINGE]);
++        assertFalse(DuoPanelGeometry.intersectsHinge(l, 1300, 0, 1400, 100));
++        int[][] r1 = DuoPanelGeometry.layout(D2, 1892, 2688, 1);
++        assertArrayEquals(new int[] {0, 1344, 1892, 2688}, r1[PANEL_0]);
++        assertArrayEquals(new int[] {0, 1344, 1892, 1344}, r1[HINGE]);
++    }
++
++    @Test
++    public void singlePanelIsTheWholeDisplay() {
++        for (int rot = 0; rot < 4; rot++) {
++            boolean portrait = (rot & 1) == 1;
++            int dw = portrait ? 1892 : 1344;
++            int dh = portrait ? 1344 : 1892;
++            int[][] l = DuoPanelGeometry.layout(D2, dw, dh, rot);
++            assertArrayEquals(new int[] {0, 0, dw, dh}, l[PANEL_0]);
++            assertArrayEquals(new int[] {0, 0, 0, 0}, l[PANEL_1]);
++            assertArrayEquals(new int[] {0, 0, 0, 0}, l[HINGE]);
++            assertFalse(DuoPanelGeometry.intersectsHinge(l, 0, 0, dw, dh));
++        }
++    }
++
++    @Test
++    public void intersectsHinge() {
++        int[][] l = DuoPanelGeometry.layout(D2, 2754, 1892, 0);
++        assertTrue(DuoPanelGeometry.intersectsHinge(l, 1300, 10, 1380, 60));    // crosses the left edge
++        assertTrue(DuoPanelGeometry.intersectsHinge(l, 1360, 1800, 1400, 1810));  // inside
++        assertTrue(DuoPanelGeometry.intersectsHinge(l, 1394, 0, 2754, 1892));   // the old right launch rect, 16 px in
++        assertFalse(DuoPanelGeometry.intersectsHinge(l, 0, 0, 1344, 1892));     // touching is not overlapping
++        assertFalse(DuoPanelGeometry.intersectsHinge(l, 1410, 0, 2754, 1892));
++        assertTrue(DuoPanelGeometry.intersectsHinge(l, 0, 0, 2754, 1892));      // a spanned window does
++        assertFalse(DuoPanelGeometry.intersectsHinge(null, 0, 0, 10, 10));
++    }
++
++    @Test
++    public void panelAt() {
++        int[][] l = DuoPanelGeometry.layout(D2, 2754, 1892, 0);
++        assertEquals(PANEL_0, DuoPanelGeometry.panelAt(l, 0, 0));
++        assertEquals(PANEL_0, DuoPanelGeometry.panelAt(l, 1343, 1891));
++        assertEquals(-1, DuoPanelGeometry.panelAt(l, 1344, 100));
++        assertEquals(-1, DuoPanelGeometry.panelAt(l, 1409, 100));
++        assertEquals(PANEL_1, DuoPanelGeometry.panelAt(l, 1410, 100));
++        assertEquals(-1, DuoPanelGeometry.panelAt(l, 2754, 100));
++        assertEquals(-1, DuoPanelGeometry.panelAt(null, 0, 0));
++        int[][] r2 = DuoPanelGeometry.layout(D2, 2754, 1892, 2);
++        assertEquals(PANEL_1, DuoPanelGeometry.panelAt(r2, 0, 0));      // panel 0 follows the physical left panel
++        assertEquals(PANEL_0, DuoPanelGeometry.panelAt(r2, 2000, 0));
++    }
++
++    @Test
++    public void rotationIsReversible() {
++        int[] r = {10, 20, 300, 400};
++        int w = 2754, h = 1892;
++        // rotate 1 then undo by rotating the result with 3 on the swapped display
++        int[] a = DuoPanelGeometry.rotate(r, w, h, 1);
++        int[] back = DuoPanelGeometry.rotate(a, h, w, 3);
++        assertArrayEquals(r, back);
++    }
++}
+-- 
+2.43.0
+
