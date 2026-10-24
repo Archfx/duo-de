@@ -1,0 +1,65 @@
+From 642b0d30149c24893ac68748c749c843fcfdfa07 Mon Sep 17 00:00:00 2001
+From: mkostersitz <spartan114@me.com>
+Date: Mon, 19 Oct 2026 20:41:27 +0000
+Subject: [PATCH] Bionic: fall back for close_range(CLOEXEC) and epoll_pwait2
+ on kernels older than 5.11 (Surface Duo 2, 5.4)
+
+Change-Id: Idb5d73401eb6e06094583d181f8b94d0d956d979
+---
+ libc/bionic/spawn.cpp     | 15 ++++++++++++++-
+ libc/bionic/sys_epoll.cpp | 13 ++++++++++++-
+ 2 files changed, 26 insertions(+), 2 deletions(-)
+
+diff --git a/libc/bionic/spawn.cpp b/libc/bionic/spawn.cpp
+index f1b8eb06d..0453b8ed4 100644
+--- a/libc/bionic/spawn.cpp
++++ b/libc/bionic/spawn.cpp
+@@ -154,7 +154,20 @@ static void ApplyAttrs(short flags, const posix_spawnattr_t* attr) {
+ 
+   if ((flags & POSIX_SPAWN_CLOEXEC_DEFAULT) != 0) {
+     // mark all open fds except stdin/out/err as close-on-exec
+-    if (close_range(3, ~0U, CLOSE_RANGE_CLOEXEC)) _exit(127);
++    if (close_range(3, ~0U, CLOSE_RANGE_CLOEXEC)) {
++      // Kernels older than 5.11 (the Surface Duo 2 runs 5.4) lack CLOSE_RANGE_CLOEXEC: mark the fds one
++      // by one. Only async-signal-safe calls here, this runs in the vfork()ed child.
++      if (errno != ENOSYS && errno != EINVAL) _exit(127);
++      struct rlimit rl;
++      int max_fd = 1024;
++      if (getrlimit(RLIMIT_NOFILE, &rl) == 0 && rl.rlim_cur != RLIM_INFINITY) {
++        max_fd = rl.rlim_cur > 65536 ? 65536 : static_cast<int>(rl.rlim_cur);
++      }
++      for (int fd = 3; fd < max_fd; ++fd) {
++        int fd_flags = fcntl(fd, F_GETFD);
++        if (fd_flags != -1) fcntl(fd, F_SETFD, fd_flags | FD_CLOEXEC);
++      }
++    }
+   }
+ }
+ 
+diff --git a/libc/bionic/sys_epoll.cpp b/libc/bionic/sys_epoll.cpp
+index be97818da..4380bf317 100644
+--- a/libc/bionic/sys_epoll.cpp
++++ b/libc/bionic/sys_epoll.cpp
+@@ -80,7 +80,18 @@ int epoll_pwait2_64(int fd, epoll_event* events, int max_events, const timespec*
+     kts_ptr = &kts;
+   }
+ #endif
+-  return __epoll_pwait2(fd, events, max_events, kts_ptr, ss, sizeof(*ss));
++  int result = __epoll_pwait2(fd, events, max_events, kts_ptr, ss, sizeof(*ss));
++  if (result == -1 && errno == ENOSYS) {
++    // Kernels older than 5.11 (the Surface Duo 2 runs 5.4) have no epoll_pwait2(): use epoll_pwait()
++    // with the timeout rounded up to milliseconds.
++    int timeout_ms = -1;
++    if (timeout) {
++      long long ms = static_cast<long long>(timeout->tv_sec) * 1000 + (timeout->tv_nsec + 999999) / 1000000;
++      timeout_ms = ms > 0x7fffffff ? 0x7fffffff : static_cast<int>(ms);
++    }
++    return __epoll_pwait(fd, events, max_events, timeout_ms, ss, sizeof(*ss));
++  }
++  return result;
+ }
+ 
+ int epoll_wait(int fd, struct epoll_event* events, int max_events, int timeout) {
+-- 
+2.43.0
+

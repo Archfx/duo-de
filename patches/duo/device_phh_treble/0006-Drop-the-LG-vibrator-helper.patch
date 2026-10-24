@@ -1,0 +1,95 @@
+From 1e98a352b6844df0e41ef82c735dcf59ccb02068 Mon Sep 17 00:00:00 2001
+From: builder <builder@aosp-vm>
+Date: Fri, 9 Oct 2026 18:42:50 +0000
+Subject: [PATCH] Drop the LG vibrator helper (vibrator-lge)
+
+It links vendor.lge.hardware.vibrator@1.0, which depends on android.hardware.vibrator@1.0, a HIDL interface that
+android-16.0.0_r4 no longer has. It is not installed by any product and a Surface Duo has no LG vibrator HAL.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ cmds/Android.bp       | 12 -----------
+ cmds/vibrator-lge.cpp | 48 -------------------------------------------
+ 2 files changed, 60 deletions(-)
+ delete mode 100644 cmds/vibrator-lge.cpp
+
+diff --git a/cmds/Android.bp b/cmds/Android.bp
+index df2625f..096401c 100644
+--- a/cmds/Android.bp
++++ b/cmds/Android.bp
+@@ -37,18 +37,6 @@ cc_binary {
+ 	host_supported: true,
+ }
+ 
+-cc_binary {
+-	name: "vibrator-lge",
+-	srcs: [
+-		"vibrator-lge.cpp",
+-	],
+-	shared_libs: [
+-		"vendor.lge.hardware.vibrator@1.0",
+-		"libutils",
+-		"libhidlbase",
+-	],
+-}
+-
+ cc_binary {
+ 	name: "mtk-sms-fwk-ready",
+ 	srcs: [
+diff --git a/cmds/vibrator-lge.cpp b/cmds/vibrator-lge.cpp
+deleted file mode 100644
+index 5797854..0000000
+--- a/cmds/vibrator-lge.cpp
++++ /dev/null
+@@ -1,48 +0,0 @@
+-#include <iostream>
+-#include <vendor/lge/hardware/vibrator/1.0/IVibratorEx.h>
+-
+-using ::vendor::lge::hardware::vibrator::V1_0::IVibratorEx;
+-using ::android::sp;
+-
+-int main(int argc, char **argv) {
+-	auto svc = IVibratorEx::getService();
+-
+-	auto supportsAmplitude = svc->supportsAmplitudeControl();
+-	if(supportsAmplitude.isOk())
+-		std::cerr << "supportsAmplitudeControl? " << supportsAmplitude << std::endl;
+-
+-	/*
+-public int on(int timeoutMs) throws RemoteException {
+-public int off() throws RemoteException {
+-public int setAmplitude(byte amplitude) throws RemoteException {
+-public void perform(int effect, byte strength, performCallback _hidl_cb) throws RemoteException {
+-public int playEffectWithStrength(ArrayList<Byte> effectData, int effectIndex, int strength) throws RemoteException {
+-*/
+-
+-
+-	if(strcmp(argv[1], "on") == 0) {
+-		int v = 100;
+-		if(argc>=3)
+-			v = atoi(argv[2]);
+-		auto ret = svc->on(v);
+-		if(ret.isOk()) {
+-			android::hardware::vibrator::V1_0::Status r = ret;
+-			std::cout << "vibrator on returned " << (int)r << std::endl;
+-		} else {
+-			std::cerr << "Binder failed request" << std::endl;
+-		}
+-	} else if(strcmp(argv[1], "amplitude") == 0) {
+-		int v = 127;
+-		if(argc>=3)
+-			v = atoi(argv[2]);
+-		auto ret = svc->setAmplitude(v);
+-		if(ret.isOk()) {
+-			android::hardware::vibrator::V1_0::Status r = ret;
+-			std::cout << "vibrator amplitude returned " << (int)r << std::endl;
+-		} else {
+-			std::cerr << "Binder failed request" << std::endl;
+-		}
+-	} else {
+-		std::cerr << "Not supported (yet)" << std::endl;
+-	}
+-}
+-- 
+2.43.0
+

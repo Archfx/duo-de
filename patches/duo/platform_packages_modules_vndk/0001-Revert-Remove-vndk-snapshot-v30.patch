@@ -1,0 +1,28 @@
+From b4085f2273ef90b2198ad85d4c9305865da36940 Mon Sep 17 00:00:00 2001
+From: builder <builder@aosp-vm>
+Date: Fri, 9 Oct 2026 18:34:33 +0000
+Subject: [PATCH 1/2] Revert "Remove vndk snapshot v30"
+
+This reverts commit 3abe83ff70ed4fa5adfc7f021c29eb8ca13f6afd.
+---
+ apex/Android.bp | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/apex/Android.bp b/apex/Android.bp
+index baf8d19..8f194df 100644
+--- a/apex/Android.bp
++++ b/apex/Android.bp
+@@ -63,3 +63,10 @@ apex_vndk {
+     vndk_version: "31",
+     system_ext_specific: true,
+ }
++
++apex_vndk {
++    name: "com.android.vndk.v30",
++    defaults: ["vndk-apex-defaults"],
++    vndk_version: "30",
++    system_ext_specific: true,
++}
+-- 
+2.43.0
+
