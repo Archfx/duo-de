@@ -1,0 +1,52 @@
+From 3f52f50b46106fb824e032596b4d6c311d68d834 Mon Sep 17 00:00:00 2001
+From: Mike Kostersitz <mkostersitz@mac.com>
+Date: Wed, 21 Oct 2026 21:32:06 +0000
+Subject: [PATCH 12/12] Declare the Surface displaymask system feature (stop
+ hiding it)
+
+The stock Duo 2 declared com.microsoft.device.display.displaymask in its system partition; Microsoft apps read it (Surface Duo SDK isDualScreenDevice) to
+enable their dual-screen layouts. com.microsoft.surface.duo_v1.xml marked it unavailable-feature, which hides it even though the vendor partition does not
+declare it. Remove that line and declare the feature next to the other Surface features. Only safe together with the com.microsoft.device boot jar
+(previous commits): without it the apps call their own stub and crash with "Stub!".
+
+Tested on a Surface Duo 2 (android-16.0.0_r4): Outlook, Teams, OneNote and Microsoft 365 Copilot lay out around the hinge, launcher and Settings unchanged.
+Edge keeps ignoring the hinge: its own code never uses DisplayMask (compiler folded the stub).
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+
+---
+ files/com.microsoft.surface.duo_experience.xml | 4 ++++
+ files/com.microsoft.surface.duo_v1.xml         | 1 -
+ 2 files changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/files/com.microsoft.surface.duo_experience.xml b/files/com.microsoft.surface.duo_experience.xml
+index 33fab9d..ea051ca 100644
+--- a/files/com.microsoft.surface.duo_experience.xml
++++ b/files/com.microsoft.surface.duo_experience.xml
+@@ -4,8 +4,12 @@
+     Surface Duo with the 2022 (Android 12L) experience. The stock ROM declared these in its system
+     partitions, which a GSI replaces. Microsoft Launcher: FeatureFlags.isisDuoA12Device() needs
+     SURFACE_2022_EXPERIENCE; isVLMSupported() accepts either vendor_layout_window_management name.
++    The stock ROM declared com.microsoft.device.display.displaymask too (system/etc/permissions); Microsoft apps
++    (Outlook, Edge, Teams, Copilot) read it to decide they run on a dual-screen Surface Duo (Surface Duo SDK
++    isDualScreenDevice). It was previously hidden with <unavailable-feature>; EXPERIMENT: declare it.
+ -->
+ <permissions>
+     <feature name="com.microsoft.surface.android.feature.SURFACE_2022_EXPERIENCE" />
+     <feature name="com.microsoft.surface.vendor_layout_window_management" />
++    <feature name="com.microsoft.device.display.displaymask" />
+ </permissions>
+diff --git a/files/com.microsoft.surface.duo_v1.xml b/files/com.microsoft.surface.duo_v1.xml
+index 2a3cfcd..fd01ab1 100644
+--- a/files/com.microsoft.surface.duo_v1.xml
++++ b/files/com.microsoft.surface.duo_v1.xml
+@@ -1,6 +1,5 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <permissions>
+-    <unavailable-feature name="com.microsoft.device.display.displaymask" />
+     <oem-permissions>
+         <permission name="surface.permission.USE_OEM_PRIVATE_SENSORS" />
+     </oem-permissions>
+-- 
+2.43.0
+

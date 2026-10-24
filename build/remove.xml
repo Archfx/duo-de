@@ -15,7 +15,6 @@
   <remove-project name="platform/hardware/nxp/keymint" />
   <remove-project name="platform/hardware/nxp/nfc" />
   <remove-project name="platform/hardware/nxp/secure_element" />
-  <remove-project name="platform/hardware/nxp/uwb" />
   <remove-project name="platform/hardware/nxp/weaver" />
   <remove-project name="platform/hardware/qcom/wlan" />
   <remove-project name="platform/hardware/samsung/nfc" />
@@ -23,7 +22,6 @@
   <remove-project name="platform/hardware/st/secure_element2" />
   <remove-project name="platform/hardware/synaptics/wlan" />
   <remove-project name="platform/hardware/ti/am57x" />
-  <remove-project name="platform/prebuilts/bazel/darwin-x86_64" />
   <remove-project name="platform/prebuilts/clang/host/darwin-x86" />
   <remove-project name="platform/prebuilts/go/darwin-x86" />
 </manifest>

@@ -1,0 +1,396 @@
+From 8261cc515787397380c36438cee0afafd9989d45 Mon Sep 17 00:00:00 2001
+From: Mike Kostersitz <mkostersitz@mac.com>
+Date: Wed, 21 Oct 2026 21:32:06 +0000
+Subject: [PATCH 11/12] DisplayMask: match the stock semantics (rotation-0
+ rects, app-visible hinge, gapless seam)
+
+getBoundingRects() now always returns the hinge in rotation-0 physical coordinates and getBoundingRectsForRotation(r) maps it with the general
+display-rotation transform (invalid rotations throw IllegalArgumentException), as the stock Duo class does. The mask is empty unless the hinge
+intersects the app-visible area of the current rotation (single-panel postures, windows that do not cross the hinge, other devices). With the hinge
+gap disabled (display exactly two panels wide) a 2 px virtual seam is reported. The arithmetic lives in HingeMath (no android.* classes) with a host
+test in surface-sdk/boot/test. The visible-hinge decision is re-evaluated on every query because Microsoft Launcher holds an instance while the
+posture changes.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+
+---
+ .../microsoft/device/display/DisplayMask.java | 176 +++++++++++-------
+ .../microsoft/device/display/HingeMath.java   |  52 ++++++
+ surface-sdk/boot/test/HingeMathTest.java      |  61 ++++++
+ 3 files changed, 223 insertions(+), 66 deletions(-)
+ create mode 100644 surface-sdk/boot/java/com/microsoft/device/display/HingeMath.java
+ create mode 100644 surface-sdk/boot/test/HingeMathTest.java
+
+diff --git a/surface-sdk/boot/java/com/microsoft/device/display/DisplayMask.java b/surface-sdk/boot/java/com/microsoft/device/display/DisplayMask.java
+index 243fbdf..71d25d3 100644
+--- a/surface-sdk/boot/java/com/microsoft/device/display/DisplayMask.java
++++ b/surface-sdk/boot/java/com/microsoft/device/display/DisplayMask.java
+@@ -6,36 +6,44 @@ import android.graphics.Rect;
+ import android.graphics.Region;
+ import android.hardware.display.DisplayManager;
+ import android.os.Build;
++import android.util.Log;
+ import android.view.Display;
+ import android.view.Surface;
+ 
+ import java.util.ArrayList;
+-import java.util.Collections;
+ import java.util.List;
+ import java.util.Objects;
+ 
+ /**
+- * Hinge geometry of a Surface Duo. API-compatible with the class Microsoft Launcher is compiled against.
++ * Hinge geometry of a Surface Duo, API-compatible with the platform class Microsoft's apps are compiled against.
+  *
+- * Rectangles are in display coordinates for the requested rotation. Rotation 0 is the natural, wide orientation
+- * (two portrait panels side by side), e.g. 2754 x 1892 on the Duo 2 with the hinge at x 1344..1410.
++ * Behaviour follows the stock Duo firmware: getBoundingRects() is always in rotation-0 physical coordinates,
++ * getBoundingRectsForRotation(r) maps them to rotation r, and the mask is empty when the hinge does not intersect the
++ * app-visible area (single-panel postures, windows that do not cross the hinge) or on other devices. One deliberate
++ * difference: the hinge-visible decision is re-evaluated on every query instead of being frozen at creation, because
++ * Microsoft Launcher keeps an instance and asks it repeatedly while the posture changes.
+  */
+ public final class DisplayMask {
+-    private final Rect mBounds;
+-    private final List<Rect> mBoundingRects;
+-    private final Context mContext;
++    private static final String TAG = "DuoDisplayMask";
++    /** Last logged decision: callers ask many times a second, only log changes. */
++    private static String sLastLogged;
+ 
++    private final Context mContext;      // application context, null for hand-made instances
++    private final int[] mGeometry;       // {naturalWidth, naturalHeight, panel, hinge} or null (not a Duo)
++    private final List<Rect> mFixedRects; // only for the public constructor
++
++    @UnsupportedAppUsage
+     public DisplayMask(Rect bounds, List<Rect> boundingRects) {
+-        this(null, bounds, boundingRects);
++        mContext = null;
++        mGeometry = null;
++        mFixedRects = new ArrayList<>();
++        if (boundingRects != null) for (Rect r : boundingRects) mFixedRects.add(new Rect(r));
+     }
+ 
+-    private DisplayMask(Context context, Rect bounds, List<Rect> boundingRects) {
+-        mContext = context == null ? null : context.getApplicationContext();
+-        mBounds = bounds == null ? new Rect() : new Rect(bounds);
+-        mBoundingRects = new ArrayList<>();
+-        if (boundingRects != null) {
+-            for (Rect r : boundingRects) mBoundingRects.add(new Rect(r));
+-        }
++    private DisplayMask(Context context, int[] geometry) {
++        mContext = context == null ? null : context.getApplicationContext() != null ? context.getApplicationContext() : context;
++        mGeometry = geometry;
++        mFixedRects = null;
+     }
+ 
+     @UnsupportedAppUsage
+@@ -49,44 +57,101 @@ public final class DisplayMask {
+     }
+ 
+     private static DisplayMask create(Context context) {
+-        int[] g = geometry();
+-        if (g == null) return new DisplayMask(context, new Rect(), Collections.emptyList());
+-        List<Rect> rects = new ArrayList<>();
+-        rects.add(hingeForRotation(g, Surface.ROTATION_0));
+-        return new DisplayMask(context, new Rect(0, 0, g[0], g[1]), rects);
++        DisplayMask m = new DisplayMask(context, naturalGeometry(context));
++        m.visibleHinge();   // logs the decision once per change
++        return m;
+     }
+ 
+-    /** {width, height, panelWidth, hingeWidth} in the natural orientation, or null for other devices. */
+-    private static int[] geometry() {
++    /** {naturalWidth, naturalHeight, panel, hinge} or null on other devices. */
++    private static int[] naturalGeometry(Context context) {
+         String device = Build.DEVICE == null ? "" : Build.DEVICE.toLowerCase();
+-        if (device.equals("duo2")) return new int[] {2754, 1892, 1344, 66};
+-        if (device.equals("duo")) return new int[] {2784, 1800, 1350, 84};
+-        return null;
++        int panel, hinge, height;
++        if (device.equals("duo2")) { panel = 1344; hinge = 66; height = 1892; }
++        else if (device.equals("duo")) { panel = 1350; hinge = 84; height = 1800; }
++        else return null;
++        int width = 2 * panel + hinge;
++        // Hinge gap disabled (persist.sys.phh.duo.disable_hinge): the display is exactly two panels wide.
++        int physicalWidth = physicalWidth(context);
++        if (HingeMath.isGapless(physicalWidth, panel)) {
++            return new int[] {2 * panel, height, panel, 0};
++        }
++        return new int[] {width, height, panel, hinge};
+     }
+ 
+-    private static Rect hingeForRotation(int[] g, int rotation) {
+-        int width = g[0], height = g[1], panel = g[2], hinge = g[3];
+-        if (rotation == Surface.ROTATION_90 || rotation == Surface.ROTATION_270) {
+-            return new Rect(0, panel, height, panel + hinge);
++    private static int physicalWidth(Context context) {
++        try {
++            Display d = defaultDisplay(context);
++            if (d != null && d.getMode() != null) {
++                int w = d.getMode().getPhysicalWidth(), h = d.getMode().getPhysicalHeight();
++                return Math.max(w, h);
++            }
++        } catch (RuntimeException ignored) {
+         }
+-        return new Rect(panel, 0, panel + hinge, height);
++        return -1;
++    }
++
++    private static Display defaultDisplay(Context context) {
++        if (context == null) return null;
++        DisplayManager dm = context.getSystemService(DisplayManager.class);
++        return dm == null ? null : dm.getDisplay(Display.DEFAULT_DISPLAY);
++    }
++
++    /** Rotation-0 hinge rectangle, or null when this is not a Duo. */
++    private int[] naturalHinge() {
++        if (mGeometry == null) return null;
++        if (mGeometry[3] == 0) return HingeMath.gaplessSeam(mGeometry[2], mGeometry[1]);
++        return HingeMath.naturalHinge(mGeometry[2], mGeometry[3], mGeometry[1]);
+     }
+ 
+-    /** Hinge rectangles for the current rotation of the default display. */
++    /** The rotation-0 hinge if it crosses the area apps can currently use, else null (empty mask). */
++    private int[] visibleHinge() {
++        int[] hinge = naturalHinge();
++        if (hinge == null) return null;
++        if (mContext == null) return hinge;
++        try {
++            Display d = defaultDisplay(mContext);
++            if (d == null) return hinge;
++            Rect size = new Rect();
++            d.getRectSize(size);
++            int rotation = d.getRotation();
++            int[] logical = HingeMath.rotate(hinge, mGeometry[0], mGeometry[1], rotation);
++            boolean visible = mGeometry[3] == 0
++                    ? HingeMath.gaplessSpanned(size.width(), size.height(), rotation, mGeometry[2])
++                    : HingeMath.intersects(logical, new int[] {0, 0, size.width(), size.height()});
++            String state = "app=" + size.width() + "x" + size.height() + " rotation=" + rotation
++                    + " hinge=" + (visible ? "visible" : "none") + " pkg=" + mContext.getPackageName();
++            if (!state.equals(sLastLogged)) {
++                sLastLogged = state;
++                Log.d(TAG, state);
++            }
++            return visible ? hinge : null;
++        } catch (RuntimeException e) {
++            return hinge;
++        }
++    }
++
++    /** Hinge rectangles in rotation-0 physical coordinates (independent of the current rotation). */
+     @UnsupportedAppUsage
+     public List<Rect> getBoundingRects() {
+-        return getBoundingRectsForRotation(currentRotation());
++        if (mFixedRects != null) return copy(mFixedRects);
++        int[] hinge = visibleHinge();
++        if (hinge == null) return new ArrayList<>();
++        List<Rect> out = new ArrayList<>();
++        out.add(new Rect(hinge[0], hinge[1], hinge[2], hinge[3]));
++        return out;
+     }
+ 
+     @UnsupportedAppUsage
+     public List<Rect> getBoundingRectsForRotation(int rotation) {
+-        int[] g = geometry();
+-        if (g == null || mBoundingRects.isEmpty()) return new ArrayList<>();
+-        // The hinge is only visible while the content is spanned across both panels. With a single panel
+-        // active (display resized to one panel) there is no hinge in view, so report none.
+-        if (!isSpanned(g)) return new ArrayList<>();
++        if (rotation < Surface.ROTATION_0 || rotation > Surface.ROTATION_270) {
++            throw new IllegalArgumentException("Invalid rotation: " + rotation);
++        }
++        if (mFixedRects != null) return copy(mFixedRects);
++        int[] hinge = visibleHinge();
++        if (hinge == null) return new ArrayList<>();
++        int[] r = HingeMath.rotate(hinge, mGeometry[0], mGeometry[1], rotation);
+         List<Rect> out = new ArrayList<>();
+-        out.add(hingeForRotation(g, rotation));
++        out.add(new Rect(r[0], r[1], r[2], r[3]));
+         return out;
+     }
+ 
+@@ -97,31 +162,10 @@ public final class DisplayMask {
+         return region;
+     }
+ 
+-    /** True unless the default display has been resized to a single panel. */
+-    private boolean isSpanned(int[] g) {
+-        if (mContext == null) return true;
+-        try {
+-            DisplayManager dm = mContext.getSystemService(DisplayManager.class);
+-            Display d = dm.getDisplay(Display.DEFAULT_DISPLAY);
+-            if (d == null) return true;
+-            android.util.DisplayMetrics m = new android.util.DisplayMetrics();
+-            d.getRealMetrics(m);
+-            return Math.max(m.widthPixels, m.heightPixels) >= g[0] - g[3];
+-        } catch (RuntimeException e) {
+-            return true;
+-        }
+-    }
+-
+-    private int currentRotation() {
+-        try {
+-            if (mContext != null) {
+-                DisplayManager dm = mContext.getSystemService(DisplayManager.class);
+-                Display d = dm.getDisplay(Display.DEFAULT_DISPLAY);
+-                if (d != null) return d.getRotation();
+-            }
+-        } catch (RuntimeException ignored) {
+-        }
+-        return Surface.ROTATION_0;
++    private static List<Rect> copy(List<Rect> in) {
++        List<Rect> out = new ArrayList<>();
++        for (Rect r : in) out.add(new Rect(r));
++        return out;
+     }
+ 
+     @Override
+@@ -129,16 +173,16 @@ public final class DisplayMask {
+         if (this == o) return true;
+         if (!(o instanceof DisplayMask)) return false;
+         DisplayMask other = (DisplayMask) o;
+-        return mBounds.equals(other.mBounds) && mBoundingRects.equals(other.mBoundingRects);
++        return getBoundingRects().equals(other.getBoundingRects());
+     }
+ 
+     @Override
+     public int hashCode() {
+-        return Objects.hash(mBounds, mBoundingRects);
++        return Objects.hash(getBoundingRects());
+     }
+ 
+     @Override
+     public String toString() {
+-        return "DisplayMask{bounds=" + mBounds + ", boundingRects=" + mBoundingRects + "}";
++        return "DisplayMask{boundingRects=" + getBoundingRects() + "}";
+     }
+ }
+diff --git a/surface-sdk/boot/java/com/microsoft/device/display/HingeMath.java b/surface-sdk/boot/java/com/microsoft/device/display/HingeMath.java
+new file mode 100644
+index 0000000..37c1305
+--- /dev/null
++++ b/surface-sdk/boot/java/com/microsoft/device/display/HingeMath.java
+@@ -0,0 +1,52 @@
++package com.microsoft.device.display;
++
++/**
++ * Pure integer geometry for the Surface Duo hinge, kept free of android.* classes so it can be unit tested on the host.
++ * Rectangles are {left, top, right, bottom}. "Natural" is rotation 0: the wide orientation, two portrait panels side by side.
++ */
++final class HingeMath {
++    private HingeMath() { }
++
++    /** Hinge rectangle in rotation-0 physical coordinates: {panel, 0, panel + hinge, height}. */
++    static int[] naturalHinge(int panel, int hinge, int height) {
++        return new int[] {panel, 0, panel + hinge, height};
++    }
++
++    /**
++     * Maps a rotation-0 physical rectangle to the logical coordinates of a display rotated by the given Surface.ROTATION_*
++     * value. naturalWidth/naturalHeight are the physical size at rotation 0. Rotation 1 is 90 degrees, 3 is 270.
++     */
++    static int[] rotate(int[] r, int naturalWidth, int naturalHeight, int rotation) {
++        switch (rotation) {
++            case 0: return new int[] {r[0], r[1], r[2], r[3]};
++            case 1: return new int[] {r[1], naturalWidth - r[2], r[3], naturalWidth - r[0]};
++            case 2: return new int[] {naturalWidth - r[2], naturalHeight - r[3], naturalWidth - r[0], naturalHeight - r[1]};
++            case 3: return new int[] {naturalHeight - r[3], r[0], naturalHeight - r[1], r[2]};
++            default: throw new IllegalArgumentException("Invalid rotation: " + rotation);
++        }
++    }
++
++    /** True when the two rectangles overlap; rectangles that only touch along an edge do not intersect. */
++    static boolean intersects(int[] a, int[] b) {
++        return a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
++    }
++
++    /** True when the display's natural width is exactly two panels (the hinge gap is disabled, no pixels between the panels). */
++    static boolean isGapless(int naturalWidth, int panel) {
++        return naturalWidth == 2 * panel;
++    }
++
++    /** Rotation-0 hinge for a gapless display: a 2 px virtual seam centred on the panel boundary. */
++    static int[] gaplessSeam(int panel, int height) {
++        return new int[] {panel - 1, 0, panel + 1, height};
++    }
++
++    /**
++     * Gapless display: the seam is a 2 px strip straddling the panel boundary, so a rectangle intersection would also report it for a single
++     * panel (its edge touches the seam by 1 px). Instead the seam counts as visible only when the app-visible area is wider than one panel
++     * along the display's natural width axis (width at rotation 0/2, height at rotation 1/3).
++     */
++    static boolean gaplessSpanned(int areaWidth, int areaHeight, int rotation, int panel) {
++        return ((rotation & 1) == 0 ? areaWidth : areaHeight) > panel;
++    }
++}
+diff --git a/surface-sdk/boot/test/HingeMathTest.java b/surface-sdk/boot/test/HingeMathTest.java
+new file mode 100644
+index 0000000..94ad8f9
+--- /dev/null
++++ b/surface-sdk/boot/test/HingeMathTest.java
+@@ -0,0 +1,61 @@
++package com.microsoft.device.display;
++
++import java.util.Arrays;
++
++/** Host test for HingeMath (no Android classes). Run: javac -d /tmp/hm HingeMath.java test/HingeMathTest.java && java -cp /tmp/hm com.microsoft.device.display.HingeMathTest */
++public class HingeMathTest {
++    static int failures;
++
++    static void eq(String what, int[] want, int[] got) {
++        if (!Arrays.equals(want, got)) { failures++; System.out.println("FAIL " + what + ": want " + Arrays.toString(want) + " got " + Arrays.toString(got)); }
++        else System.out.println("ok   " + what);
++    }
++    static void truth(String what, boolean want, boolean got) {
++        if (want != got) { failures++; System.out.println("FAIL " + what + ": want " + want + " got " + got); } else System.out.println("ok   " + what);
++    }
++
++    public static void main(String[] a) {
++        // Duo 2: 2754x1892, panel 1344, hinge 66
++        int[] h2 = HingeMath.naturalHinge(1344, 66, 1892);
++        eq("duo2 natural", new int[] {1344, 0, 1410, 1892}, h2);
++        eq("duo2 rot0", new int[] {1344, 0, 1410, 1892}, HingeMath.rotate(h2, 2754, 1892, 0));
++        eq("duo2 rot1", new int[] {0, 1344, 1892, 1410}, HingeMath.rotate(h2, 2754, 1892, 1));
++        eq("duo2 rot2", new int[] {1344, 0, 1410, 1892}, HingeMath.rotate(h2, 2754, 1892, 2));
++        eq("duo2 rot3", new int[] {0, 1344, 1892, 1410}, HingeMath.rotate(h2, 2754, 1892, 3));
++        // Duo 1: 2784x1800, panel 1350, hinge 84
++        int[] h1 = HingeMath.naturalHinge(1350, 84, 1800);
++        eq("duo1 rot0", new int[] {1350, 0, 1434, 1800}, HingeMath.rotate(h1, 2784, 1800, 0));
++        eq("duo1 rot1", new int[] {0, 1350, 1800, 1434}, HingeMath.rotate(h1, 2784, 1800, 1));
++        eq("duo1 rot3", new int[] {0, 1350, 1800, 1434}, HingeMath.rotate(h1, 2784, 1800, 3));
++        // an off-centre hinge must rotate correctly (guards against the old hand-written table): hinge at 1000..1066 of 2754
++        int[] off = {1000, 0, 1066, 1892};
++        eq("offcentre rot1", new int[] {0, 1688, 1892, 1754}, HingeMath.rotate(off, 2754, 1892, 1));
++        eq("offcentre rot3", new int[] {0, 1000, 1892, 1066}, HingeMath.rotate(off, 2754, 1892, 3));
++        eq("offcentre rot2", new int[] {1688, 0, 1754, 1892}, HingeMath.rotate(off, 2754, 1892, 2));
++        try { HingeMath.rotate(h2, 2754, 1892, 4); failures++; System.out.println("FAIL rotation 4 should throw"); }
++        catch (IllegalArgumentException e) { System.out.println("ok   rotation 4 throws"); }
++        // visibility: app area vs hinge for the current rotation
++        truth("full spanned 2754x1892 sees hinge", true, HingeMath.intersects(HingeMath.rotate(h2, 2754, 1892, 0), new int[] {0, 0, 2754, 1892}));
++        truth("single panel 1344x1892: touching edge, no hinge", false, HingeMath.intersects(HingeMath.rotate(h2, 2754, 1892, 0), new int[] {0, 0, 1344, 1892}));
++        truth("half window 1377 wide sees hinge", true, HingeMath.intersects(HingeMath.rotate(h2, 2754, 1892, 0), new int[] {0, 0, 1377, 1892}));
++        truth("window 1300 wide: no hinge", false, HingeMath.intersects(HingeMath.rotate(h2, 2754, 1892, 0), new int[] {0, 0, 1300, 1892}));
++        truth("portrait spanned 1892x2754 at rot1 sees hinge", true, HingeMath.intersects(HingeMath.rotate(h2, 2754, 1892, 1), new int[] {0, 0, 1892, 2754}));
++        truth("portrait single panel 1892x1344 at rot1: no hinge", false, HingeMath.intersects(HingeMath.rotate(h2, 2754, 1892, 1), new int[] {0, 0, 1892, 1344}));
++        // gapless (hinge gap disabled): 2688x1892, 2 px virtual seam
++        truth("2688 is gapless for panel 1344", true, HingeMath.isGapless(2688, 1344));
++        truth("2754 is not gapless", false, HingeMath.isGapless(2754, 1344));
++        int[] seam = HingeMath.gaplessSeam(1344, 1892);
++        eq("gapless seam", new int[] {1343, 0, 1345, 1892}, seam);
++        eq("gapless seam rot1", new int[] {0, 1343, 1892, 1345}, HingeMath.rotate(seam, 2688, 1892, 1));
++        truth("gapless full area sees seam", true, HingeMath.intersects(seam, new int[] {0, 0, 2688, 1892}));
++        truth("gapless single panel: no seam", false, HingeMath.intersects(seam, new int[] {0, 0, 1343, 1892}));
++        truth("gapless spanned 2688x1892 rot0", true, HingeMath.gaplessSpanned(2688, 1892, 0, 1344));
++        truth("gapless single panel 1344x1892 rot0", false, HingeMath.gaplessSpanned(1344, 1892, 0, 1344));
++        truth("gapless spanned portrait 1892x2688 rot1", true, HingeMath.gaplessSpanned(1892, 2688, 1, 1344));
++        truth("gapless single panel portrait 1892x1344 rot1", false, HingeMath.gaplessSpanned(1892, 1344, 1, 1344));
++        truth("gapless single panel portrait 1892x1344 rot3", false, HingeMath.gaplessSpanned(1892, 1344, 3, 1344));
++        truth("gapless 180: spanned 2688x1892 rot2", true, HingeMath.gaplessSpanned(2688, 1892, 2, 1344));
++        System.out.println(failures == 0 ? "ALL PASS" : failures + " FAILURES");
++        if (failures != 0) System.exit(1);
++    }
++}
+-- 
+2.43.0
+

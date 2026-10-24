@@ -1,22 +1,22 @@
-From eb34ff9dedd263db1647f49e545b35f6b733800e Mon Sep 17 00:00:00 2001
+From 15fe1714f051a2d378063a024db60331ce06d265 Mon Sep 17 00:00:00 2001
 From: Archfx <cybx@live.com>
 Date: Thu, 26 Jun 2025 15:33:21 -0400
-Subject: [PATCH] Archfx DUO-DE Launcher3 Modifications
+Subject: [PATCH 1/2] Archfx DUO-DE Launcher3 Modifications
 
 Change-Id: I113b43d8769baa2ad42853592cfcf2fccd6b62fc
 ---
- src/com/android/launcher3/DeviceProfile.java  | 13 +++-
+ src/com/android/launcher3/DeviceProfile.java  | 17 ++++-
  .../allapps/AllAppsTransitionController.java  | 27 ++++++++
  .../touch/WorkspaceTouchListener.java         | 58 +++++++++++++++++
  .../util/ActivityOptionsWrapper.java          | 64 +++++++++++++++++++
  .../launcher3/views/ActivityContext.java      |  4 ++
- 5 files changed, 164 insertions(+), 2 deletions(-)
+ 5 files changed, 168 insertions(+), 2 deletions(-)
 
 diff --git a/src/com/android/launcher3/DeviceProfile.java b/src/com/android/launcher3/DeviceProfile.java
-index e17f5b26c5..d96d4dae47 100644
+index 87e6281c1e..5f50765b61 100644
 --- a/src/com/android/launcher3/DeviceProfile.java
 +++ b/src/com/android/launcher3/DeviceProfile.java
-@@ -76,6 +76,8 @@ import java.io.PrintWriter;
+@@ -82,6 +82,8 @@ import java.io.PrintWriter;
  import java.util.Locale;
  import java.util.function.Consumer;
  
@@ -25,7 +25,7 @@ index e17f5b26c5..d96d4dae47 100644
  @SuppressLint("NewApi")
  public class DeviceProfile {
  
-@@ -318,6 +320,9 @@ public class DeviceProfile {
+@@ -187,6 +189,9 @@ public class DeviceProfile {
      // DragController
      public int flingToDeleteThresholdVelocity;
  
@@ -35,26 +35,30 @@ index e17f5b26c5..d96d4dae47 100644
      /** Used only as an alternative to mocking when null values cannot be used. */
      @VisibleForTesting
      public DeviceProfile() {
-@@ -832,8 +837,12 @@ public class DeviceProfile {
-         }
+@@ -533,8 +538,16 @@ public class DeviceProfile {
+ 
  
          if (shouldShowAllAppsOnSheet()) {
--            allAppsPadding.top = mInsets.top;
--            allAppsShiftRange = heightPx;
+-            allAppsPadding.top = allAppsTopPadding;
+-            allAppsShiftRange = mDeviceProperties.getHeightPx() - allAppsTopPadding + mInsets.top;
++            // DUO-DE: size the all-apps sheet for the spanned Duo screen (r4: sizes live in mDeviceProperties)
 +            float allAppsHeightScale = 0.7f;
-+            if (widthPx > 2500) {
++            if (mDeviceProperties.getWidthPx() > 2500) {
 +                allAppsHeightScale = 0.95f;
 +            }
-+            allAppsPadding.top = (heightPx > 1400) ? ((int) Math.round(heightPx * (1 - allAppsHeightScale))) : mInsets.top;
-+            allAppsShiftRange = (heightPx > 1400) ? ((int) Math.round(heightPx * (allAppsHeightScale))) : heightPx;
++            int duoHeightPx = mDeviceProperties.getHeightPx();
++            allAppsPadding.top = (duoHeightPx > 1400)
++                    ? ((int) Math.round(duoHeightPx * (1 - allAppsHeightScale))) : mInsets.top;
++            allAppsShiftRange = (duoHeightPx > 1400)
++                    ? ((int) Math.round(duoHeightPx * allAppsHeightScale)) : duoHeightPx;
          } else {
              allAppsPadding.top = 0;
              allAppsShiftRange =
 diff --git a/src/com/android/launcher3/allapps/AllAppsTransitionController.java b/src/com/android/launcher3/allapps/AllAppsTransitionController.java
-index 350f763939..0b0301d8ed 100644
+index c518050241..11fbe3fd42 100644
 --- a/src/com/android/launcher3/allapps/AllAppsTransitionController.java
 +++ b/src/com/android/launcher3/allapps/AllAppsTransitionController.java
-@@ -66,6 +66,13 @@ import com.android.launcher3.views.ScrimView;
+@@ -67,6 +67,13 @@ import com.android.launcher3.views.ScrimView;
  
  import com.google.android.msdl.data.model.MSDLToken;
  
@@ -68,7 +72,7 @@ index 350f763939..0b0301d8ed 100644
  /**
   * Handles AllApps view transition.
   * 1) Slides all apps view using direct manipulation
-@@ -218,6 +225,26 @@ public class AllAppsTransitionController
+@@ -222,6 +229,26 @@ public class AllAppsTransitionController
          }
  
          mShouldShowAllAppsOnSheet = dp.shouldShowAllAppsOnSheet();
@@ -96,7 +100,7 @@ index 350f763939..0b0301d8ed 100644
  
      /**
 diff --git a/src/com/android/launcher3/touch/WorkspaceTouchListener.java b/src/com/android/launcher3/touch/WorkspaceTouchListener.java
-index 576f17616b..b6264a3366 100644
+index 5974fcfcc6..62f1261e8b 100644
 --- a/src/com/android/launcher3/touch/WorkspaceTouchListener.java
 +++ b/src/com/android/launcher3/touch/WorkspaceTouchListener.java
 @@ -49,6 +49,18 @@ import com.android.launcher3.testing.TestLogging;
@@ -129,7 +133,7 @@ index 576f17616b..b6264a3366 100644
              if (handleLongPress) {
                  // Check if the event is not near the edges
                  DeviceProfile dp = mLauncher.getDeviceProfile();
-@@ -188,6 +204,48 @@ public class WorkspaceTouchListener extends GestureDetector.SimpleOnGestureListe
+@@ -189,6 +205,48 @@ public class WorkspaceTouchListener extends GestureDetector.SimpleOnGestureListe
                  && mLauncher.isInState(NORMAL);
      }
  
@@ -222,8 +226,8 @@ index 17ff2a96b7..ec380af9c5 100644
      public Bundle toBundle() {
 +        String mode = "freeform";
 +        int windowMode;
-+        Boolean isTabletMode = ActivityContext.lookupContext(this.context).getDeviceProfile().isTablet;
-+        int widthPx = ActivityContext.lookupContext(this.context).getDeviceProfile().widthPx;
++        Boolean isTabletMode = ActivityContext.lookupContext(this.context).getDeviceProfile().getDeviceProperties().isTablet();
++        int widthPx = ActivityContext.lookupContext(this.context).getDeviceProfile().getDeviceProperties().getWidthPx();
 +        Boolean initialX = ActivityContext.lookupContext(this.context).getDeviceProfile().initialX;
 +
 +        int xValue = (initialX == true && isTabletMode && widthPx>2500) ? 1394 : 50;
@@ -272,10 +276,10 @@ index 17ff2a96b7..ec380af9c5 100644
 +    }
  }
 diff --git a/src/com/android/launcher3/views/ActivityContext.java b/src/com/android/launcher3/views/ActivityContext.java
-index cbf534187d..a1dbbf1d07 100644
+index f8cba752b8..39b6ba9edb 100644
 --- a/src/com/android/launcher3/views/ActivityContext.java
 +++ b/src/com/android/launcher3/views/ActivityContext.java
-@@ -390,6 +390,9 @@ public interface ActivityContext extends SavedStateRegistryOwner {
+@@ -468,6 +468,9 @@ public interface ActivityContext extends SavedStateRegistryOwner {
      default RunnableList sendPendingIntentWithAnimation(
              @NonNull View v, PendingIntent intent, @Nullable ItemInfo item) {
          ActivityOptionsWrapper options = getActivityLaunchOptions(v, item);
@@ -285,7 +289,7 @@ index cbf534187d..a1dbbf1d07 100644
          try {
              intent.send(null, 0, null, null, null, null, options.toBundle());
              if (item != null) {
-@@ -435,6 +438,7 @@ public interface ActivityContext extends SavedStateRegistryOwner {
+@@ -513,6 +516,7 @@ public interface ActivityContext extends SavedStateRegistryOwner {
                  : makeDefaultActivityOptions(item != null && item.animationType == DEFAULT_NO_ICON
                          ? SPLASH_SCREEN_STYLE_SOLID_COLOR : -1 /* SPLASH_SCREEN_STYLE_UNDEFINED */);
          UserHandle user = item == null ? null : item.user;
@@ -294,5 +298,5 @@ index cbf534187d..a1dbbf1d07 100644
          // Prepare intent
          intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
 -- 
-2.34.1
+2.43.0
 
