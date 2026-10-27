@@ -1,0 +1,457 @@
+From 87413bfff2c2b8a576f7bf3e3b050f01072bd940 Mon Sep 17 00:00:00 2001
+From: Michael Kostersitz <mkostersitz@mac.com>
+Date: Mon, 26 Oct 2026 21:17:39 +0000
+Subject: [PATCH] Duo: two panel window policy, one DisplayArea group per
+ screen (opt-in)
+
+Gives the Surface Duo stock-shaped window handling: each screen is its own DisplayAreaGroup with a
+TaskDisplayArea, so an app on a screen gets a plain screen sized configuration (1344x1892 on the Duo 2) and never
+sees the hinge; home and spanned apps stay in the default task area that covers the display.
+
+- DuoDisplayAreaPolicyProvider (config_deviceSpecificDisplayAreaPolicyProvider): builds the two groups when
+  persist.sys.phh.duo.panels or persist.debug.phh.duo.panels is 1 on a Duo (Build.DEVICE duo/duo2); otherwise the
+  platform default policy, so other devices and the default setting are unchanged. Read once at display creation.
+- PanelGroup follows its physical screen from DuoPanelGeometry and crops its surface to the screen, so the
+  ActivityRecordInputSink of an app (touchable region = its crop) no longer swallows touches meant for the other
+  screen or for home.
+- Z-order: after every visibility pass the home / spanned area goes above the screens only while a non-home root
+  task in it is visible (recents, a spanned app), otherwise below.
+- Home per screen: a Home action force-hides the focused screen's tasks (collected into the transition, followed by
+  a visibility pass), so home shows through there and the other screen keeps its app. A touch moving focus to the
+  home window is not a Home action (ATMS.setFocusedTask marks it).
+- Launch routing: a launcher icon opens its app on the screen that contains the icon (intent source bounds), for
+  new and for existing tasks, for any launcher. A minimized task launched again comes back.
+
+Needs DuoPanelGeometry (previous patch). Tested on a Duo 2 on android-16.0.0_r4 with Launcher3 and Microsoft
+Launcher as home. The default provider string is set in core/res config.xml for now; it only has an effect when the
+property is on.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Change-Id: I94650d5107a60a5561e0f381b8a778f36d6611d8
+---
+ core/res/res/values/config.xml                |   2 +-
+ .../server/wm/ActivityTaskManagerService.java |   4 +-
+ .../android/server/wm/DisplayAreaPolicy.java  |   2 +-
+ .../wm/DuoDisplayAreaPolicyProvider.java      | 291 ++++++++++++++++++
+ .../android/server/wm/LaunchParamsUtil.java   |   9 +
+ .../server/wm/RootWindowContainer.java        |   2 +
+ .../android/server/wm/TaskDisplayArea.java    |  17 +
+ 7 files changed, 323 insertions(+), 4 deletions(-)
+ create mode 100644 services/core/java/com/android/server/wm/DuoDisplayAreaPolicyProvider.java
+
+diff --git a/core/res/res/values/config.xml b/core/res/res/values/config.xml
+index 382f6eabf0a2..f8574a7ed161 100644
+--- a/core/res/res/values/config.xml
++++ b/core/res/res/values/config.xml
+@@ -5458,7 +5458,7 @@
+ 
+     <!-- Class name of the device specific implementation of DisplayAreaPolicy.Provider
+          or empty if the default should be used. -->
+-    <string translatable="false" name="config_deviceSpecificDisplayAreaPolicyProvider"></string>
++    <string translatable="false" name="config_deviceSpecificDisplayAreaPolicyProvider">com.android.server.wm.DuoDisplayAreaPolicyProvider</string>
+ 
+     <!-- Class name of the device specific implementation of DeviceStatePolicy.Provider
+         or empty if the default should be used. -->
+diff --git a/services/core/java/com/android/server/wm/ActivityTaskManagerService.java b/services/core/java/com/android/server/wm/ActivityTaskManagerService.java
+index 4a728b65b7fd..71681104aad3 100644
+--- a/services/core/java/com/android/server/wm/ActivityTaskManagerService.java
++++ b/services/core/java/com/android/server/wm/ActivityTaskManagerService.java
+@@ -2091,7 +2091,7 @@ public class ActivityTaskManagerService extends IActivityTaskManager.Stub {
+                     return;
+                 }
+                 final ActivityRecord r = task.topRunningActivity();
+-                if (r != null && r.moveFocusableActivityToTop("setFocusedRootTask")) {
++                if (r != null && DuoDisplayAreaPolicyProvider.moveToTopByFocus(r, "setFocusedRootTask")) {
+                     mRootWindowContainer.resumeFocusedTasksTopActivities();
+                 }
+             }
+@@ -2158,7 +2158,7 @@ public class ActivityTaskManagerService extends IActivityTaskManager.Stub {
+             // so that we wait for the new lifecycles to complete.
+             transition.setReady(task, true /* ready */);
+         }
+-        final boolean movedToTop = r.moveFocusableActivityToTop("setFocusedTask");
++        final boolean movedToTop = DuoDisplayAreaPolicyProvider.moveToTopByFocus(r, "setFocusedTask");
+         if (movedToTop) {
+             if (transition != null) {
+                 getTransitionController().requestStartTransition(
+diff --git a/services/core/java/com/android/server/wm/DisplayAreaPolicy.java b/services/core/java/com/android/server/wm/DisplayAreaPolicy.java
+index 3d079ad83a4a..6a42f71dac11 100644
+--- a/services/core/java/com/android/server/wm/DisplayAreaPolicy.java
++++ b/services/core/java/com/android/server/wm/DisplayAreaPolicy.java
+@@ -139,7 +139,7 @@ public abstract class DisplayAreaPolicy {
+                     .build(wmService);
+         }
+ 
+-        private void configureTrustedHierarchyBuilder(HierarchyBuilder rootHierarchy,
++        void configureTrustedHierarchyBuilder(HierarchyBuilder rootHierarchy,
+                 WindowManagerService wmService, DisplayContent content) {
+             // WindowedMagnification should be on the top so that there is only one surface
+             // to be magnified.
+diff --git a/services/core/java/com/android/server/wm/DuoDisplayAreaPolicyProvider.java b/services/core/java/com/android/server/wm/DuoDisplayAreaPolicyProvider.java
+new file mode 100644
+index 000000000000..6ef38240524f
+--- /dev/null
++++ b/services/core/java/com/android/server/wm/DuoDisplayAreaPolicyProvider.java
+@@ -0,0 +1,291 @@
++/*
++ * Copyright (C) 2026 The Duo-DE Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package com.android.server.wm;
++
++import static android.window.DisplayAreaOrganizer.FEATURE_DEFAULT_TASK_CONTAINER;
++import static android.window.DisplayAreaOrganizer.FEATURE_VENDOR_FIRST;
++
++import android.annotation.Nullable;
++import android.content.Intent;
++import android.content.res.Configuration;
++import android.graphics.Rect;
++import android.os.Build;
++import android.os.SystemProperties;
++import android.util.Slog;
++
++import com.android.internal.policy.DuoPanelGeometry;
++import com.android.server.wm.DisplayAreaPolicyBuilder.HierarchyBuilder;
++
++import java.util.ArrayList;
++import java.util.function.Consumer;
++import java.util.List;
++
++/**
++ * Surface Duo display area policy: one panel = one {@link DisplayAreaGroup} with its own TaskDisplayArea, so an app
++ * launched into a panel gets a plain panel-sized (1344x1892) configuration and never sees the hinge. Home and spanned
++ * apps stay in the default TaskDisplayArea that covers the whole display.
++ *
++ * Selected with the device specific {@code config_deviceSpecificDisplayAreaPolicyProvider}. Opt-in through
++ * {@code persist.sys.phh.duo.panels=1} or {@code persist.debug.phh.duo.panels=1} (read once at display creation, reboot to change); with the property off, or on a
++ * device that is not a Surface Duo, the platform default policy is built.
++ */
++public class DuoDisplayAreaPolicyProvider implements DisplayAreaPolicy.Provider {
++    private static final String TAG = "DuoDisplayAreaPolicy";
++
++    /** Group (root) and task container of the first and of the second panel; vendor feature ids. */
++    public static final int FEATURE_PANEL_0 = FEATURE_VENDOR_FIRST + 1;
++    public static final int FEATURE_PANEL_0_TASKS = FEATURE_VENDOR_FIRST + 2;
++    public static final int FEATURE_PANEL_1 = FEATURE_VENDOR_FIRST + 3;
++    public static final int FEATURE_PANEL_1_TASKS = FEATURE_VENDOR_FIRST + 4;
++
++    /** True once the two panel hierarchy has been built for the default display. */
++    private static volatile boolean sActive;
++
++    static boolean isActive() {
++        return sActive;
++    }
++
++    @Override
++    public DisplayAreaPolicy instantiate(WindowManagerService wmService, DisplayContent content,
++            RootDisplayArea root, DisplayArea.Tokens imeContainer) {
++        final DuoPanelGeometry.Spec spec = DuoPanelGeometry.forDevice(Build.DEVICE);
++        if (spec == null || !content.isDefaultDisplay
++                || !panelsEnabled()) {
++            return new DisplayAreaPolicy.DefaultProvider().instantiate(
++                    wmService, content, root, imeContainer);
++        }
++        Slog.i(TAG, "Two panel display area policy for " + Build.DEVICE);
++        sActive = true;
++
++        // Root: what the platform default builds, so system UI windows, the IME, home and spanned apps behave as before.
++        final TaskDisplayArea defaultTda = new TaskDisplayArea(wmService, "DefaultTaskDisplayArea",
++                FEATURE_DEFAULT_TASK_CONTAINER, false /* createdByOrganizer */, true /* canHostHomeTask */);
++        defaultTda.setDuoPanelsActive(true);
++        final List<TaskDisplayArea> rootTdas = new ArrayList<>();
++        rootTdas.add(defaultTda);
++        final HierarchyBuilder rootHierarchy = new HierarchyBuilder(root);
++        rootHierarchy.setImeContainer(imeContainer).setTaskDisplayAreas(rootTdas);
++        if (content.isTrusted()) {
++            new DisplayAreaPolicy.DefaultProvider().configureTrustedHierarchyBuilder(
++                    rootHierarchy, wmService, content);
++        }
++
++        return new DisplayAreaPolicyBuilder(content.getDisplayId(), rootHierarchy)
++                .addDisplayAreaGroupHierarchy(panel(wmService, spec, 0, FEATURE_PANEL_0, FEATURE_PANEL_0_TASKS))
++                .addDisplayAreaGroupHierarchy(panel(wmService, spec, 1, FEATURE_PANEL_1, FEATURE_PANEL_1_TASKS))
++                .build(wmService);
++    }
++
++    /** persist.sys.phh.duo.panels, or persist.debug.phh.duo.panels which adb shell may set (spike convenience). */
++    private static boolean panelsEnabled() {
++        return SystemProperties.getBoolean("persist.sys.phh.duo.panels", false)
++                || SystemProperties.getBoolean("persist.debug.phh.duo.panels", false);
++    }
++
++    /**
++     * Home on a panel: hides every root task of the panel that holds the focused root task, so home (which is
++     * transparent where it has no icon) shows through on that panel only and the other panel keeps its app. Hidden
++     * tasks are not drawn and their activities stop, as after Home on a phone. A task launched or moved to front in
++     * the panel clears the flag again (see TaskDisplayArea.positionChildTaskAt).
++     */
++    /** True while a touch (or setFocusedTask) is only moving focus to a window, which is not a Home action. */
++    private static boolean sFocusChange;
++
++    /**
++     * Moves the activity's task to top because it got focus (a touch on its window). If that task is home it must not
++     * minimize the focused panel: tapping the home window on an empty panel is not pressing Home. Runs under the
++     * activity task manager lock, so the flag cannot be seen by another thread's Home action.
++     */
++    static boolean moveToTopByFocus(ActivityRecord r, String reason) {
++        final boolean old = sFocusChange;
++        sFocusChange = true;
++        try {
++            return r.moveFocusableActivityToTop(reason);
++        } finally {
++            sFocusChange = old;
++        }
++    }
++
++    static void minimizeFocusedPanel(DisplayContent display) {
++        if (display == null || sFocusChange) return;
++        final Task focused = display.getFocusedRootTask();
++        if (focused == null || !(focused.getRootDisplayArea() instanceof PanelGroup)) return;
++        final TaskDisplayArea panelTasks = focused.getDisplayArea();
++        final List<Task> tasks = new ArrayList<>();
++        panelTasks.forAllRootTasks((Consumer<Task>) tasks::add);   // collect first: hiding moves tasks to the back
++        Slog.i(TAG, "Home: minimizing " + focused.getRootDisplayArea().getName() + " (" + tasks.size() + " tasks)");
++        // With shell transitions a visibility change only reaches the surfaces if the container is part of the
++        // transition being collected (the Home start); collect each task before hiding it.
++        final TransitionController transitions = display.mTransitionController;
++        for (int i = 0; i < tasks.size(); i++) {
++            if (transitions.isCollecting()) {
++                transitions.collect(tasks.get(i));
++            }
++            tasks.get(i).setForceHidden(Task.FLAG_FORCE_HIDDEN_FOR_TASK_ORG, true /* set */);
++        }
++        // Hiding a task only takes effect (activities stop, surfaces go away) in a visibility pass, which the Home
++        // start has already done or skips; run one right after, outside the current call chain.
++        final WindowManagerService wms = display.mWmService;
++        wms.mH.post(() -> {
++            synchronized (wms.mGlobalLock) {
++                wms.mRoot.ensureActivitiesVisible();
++            }
++        });
++    }
++
++    /**
++     * The panel a launch should go to, from where the user tapped. A launcher passes the on-screen rectangle of the
++     * tapped icon as the intent's source bounds; the panel containing it gets the new task, so an icon on the left
++     * opens its app on the left screen and one on the right on the right, whichever launcher is home (no launcher
++     * specific code). Only for a new LAUNCHER task started from the home activity while both panels are side by side;
++     * anything else keeps the platform choice (the default, spanned area).
++     */
++    @Nullable
++    static TaskDisplayArea panelForLaunch(DisplayContent dc, @Nullable ActivityRecord source,
++            @Nullable ActivityRecord record, @Nullable Task existingTask) {
++        if (!sActive || dc == null || record == null || record.intent == null) return null;
++        // An app that already has a task is moved to / kept on the tapped panel; without this the platform falls back
++        // to the launcher's task area and pulls the task out of its panel into the spanned area.
++        if (existingTask != null && !existingTask.isActivityTypeStandard()) return null;
++        if (source == null || !source.isActivityTypeHome()) return null;
++        final Rect sb = record.intent.getSourceBounds();
++        if (sb == null || !record.intent.hasCategory(Intent.CATEGORY_LAUNCHER)) return null;
++        final TaskDisplayArea first = dc.getItemFromTaskDisplayAreas(
++                tda -> tda.mFeatureId == FEATURE_PANEL_0_TASKS ? tda : null);
++        final TaskDisplayArea second = dc.getItemFromTaskDisplayAreas(
++                tda -> tda.mFeatureId == FEATURE_PANEL_1_TASKS ? tda : null);
++        if (first == null || second == null) return null;
++        final Rect b0 = first.getBounds();
++        final Rect b1 = second.getBounds();
++        if (b0.equals(b1) || b0.isEmpty() || b1.isEmpty()) return null;   // single panel posture or unknown size
++        final int x = sb.centerX();
++        final int y = sb.centerY();
++        final boolean in0 = b0.contains(x, y);
++        final boolean in1 = b1.contains(x, y);
++        final TaskDisplayArea target = in0 != in1 ? (in0 ? first : second)
++                // On the hinge or outside both: the nearer panel
++                : (distance(b0, x, y) <= distance(b1, x, y) ? first : second);
++        if (existingTask != null && existingTask.isForceHidden()) {
++            // a minimized app launched again comes back
++            existingTask.setForceHidden(Task.FLAG_FORCE_HIDDEN_FOR_TASK_ORG, false /* set */);
++        }
++        return target;
++    }
++
++    private static int distance(Rect r, int x, int y) {
++        final int dx = Math.max(Math.max(r.left - x, 0), x - r.right);
++        final int dy = Math.max(Math.max(r.top - y, 0), y - r.bottom);
++        return dx + dy;
++    }
++
++    /**
++     * Keeps the home / spanned task area under the panels unless it has something to show over them: the area
++     * that holds home, recents and spanned apps goes above both panels only while one of its non-home root tasks
++     * (recents, a spanned app) is visible, and under them otherwise, so home (transparent where it has no icon)
++     * only shows through an empty or minimized panel and never covers a panel app. Called after every visibility pass.
++     */
++    static void updateOrder(DisplayContent display) {
++        if (!sActive || display == null || !display.isDefaultDisplay) return;
++        final TaskDisplayArea home = display.getDefaultTaskDisplayArea();
++        final WindowContainer parent = home == null ? null : home.getParent();
++        if (parent == null) return;
++        final TaskDisplayArea first = display.getItemFromTaskDisplayAreas(
++                tda -> tda.mFeatureId == FEATURE_PANEL_0_TASKS ? tda : null);
++        final TaskDisplayArea second = display.getItemFromTaskDisplayAreas(
++                tda -> tda.mFeatureId == FEATURE_PANEL_1_TASKS ? tda : null);
++        if (first == null || second == null) return;
++        final WindowContainer group0 = first.getRootDisplayArea();
++        final WindowContainer group1 = second.getRootDisplayArea();
++        if (group0 == null || group1 == null || group0.getParent() != parent || group1.getParent() != parent) return;
++
++        final boolean[] needsTop = {false};
++        home.forAllRootTasks((java.util.function.Predicate<Task>) t -> {
++            if (!t.isActivityTypeHome() && t.isVisible()) needsTop[0] = true;
++            return needsTop[0];
++        });
++        final int homeIndex = parent.mChildren.indexOf(home);
++        final int index0 = parent.mChildren.indexOf(group0);
++        final int index1 = parent.mChildren.indexOf(group1);
++        final int highestPanel = Math.max(index0, index1);
++        final int lowestPanel = Math.min(index0, index1);
++        if (needsTop[0] && homeIndex < highestPanel) {
++            parent.positionChildAt(highestPanel, home, false /* includingParents */);
++        } else if (!needsTop[0] && homeIndex > lowestPanel) {
++            parent.positionChildAt(lowestPanel, home, false /* includingParents */);
++        }
++    }
++
++    private static HierarchyBuilder panel(WindowManagerService wmService, DuoPanelGeometry.Spec spec,
++            int index, int groupFeature, int tasksFeature) {
++        final DisplayAreaGroup group = new PanelGroup(wmService, "Panel" + index, groupFeature, spec, index);
++        final List<TaskDisplayArea> tdas = new ArrayList<>();
++        // A panel never hosts home; the spanned home stays in the default task container.
++        tdas.add(new TaskDisplayArea(wmService, "Panel" + index + "Tasks", tasksFeature,
++                false /* createdByOrganizer */, false /* canHostHomeTask */));
++        return new HierarchyBuilder(group).setTaskDisplayAreas(tdas);
++    }
++
++    /**
++     * A {@link DisplayAreaGroup} that follows its physical panel: it takes the panel rect of the display it is on
++     * (spanned or gapless), or the whole display in a single panel posture, and re-evaluates on every configuration
++     * change (resize, rotation). Platform code only sets group bounds from tests, so this does it itself.
++     */
++    static class PanelGroup extends DisplayAreaGroup {
++        private final DuoPanelGeometry.Spec mSpec;
++        private final int mIndex;
++
++        PanelGroup(WindowManagerService wms, String name, int featureId, DuoPanelGeometry.Spec spec, int index) {
++            super(wms, name, featureId);
++            mSpec = spec;
++            mIndex = index;
++        }
++
++        /**
++         * Crops the group's surface to its panel. A task surface is not cropped by its parents, so the input sink of an
++         * activity (touchable region = its crop) otherwise covers the whole display and swallows touches meant for the
++         * other panel and for home; transition animations also stay inside the panel.
++         */
++        @Override
++        void prepareSurfaces() {
++            super.prepareSurfaces();
++            final Rect bounds = getBounds();
++            if (mSurfaceControl != null && !bounds.isEmpty()) {
++                getSyncTransaction().setCrop(mSurfaceControl, new Rect(0, 0, bounds.width(), bounds.height()));
++            }
++        }
++
++        @Override
++        public void onConfigurationChanged(Configuration newParentConfig) {
++            super.onConfigurationChanged(newParentConfig);
++            final Rect display = newParentConfig.windowConfiguration.getBounds();
++            final int rotation = mDisplayContent != null ? mDisplayContent.getRotation() : 0;
++            final int[][] layout = DuoPanelGeometry.layout(
++                    mSpec, display.width(), display.height(), rotation);
++            final Rect bounds;
++            if (layout == null) {
++                bounds = new Rect();   // unknown size: fill the parent
++            } else {
++                final int[] r = layout[DuoPanelGeometry.mode(mSpec, display.width(), display.height())
++                        == DuoPanelGeometry.MODE_SINGLE ? DuoPanelGeometry.PANEL_0 : mIndex];
++                bounds = new Rect(display.left + r[0], display.top + r[1], display.left + r[2], display.top + r[3]);
++            }
++            if (!bounds.equals(getRequestedOverrideBounds())) {
++                setBounds(bounds);
++            }
++        }
++    }
++}
+diff --git a/services/core/java/com/android/server/wm/LaunchParamsUtil.java b/services/core/java/com/android/server/wm/LaunchParamsUtil.java
+index 13df10cba055..7055fcc381de 100644
+--- a/services/core/java/com/android/server/wm/LaunchParamsUtil.java
++++ b/services/core/java/com/android/server/wm/LaunchParamsUtil.java
+@@ -326,6 +326,15 @@ class LaunchParamsUtil {
+             }
+         }
+ 
++        // Duo two panel policy: a launcher icon opens its app on the panel it was tapped on.
++        if (taskDisplayArea == null) {
++            taskDisplayArea = DuoDisplayAreaPolicyProvider.panelForLaunch(
++                    supervisor.mRootWindowContainer.getDefaultDisplay(), source, activityRecord, task);
++            if (taskDisplayArea != null) {
++                logger.accept("display-area-from-source-bounds=" + taskDisplayArea);
++            }
++        }
++
+         // If the source activity is a no-display activity, pass on the launch display area token
+         // from source activity as currently preferred.
+         if (taskDisplayArea == null && source != null && source.isNoDisplay()) {
+diff --git a/services/core/java/com/android/server/wm/RootWindowContainer.java b/services/core/java/com/android/server/wm/RootWindowContainer.java
+index b8f7de6a218a..3ebfa6bf97fe 100644
+--- a/services/core/java/com/android/server/wm/RootWindowContainer.java
++++ b/services/core/java/com/android/server/wm/RootWindowContainer.java
+@@ -1858,6 +1858,8 @@ class RootWindowContainer extends WindowContainer<DisplayContent>
+         } finally {
+             mTaskSupervisor.endActivityVisibilityUpdate();
+             Trace.traceEnd(TRACE_TAG_WINDOW_MANAGER);
++            // Duo two panel policy: keep the home / spanned area under the panels unless it has something to show
++            DuoDisplayAreaPolicyProvider.updateOrder(getDefaultDisplay());
+         }
+     }
+ 
+diff --git a/services/core/java/com/android/server/wm/TaskDisplayArea.java b/services/core/java/com/android/server/wm/TaskDisplayArea.java
+index 9d005fc7bc9e..3167d39aa731 100644
+--- a/services/core/java/com/android/server/wm/TaskDisplayArea.java
++++ b/services/core/java/com/android/server/wm/TaskDisplayArea.java
+@@ -315,6 +315,13 @@ final class TaskDisplayArea extends DisplayArea<WindowContainer> {
+         removeRootTaskReferenceIfNeeded(task);
+     }
+ 
++    /** Set by {@link DuoDisplayAreaPolicyProvider} on the area that hosts home when the two panel policy is on. */
++    private boolean mDuoPanelsActive;
++
++    void setDuoPanelsActive(boolean active) {
++        mDuoPanelsActive = active;
++    }
++
+     @Override
+     boolean isOnTop() {
+         // Considered always on top
+@@ -357,6 +364,16 @@ final class TaskDisplayArea extends DisplayArea<WindowContainer> {
+                 && !getParent().isOnTop()) {
+             includingParents = false;
+         }
++        if (mDuoPanelsActive && moveToTop && child.isActivityTypeHome()) {
++            // Duo two panel policy: Home does not cover the panels, it reveals itself on the focused panel only.
++            includingParents = false;
++            DuoDisplayAreaPolicyProvider.minimizeFocusedPanel(mDisplayContent);
++        }
++        if (moveToTop && child.isForceHidden()
++                && getRootDisplayArea() instanceof DuoDisplayAreaPolicyProvider.PanelGroup) {
++            // Duo two panel policy: bringing a minimized task back to front shows it on its panel again.
++            child.setForceHidden(Task.FLAG_FORCE_HIDDEN_FOR_TASK_ORG, false /* set */);
++        }
+         final int targetPosition = findPositionForRootTask(position, child, false /* adding */);
+         super.positionChildAt(targetPosition, child, false /* includingParents */);
+ 
+-- 
+2.43.0
+
