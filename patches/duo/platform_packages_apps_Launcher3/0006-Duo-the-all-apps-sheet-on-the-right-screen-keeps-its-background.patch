@@ -1,0 +1,42 @@
+From a4c8f4e08f2f99450a4d40e945369c31e6f5d5a0 Mon Sep 17 00:00:00 2001
+From: Michael Kostersitz <mkostersitz@mac.com>
+Date: Tue, 27 Oct 2026 10:35:19 +0000
+Subject: [PATCH] Duo: the all-apps sheet on the right screen keeps its
+ background
+
+The sheet background is a child of the apps view, which is already one screen wide and pinned to the chosen screen.
+The right screen branch also gave the background a left margin of one screen and a negative right margin, which pushed
+it out of its parent: the right drawer showed its icons with no sheet behind them (workspace icons showed through)
+while the left one was fine. Use no margins on either screen.
+
+Reported by Ethanol10 on Archfx/duo-de#280 with screenshots.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Change-Id: Ic7a839045ac5d304f9e3c76b8a0bd4c7fa1009a6
+---
+ .../android/launcher3/touch/WorkspaceTouchListener.java    | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/src/com/android/launcher3/touch/WorkspaceTouchListener.java b/src/com/android/launcher3/touch/WorkspaceTouchListener.java
+index e863ad4e75..8158f60b05 100644
+--- a/src/com/android/launcher3/touch/WorkspaceTouchListener.java
++++ b/src/com/android/launcher3/touch/WorkspaceTouchListener.java
+@@ -227,10 +227,13 @@ public class WorkspaceTouchListener extends GestureDetector.SimpleOnGestureListe
+              // The sheet is exactly one screen wide and never reaches into the hinge
+              params.width = screenRect[2] - screenRect[0];
+              // Align to right or left based on initialX
++             // The sheet background is a child of the apps view, which is already one screen wide and placed on
++             // the chosen screen: no margins on either side (they pushed the right screen's background out of
++             // its parent, leaving the icons with no sheet behind them).
+              if (initialX) {
+                  params.gravity = Gravity.END;
+-                 backgroundParams.leftMargin = screenRect[0];
+-                 backgroundParams.rightMargin = -screenRect[0];
++                 backgroundParams.leftMargin = 0;
++                 backgroundParams.rightMargin = 0;
+              } else {
+                  params.gravity = Gravity.START;
+                  backgroundParams.leftMargin = 0;
+-- 
+2.43.0
+

@@ -1,0 +1,183 @@
+From 4f9f50c9d8c02b10cf4c4ab1dbad00a3d1096a95 Mon Sep 17 00:00:00 2001
+From: Michael Kostersitz <mkostersitz@mac.com>
+Date: Fri, 23 Oct 2026 17:44:19 +0000
+Subject: [PATCH] Duo: keep the Launcher3 Duo-DE modifications off the hinge
+ (DuoPanels)
+
+Replace the 1344 / 2500 / 1394 literals with the panel rects from DuoPanelGeometry:
+- the spanned test (widthPx > 2500) in DeviceProfile and WorkspaceTouchListener
+- the left/right screen of a touch (x < 1344), now by the hinge centre
+- the all-apps sheet, exactly one screen wide (was half the display minus 5 px, 28 px into the hinge)
+- the freeform launch rect for the right screen (started at x=1394, 16 px inside the hinge, and 116 px
+  short of the screen edge): now the screen rect inset by 50 px
+
+New helper util/DuoPanels. Needs frameworks_base DuoPanelGeometry.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Change-Id: I3f4dcfcac19c7263f395a416f0d993af1112473b
+---
+ src/com/android/launcher3/DeviceProfile.java  |  3 +-
+ .../touch/WorkspaceTouchListener.java         | 20 ++++---
+ .../util/ActivityOptionsWrapper.java          | 10 +++-
+ src/com/android/launcher3/util/DuoPanels.java | 52 +++++++++++++++++++
+ 4 files changed, 75 insertions(+), 10 deletions(-)
+ create mode 100644 src/com/android/launcher3/util/DuoPanels.java
+
+diff --git a/src/com/android/launcher3/DeviceProfile.java b/src/com/android/launcher3/DeviceProfile.java
+index 5f50765b61..c028b15707 100644
+--- a/src/com/android/launcher3/DeviceProfile.java
++++ b/src/com/android/launcher3/DeviceProfile.java
+@@ -71,6 +71,7 @@ import com.android.launcher3.responsive.ResponsiveCellSpecsProvider;
+ import com.android.launcher3.responsive.ResponsiveSpec.Companion.ResponsiveSpecType;
+ import com.android.launcher3.responsive.ResponsiveSpec.DimensionType;
+ import com.android.launcher3.responsive.ResponsiveSpecsProvider;
++import com.android.launcher3.util.DuoPanels;
+ import com.android.launcher3.util.DisplayController;
+ import com.android.launcher3.util.DisplayController.Info;
+ import com.android.launcher3.util.IconSizeSteps;
+@@ -540,7 +541,7 @@ public class DeviceProfile {
+         if (shouldShowAllAppsOnSheet()) {
+             // DUO-DE: size the all-apps sheet for the spanned Duo screen (r4: sizes live in mDeviceProperties)
+             float allAppsHeightScale = 0.7f;
+-            if (mDeviceProperties.getWidthPx() > 2500) {
++            if (DuoPanels.isSpannedLandscape(mDeviceProperties.getWidthPx(), mDeviceProperties.getHeightPx())) {
+                 allAppsHeightScale = 0.95f;
+             }
+             int duoHeightPx = mDeviceProperties.getHeightPx();
+diff --git a/src/com/android/launcher3/touch/WorkspaceTouchListener.java b/src/com/android/launcher3/touch/WorkspaceTouchListener.java
+index 62f1261e8b..e863ad4e75 100644
+--- a/src/com/android/launcher3/touch/WorkspaceTouchListener.java
++++ b/src/com/android/launcher3/touch/WorkspaceTouchListener.java
+@@ -51,6 +51,7 @@ import com.android.launcher3.util.TouchUtil;
+ 
+ import com.android.launcher3.allapps.ActivityAllAppsContainerView;
+ import com.android.launcher3.R;
++import com.android.launcher3.util.DuoPanels;
+ import android.widget.FrameLayout;
+ import android.view.ViewGroup;
+ import android.view.Gravity;
+@@ -106,7 +107,10 @@ public class WorkspaceTouchListener extends GestureDetector.SimpleOnGestureListe
+             // Check if we can handle long press.
+             boolean handleLongPress = canHandleLongPress();
+ 
+-            boolean isXTouch = (ev.getX() < 1344) ? false : true;
++            int[][] halves = DuoPanels.halves(
++                    mLauncher.getDeviceProfile().getDeviceProperties().getWidthPx(),
++                    mLauncher.getDeviceProfile().getDeviceProperties().getHeightPx());
++            boolean isXTouch = halves != null && DuoPanels.isRightHalf(halves, ev.getX());
+             mLauncher.getDeviceProfile().initialX = isXTouch;
+             alignAllApps(isXTouch);
+ 
+@@ -209,7 +213,8 @@ public class WorkspaceTouchListener extends GestureDetector.SimpleOnGestureListe
+          WindowManager windowManager = (WindowManager) mLauncher.getSystemService(Context.WINDOW_SERVICE);
+          DisplayMetrics displayMetrics = new DisplayMetrics();
+          windowManager.getDefaultDisplay().getMetrics(displayMetrics);
+-         int screenWidth = displayMetrics.widthPixels;
++         Rect screen = windowManager.getMaximumWindowMetrics().getBounds();
++         int[][] halves = DuoPanels.halves(screen.width(), screen.height());
+ 
+          ActivityAllAppsContainerView<Launcher> mAppsView = mLauncher.findViewById(R.id.apps_view);
+          View mBottomSheetBackground = mLauncher.findViewById(R.id.bottom_sheet_background);
+@@ -217,14 +222,15 @@ public class WorkspaceTouchListener extends GestureDetector.SimpleOnGestureListe
+          FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) mAppsView.getLayoutParams();
+          RelativeLayout.LayoutParams backgroundParams = (RelativeLayout.LayoutParams) mBottomSheetBackground.getLayoutParams();
+ 
+-         if (screenWidth>2500) {
+-             // Set the desired width and height dynamically
+-             params.width = (screenWidth / 2)-5; // Half of the screen width
++         if (halves != null) {
++             int[] screenRect = halves[initialX ? 1 : 0];
++             // The sheet is exactly one screen wide and never reaches into the hinge
++             params.width = screenRect[2] - screenRect[0];
+              // Align to right or left based on initialX
+              if (initialX) {
+                  params.gravity = Gravity.END;
+-                 backgroundParams.leftMargin = (screenWidth / 2) + 5;
+-                 backgroundParams.rightMargin = -(screenWidth / 2);
++                 backgroundParams.leftMargin = screenRect[0];
++                 backgroundParams.rightMargin = -screenRect[0];
+              } else {
+                  params.gravity = Gravity.START;
+                  backgroundParams.leftMargin = 0;
+diff --git a/src/com/android/launcher3/util/ActivityOptionsWrapper.java b/src/com/android/launcher3/util/ActivityOptionsWrapper.java
+index 279390a00b..1b95209813 100644
+--- a/src/com/android/launcher3/util/ActivityOptionsWrapper.java
++++ b/src/com/android/launcher3/util/ActivityOptionsWrapper.java
+@@ -59,8 +59,14 @@ public class ActivityOptionsWrapper {
+         int widthPx = ActivityContext.lookupContext(this.context).getDeviceProfile().getDeviceProperties().getWidthPx();
+         Boolean initialX = ActivityContext.lookupContext(this.context).getDeviceProfile().initialX;
+ 
+-        int xValue = (initialX == true && isTabletMode && widthPx>2500) ? 1394 : 50;
+-        Rect rect = new Rect(xValue, 120, 1244 + xValue , 1710);
++        int heightPx = ActivityContext.lookupContext(this.context).getDeviceProfile().getDeviceProperties().getHeightPx();
++        Rect rect = new Rect(50, 120, 1294, 1710);
++        int[][] halves = isTabletMode ? DuoPanels.halves(widthPx, heightPx) : null;
++        if (halves != null) {
++            // Same 50 px margin on each side of the screen the launch came from, never inside the hinge
++            int[] screenRect = halves[Boolean.TRUE.equals(initialX) ? 1 : 0];
++            rect = new Rect(screenRect[0] + 50, 120, screenRect[2] - 50, 1710);
++        }
+ 
+         if (this.context != null) {
+             SharedPreferences pref = this.context.getSharedPreferences(LauncherFiles.SHARED_PREFERENCES_KEY, Context.MODE_PRIVATE);
+diff --git a/src/com/android/launcher3/util/DuoPanels.java b/src/com/android/launcher3/util/DuoPanels.java
+new file mode 100644
+index 0000000000..f2679b66d6
+--- /dev/null
++++ b/src/com/android/launcher3/util/DuoPanels.java
+@@ -0,0 +1,52 @@
++/*
++ * Copyright (C) 2026 The Duo-DE Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package com.android.launcher3.util;
++
++import android.os.Build;
++
++import com.android.internal.policy.DuoPanelGeometry;
++
++/**
++ * The two Surface Duo panels as Launcher3 needs them: the left and right screen of a landscape (side by side) display,
++ * with the hinge between them. Replaces the 1344 / 2500 / 1394 literals of the Duo-DE modifications.
++ */
++public final class DuoPanels {
++    private DuoPanels() { }
++
++    /**
++     * The {left, right} panel rects {l, t, r, b} of a Duo whose display is spanned (hinge band) or gapless
++     * (no hinge gap) and wider than tall, or null on any other device or posture.
++     */
++    public static int[][] halves(int widthPx, int heightPx) {
++        if (widthPx <= heightPx) return null;
++        DuoPanelGeometry.Spec spec = DuoPanelGeometry.forDevice(Build.DEVICE);
++        int mode = DuoPanelGeometry.mode(spec, widthPx, heightPx);
++        if (mode != DuoPanelGeometry.MODE_SPANNED && mode != DuoPanelGeometry.MODE_GAPLESS) return null;
++        // Rotation 0 and 180 have the same two rects, panel 0 is simply on the other side.
++        int[][] layout = DuoPanelGeometry.layout(spec, widthPx, heightPx, 0);
++        return new int[][] {layout[DuoPanelGeometry.PANEL_0], layout[DuoPanelGeometry.PANEL_1]};
++    }
++
++    public static boolean isSpannedLandscape(int widthPx, int heightPx) {
++        return halves(widthPx, heightPx) != null;
++    }
++
++    /** True when x is on the right screen; a touch on the hinge goes to the nearer screen. */
++    public static boolean isRightHalf(int[][] halves, float x) {
++        return x >= (halves[0][2] + halves[1][0]) / 2f;
++    }
++}
+-- 
+2.43.0
+
