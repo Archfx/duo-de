@@ -1,0 +1,34 @@
+From 07adaa847778ab9cf099888a951259e40627ce02 Mon Sep 17 00:00:00 2001
+From: Michael Kostersitz <mkostersitz@mac.com>
+Date: Tue, 27 Oct 2026 14:11:10 +0000
+Subject: [PATCH] Duo: keep the all-apps sheet background on the right screen
+
+The all-apps container is already moved to the right half with Gravity.END.
+The bottom sheet background sits inside the container, so the extra
+leftMargin of half the screen pushed it out of the container to the right,
+leaving the right drawer with no background. Use zero margins for both screens.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Change-Id: I94deec8fd7da2e0ee05076b675dd8550d01602dc
+---
+ src/com/android/launcher3/touch/WorkspaceTouchListener.java | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/com/android/launcher3/touch/WorkspaceTouchListener.java b/src/com/android/launcher3/touch/WorkspaceTouchListener.java
+index 62f1261e8b..f3e74faceb 100644
+--- a/src/com/android/launcher3/touch/WorkspaceTouchListener.java
++++ b/src/com/android/launcher3/touch/WorkspaceTouchListener.java
+@@ -223,8 +223,8 @@ public class WorkspaceTouchListener extends GestureDetector.SimpleOnGestureListe
+              // Align to right or left based on initialX
+              if (initialX) {
+                  params.gravity = Gravity.END;
+-                 backgroundParams.leftMargin = (screenWidth / 2) + 5;
+-                 backgroundParams.rightMargin = -(screenWidth / 2);
++                 backgroundParams.leftMargin = 0;
++                 backgroundParams.rightMargin = 0;
+              } else {
+                  params.gravity = Gravity.START;
+                  backgroundParams.leftMargin = 0;
+-- 
+2.43.0
+
