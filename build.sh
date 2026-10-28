@@ -93,10 +93,10 @@ buildTrebleApp() {
 
 buildVariant() {
     echo "--> Building $1"
-    lunch "$1"-bp2a-user
+    lunch "$1"-bp2a-userdebug
     make -j$(nproc --all) installclean
     make -j$(nproc --all) systemimage
-    if [ "$SIGN_IMG" == "true" ]; then
+    if [ "$SIGN_IMG" == "true" ]; then    
         make -j$(nproc --all) target-files-package otatools
         bash $BUILD_ROOT/sign.sh "../archfx-priv/keys" $OUT/signed-target_files.zip
         unzip -jqo $OUT/signed-target_files.zip IMAGES/system.img -d $OUT
@@ -122,7 +122,7 @@ buildVariants() {
     # buildVariant treble_a64_bgN
     
     buildVariant treble_arm64_bgN
-    buildVariant treble_arm64_bvN    
+    buildVariant treble_arm64_bvN   
  
     # buildVndkliteVariant treble_a64_bvN
     # buildVndkliteVariant treble_a64_bgN
@@ -159,8 +159,10 @@ generateOta() {
             [[ "$filename" == *"-vndklite"* ]] && vndk="-vndklite" || vndk=""
             name="treble_${arch}_b${variant}N${vndk}"
             size=$(wc -c $file | awk '{print $1}')
+            xz_sha256=$(sha256sum $file | awk '{print $1}')
+            img_sha256=$(xz -dc $file | sha256sum | awk '{print $1}')
             url="https://github.com/archfx/duo-de/releases/download/$version/$filename"
-            json="${json} {\"name\": \"$name\",\"size\": \"$size\",\"url\": \"$url\"},"
+            json="${json} {\"name\": \"$name\",\"size\": \"$size\",\"xz_sha256\": \"$xz_sha256\",\"sha256\": \"$img_sha256\",\"url\": \"$url\"},"
         done
         json="${json%?}]}"
         echo "$json" | jq . > $BUILD_ROOT/config/ota.json
@@ -189,9 +191,9 @@ fi
 # initRepos
 # syncRepos
 # applyPatches
-# setupEnv
-# buildTrebleApp
-# buildVariants
+setupEnv
+buildTrebleApp
+buildVariants
 generatePackages
 generateOta
 # uploadOTA

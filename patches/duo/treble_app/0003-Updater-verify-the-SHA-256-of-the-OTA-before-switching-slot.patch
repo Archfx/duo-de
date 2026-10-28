@@ -1,0 +1,197 @@
+From bf92871895cffe1473c95697c8610716287a3e2a Mon Sep 17 00:00:00 2001
+From: Mike Kostersitz <mkostersitz@mac.com>
+Date: Fri, 16 Oct 2026 18:56:33 +0000
+Subject: [PATCH] Updater: verify the SHA-256 of the OTA download and image
+ before switching slot
+
+ota.json variants may carry xz_sha256 (the downloaded .img.xz) and sha256 (the decompressed
+image written to the new slot). Both are hashed while streaming; a mismatch aborts before
+the slot switch, so the running system is untouched. Missing hashes only log a warning.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ .../java/me/phh/treble/app/UpdaterActivity.kt | 62 +++++++++++++++++--
+ app/src/main/res/values/strings.xml           |  1 +
+ 2 files changed, 57 insertions(+), 6 deletions(-)
+
+diff --git a/app/src/main/java/me/phh/treble/app/UpdaterActivity.kt b/app/src/main/java/me/phh/treble/app/UpdaterActivity.kt
+index 7a9fe1c..e062fc2 100644
+--- a/app/src/main/java/me/phh/treble/app/UpdaterActivity.kt
++++ b/app/src/main/java/me/phh/treble/app/UpdaterActivity.kt
+@@ -17,6 +17,7 @@ import java.io.FileOutputStream
+ import java.io.InputStream
+ import java.io.IOException
+ import java.lang.Runnable
++import java.security.MessageDigest
+ import java.net.URL
+ import java.net.HttpURLConnection
+ import javax.net.ssl.HttpsURLConnection
+@@ -296,6 +297,24 @@ class UpdaterActivity : PreferenceActivity() {
+         return ""
+     }
+ 
++    // Optional integrity data published next to the url in ota.json: hex SHA-256 of the downloaded
++    // .img.xz (xz_sha256) and of the decompressed image written to the new slot (sha256).
++    private fun getExpectedHashes() : Pair<String, String> {
++        if (otaJson.length() > 0) {
++            val otaVariants = otaJson.getJSONArray("variants")
++            for (i in 0 until otaVariants.length()) {
++                val otaVariant = otaVariants.get(i) as JSONObject
++                if (otaVariant.getString("name") == getVariant()) {
++                    return Pair(otaVariant.optString("xz_sha256", "").lowercase(),
++                                otaVariant.optString("sha256", "").lowercase())
++                }
++            }
++        }
++        return Pair("", "")
++    }
++
++    private fun ByteArray.toHex() : String = joinToString("") { "%02x".format(it) }
++
+     private fun downloadUpdate() {
+         val progress_bar = findViewById(R.id.progress_horizontal) as ProgressBar
+         val progress_text = findViewById(R.id.progress_value) as TextView
+@@ -316,6 +335,7 @@ class UpdaterActivity : PreferenceActivity() {
+             updateUiElements(false)
+         } else {
+             Log.d("PHH", "Got URL: " + url)
++            val expectedHashes = getExpectedHashes()
+             try {
+                 thread {
+                     var httpsConnection = URL(url).openConnection() as HttpsURLConnection
+@@ -329,12 +349,13 @@ class UpdaterActivity : PreferenceActivity() {
+                     Log.d("PHH", "Download size is: " + completeFileSize)
+                     httpsConnection.inputStream.use { httpStream ->
+                         var hasSuccess = false
++                        var verificationFailed = false
+                         try {
+                             Log.e("PHH", "OTA image install started")
+                             prepareOTA()
+                             Log.e("PHH", "New slot created")
+                             Log.e("PHH", "OTA image extracting")
+-                            extractUpdate(httpStream, completeFileSize)
++                            extractUpdate(httpStream, completeFileSize, expectedHashes)
+                             Log.e("PHH", "OTA image extracted")
+                             applyUpdate()
+                             Log.e("PHH", "Slot switch made")
+@@ -342,6 +363,7 @@ class UpdaterActivity : PreferenceActivity() {
+                             hasSuccess = true
+                         } catch (e: Exception) {
+                             Log.e("PHH", "Failed applying OTA image. Error: " + e.toString(), e)
++                            verificationFailed = e is OtaVerificationException
+                         }
+                         runOnUiThread(Runnable {
+                             val builder = AlertDialog.Builder(this)
+@@ -352,7 +374,7 @@ class UpdaterActivity : PreferenceActivity() {
+                                 progress_bar.setVisibility(View.GONE)
+                                 progress_text.setVisibility(View.GONE)
+                                 builder.setTitle(getString(R.string.error_dialog_title))
+-                                builder.setMessage(getString(R.string.failed_install_message))
++                                builder.setMessage(getString(if (verificationFailed) R.string.failed_verify_message else R.string.failed_install_message))
+                             }
+                             builder.setPositiveButton(android.R.string.ok) { _, _ -> }
+                             builder.show()
+@@ -401,7 +423,7 @@ class UpdaterActivity : PreferenceActivity() {
+         }
+     }
+ 
+-    private fun extractUpdate(stream: InputStream, completeFileSize: Long) {
++    private fun extractUpdate(stream: InputStream, completeFileSize: Long, expectedHashes: Pair<String, String>) {
+         val progress_bar = findViewById(R.id.progress_horizontal) as ProgressBar
+         val progress_text = findViewById(R.id.progress_value) as TextView
+         val update_title = findViewById(R.id.txt_update_title) as TextView
+@@ -415,11 +437,15 @@ class UpdaterActivity : PreferenceActivity() {
+             progress_text.setVisibility(View.VISIBLE)
+         })
+ 
+-        val xzOut = XZInputStream(object: InputStream() {
++        val xzDigest = MessageDigest.getInstance("SHA-256")
++        val imgDigest = MessageDigest.getInstance("SHA-256")
++        val counted = object: InputStream() {
+             var nBytesRead = 0L
+             override fun read(): Int {
+                 nBytesRead++
+-                return stream.read()
++                val c = stream.read()
++                if (c >= 0) xzDigest.update(c.toByte())
++                return c
+             }
+ 
+             override fun available(): Int {
+@@ -441,12 +467,14 @@ class UpdaterActivity : PreferenceActivity() {
+             override fun read(b: ByteArray?): Int {
+                 val n = stream.read(b)
+                 nBytesRead += n
++                if (n > 0 && b != null) xzDigest.update(b, 0, n)
+                 return n
+             }
+ 
+             override fun read(b: ByteArray?, off: Int, len: Int): Int {
+                 val n = stream.read(b, off, len)
+                 nBytesRead += n
++                if (n > 0 && b != null) xzDigest.update(b, off, n)
+                 var extProgress = (100 * nBytesRead) / completeFileSize
+                 runOnUiThread(Runnable {
+                     if (extProgress < 100) {
+@@ -464,7 +492,8 @@ class UpdaterActivity : PreferenceActivity() {
+             override fun skip(n: Long): Long {
+                 return stream.skip(n)
+             }
+-        })
++        }
++        val xzOut = XZInputStream(counted)
+         FileOutputStream("/dev/phh-ota").use { blockDev ->
+             val extBuf = ByteArray(1024 * 1024)
+             var totalWritten = 0L
+@@ -472,11 +501,29 @@ class UpdaterActivity : PreferenceActivity() {
+                 val extRead = xzOut.read(extBuf)
+                 if (extRead == -1) break
+                 blockDev.write(extBuf, 0, extRead)
++                imgDigest.update(extBuf, 0, extRead)
+                 totalWritten += extRead
+                 Log.d("PHH", "Total written to block dev is " + totalWritten)
+             }
+         }
+ 
++        // Read whatever is left of the download so the hash covers the whole file.
++        val rest = ByteArray(64 * 1024)
++        while (counted.read(rest) >= 0) { }
++        val xzHex = xzDigest.digest().toHex()
++        val imgHex = imgDigest.digest().toHex()
++        Log.e("PHH", "OTA download sha256: " + xzHex)
++        Log.e("PHH", "OTA image sha256: " + imgHex)
++        if (expectedHashes.first.isEmpty() && expectedHashes.second.isEmpty()) {
++            Log.e("PHH", "OTA json has no hashes, installing without verification")
++        }
++        if (expectedHashes.first.isNotEmpty() && expectedHashes.first != xzHex) {
++            throw OtaVerificationException("Download hash mismatch, expected " + expectedHashes.first + " got " + xzHex)
++        }
++        if (expectedHashes.second.isNotEmpty() && expectedHashes.second != imgHex) {
++            throw OtaVerificationException("Image hash mismatch, expected " + expectedHashes.second + " got " + imgHex)
++        }
++        Log.e("PHH", "OTA image verified")
+         runOnUiThread(Runnable {
+             progress_bar.setProgress(100)
+             progress_text.text = "100%"
+@@ -509,3 +556,6 @@ class UpdaterActivity : PreferenceActivity() {
+         })
+     }
+ }
++
++// Thrown when the downloaded image does not match the hashes published in ota.json.
++class OtaVerificationException(message: String) : Exception(message)
+diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
+index 2a4c35e..7aa61fb 100644
+--- a/app/src/main/res/values/strings.xml
++++ b/app/src/main/res/values/strings.xml
+@@ -17,6 +17,7 @@
+     <string name="update_error_message">An error has occurred during download!\nPlease, try again later.</string>
+     <string name="success_install_message">New update installed successfully.\nPlease, reboot now.</string>
+     <string name="failed_download_message">New update failed to be downloaded.\nCheck your logs for more information.</string>
++    <string name="failed_verify_message">The new update was downloaded but failed verification.\nYour current system was not changed.</string>
+     <string name="failed_install_message">New update failed to be installed.\nCheck your logs for more information.</string>
+     <string name="preparing_update_title">Preparing system update</string>
+     <string name="downloading_update_title">Downloading system update</string>
+-- 
+2.43.0
+

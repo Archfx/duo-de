@@ -1,63 +1,73 @@
-From 70f477a8ff961d575c64ba9875b76c50f20c1f9f Mon Sep 17 00:00:00 2001
+From e9f4ea71e09a82b86937e2948b225733b92fda50 Mon Sep 17 00:00:00 2001
 From: signoreTNT <71853850+signoreTNT@users.noreply.github.com>
 Date: Wed, 12 Feb 2025 12:41:40 +0100
-Subject: [PATCH 28/28] Revert "libfiemap: Disable loop mapping code."
+Subject: [PATCH] Revert "libfiemap: Disable loop mapping code."
 
 This reverts commit d7f09657617cd26734729bf8bc24b9a7829a544d.
+
+Change-Id: I008e59a05edad1a7ae5ddca076b0b616b9653eba
 ---
- fs_mgr/libfiemap/image_manager.cpp | 26 +++++++++++++-------------
- 1 file changed, 13 insertions(+), 13 deletions(-)
+ fs_mgr/libfiemap/image_manager.cpp | 34 ++++++++++--------------------
+ 1 file changed, 11 insertions(+), 23 deletions(-)
 
 diff --git a/fs_mgr/libfiemap/image_manager.cpp b/fs_mgr/libfiemap/image_manager.cpp
-index 83766adbf..71a041b3a 100644
+index a95b112bb..f99bd76be 100644
 --- a/fs_mgr/libfiemap/image_manager.cpp
 +++ b/fs_mgr/libfiemap/image_manager.cpp
-@@ -531,16 +531,11 @@ bool ImageManager::MapImageDevice(const std::string& name,
-     // If there is no intermediate device-mapper node, then partitions cannot be
-     // opened writable due to sepolicy and exclusivity of having a mounted
-     // filesystem. This should only happen on devices with no encryption, or
--    // devices with FBE and no metadata encryption. For these cases we COULD
--    // perform normal writes to /data/gsi (which is unencrypted), but given that
--    // metadata encryption has been mandated since Android R, we don't actually
--    // support or test this.
-+    // devices with FBE and no metadata encryption. For these cases it suffices
-+    // to perform normal file writes to /data/gsi (which is unencrypted).
-     //
--    // So, we validate here that /data is backed by device-mapper. This code
--    // isn't needed in recovery since there is no /data.
--    //
--    // If this logic sticks for a release, we can remove MapWithLoopDevice, as
--    // well as WrapUserdataIfNeeded in fs_mgr.
-+    // Note: this is not gated on DeviceInfo, because the recovery-specific path
-+    // must only be used in actual recovery.
-     std::string block_device;
-     bool can_use_devicemapper;
-     if (!FiemapWriter::GetBlockDeviceForFile(image_header, &block_device, &can_use_devicemapper)) {
-@@ -548,15 +543,20 @@ bool ImageManager::MapImageDevice(const std::string& name,
+@@ -521,26 +521,14 @@ bool ImageManager::MapImageDevice(const std::string& name,
          return false;
      }
  
--    if (!can_use_devicemapper) {
--        LOG(ERROR) << "Cannot map image: /data must be mounted on top of device-mapper.";
-+    if (can_use_devicemapper) {
-+        if (!MapWithDmLinear(*partition_opener_.get(), name, timeout_ms, path)) {
++    // If /data is not on top of device-mapper (devices with FBE but no metadata encryption,
++    // e.g. older vendors), partitions cannot be opened writable due to
++    // sepolicy and exclusivity of having a mounted filesystem. AOSP dropped support for this
++    // case; restore it by mapping the image with a loop device instead of dm-linear.
++    bool use_loop_device = false;
+ #ifndef __ANDROID_RAMDISK__
+     auto image_header = GetImageHeaderPath(name);
+     if (access(image_header.c_str(), F_OK) == 0) {
+-        // If there is a device-mapper node wrapping the block device, then we're
+-        // able to create another node around it; the dm layer does not carry the
+-        // exclusion lock down the stack when a mount occurs.
+-        //
+-        // If there is no intermediate device-mapper node, then partitions cannot be
+-        // opened writable due to sepolicy and exclusivity of having a mounted
+-        // filesystem. This should only happen on devices with no encryption, or
+-        // devices with FBE and no metadata encryption. For these cases we COULD
+-        // perform normal writes to /data/gsi (which is unencrypted), but given that
+-        // metadata encryption has been mandated since Android R, we don't actually
+-        // support or test this.
+-        //
+-        // So, we validate here that /data is backed by device-mapper. This code
+-        // isn't needed in recovery since there is no /data.
+-        //
+-        // If this logic sticks for a release, we can remove MapWithLoopDevice, as
+-        // well as WrapUserdataIfNeeded in fs_mgr.
+         std::string block_device;
+         bool can_use_devicemapper;
+         if (!FiemapWriter::GetBlockDeviceForFile(image_header, &block_device,
+@@ -548,15 +536,15 @@ bool ImageManager::MapImageDevice(const std::string& name,
+             LOG(ERROR) << "Could not determine block device for " << image_header;
+             return false;
+         }
+-
+-        if (!can_use_devicemapper) {
+-            LOG(ERROR) << "Cannot map image: /data must be mounted on top of device-mapper.";
+-            return false;
+-        }
++        use_loop_device = !can_use_devicemapper;
+     }
+ #endif
+ 
+-    if (!MapWithDmLinear(*partition_opener_.get(), name, timeout_ms, path)) {
++    if (use_loop_device) {
++        if (!MapWithLoopDevice(name, timeout_ms, path)) {
 +            return false;
 +        }
-+    } else if (!MapWithLoopDevice(name, timeout_ms, path)) {
++    } else if (!MapWithDmLinear(*partition_opener_.get(), name, timeout_ms, path)) {
          return false;
      }
--#endif
--
-+#else
-+    // In recovery, we can *only* use device-mapper, since partitions aren't
-+    // mounted. That also means we cannot call GetBlockDeviceForFile.
-     if (!MapWithDmLinear(*partition_opener_.get(), name, timeout_ms, path)) {
-         return false;
-     }
-+#endif
  
-     // Set a property so we remember this is mapped.
-     auto prop_name = GetStatusPropertyName(name);
 -- 
 2.43.0
 

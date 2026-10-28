@@ -1,0 +1,74 @@
+From d79f4433506dfa0d3a12dd9250894a5cc33fd412 Mon Sep 17 00:00:00 2001
+From: ethan <ethangoh98@gmail.com>
+Date: Thu, 19 October 2026 01:14:32 +1100
+Subject: [PATCH] Remove permissive checks for user builds
+
+diff --git a/aosp.mk b/aosp.mk
+index f3a8fae..d21dc93 100644
+--- a/aosp.mk
++++ b/aosp.mk
+@@ -1,4 +1,4 @@
+ $(call inherit-product, vendor/ponces/config/common.mk)
+ 
+ PRODUCT_SYSTEM_DEFAULT_PROPERTIES += \
+-    ro.system.ota.json_url=https://raw.githubusercontent.com/Archfx/duo-de/main-16/config/ota.json
+\ No newline at end of file
++    ro.system.ota.json_url=https://raw.githubusercontent.com/Archfx/duo-de/main-16/config/ota.json
+diff --git a/base.mk b/base.mk
+index 3046a35..deea465 100644
+--- a/base.mk
++++ b/base.mk
+@@ -33,7 +33,6 @@ PRODUCT_SYSTEM_DEFAULT_PROPERTIES += \
+     ro.build.version.all_codenames=$(PLATFORM_VERSION_ALL_CODENAMES) \
+     ro.build.version.release=$(PLATFORM_VERSION) \
+     ro.build.version.security_patch=$(PLATFORM_SECURITY_PATCH) \
+-    ro.adb.secure=0 \
+     ro.logd.auditd=true \
+     ro.logd.kernel=true \
+ 
+diff --git a/sepolicy/huawei.te b/sepolicy/huawei.te
+index 2988ed6..8d2d75f 100644
+--- a/sepolicy/huawei.te
++++ b/sepolicy/huawei.te
+@@ -1,5 +1,5 @@
+ allow ueventd proc:file r_file_perms;
+-permissive ueventd;
++# permissive ueventd;
+ 
+ type teecd_data_file, file_type;
+ type dmd_device, file_type;
+diff --git a/sepolicy/mediatek.te b/sepolicy/mediatek.te
+index 0344d0f..d0133a0 100644
+--- a/sepolicy/mediatek.te
++++ b/sepolicy/mediatek.te
+@@ -23,7 +23,7 @@ allow { appdomain -isolated_app }  mtk_hal_mms_hwservice:hwservice_manager find;
+ #denied { getattr } for comm="tkuinit" path="/dev/__properties__/u:object_r:default_prop:s0" dev="tmpfs" ino=2029 scontext=u:r:tkcore:s0 tcontext=u:object_r:default_prop:s0 tclass=file permissive=1
+ 
+ type tkcore, domain;
+-permissive tkcore;
++# permissive tkcore;
+ 
+ allow platform_app sysfs_leds:dir r_dir_perms;
+ allow platform_app sysfs_leds:file r_file_perms;
+diff --git a/sepolicy/su.te b/sepolicy/su.te
+index f8829cd..921580f 100644
+--- a/sepolicy/su.te
++++ b/sepolicy/su.te
+@@ -3,7 +3,7 @@ type phhsu_exec, exec_type, file_type;
+ type phhsu_daemon_tmpfs, file_type;
+ 
+ typeattribute phhsu_daemon coredomain;
+-permissive phhsu_daemon;
++# permissive phhsu_daemon;
+ 
+ tmpfs_domain(phhsu_daemon);
+ domain_auto_trans(init, phhsu_exec, phhsu_daemon);
+diff --git a/system.prop b/system.prop
+index 90afe72..703b5e8 100644
+--- a/system.prop
++++ b/system.prop
+@@ -1,4 +1,3 @@
+-ro.adb.secure=0
+ #Some devices have sdcardfs kernel panicing on 8.0
+ #Disable for everyone for the moment
+ ro.sys.sdcardfs=0

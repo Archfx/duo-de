@@ -1,0 +1,33 @@
+From df7377ce5303d3679d41acb699c216d1e1645f72 Mon Sep 17 00:00:00 2001
+From: Mike Kostersitz <mkostersitz@mac.com>
+Date: Thu, 15 Oct 2026 23:28:38 +0000
+Subject: [PATCH] Enable enable_refactor_task_thumbnail for the bp2a release
+ config (r4 port)
+
+android-16.0.0_r4 (BP4A) TaskView creates RecentsDependencies unconditionally,
+and RecentsView only initialises them when enable_refactor_task_thumbnail is on.
+That flag is ENABLED in bp3a/bp4a but not in bp2a, which this build still uses,
+so the first swipe-up into Overview crashes Launcher3 with
+"Recents dependencies are not initialized".
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ .../enable_refactor_task_thumbnail.textproto                | 6 ++++++
+ 1 file changed, 6 insertions(+)
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/enable_refactor_task_thumbnail.textproto
+
+diff --git a/release/aconfig/bp2a/com.android.launcher3/enable_refactor_task_thumbnail.textproto b/release/aconfig/bp2a/com.android.launcher3/enable_refactor_task_thumbnail.textproto
+new file mode 100644
+index 0000000..5adcfb6
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/enable_refactor_task_thumbnail.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "enable_refactor_task_thumbnail"
++  state: ENABLED
++  permission: READ_ONLY
++}
+-- 
+2.43.0
+

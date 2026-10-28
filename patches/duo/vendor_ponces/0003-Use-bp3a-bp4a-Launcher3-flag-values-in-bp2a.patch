@@ -1,0 +1,426 @@
+From a4f485e31ce53c45091670e6453e2983e6838f07 Mon Sep 17 00:00:00 2001
+From: Mike Kostersitz <mkostersitz@mac.com>
+Date: Fri, 16 Oct 2026 00:06:25 +0000
+Subject: [PATCH] Use the bp3a/bp4a Launcher3 flag values in the bp2a release
+ config (r4 port)
+
+android-16.0.0_r4 Launcher3 is written for the BP4A release flags. With bp2a,
+flags such as all_apps_blur and enable_overview_background_wallpaper_blur are
+off and the code falls into broken paths (ScalingWorkspaceRevealAnim passes an
+integer resource to getDimensionPixelSize and crashes Launcher3 on swipe-up).
+Copy the bp3a/bp4a values for every Launcher3 flag the source declares, except
+the ones ponces already sets.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ .../bp2a/com.android.launcher3/all_apps_blur.textproto      | 6 ++++++
+ .../all_apps_sheet_for_handheld.textproto                   | 6 ++++++
+ .../com.android.launcher3/clear_scrim_on_reset.textproto    | 6 ++++++
+ .../enable_alt_tab_kqs_flatenning.textproto                 | 6 ++++++
+ .../enable_alt_tab_kqs_on_connected_displays.textproto      | 6 ++++++
+ .../enable_auto_stash_connected_display_taskbar.textproto   | 6 ++++++
+ .../enable_custom_height_for_all_apps_on_cd.textproto       | 6 ++++++
+ .../enable_desktop_exploded_view.textproto                  | 6 ++++++
+ .../enable_gesture_nav_on_connected_displays.textproto      | 6 ++++++
+ .../enable_grid_only_overview.textproto                     | 6 ++++++
+ .../enable_meta_tab_toggle_in_overview.textproto            | 6 ++++++
+ .../enable_new_all_set_animation.textproto                  | 6 ++++++
+ .../enable_overview_background_wallpaper_blur.textproto     | 6 ++++++
+ .../enable_overview_icon_menu.textproto                     | 6 ++++++
+ .../enable_overview_on_connected_displays.textproto         | 6 ++++++
+ .../enable_refactor_task_content_view.textproto             | 6 ++++++
+ .../enable_taskbar_for_direct_boot.textproto                | 6 ++++++
+ .../enable_taskbar_recents_themed_icons.textproto           | 6 ++++++
+ .../enable_widget_picker_refactor.textproto                 | 6 ++++++
+ .../force_monochrome_app_icons.textproto                    | 6 ++++++
+ .../bp2a/com.android.launcher3/msdl_feedback.textproto      | 6 ++++++
+ .../bp2a/com.android.launcher3/one_grid_specs.textproto     | 6 ++++++
+ .../refactor_taskbar_ui_state.textproto                     | 6 ++++++
+ .../restore_archived_app_icons_from_db.textproto            | 6 ++++++
+ .../restore_archived_shortcuts.textproto                    | 6 ++++++
+ .../show_close_button_on_taskview_hover.textproto           | 6 ++++++
+ .../show_taskbar_pinning_popup_from_anywhere.textproto      | 6 ++++++
+ .../sync_app_launch_with_taskbar_stash.textproto            | 6 ++++++
+ .../work_scheduler_in_work_profile.textproto                | 6 ++++++
+ 29 files changed, 174 insertions(+)
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/all_apps_blur.textproto
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/all_apps_sheet_for_handheld.textproto
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/clear_scrim_on_reset.textproto
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/enable_alt_tab_kqs_flatenning.textproto
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/enable_alt_tab_kqs_on_connected_displays.textproto
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/enable_auto_stash_connected_display_taskbar.textproto
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/enable_custom_height_for_all_apps_on_cd.textproto
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/enable_desktop_exploded_view.textproto
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/enable_gesture_nav_on_connected_displays.textproto
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/enable_grid_only_overview.textproto
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/enable_meta_tab_toggle_in_overview.textproto
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/enable_new_all_set_animation.textproto
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/enable_overview_background_wallpaper_blur.textproto
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/enable_overview_icon_menu.textproto
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/enable_overview_on_connected_displays.textproto
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/enable_refactor_task_content_view.textproto
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/enable_taskbar_for_direct_boot.textproto
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/enable_taskbar_recents_themed_icons.textproto
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/enable_widget_picker_refactor.textproto
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/force_monochrome_app_icons.textproto
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/msdl_feedback.textproto
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/one_grid_specs.textproto
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/refactor_taskbar_ui_state.textproto
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/restore_archived_app_icons_from_db.textproto
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/restore_archived_shortcuts.textproto
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/show_close_button_on_taskview_hover.textproto
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/show_taskbar_pinning_popup_from_anywhere.textproto
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/sync_app_launch_with_taskbar_stash.textproto
+ create mode 100644 release/aconfig/bp2a/com.android.launcher3/work_scheduler_in_work_profile.textproto
+
+diff --git a/release/aconfig/bp2a/com.android.launcher3/all_apps_blur.textproto b/release/aconfig/bp2a/com.android.launcher3/all_apps_blur.textproto
+new file mode 100644
+index 0000000..b49a905
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/all_apps_blur.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "all_apps_blur"
++  state: ENABLED
++  permission: READ_ONLY
++}
+diff --git a/release/aconfig/bp2a/com.android.launcher3/all_apps_sheet_for_handheld.textproto b/release/aconfig/bp2a/com.android.launcher3/all_apps_sheet_for_handheld.textproto
+new file mode 100644
+index 0000000..efe0e63
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/all_apps_sheet_for_handheld.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "all_apps_sheet_for_handheld"
++  state: ENABLED
++  permission: READ_ONLY
++}
+diff --git a/release/aconfig/bp2a/com.android.launcher3/clear_scrim_on_reset.textproto b/release/aconfig/bp2a/com.android.launcher3/clear_scrim_on_reset.textproto
+new file mode 100644
+index 0000000..f151ffe
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/clear_scrim_on_reset.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "clear_scrim_on_reset"
++  state: ENABLED
++  permission: READ_ONLY
++}
+diff --git a/release/aconfig/bp2a/com.android.launcher3/enable_alt_tab_kqs_flatenning.textproto b/release/aconfig/bp2a/com.android.launcher3/enable_alt_tab_kqs_flatenning.textproto
+new file mode 100644
+index 0000000..73b2852
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/enable_alt_tab_kqs_flatenning.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "enable_alt_tab_kqs_flatenning"
++  state: ENABLED
++  permission: READ_ONLY
++}
+diff --git a/release/aconfig/bp2a/com.android.launcher3/enable_alt_tab_kqs_on_connected_displays.textproto b/release/aconfig/bp2a/com.android.launcher3/enable_alt_tab_kqs_on_connected_displays.textproto
+new file mode 100644
+index 0000000..a385aa6
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/enable_alt_tab_kqs_on_connected_displays.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "enable_alt_tab_kqs_on_connected_displays"
++  state: ENABLED
++  permission: READ_ONLY
++}
+diff --git a/release/aconfig/bp2a/com.android.launcher3/enable_auto_stash_connected_display_taskbar.textproto b/release/aconfig/bp2a/com.android.launcher3/enable_auto_stash_connected_display_taskbar.textproto
+new file mode 100644
+index 0000000..0dcbbde
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/enable_auto_stash_connected_display_taskbar.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "enable_auto_stash_connected_display_taskbar"
++  state: ENABLED
++  permission: READ_ONLY
++}
+diff --git a/release/aconfig/bp2a/com.android.launcher3/enable_custom_height_for_all_apps_on_cd.textproto b/release/aconfig/bp2a/com.android.launcher3/enable_custom_height_for_all_apps_on_cd.textproto
+new file mode 100644
+index 0000000..7469427
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/enable_custom_height_for_all_apps_on_cd.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "enable_custom_height_for_all_apps_on_cd"
++  state: ENABLED
++  permission: READ_ONLY
++}
+diff --git a/release/aconfig/bp2a/com.android.launcher3/enable_desktop_exploded_view.textproto b/release/aconfig/bp2a/com.android.launcher3/enable_desktop_exploded_view.textproto
+new file mode 100644
+index 0000000..2fa602f
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/enable_desktop_exploded_view.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "enable_desktop_exploded_view"
++  state: ENABLED
++  permission: READ_ONLY
++}
+diff --git a/release/aconfig/bp2a/com.android.launcher3/enable_gesture_nav_on_connected_displays.textproto b/release/aconfig/bp2a/com.android.launcher3/enable_gesture_nav_on_connected_displays.textproto
+new file mode 100644
+index 0000000..509ed0e
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/enable_gesture_nav_on_connected_displays.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "enable_gesture_nav_on_connected_displays"
++  state: ENABLED
++  permission: READ_ONLY
++}
+diff --git a/release/aconfig/bp2a/com.android.launcher3/enable_grid_only_overview.textproto b/release/aconfig/bp2a/com.android.launcher3/enable_grid_only_overview.textproto
+new file mode 100644
+index 0000000..d045e62
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/enable_grid_only_overview.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "enable_grid_only_overview"
++  state: ENABLED
++  permission: READ_ONLY
++}
+diff --git a/release/aconfig/bp2a/com.android.launcher3/enable_meta_tab_toggle_in_overview.textproto b/release/aconfig/bp2a/com.android.launcher3/enable_meta_tab_toggle_in_overview.textproto
+new file mode 100644
+index 0000000..55c1102
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/enable_meta_tab_toggle_in_overview.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "enable_meta_tab_toggle_in_overview"
++  state: ENABLED
++  permission: READ_ONLY
++}
+diff --git a/release/aconfig/bp2a/com.android.launcher3/enable_new_all_set_animation.textproto b/release/aconfig/bp2a/com.android.launcher3/enable_new_all_set_animation.textproto
+new file mode 100644
+index 0000000..0e0b401
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/enable_new_all_set_animation.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "enable_new_all_set_animation"
++  state: ENABLED
++  permission: READ_ONLY
++}
+diff --git a/release/aconfig/bp2a/com.android.launcher3/enable_overview_background_wallpaper_blur.textproto b/release/aconfig/bp2a/com.android.launcher3/enable_overview_background_wallpaper_blur.textproto
+new file mode 100644
+index 0000000..e30ef2a
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/enable_overview_background_wallpaper_blur.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "enable_overview_background_wallpaper_blur"
++  state: ENABLED
++  permission: READ_ONLY
++}
+diff --git a/release/aconfig/bp2a/com.android.launcher3/enable_overview_icon_menu.textproto b/release/aconfig/bp2a/com.android.launcher3/enable_overview_icon_menu.textproto
+new file mode 100644
+index 0000000..23e5445
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/enable_overview_icon_menu.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "enable_overview_icon_menu"
++  state: ENABLED
++  permission: READ_ONLY
++}
+diff --git a/release/aconfig/bp2a/com.android.launcher3/enable_overview_on_connected_displays.textproto b/release/aconfig/bp2a/com.android.launcher3/enable_overview_on_connected_displays.textproto
+new file mode 100644
+index 0000000..6a33c89
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/enable_overview_on_connected_displays.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "enable_overview_on_connected_displays"
++  state: ENABLED
++  permission: READ_ONLY
++}
+diff --git a/release/aconfig/bp2a/com.android.launcher3/enable_refactor_task_content_view.textproto b/release/aconfig/bp2a/com.android.launcher3/enable_refactor_task_content_view.textproto
+new file mode 100644
+index 0000000..bab1895
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/enable_refactor_task_content_view.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "enable_refactor_task_content_view"
++  state: ENABLED
++  permission: READ_ONLY
++}
+diff --git a/release/aconfig/bp2a/com.android.launcher3/enable_taskbar_for_direct_boot.textproto b/release/aconfig/bp2a/com.android.launcher3/enable_taskbar_for_direct_boot.textproto
+new file mode 100644
+index 0000000..8eec944
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/enable_taskbar_for_direct_boot.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "enable_taskbar_for_direct_boot"
++  state: ENABLED
++  permission: READ_ONLY
++}
+diff --git a/release/aconfig/bp2a/com.android.launcher3/enable_taskbar_recents_themed_icons.textproto b/release/aconfig/bp2a/com.android.launcher3/enable_taskbar_recents_themed_icons.textproto
+new file mode 100644
+index 0000000..c9730e5
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/enable_taskbar_recents_themed_icons.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "enable_taskbar_recents_themed_icons"
++  state: ENABLED
++  permission: READ_ONLY
++}
+diff --git a/release/aconfig/bp2a/com.android.launcher3/enable_widget_picker_refactor.textproto b/release/aconfig/bp2a/com.android.launcher3/enable_widget_picker_refactor.textproto
+new file mode 100644
+index 0000000..08e94a9
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/enable_widget_picker_refactor.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "enable_widget_picker_refactor"
++  state: ENABLED
++  permission: READ_ONLY
++}
+diff --git a/release/aconfig/bp2a/com.android.launcher3/force_monochrome_app_icons.textproto b/release/aconfig/bp2a/com.android.launcher3/force_monochrome_app_icons.textproto
+new file mode 100644
+index 0000000..dc9d3b2
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/force_monochrome_app_icons.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "force_monochrome_app_icons"
++  state: ENABLED
++  permission: READ_ONLY
++}
+diff --git a/release/aconfig/bp2a/com.android.launcher3/msdl_feedback.textproto b/release/aconfig/bp2a/com.android.launcher3/msdl_feedback.textproto
+new file mode 100644
+index 0000000..4c4a0b5
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/msdl_feedback.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "msdl_feedback"
++  state: ENABLED
++  permission: READ_ONLY
++}
+diff --git a/release/aconfig/bp2a/com.android.launcher3/one_grid_specs.textproto b/release/aconfig/bp2a/com.android.launcher3/one_grid_specs.textproto
+new file mode 100644
+index 0000000..1dcdced
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/one_grid_specs.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "one_grid_specs"
++  state: ENABLED
++  permission: READ_ONLY
++}
+diff --git a/release/aconfig/bp2a/com.android.launcher3/refactor_taskbar_ui_state.textproto b/release/aconfig/bp2a/com.android.launcher3/refactor_taskbar_ui_state.textproto
+new file mode 100644
+index 0000000..dc0d526
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/refactor_taskbar_ui_state.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "refactor_taskbar_ui_state"
++  state: ENABLED
++  permission: READ_ONLY
++}
+diff --git a/release/aconfig/bp2a/com.android.launcher3/restore_archived_app_icons_from_db.textproto b/release/aconfig/bp2a/com.android.launcher3/restore_archived_app_icons_from_db.textproto
+new file mode 100644
+index 0000000..67f0e27
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/restore_archived_app_icons_from_db.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "restore_archived_app_icons_from_db"
++  state: ENABLED
++  permission: READ_ONLY
++}
+diff --git a/release/aconfig/bp2a/com.android.launcher3/restore_archived_shortcuts.textproto b/release/aconfig/bp2a/com.android.launcher3/restore_archived_shortcuts.textproto
+new file mode 100644
+index 0000000..2beb08e
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/restore_archived_shortcuts.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "restore_archived_shortcuts"
++  state: ENABLED
++  permission: READ_ONLY
++}
+diff --git a/release/aconfig/bp2a/com.android.launcher3/show_close_button_on_taskview_hover.textproto b/release/aconfig/bp2a/com.android.launcher3/show_close_button_on_taskview_hover.textproto
+new file mode 100644
+index 0000000..71af757
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/show_close_button_on_taskview_hover.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "show_close_button_on_taskview_hover"
++  state: ENABLED
++  permission: READ_ONLY
++}
+diff --git a/release/aconfig/bp2a/com.android.launcher3/show_taskbar_pinning_popup_from_anywhere.textproto b/release/aconfig/bp2a/com.android.launcher3/show_taskbar_pinning_popup_from_anywhere.textproto
+new file mode 100644
+index 0000000..2524f9d
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/show_taskbar_pinning_popup_from_anywhere.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "show_taskbar_pinning_popup_from_anywhere"
++  state: ENABLED
++  permission: READ_ONLY
++}
+diff --git a/release/aconfig/bp2a/com.android.launcher3/sync_app_launch_with_taskbar_stash.textproto b/release/aconfig/bp2a/com.android.launcher3/sync_app_launch_with_taskbar_stash.textproto
+new file mode 100644
+index 0000000..66a07c0
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/sync_app_launch_with_taskbar_stash.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "sync_app_launch_with_taskbar_stash"
++  state: ENABLED
++  permission: READ_ONLY
++}
+diff --git a/release/aconfig/bp2a/com.android.launcher3/work_scheduler_in_work_profile.textproto b/release/aconfig/bp2a/com.android.launcher3/work_scheduler_in_work_profile.textproto
+new file mode 100644
+index 0000000..9556368
+--- /dev/null
++++ b/release/aconfig/bp2a/com.android.launcher3/work_scheduler_in_work_profile.textproto
+@@ -0,0 +1,6 @@
++flag_value {
++  package: "com.android.launcher3"
++  name: "work_scheduler_in_work_profile"
++  state: ENABLED
++  permission: READ_ONLY
++}
+-- 
+2.43.0
+

@@ -1,0 +1,50 @@
+From 322dc01aa3462fa36cdadb88f07729cfa64e8b04 Mon Sep 17 00:00:00 2001
+From: builder <builder@aosp-vm>
+Date: Fri, 9 Oct 2026 18:38:42 +0000
+Subject: [PATCH] Drop ParanoidSense and OmniJaws from the product (r4 port,
+ until their framework patches are ported)
+
+Their apps depend on frameworks/base patches that conflict on android-16.0.0_r4 (SenseProvider for face unlock,
+OmniJaws keyguard slice provider). Removes the package, the ro.face.sense_service property and the face feature file.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ config/common.mk   | 10 ----------
+ config/packages.mk |  3 ---
+ 2 files changed, 13 deletions(-)
+
+diff --git a/config/common.mk b/config/common.mk
+index 86b53a7..ed902c5 100644
+--- a/config/common.mk
++++ b/config/common.mk
+@@ -12,16 +12,6 @@ endif
+ PRODUCT_COPY_FILES += \
+     frameworks/native/data/etc/android.software.sip.voip.xml:$(TARGET_COPY_OUT_PRODUCT)/etc/permissions/android.software.sip.voip.xml
+ 
+-# Face Unlock
+-PRODUCT_PACKAGES += \
+-    ParanoidSense
+-
+-PRODUCT_SYSTEM_EXT_PROPERTIES += \
+-    ro.face.sense_service=true
+-
+-PRODUCT_COPY_FILES += \
+-    frameworks/native/data/etc/android.hardware.biometrics.face.xml:$(TARGET_COPY_OUT_SYSTEM)/etc/permissions/android.hardware.biometrics.face.xml
+-
+ # World APN list
+ PRODUCT_COPY_FILES += \
+     vendor/ponces/prebuilt/common/etc/apns-conf.xml:$(TARGET_COPY_OUT_SYSTEM)/etc/apns-conf.xml
+diff --git a/config/packages.mk b/config/packages.mk
+index 88154e8..8ab24ea 100644
+--- a/config/packages.mk
++++ b/config/packages.mk
+@@ -9,6 +9,3 @@ PRODUCT_PACKAGES += \
+ PRODUCT_PACKAGES += \
+     QuickAccessWallet
+ 
+-# Weather
+-PRODUCT_PACKAGES += \
+-    OmniJaws
+-- 
+2.43.0
+
