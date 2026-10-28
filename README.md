@@ -1,7 +1,5 @@
 # Surface-duo Dual Experience [duo-de][A16]
 
-[![Typing SVG](https://readme-typing-svg.herokuapp.com?font=Ubuntu&pause=1000&color=F71D0C&center=true&vCenter=true&width=435&lines=Android+16+Experimental+Release+Available)](https://git.io/typing-svg)
-
 
 <img align="left" width="120" height="auto" alt="" src="images/delogo.svg"/>
 The Surface Duo, Microsoft's dual-screen Android device, aimed to redefine mobile productivity by offering a unique form factor that combined the versatility of two screens with the familiarity of the Android operating system. Although Microsoft officially ceased updates and support for the Surface Duo line in early 2023, with AOSP GSI and the help of the open-source community, it is time to give a second life to this awesome and unique hardware.
@@ -169,7 +167,7 @@ Any issues, please
 ## Credits
 These people have helped this project in some way or another, so they should be the ones who receive all the credit:
 
-[phhusson](https://github.com/phhusson) [AndyYan](https://github.com/AndyCGYan) [eremitein](https://github.com/eremitein) [kdrag0n](https://github.com/kdrag0n) [Peter Cai](https://github.com/PeterCxy) [haridhayal11](https://github.com/haridhayal11) [sooti](https://github.com/sooti) [Iceows](https://github.com/Iceows) [ChonDoit](https://github.com/ChonDoit) [ponces](https://github.com/ponces) [thai-ng](https://github.com/thai-ng) [farmerbb](https://github.com/farmerbb) [Ethanol10](https://github.com/Ethanol10)
+[phhusson](https://github.com/phhusson) [AndyYan](https://github.com/AndyCGYan) [eremitein](https://github.com/eremitein) [kdrag0n](https://github.com/kdrag0n) [Peter Cai](https://github.com/PeterCxy) [haridhayal11](https://github.com/haridhayal11) [sooti](https://github.com/sooti) [Iceows](https://github.com/Iceows) [ChonDoit](https://github.com/ChonDoit) [ponces](https://github.com/ponces) [thai-ng](https://github.com/thai-ng) [farmerbb](https://github.com/farmerbb) [Ethanol10](https://github.com/Ethanol10) [mkostersitz](https://github.com/mkostersitz)
 
 
 ## Disclaimer
