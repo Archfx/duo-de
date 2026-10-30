@@ -1,7 +1,5 @@
 # Surface-duo Dual Experience [duo-de][A16]
 
-[![Typing SVG](https://readme-typing-svg.herokuapp.com?font=Ubuntu&pause=1000&color=F71D0C&center=true&vCenter=true&width=435&lines=Android+16+Experimental+Release+Available)](https://git.io/typing-svg)
-
 
 <img align="left" width="120" height="auto" alt="" src="images/delogo.svg"/>
 The Surface Duo, Microsoft's dual-screen Android device, aimed to redefine mobile productivity by offering a unique form factor that combined the versatility of two screens with the familiarity of the Android operating system. Although Microsoft officially ceased updates and support for the Surface Duo line in early 2023, with AOSP GSI and the help of the open-source community, it is time to give a second life to this awesome and unique hardware.
@@ -47,8 +45,10 @@ Both options will prompt you to open the second application to share the screen.
 
 ## Surface Duo 2 Status
 
-While DUO-DE works smoothly on both [Surface Duo (Gen1)](https://support.microsoft.com/en-us/surface/surface-duo-1st-gen-features-and-specs-13f2bba9-2b5d-8802-b021-abf26539eef8) and [Surface Duo 2](https://support.microsoft.com/en-us/surface/surface-duo-2-features-01e772a5-3272-4e2f-b0cd-53b5b73e8d21), some of the extra functionalities of Duo2 (like ultrawide or zoom sensors of cameras, surface pen charging) require a lot of reverse engineering work. The Duo2 reverse engineering work is led by [Ethanol10](https://github.com/Ethanol10). Currently, we have extracted lot of information about Duo2, however realizing them as features would take time due to the amount of development and testing required. Discussions related to reverse engineering Duo2 are available [here](https://github.com/Archfx/duo-de/discussions/54).
-> Update: Releases after v2024.12.16 support surface pen wireless charging with the appropriate pen case
+DUO-DE works smoothly on both [Surface Duo (Gen1)](https://support.microsoft.com/en-us/surface/surface-duo-1st-gen-features-and-specs-13f2bba9-2b5d-8802-b021-abf26539eef8) and [Surface Duo 2](https://support.microsoft.com/en-us/surface/surface-duo-2-features-01e772a5-3272-4e2f-b0cd-53b5b73e8d21). The additional Surface Duo 2 functionalities, including support for its ultrawide and zoom camera sensors and Surface Pen wireless charging, have been implemented.
+
+The Surface Duo 2 reverse-engineering effort was led by [Ethanol10](https://github.com/Ethanol10), with several significant contributions from [mkostersitz](https://github.com/mkostersitz). Thanks to their efforts, the previously outstanding Duo 2 issues have been resolved. Discussions and technical details about the reverse-engineering work are available [here](https://github.com/Archfx/duo-de/discussions/54).
+
 
 ## Benchmarks
 
@@ -169,7 +169,7 @@ Any issues, please
 ## Credits
 These people have helped this project in some way or another, so they should be the ones who receive all the credit:
 
-[phhusson](https://github.com/phhusson) [AndyYan](https://github.com/AndyCGYan) [eremitein](https://github.com/eremitein) [kdrag0n](https://github.com/kdrag0n) [Peter Cai](https://github.com/PeterCxy) [haridhayal11](https://github.com/haridhayal11) [sooti](https://github.com/sooti) [Iceows](https://github.com/Iceows) [ChonDoit](https://github.com/ChonDoit) [ponces](https://github.com/ponces) [thai-ng](https://github.com/thai-ng) [farmerbb](https://github.com/farmerbb) [Ethanol10](https://github.com/Ethanol10)
+[phhusson](https://github.com/phhusson) [AndyYan](https://github.com/AndyCGYan) [eremitein](https://github.com/eremitein) [kdrag0n](https://github.com/kdrag0n) [Peter Cai](https://github.com/PeterCxy) [haridhayal11](https://github.com/haridhayal11) [sooti](https://github.com/sooti) [Iceows](https://github.com/Iceows) [ChonDoit](https://github.com/ChonDoit) [ponces](https://github.com/ponces) [thai-ng](https://github.com/thai-ng) [farmerbb](https://github.com/farmerbb) [Ethanol10](https://github.com/Ethanol10) [mkostersitz](https://github.com/mkostersitz)
 
 
 ## Disclaimer
