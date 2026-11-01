@@ -1,0 +1,40 @@
+From de4ede268edde57a01c8323144516d5ff1c62ea9 Mon Sep 17 00:00:00 2001
+From: Alberto Ponces <ponces26@gmail.com>
+Date: Sun, 26 Feb 2023 22:13:35 +0000
+Subject: [PATCH 3/7] SystemUI: use Style.SPRITZ by default
+
+Change-Id: Ia44ba56c8daa07033b290de89bb300bda9d39d86
+---
+ .../com/android/systemui/theme/ThemeOverlayController.java  | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/packages/SystemUI/src/com/android/systemui/theme/ThemeOverlayController.java b/packages/SystemUI/src/com/android/systemui/theme/ThemeOverlayController.java
+index a08f225562f7..27b65314608f 100644
+--- a/packages/SystemUI/src/com/android/systemui/theme/ThemeOverlayController.java
++++ b/packages/SystemUI/src/com/android/systemui/theme/ThemeOverlayController.java
+@@ -158,7 +158,7 @@ public class ThemeOverlayController implements CoreStartable, Dumpable {
+     // Theme variant: Vibrant, Tonal, Expressive, etc
+     @VisibleForTesting
+     @Style.Type
+-    protected int mThemeStyle = Style.TONAL_SPOT;
++    protected int mThemeStyle = Style.SPRITZ;
+     // Accent colors overlay
+     private FabricatedOverlay mSecondaryOverlay;
+     // Neutral system colors overlay
+@@ -904,11 +904,11 @@ public class ThemeOverlayController implements CoreStartable, Dumpable {
+                 style = Style.valueOf(
+                         object.getString(OVERLAY_CATEGORY_THEME_STYLE));
+                 if (!validStyles.contains(style)) {
+-                    style = Style.TONAL_SPOT;
++                    style = Style.SPRITZ;
+                 }
+             } catch (JSONException | IllegalArgumentException e) {
+                 Log.i(TAG, "Failed to parse THEME_CUSTOMIZATION_OVERLAY_PACKAGES.", e);
+-                style = Style.TONAL_SPOT;
++                style = Style.SPRITZ;
+             }
+         }
+         return style;
+-- 
+2.43.0
+

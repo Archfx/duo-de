@@ -1,0 +1,208 @@
+From 8bb603c8f973de594444c7506723da323f93c975 Mon Sep 17 00:00:00 2001
+From: Pierre-Hugues Husson <phh@phh.me>
+Date: Wed, 21 Feb 2024 12:50:28 -0500
+Subject: [PATCH 08/12] Initialize Samsung AIDL ISehRadioNetwork. Fixes 5G on
+ S24
+
+---
+ Android.bp                                    |   1 +
+ .../com/android/internal/telephony/RIL.java   |   2 +-
+ .../internal/telephony/RadioNetworkProxy.java | 143 +++++++++++++++++-
+ 3 files changed, 144 insertions(+), 2 deletions(-)
+
+diff --git a/Android.bp b/Android.bp
+index e667cb39e5..e87ddb3ffd 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -90,6 +90,7 @@ java_library {
+         "android.hardware.radio.network-V5-java",
+         "android.hardware.radio.sim-V5-java",
+         "android.hardware.radio.voice-V5-java",
++        "vendor.samsung.hardware.radio.network-V1-java",
+         "voip-common",
+         "ims-common",
+         "unsupportedappusage",
+diff --git a/src/java/com/android/internal/telephony/RIL.java b/src/java/com/android/internal/telephony/RIL.java
+index f5d06dbe76..358654aa1d 100644
+--- a/src/java/com/android/internal/telephony/RIL.java
++++ b/src/java/com/android/internal/telephony/RIL.java
+@@ -865,7 +865,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
+                             mHalVersion.put(service, ((RadioNetworkProxy) serviceProxy).setAidl(
+                                     mHalVersion.get(service),
+                                     android.hardware.radio.network.IRadioNetwork.Stub
+-                                            .asInterface(binder)));
++                                            .asInterface(binder), HIDL_SERVICE_NAME[mPhoneId]));
+                         }
+                         break;
+                     case HAL_SERVICE_SIM:
+diff --git a/src/java/com/android/internal/telephony/RadioNetworkProxy.java b/src/java/com/android/internal/telephony/RadioNetworkProxy.java
+index 5db77067f2..f4123f82b1 100644
+--- a/src/java/com/android/internal/telephony/RadioNetworkProxy.java
++++ b/src/java/com/android/internal/telephony/RadioNetworkProxy.java
+@@ -34,6 +34,20 @@ import java.util.ArrayList;
+ import java.util.List;
+ import java.util.stream.Collectors;
+ 
++import vendor.samsung.hardware.radio.network.ISehRadioNetworkIndication;
++import vendor.samsung.hardware.radio.network.ISehRadioNetworkResponse;
++import vendor.samsung.hardware.radio.network.ISehRadioNetwork;
++import vendor.samsung.hardware.radio.network.SehCallDetails;
++import vendor.samsung.hardware.radio.network.SehCsgInfo;
++import vendor.samsung.hardware.radio.network.SehEriInfo;
++import vendor.samsung.hardware.radio.network.SehExtendedRegStateResult;
++import vendor.samsung.hardware.radio.network.SehOperatorInfo;
++import vendor.samsung.hardware.radio.network.SehPreferredNetworkInfo;
++import vendor.samsung.hardware.radio.network.SehRadioResponseInfo;
++import vendor.samsung.hardware.radio.network.SehRoamingNetworkInfo;
++import vendor.samsung.hardware.radio.network.SehSignalBar;
++import vendor.samsung.hardware.radio.network.SehVendorConfiguration;
++
+ /**
+  * A holder for IRadioNetwork.
+  * Use getAidl to get IRadioNetwork and call the AIDL implementations of the HAL APIs.
+@@ -69,7 +83,7 @@ public class RadioNetworkProxy extends RadioServiceProxy {
+      * @return updated HAL version
+      */
+     public HalVersion setAidl(HalVersion halVersion,
+-            android.hardware.radio.network.IRadioNetwork network) {
++            android.hardware.radio.network.IRadioNetwork network, String serviceName) {
+         HalVersion version = halVersion;
+         try {
+             version = RIL.getServiceHalVersion(network.getInterfaceVersion());
+@@ -80,6 +94,133 @@ public class RadioNetworkProxy extends RadioServiceProxy {
+         mNetworkProxy = network;
+         mIsAidl = true;
+ 
++        try {
++            var samsungIndication = new ISehRadioNetworkIndication.Stub() {
++                void l(String v) {
++                    android.util.Log.e("PHH-Radio", v);
++                }
++                public void acbInfo(int type, int[] acbInfo) {
++                    l("acbInfo");
++                }
++                public void callDetailsChanged(int type, SehCallDetails[] callDetails) {
++                    l("callDetailsChanged");
++                }
++                public void csFallback(int type, int state) {
++                    l("csFallback");
++                }
++                public void currentNetworkScanIsrequested(int type, byte mode) {
++                    l("currentNetworkScanIsrequested");
++                }
++                public void eriInfoReceived(int type, SehEriInfo eriInfo) {
++                    l("eriInfoReceived");
++                }
++                public void execute(int type, String cmd) {
++                    l("execute " + cmd);
++                }
++                public void extendedRegistrationState(int type, SehExtendedRegStateResult state) {
++                    l("extendedRegistrationState " + state);
++                    l("dataRegState = " + state.unprocessedDataRegState +
++                            ", voiceRegState = " + state.unprocessedVoiceRegState +
++                            ", isValid = " + state.isValid +
++                            ", snapshotStatus = " + state.snapshotStatus +
++                            ", dataRat = " + state.unprocessedDataRat +
++                            ", mobileOptionRat = " + state.mobileOptionalRat +
++                            ", imsEmergencyCallBarring = " + state.imsEmergencyCallBarring +
++                            ", isPsOnlyReg = " + state.isPsOnlyReg);
++                }
++                public void imsPreferenceChanged(int type, int[] imsPref) {
++                    l("imsPreferenceChanged");
++                }
++                public void needTurnOnRadioIndication(int type) {
++                    l("needTurnOnRadioIndication");
++                }
++                public void nrBearerAllocationChanged(int type, int status) {
++                    l("nrBearerAllocationChanged " + status);
++                }
++                public void nrIconTypeChanged(int type, int nrIconType) {
++                    l("nrIconTypeChanged " + nrIconType);
++                }
++                public void nrNetworkTypeAdded(int type, int nrNetworkType) {
++                    l("nrNetworkTypeAdded " + nrNetworkType);
++                }
++                public void roamingNetworkScanIsRequested(int type, byte[] scanData) {
++                    l("roamingNetworkScanIsRequested");
++                }
++                public void signalLevelInfoChanged(int type, SehSignalBar signalBarInfo) {
++                    l("signalLevelInfoChanged " + signalBarInfo);
++                }
++                public void vendorConfigurationChanged(int type, SehVendorConfiguration[] configurations) {
++                    l("vendorConfigurationChanged:");
++                    for(var c: configurations) {
++                        l(" - " + c.name + "=" + c.value);
++                    }
++                }
++                @Override
++                public String getInterfaceHash() {
++                    return ISehRadioNetworkIndication.HASH;
++                }
++
++                @Override
++                public int getInterfaceVersion() {
++                    return ISehRadioNetworkIndication.VERSION;
++                }
++            };
++
++            var samsungResponse = new ISehRadioNetworkResponse.Stub() {
++                void l(String v) {
++                    android.util.Log.e("PHH-Radio", v);
++                }
++                public void emergencyControlResponse(SehRadioResponseInfo info) {}
++                public void emergencySearchResponse(SehRadioResponseInfo info, int respEmergenySearch) {}
++                public void getAvailableNetworksResponse(SehRadioResponseInfo info, SehOperatorInfo[] networksInfo) {}
++                public void getCnapResponse(SehRadioResponseInfo info, int m) {}
++                public void getCsgListResponse(SehRadioResponseInfo info, SehCsgInfo[] csgInfos) {}
++                public void getDisable2gResponse(SehRadioResponseInfo info, int isDisable) {}
++                public void getNrIconTypeResponse(SehRadioResponseInfo info, int nrIconType) {}
++                public void getNrModeResponse(SehRadioResponseInfo info, int nrMode) {}
++                public void getPreferredNetworkListResponse(SehRadioResponseInfo info, SehPreferredNetworkInfo[] infos) {}
++                public void getRoamingNetworkInfoViaBLEResponse(SehRadioResponseInfo info, SehRoamingNetworkInfo[] networkInfo) {}
++                public void getVendorSpecificConfigurationResponse(SehRadioResponseInfo info, SehVendorConfiguration configurations) {}
++                public void selectCsgManualResponse(SehRadioResponseInfo info) {}
++                public void sendEncodedUssdResponse(SehRadioResponseInfo info) {}
++                public void sendRequestRawResponse(SehRadioResponseInfo info, byte[] data) {}
++                public void sendRequestStringsResponse(SehRadioResponseInfo info, String[] data) {}
++                public void setCurrentNetworkInfoViaBLEResponse(SehRadioResponseInfo info) {}
++                public void setDisable2gResponse(SehRadioResponseInfo info) {}
++                public void setImsCallListResponse(SehRadioResponseInfo info) {}
++                public void setNrModeResponse(SehRadioResponseInfo info) {}
++                public void setPreferredNetworkListResponse(SehRadioResponseInfo info) {}
++                public void setRoamingNetworkInfoViaBLEResponse(SehRadioResponseInfo info) {}
++                public void setScanResultViaBLEResponse(SehRadioResponseInfo info) {}
++                public void setVendorSpecificConfigurationResponse(SehRadioResponseInfo info) {
++                    l("vendor-specific configuration response " + info);
++                }
++
++                @Override
++                public String getInterfaceHash() {
++                    return ISehRadioNetworkResponse.HASH;
++                }
++
++                @Override
++                public int getInterfaceVersion() {
++                    return ISehRadioNetworkResponse.VERSION;
++                }
++            };
++            var samsungHal =
++                ISehRadioNetwork.Stub.asInterface(
++                        android.os.ServiceManager.waitForDeclaredService(
++                            ISehRadioNetwork.DESCRIPTOR + "/" + serviceName));
++            samsungHal.setResponseFunctions(samsungResponse, samsungIndication);
++            var conf = new SehVendorConfiguration[1];
++            conf[0] = new SehVendorConfiguration();
++            conf[0].name = "FW_READY";
++            conf[0].value = "1";
++            samsungHal.setVendorSpecificConfiguration(0x4242, conf);
++            android.util.Log.e("PHH", "Successfully got ISehRadioNetwork");
++        } catch(Throwable t) {
++            android.util.Log.e("PHH", "Failed getting ISehRadioNetwork", t);
++        }
++
+         Rlog.d(TAG, "AIDL initialized mHalVersion=" + mHalVersion);
+         return mHalVersion;
+     }
+-- 
+2.43.0
+

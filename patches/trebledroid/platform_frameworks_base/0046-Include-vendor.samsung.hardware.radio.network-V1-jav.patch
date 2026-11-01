@@ -1,0 +1,25 @@
+From 724781d7311a54974362583cd3617f94a4705e36 Mon Sep 17 00:00:00 2001
+From: Pierre-Hugues Husson <phh@phh.me>
+Date: Wed, 21 Feb 2024 12:41:46 -0500
+Subject: [PATCH 46/55] Include vendor.samsung.hardware.radio.network-V1-java
+ in base libs, will be used by f/o/telephony
+
+---
+ Android.bp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Android.bp b/Android.bp
+index e7c20418bcef..df041ccf1d4a 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -239,6 +239,7 @@ java_library {
+         "android.hardware.radio.network-V5-java",
+         "android.hardware.radio.sim-V5-java",
+         "android.hardware.radio.voice-V5-java",
++        "vendor.samsung.hardware.radio.network-V1-java",
+         "android.hardware.thermal-V1.0-java-constants",
+         "android.hardware.thermal-V1.0-java",
+         "android.hardware.thermal-V1.1-java",
+-- 
+2.43.0
+
