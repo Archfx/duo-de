@@ -1,11 +1,10 @@
 From d79f4433506dfa0d3a12dd9250894a5cc33fd412 Mon Sep 17 00:00:00 2001
 From: ethan <ethangoh98@gmail.com>
 Date: Tue, 17 November 2026 17:32:58 +1100
-Subject: [PATCH] Half-screen span when the window is spanned to the left or right edge of the screen
+Subject: [PATCH] Half-screen span when the window is spanned to the left or right edge of the screen, also has an overlay where the window is going to snap to.
 
-project frameworks/base/
 diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/FluidResizeTaskPositioner.java b/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/FluidResizeTaskPositioner.java
-index 7d2da9d3c806..3410cd78468e 100644
+index 7d2da9d3c806..3aa5ea7d2ff1 100644
 --- a/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/FluidResizeTaskPositioner.java
 +++ b/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/FluidResizeTaskPositioner.java
 @@ -35,6 +35,7 @@ import com.android.wm.shell.ShellTaskOrganizer;
@@ -16,27 +15,144 @@ index 7d2da9d3c806..3410cd78468e 100644
  
  import java.util.ArrayList;
  import java.util.function.Supplier;
-@@ -70,6 +71,10 @@ class FluidResizeTaskPositioner implements TaskPositioner, Transitions.Transitio
+@@ -70,6 +71,17 @@ class FluidResizeTaskPositioner implements TaskPositioner, Transitions.Transitio
      private IBinder mDragResizeEndTransition;
      @Surface.Rotation private int mRotation;
  
 +    private static final int SIDE_SNAP_DISTANCE_PX = 80;
 +    private static final float SIDE_SNAP_PREVIEW_ALPHA = 0.5f;
++    private static final float SNAP_PREVIEW_OVERLAY_ALPHA = 0.2f;
++    private static final float SNAP_PREVIEW_STROKE_ALPHA = 0.85f;
++    private static final float SNAP_PREVIEW_STROKE_WIDTH_PX = 4f;
++    private static final float SNAP_PREVIEW_CORNER_RADIUS_PX = 20f;
 +    private boolean mSnapBandActive;
++    private SurfaceControl mSnapPreviewSurface;
++    private SurfaceControl[] mSnapPreviewBorderSurfaces = new SurfaceControl[4];
++    private boolean mSnapPreviewVisible;
 +
      FluidResizeTaskPositioner(ShellTaskOrganizer taskOrganizer, Transitions transitions,
              WindowDecorationWrapper windowDecoration, DisplayController displayController,
              DesktopState desktopState) {
-@@ -136,10 +141,43 @@ class FluidResizeTaskPositioner implements TaskPositioner, Transitions.Transitio
+@@ -136,10 +148,134 @@ class FluidResizeTaskPositioner implements TaskPositioner, Transitions.Transitio
              DragPositioningCallbackUtility.setPositionOnDrag(mWindowDecoration,
                      mRepositionTaskBounds, mTaskBoundsAtDragStart, mRepositionStartPoint, t, x, y);
              t.apply();
-+            updateSnapBandAlpha(x);
++            updateSnapBandAlpha(x, y);
++            updateSnapPreview(x, y);
          }
          return new Rect(mRepositionTaskBounds);
      }
  
-+    private void updateSnapBandAlpha(float x) {
++    private void updateSnapBandAlpha(float x, float y) {
++        final SurfaceControl taskSurface = mWindowDecoration.getTaskSurface();
++        if (taskSurface == null) {
++            mSnapBandActive = false;
++            return;
++        }
++
++        final Rect stableBounds = getStableBounds();
++        final boolean inSnapBand = isInSnapBand(x, y, stableBounds);
++        if (inSnapBand == mSnapBandActive) {
++            return;
++        }
++
++        final SurfaceControl.Transaction t = mTransactionSupplier.get();
++        t.setAlpha(taskSurface, inSnapBand ? SIDE_SNAP_PREVIEW_ALPHA : 1f);
++        t.apply();
++        mSnapBandActive = inSnapBand;
++    }
++
++    private boolean isInSnapBand(float x, float y, @NonNull Rect stableBounds) {
++        if (stableBounds.isEmpty() || stableBounds.width() == 0) {
++            return false;
++        }
++
++        final boolean nearLeftEdge = x <= stableBounds.left + SIDE_SNAP_DISTANCE_PX;
++        final boolean nearRightEdge = x >= stableBounds.right - SIDE_SNAP_DISTANCE_PX;
++        final boolean nearTopEdge = y <= stableBounds.top + SIDE_SNAP_DISTANCE_PX;
++        final boolean nearBottomEdge = y >= stableBounds.bottom - SIDE_SNAP_DISTANCE_PX;
++        final int halfHeight = stableBounds.height() / 2;
++        final boolean isLandscapeHalfScreen = mRotation == Surface.ROTATION_90
++                || mRotation == Surface.ROTATION_270;
++
++        if (isLandscapeHalfScreen) {
++            final int midY = stableBounds.top + halfHeight;
++            if (y >= midY - SIDE_SNAP_DISTANCE_PX && y <= midY + SIDE_SNAP_DISTANCE_PX) {
++                return true;
++            }
++            if (y <= stableBounds.top + SIDE_SNAP_DISTANCE_PX
++                    || y >= stableBounds.bottom - SIDE_SNAP_DISTANCE_PX) {
++                return true;
++            }
++        }
++
++        return (nearLeftEdge || nearRightEdge) || (nearTopEdge || nearBottomEdge);
++    }
++
++    private void updateSnapPreview(float x, float y) {
++        final Rect stableBounds = getStableBounds();
++        final SurfaceControl taskSurface = mWindowDecoration.getTaskSurface();
++        if (taskSurface == null || stableBounds.isEmpty()) {
++            hideSnapPreview();
++            return;
++        }
++
++        final Rect targetBounds = resolveHalfScreenSnapBounds(stableBounds, new Rect(mRepositionTaskBounds),
++                x, y);
++        if (targetBounds.isEmpty() || targetBounds.equals(mRepositionTaskBounds)) {
++            hideSnapPreview();
++            return;
++        }
++
++        ensureSnapPreviewSurface();
++        if (mSnapPreviewSurface == null) {
++            return;
++        }
++
++        final SurfaceControl.Transaction t = mTransactionSupplier.get();
++        t.show(mSnapPreviewSurface)
++                .setLayer(mSnapPreviewSurface, 1000)
++                .setColor(mSnapPreviewSurface, new float[] {
++                        0.75f, 0.75f, 0.75f, SNAP_PREVIEW_OVERLAY_ALPHA
++                })
++                .setCornerRadius(mSnapPreviewSurface, SNAP_PREVIEW_CORNER_RADIUS_PX)
++                .setWindowCrop(mSnapPreviewSurface, targetBounds.width(), targetBounds.height())
++                .setPosition(mSnapPreviewSurface, targetBounds.left, targetBounds.top)
++                .setAlpha(mSnapPreviewSurface, SNAP_PREVIEW_OVERLAY_ALPHA)
++                .apply();
++        mSnapPreviewVisible = true;
++    }
++
++    private void ensureSnapPreviewSurface() {
++        if (mSnapPreviewSurface != null) {
++            return;
++        }
++        mSnapPreviewSurface = new SurfaceControl.Builder()
++                .setName("Fluid resize snap preview")
++                .setColorLayer()
++                .setHidden(true)
++                .setCallsite("FluidResizeTaskPositioner#ensureSnapPreviewSurface")
++                .build();
++    }
++
++    private void hideSnapPreview() {
++        if (mSnapPreviewSurface == null || !mSnapPreviewVisible) {
++            return;
++        }
++        final SurfaceControl.Transaction t = mTransactionSupplier.get();
++        t.hide(mSnapPreviewSurface).apply();
++        mSnapPreviewVisible = false;
++
++        // Hide the border surfaces
++        for (SurfaceControl borderSurface : mSnapPreviewBorderSurfaces) {
++            if (borderSurface != null) {
++                t.hide(borderSurface);
++            }
++        }
++        t.apply();
++    }
++
++    private Rect getStableBounds() {
 +        final Rect stableBounds = new Rect();
 +        final android.view.Display display = mWindowDecoration.getDisplay();
 +        if (display != null && mDisplayController != null) {
@@ -46,52 +162,26 @@ index 7d2da9d3c806..3410cd78468e 100644
 +                displayLayout.getStableBounds(stableBounds);
 +            }
 +        }
-+
-+        final boolean inSnapBand = !stableBounds.isEmpty()
-+                && (x <= stableBounds.left + SIDE_SNAP_DISTANCE_PX
-+                        || x >= stableBounds.right - SIDE_SNAP_DISTANCE_PX);
-+
-+        final SurfaceControl taskSurface = mWindowDecoration.getTaskSurface();
-+        if (taskSurface == null) {
-+            mSnapBandActive = false;
-+            return;
-+        }
-+
-+        final SurfaceControl.Transaction t = mTransactionSupplier.get();
-+        if (inSnapBand) {
-+            t.setAlpha(taskSurface, SIDE_SNAP_PREVIEW_ALPHA);
-+            mSnapBandActive = true;
-+        } else if (mSnapBandActive) {
-+            t.setAlpha(taskSurface, 1f);
-+            mSnapBandActive = false;
-+        }
-+        t.apply();
++        return stableBounds;
 +    }
 +
      @Override
      public Rect onDragPositioningEnd(int displayId, float x, float y) {
          // If task has been resized or task was dragged into area outside of
-@@ -158,6 +196,30 @@ class FluidResizeTaskPositioner implements TaskPositioner, Transitions.Transitio
+@@ -158,6 +294,23 @@ class FluidResizeTaskPositioner implements TaskPositioner, Transitions.Transitio
          } else if (mCtrlType == CTRL_TYPE_UNDEFINED) {
              DragPositioningCallbackUtility.updateTaskBounds(mRepositionTaskBounds,
                      mTaskBoundsAtDragStart, mRepositionStartPoint, x, y);
 +
-+            final Rect stableBounds = new Rect();
-+            final android.view.Display display = mWindowDecoration.getDisplay();
-+            if (display != null && mDisplayController != null) {
-+                final DisplayLayout displayLayout =
-+                        mDisplayController.getDisplayLayout(display.getDisplayId());
-+                if (displayLayout != null) {
-+                    displayLayout.getStableBounds(stableBounds);
-+                }
-+            }
-+
++            final Rect stableBounds = getStableBounds();
 +            final Rect snappedBounds = resolveHalfScreenSnapBounds(stableBounds, mRepositionTaskBounds,
 +                    x, y);
 +            if (!snappedBounds.isEmpty()) {
 +                mRepositionTaskBounds.set(snappedBounds);
 +            }
 +        }
++
++        hideSnapPreview();
 +
 +        final SurfaceControl taskSurface = mWindowDecoration.getTaskSurface();
 +        if (taskSurface != null && mSnapBandActive) {
@@ -102,7 +192,7 @@ index 7d2da9d3c806..3410cd78468e 100644
          }
  
          mTaskBoundsAtDragStart.setEmpty();
-@@ -167,6 +229,74 @@ class FluidResizeTaskPositioner implements TaskPositioner, Transitions.Transitio
+@@ -167,6 +320,74 @@ class FluidResizeTaskPositioner implements TaskPositioner, Transitions.Transitio
          return new Rect(mRepositionTaskBounds);
      }
  
