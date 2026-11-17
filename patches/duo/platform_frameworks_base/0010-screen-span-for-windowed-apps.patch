@@ -3,8 +3,9 @@ From: ethan <ethangoh98@gmail.com>
 Date: Tue, 17 November 2026 17:32:58 +1100
 Subject: [PATCH] Half-screen span when the window is spanned to the left or right edge of the screen
 
+project frameworks/base/
 diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/FluidResizeTaskPositioner.java b/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/FluidResizeTaskPositioner.java
-index 7d2da9d3c806..7089d979eabe 100644
+index 7d2da9d3c806..3410cd78468e 100644
 --- a/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/FluidResizeTaskPositioner.java
 +++ b/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/FluidResizeTaskPositioner.java
 @@ -35,6 +35,7 @@ import com.android.wm.shell.ShellTaskOrganizer;
@@ -101,7 +102,7 @@ index 7d2da9d3c806..7089d979eabe 100644
          }
  
          mTaskBoundsAtDragStart.setEmpty();
-@@ -167,6 +229,27 @@ class FluidResizeTaskPositioner implements TaskPositioner, Transitions.Transitio
+@@ -167,6 +229,74 @@ class FluidResizeTaskPositioner implements TaskPositioner, Transitions.Transitio
          return new Rect(mRepositionTaskBounds);
      }
  
@@ -113,11 +114,58 @@ index 7d2da9d3c806..7089d979eabe 100644
 +
 +        final boolean nearLeftEdge = x <= stableBounds.left + SIDE_SNAP_DISTANCE_PX;
 +        final boolean nearRightEdge = x >= stableBounds.right - SIDE_SNAP_DISTANCE_PX;
++        final boolean nearTopEdge = y <= stableBounds.top + SIDE_SNAP_DISTANCE_PX;
++        final boolean nearBottomEdge = y >= stableBounds.bottom - SIDE_SNAP_DISTANCE_PX;
++        final int halfWidth = stableBounds.width() / 2;
++        final int halfHeight = stableBounds.height() / 2;
++
++        if ((nearLeftEdge || nearRightEdge) && (nearTopEdge || nearBottomEdge)) {
++            if (nearLeftEdge && nearTopEdge) {
++                return new Rect(stableBounds.left, stableBounds.top,
++                        stableBounds.left + halfWidth, stableBounds.top + halfHeight);
++            }
++            if (nearRightEdge && nearTopEdge) {
++                return new Rect(stableBounds.right - halfWidth, stableBounds.top,
++                        stableBounds.right, stableBounds.top + halfHeight);
++            }
++            if (nearLeftEdge && nearBottomEdge) {
++                return new Rect(stableBounds.left, stableBounds.bottom - halfHeight,
++                        stableBounds.left + halfWidth, stableBounds.bottom);
++            }
++            if (nearRightEdge && nearBottomEdge) {
++                return new Rect(stableBounds.right - halfWidth, stableBounds.bottom - halfHeight,
++                        stableBounds.right, stableBounds.bottom);
++            }
++        }
++
++        final boolean isLandscapeHalfScreen = mRotation == Surface.ROTATION_90
++                || mRotation == Surface.ROTATION_270;
++        if (isLandscapeHalfScreen) {
++            final int midY = stableBounds.top + halfHeight;
++            final boolean nearMidline = y >= midY - SIDE_SNAP_DISTANCE_PX
++                    && y <= midY + SIDE_SNAP_DISTANCE_PX;
++            if (nearMidline) {
++                if (y < midY) {
++                    return new Rect(stableBounds.left, stableBounds.top,
++                            stableBounds.right, stableBounds.top + halfHeight);
++                }
++                return new Rect(stableBounds.left, stableBounds.top + halfHeight,
++                        stableBounds.right, stableBounds.bottom);
++            }
++            if (y <= stableBounds.top + SIDE_SNAP_DISTANCE_PX) {
++                return new Rect(stableBounds.left, stableBounds.top,
++                        stableBounds.right, stableBounds.top + halfHeight);
++            }
++            if (y >= stableBounds.bottom - SIDE_SNAP_DISTANCE_PX) {
++                return new Rect(stableBounds.left, stableBounds.top + halfHeight,
++                        stableBounds.right, stableBounds.bottom);
++            }
++        }
++
 +        if (!nearLeftEdge && !nearRightEdge) {
 +            return proposedBounds;
 +        }
 +
-+        final int halfWidth = stableBounds.width() / 2;
 +        if (nearLeftEdge) {
 +            return new Rect(stableBounds.left, stableBounds.top,
 +                    stableBounds.left + halfWidth, stableBounds.bottom);
