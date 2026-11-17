@@ -1,0 +1,131 @@
+From d79f4433506dfa0d3a12dd9250894a5cc33fd412 Mon Sep 17 00:00:00 2001
+From: ethan <ethangoh98@gmail.com>
+Date: Tue, 17 November 2026 17:32:58 +1100
+Subject: [PATCH] Half-screen span when the window is spanned to the left or right edge of the screen
+
+diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/FluidResizeTaskPositioner.java b/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/FluidResizeTaskPositioner.java
+index 7d2da9d3c806..7089d979eabe 100644
+--- a/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/FluidResizeTaskPositioner.java
++++ b/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/FluidResizeTaskPositioner.java
+@@ -35,6 +35,7 @@ import com.android.wm.shell.ShellTaskOrganizer;
+ import com.android.wm.shell.common.DisplayController;
+ import com.android.wm.shell.shared.desktopmode.DesktopState;
+ import com.android.wm.shell.transition.Transitions;
++import com.android.wm.shell.common.DisplayLayout;
+ 
+ import java.util.ArrayList;
+ import java.util.function.Supplier;
+@@ -70,6 +71,10 @@ class FluidResizeTaskPositioner implements TaskPositioner, Transitions.Transitio
+     private IBinder mDragResizeEndTransition;
+     @Surface.Rotation private int mRotation;
+ 
++    private static final int SIDE_SNAP_DISTANCE_PX = 80;
++    private static final float SIDE_SNAP_PREVIEW_ALPHA = 0.5f;
++    private boolean mSnapBandActive;
++
+     FluidResizeTaskPositioner(ShellTaskOrganizer taskOrganizer, Transitions transitions,
+             WindowDecorationWrapper windowDecoration, DisplayController displayController,
+             DesktopState desktopState) {
+@@ -136,10 +141,43 @@ class FluidResizeTaskPositioner implements TaskPositioner, Transitions.Transitio
+             DragPositioningCallbackUtility.setPositionOnDrag(mWindowDecoration,
+                     mRepositionTaskBounds, mTaskBoundsAtDragStart, mRepositionStartPoint, t, x, y);
+             t.apply();
++            updateSnapBandAlpha(x);
+         }
+         return new Rect(mRepositionTaskBounds);
+     }
+ 
++    private void updateSnapBandAlpha(float x) {
++        final Rect stableBounds = new Rect();
++        final android.view.Display display = mWindowDecoration.getDisplay();
++        if (display != null && mDisplayController != null) {
++            final DisplayLayout displayLayout =
++                    mDisplayController.getDisplayLayout(display.getDisplayId());
++            if (displayLayout != null) {
++                displayLayout.getStableBounds(stableBounds);
++            }
++        }
++
++        final boolean inSnapBand = !stableBounds.isEmpty()
++                && (x <= stableBounds.left + SIDE_SNAP_DISTANCE_PX
++                        || x >= stableBounds.right - SIDE_SNAP_DISTANCE_PX);
++
++        final SurfaceControl taskSurface = mWindowDecoration.getTaskSurface();
++        if (taskSurface == null) {
++            mSnapBandActive = false;
++            return;
++        }
++
++        final SurfaceControl.Transaction t = mTransactionSupplier.get();
++        if (inSnapBand) {
++            t.setAlpha(taskSurface, SIDE_SNAP_PREVIEW_ALPHA);
++            mSnapBandActive = true;
++        } else if (mSnapBandActive) {
++            t.setAlpha(taskSurface, 1f);
++            mSnapBandActive = false;
++        }
++        t.apply();
++    }
++
+     @Override
+     public Rect onDragPositioningEnd(int displayId, float x, float y) {
+         // If task has been resized or task was dragged into area outside of
+@@ -158,6 +196,30 @@ class FluidResizeTaskPositioner implements TaskPositioner, Transitions.Transitio
+         } else if (mCtrlType == CTRL_TYPE_UNDEFINED) {
+             DragPositioningCallbackUtility.updateTaskBounds(mRepositionTaskBounds,
+                     mTaskBoundsAtDragStart, mRepositionStartPoint, x, y);
++
++            final Rect stableBounds = new Rect();
++            final android.view.Display display = mWindowDecoration.getDisplay();
++            if (display != null && mDisplayController != null) {
++                final DisplayLayout displayLayout =
++                        mDisplayController.getDisplayLayout(display.getDisplayId());
++                if (displayLayout != null) {
++                    displayLayout.getStableBounds(stableBounds);
++                }
++            }
++
++            final Rect snappedBounds = resolveHalfScreenSnapBounds(stableBounds, mRepositionTaskBounds,
++                    x, y);
++            if (!snappedBounds.isEmpty()) {
++                mRepositionTaskBounds.set(snappedBounds);
++            }
++        }
++
++        final SurfaceControl taskSurface = mWindowDecoration.getTaskSurface();
++        if (taskSurface != null && mSnapBandActive) {
++            final SurfaceControl.Transaction t = mTransactionSupplier.get();
++            t.setAlpha(taskSurface, 1f);
++            t.apply();
++            mSnapBandActive = false;
+         }
+ 
+         mTaskBoundsAtDragStart.setEmpty();
+@@ -167,6 +229,27 @@ class FluidResizeTaskPositioner implements TaskPositioner, Transitions.Transitio
+         return new Rect(mRepositionTaskBounds);
+     }
+ 
++    private Rect resolveHalfScreenSnapBounds(@NonNull Rect stableBounds, @NonNull Rect proposedBounds,
++            float x, float y) {
++        if (stableBounds.isEmpty() || stableBounds.width() == 0) {
++            return proposedBounds;
++        }
++
++        final boolean nearLeftEdge = x <= stableBounds.left + SIDE_SNAP_DISTANCE_PX;
++        final boolean nearRightEdge = x >= stableBounds.right - SIDE_SNAP_DISTANCE_PX;
++        if (!nearLeftEdge && !nearRightEdge) {
++            return proposedBounds;
++        }
++
++        final int halfWidth = stableBounds.width() / 2;
++        if (nearLeftEdge) {
++            return new Rect(stableBounds.left, stableBounds.top,
++                    stableBounds.left + halfWidth, stableBounds.bottom);
++        }
++        return new Rect(stableBounds.right - halfWidth, stableBounds.top,
++                stableBounds.right, stableBounds.bottom);
++    }
++
+     @Override
+     public void close() {}
+ 
