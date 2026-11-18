@@ -122,7 +122,11 @@ fastboot reboot
 7. Once you flash a **duo-de** version using the above steps, subsequent updates will be received using OTA. You can check updates using ``settings -> system -> system updates``.
    > If prompted to select the default updater, select `PHH treble updater` for always.
 8. Enable the ideal `Treble Settings` as outlined [here](https://github.com/Archfx/duo-de/discussions/81). 
-9. If you wish to see future updates and feature improvements, consider _starring_ (★) the project—it motivates the development of new releases!
+9. If Notifications are not showing up on Peek mode, run the following command through ADB
+```shell
+adb shell cmd notification allow_listener com.thain.duo/.PeekNotificationListenerService
+```
+10. If you wish to see future updates and feature improvements, consider _starring_ (★) the project—it motivates the development of new releases!
 
 ## Migrating back to 12L
 
