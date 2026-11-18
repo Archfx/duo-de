@@ -1,0 +1,18 @@
+From d79f4433506dfa0d3a12dd9250894a5cc33fd412 Mon Sep 17 00:00:00 2001
+From: ethan <ethangoh98@gmail.com>
+Date: Tue, 10 November 2026 15:02:58 +1100
+Subject: [PATCH] Add com.thain.duo as a notification listener in vanilla builds.
+
+diff --git a/overlay/frameworks/base/core/res/res/values/config.xml b/overlay/frameworks/base/core/res/res/values/config.xml
+index 5b1e1d9..f7a34a2 100644
+--- a/overlay/frameworks/base/core/res/res/values/config.xml
++++ b/overlay/frameworks/base/core/res/res/values/config.xml
+@@ -85,4 +85,8 @@
+ 
+ 	<!-- The number of physical SIM slots on the device, eSIM and pSIM inclusive -->
+     <integer name="config_num_physical_slots">2</integer>
++
++    <!-- Colon separated list of package names that should be granted Notification Listener access, 
++		can be overrided by GMS Config! Add here for vanilla build users.  -->
++    <string name="config_defaultListenerAccessPackages" translatable="false">com.android.launcher3:com.thain.duo</string>
+ </resources>

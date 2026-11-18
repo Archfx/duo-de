@@ -1,0 +1,107 @@
+From d79f4433506dfa0d3a12dd9250894a5cc33fd412 Mon Sep 17 00:00:00 2001
+From: ethan <ethangoh98@gmail.com>
+Date: Fri, 30 October 2026 17:19:32 +1100
+Subject: [PATCH] Check fingerprint from crash looping repeatedly
+
+diff --git a/services/core/java/com/android/server/biometrics/sensors/BiometricScheduler.java b/services/core/java/com/android/server/biometrics/sensors/BiometricScheduler.java
+index 1d4e8b8c185e..9c55431d6014 100644
+--- a/services/core/java/com/android/server/biometrics/sensors/BiometricScheduler.java
++++ b/services/core/java/com/android/server/biometrics/sensors/BiometricScheduler.java
+@@ -145,6 +145,11 @@ public class BiometricScheduler<T, U> {
+     @NonNull private Supplier<Integer> mCurrentUserRetriever;
+     @Nullable private UserSwitchProvider<T, U> mUserSwitchProvider;
+ 
++    private boolean fingerprintRegistrationFailed;
++    private final int maxFingerprintFailureAttempts = 50;
++    private int failedFingerprintInitAttempts = 0;
++    private String fingerprintStr = "com.android.server.biometrics.sensors.fingerprint.hidl.FingerprintUpdateActiveUserClient";
++
+     private class UserSwitchClientCallback implements ClientMonitorCallback {
+         @NonNull private final BaseClientMonitor mOwner;
+ 
+@@ -157,6 +162,14 @@ public class BiometricScheduler<T, U> {
+             mHandler.post(() -> {
+                 Slog.d(TAG, "[Client finished] " + clientMonitor + ", success: " + success);
+ 
++                if(clientMonitor.toString().contains(fingerprintStr) && !success){
++                    failedFingerprintInitAttempts++;
++                }
++
++                if(failedFingerprintInitAttempts >= maxFingerprintFailureAttempts){
++                    fingerprintRegistrationFailed = true;
++                }
++
+                 // Set mStopUserClient to null when StopUserClient fails. Otherwise it's possible
+                 // for that the queue will wait indefinitely until the field is cleared.
+                 if (clientMonitor instanceof StopUserClient<?>) {
+@@ -325,6 +338,10 @@ public class BiometricScheduler<T, U> {
+                     mUserSwitchProvider.getStartUserClient(nextUserId);
+             final UserSwitchClientCallback finishedCallback =
+                     new UserSwitchClientCallback(startClient);
++        
++            if(startClient.toString().contains(fingerprintStr) && fingerprintRegistrationFailed){
++                return; //bail.
++            }
+ 
+             Slog.d(TAG, "[Starting User] " + startClient);
+             mCurrentOperation = new BiometricSchedulerOperation(
+diff --git a/services/core/java/com/android/server/biometrics/sensors/fingerprint/hidl/HidlToAidlSensorAdapter.java b/services/core/java/com/android/server/biometrics/sensors/fingerprint/hidl/HidlToAidlSensorAdapter.java
+index d2fc5190556e..1cc107ca94c7 100644
+--- a/services/core/java/com/android/server/biometrics/sensors/fingerprint/hidl/HidlToAidlSensorAdapter.java
++++ b/services/core/java/com/android/server/biometrics/sensors/fingerprint/hidl/HidlToAidlSensorAdapter.java
+@@ -65,6 +65,10 @@ public class HidlToAidlSensorAdapter extends Sensor implements IHwBinder.DeathRe
+     private IBiometricsFingerprint mDaemon;
+     private AidlSession mSession;
+ 
++    private static boolean sFingerprintHidlUnsupported = false;
++    private static final int fingerprintMaxFailedRegistrationAttempts = 50;
++    private static int fingerprintFailedRegistrationAttempts = 0;
++
+     private final StartUserClient.UserStartedCallback<AidlSession> mUserStartedCallback =
+             (newUserId, newUser, halInterfaceVersion) -> {
+                 if (mCurrentUserId != newUserId) {
+@@ -194,6 +198,28 @@ public class HidlToAidlSensorAdapter extends Sensor implements IHwBinder.DeathRe
+                 mAidlResponseHandlerCallback,
+                 getFingerprintUtilsInstance());
+     }
++    
++    protected static IBiometricsFingerprint getServiceSafely() {
++        if (sFingerprintHidlUnsupported) {
++            return null; // Bails out instantly in pure Java. Zero hwservicemanager spam.
++        }
++
++        try {
++            // This is the call that triggers hwservicemanager if missing
++            IBiometricsFingerprint service = IBiometricsFingerprint.getService();
++            return service;
++        } catch (java.util.NoSuchElementException | RemoteException e) {
++            // Retry but up to max times.
++            fingerprintFailedRegistrationAttempts++;
++
++            if(fingerprintFailedRegistrationAttempts >= fingerprintMaxFailedRegistrationAttempts){
++                sFingerprintHidlUnsupported = false;
++            }
++
++            Slog.w(TAG, "HIDL fingerprint service unavailable. Permanently disabling framework lookups to prevent hwservicemanager spam.");
++            return null;
++        }
++    }
+ 
+     @VisibleForTesting IBiometricsFingerprint getIBiometricsFingerprint() {
+         if (getProvider().getTestHalEnabled()) {
+@@ -207,12 +233,9 @@ public class HidlToAidlSensorAdapter extends Sensor implements IHwBinder.DeathRe
+         }
+ 
+         try {
+-            mDaemon = IBiometricsFingerprint.getService();
+-        } catch (RemoteException e) {
+-            Slog.e(TAG, "Failed to get fingerprint HAL", e);
+-        } catch (java.util.NoSuchElementException e) {
+-            // Service doesn't exist or cannot be opened.
+-            Slog.w(TAG, "NoSuchElementException", e);
++            mDaemon = getServiceSafely();
++        } catch (Exception e){
++            Slog.w(TAG, "HIDL fingerprint fetching failed: " + e);
+         }
+ 
+         if (mDaemon == null) {

@@ -1,0 +1,19 @@
+From d79f4433506dfa0d3a12dd9250894a5cc33fd412 Mon Sep 17 00:00:00 2001
+From: ethan <ethangoh98@gmail.com>
+Date: Tue, 10 November 2026 14:56:22 +1100
+Subject: [PATCH] Add com.thain.duo as a notification listener in GApps builds.
+
+diff --git a/common/rro_overlays/GmsConfigOverlay/res/values/config.xml b/common/rro_overlays/GmsConfigOverlay/res/values/config.xml
+index 1171d53..b672f40 100644
+--- a/common/rro_overlays/GmsConfigOverlay/res/values/config.xml
++++ b/common/rro_overlays/GmsConfigOverlay/res/values/config.xml
+@@ -268,7 +268,7 @@
+     </string-array>
+ 
+    <!-- Colon separated list of package names that should be granted Notification Listener access -->
+-    <string name="config_defaultListenerAccessPackages" translatable="false">com.android.launcher3:com.google.android.apps.nexuslauncher:com.google.android.setupwizard:com.google.android.apps.pixelmigrate:com.google.android.as:com.google.android.projection.gearhead:com.google.pixel.exo</string>
++    <string name="config_defaultListenerAccessPackages" translatable="false">com.android.launcher3:com.google.android.apps.nexuslauncher:com.google.android.setupwizard:com.google.android.apps.pixelmigrate:com.google.android.as:com.google.android.projection.gearhead:com.google.pixel.exo:com.thain.duo</string>
+ 
+     <!-- Default autofill service to enable [DO NOT TRANSLATE] -->
+     <string name="config_defaultAutofillService" translatable="false">com.google.android.gms/.autofill.service.AutofillService</string>
+0004-add-posture-processor-to-notification-listener-access
