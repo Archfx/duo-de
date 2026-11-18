@@ -34,6 +34,10 @@ This ROM switches between tablet mode (first image) and phone mode (second image
 
 ### Floating Windows
 Floating windowed mode can be enabled/disabled for tablet mode and phone mode separately. To do that, click and hold the desktop, click `Home settings`, and find the settings `Tablet Mode Floating Windows` and `Phone Mode Floating Windows`. 
+You can also snap the windows to the side or corners.
+
+<p align="center">
+<img src="images/duo-windowsnapping.gif" alt="drawing" style="width:640px;"/></p>
 
 ### Split Windows
 You can still launch apps in split window mode (similar to the Stock 12L) using two methods, 
