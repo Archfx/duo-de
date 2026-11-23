@@ -1,0 +1,152 @@
+From d79f4433506dfa0d3a12dd9250894a5cc33fd412 Mon Sep 17 00:00:00 2001
+From: ethan <ethangoh98@gmail.com>
+Date: Tue, 23 November 2026 12:30:57 +1100
+Subject: [PATCH] SystemUI: Restore 14 QPR1 FingerprintInteractiveToAuth implementation
+
+diff --git a/packages/SystemUI/src/com/android/systemui/biometrics/FingerprintInteractiveToAuthProviderImpl.kt b/packages/SystemUI/src/com/android/systemui/biometrics/FingerprintInteractiveToAuthProviderImpl.kt
+new file mode 100644
+index 000000000000..efa890a8d694
+--- /dev/null
++++ b/packages/SystemUI/src/com/android/systemui/biometrics/FingerprintInteractiveToAuthProviderImpl.kt
+@@ -0,0 +1,83 @@
++/*
++ * Copyright (C) 2023 ArrowOS
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++*/
++
++package com.android.systemui.biometrics
++
++import android.content.Context
++import android.database.ContentObserver
++import android.hardware.biometrics.common.AuthenticateReason
++import android.os.SystemProperties
++import android.provider.Settings
++import com.android.systemui.common.coroutine.ConflatedCallbackFlow.conflatedCallbackFlow
++import com.android.systemui.dagger.qualifiers.Background
++import com.android.systemui.user.domain.interactor.SelectedUserInteractor
++import com.android.systemui.util.settings.SecureSettings
++import javax.inject.Inject
++import kotlinx.coroutines.CoroutineDispatcher
++import kotlinx.coroutines.channels.awaitClose
++import kotlinx.coroutines.flow.flatMapLatest
++import kotlinx.coroutines.flow.flowOn
++
++class FingerprintInteractiveToAuthProviderImpl @Inject constructor(
++    @Background private val backgroundDispatcher: CoroutineDispatcher,
++    private val context: Context,
++    private val secureSettings: SecureSettings,
++    private val selectedUserInteractor: SelectedUserInteractor,
++) : FingerprintInteractiveToAuthProvider {
++    private val defaultValue = if (SystemProperties.get("ro.hardware", "N/A") == "surfaceduo2") {
++        0
++    } else {
++        1
++    }
++
++    override val enabledForCurrentUser =
++        selectedUserInteractor.selectedUser.flatMapLatest { currentUserId ->
++            conflatedCallbackFlow {
++                val callback = object : ContentObserver(null) {
++                    override fun onChange(selfChange: Boolean) {
++                        trySend(isEnabled(currentUserId))
++                    }
++                }
++                secureSettings.registerContentObserverSync(
++                    Settings.Secure.SFPS_PERFORMANT_AUTH_ENABLED, true, callback
++                )
++                trySend(isEnabled(currentUserId))
++                awaitClose { secureSettings.unregisterContentObserverSync(callback) }
++            }
++        }
++        .flowOn(backgroundDispatcher)
++
++    override fun getVendorExtension(userId: Int): AuthenticateReason.Vendor? = null
++
++    override fun isEnabled(userId: Int): Boolean {
++        var value = Settings.Secure.getIntForUser(
++            context.contentResolver,
++            Settings.Secure.SFPS_PERFORMANT_AUTH_ENABLED,
++            -1,
++            userId,
++        )
++        if (value == -1) {
++            value = defaultValue
++            Settings.Secure.putIntForUser(
++                context.contentResolver,
++                Settings.Secure.SFPS_PERFORMANT_AUTH_ENABLED,
++                value,
++                userId,
++            )
++        }
++        return value == 0
++    }
++}
+\ No newline at end of file
+diff --git a/packages/SystemUI/src/com/android/systemui/biometrics/dagger/BiometricsModule.kt b/packages/SystemUI/src/com/android/systemui/biometrics/dagger/BiometricsModule.kt
+index 98a6f1471898..b9c1dc9da01b 100644
+--- a/packages/SystemUI/src/com/android/systemui/biometrics/dagger/BiometricsModule.kt
++++ b/packages/SystemUI/src/com/android/systemui/biometrics/dagger/BiometricsModule.kt
+@@ -25,6 +25,8 @@ import com.android.launcher3.icons.IconProvider
+ import com.android.systemui.CoreStartable
+ import com.android.systemui.biometrics.AuthController
+ import com.android.systemui.biometrics.EllipseOverlapDetectorParams
++import com.android.systemui.biometrics.FingerprintInteractiveToAuthProvider
++import com.android.systemui.biometrics.FingerprintInteractiveToAuthProviderImpl
+ import com.android.systemui.biometrics.UdfpsUtils
+ import com.android.systemui.biometrics.data.repository.BiometricStatusRepository
+ import com.android.systemui.biometrics.data.repository.BiometricStatusRepositoryImpl
+@@ -44,11 +46,14 @@ import com.android.systemui.biometrics.ui.binder.DeviceEntryUnlockTrackerViewBin
+ import com.android.systemui.biometrics.ui.binder.SideFpsOverlayViewBinder
+ import com.android.systemui.camera.CameraSensorPrivacyModule
+ import com.android.systemui.dagger.SysUISingleton
++import com.android.systemui.dagger.qualifiers.Background
+ import com.android.systemui.display.dagger.SystemUIDisplaySubcomponent
+ import com.android.systemui.display.data.repository.DisplayStateRepository
+ import com.android.systemui.keyguard.ui.binder.AlternateBouncerViewBinder
+ import com.android.systemui.statusbar.policy.ConfigurationController.ConfigurationListener
++import com.android.systemui.user.domain.interactor.SelectedUserInteractor
+ import com.android.systemui.util.concurrency.ThreadFactory
++import com.android.systemui.util.settings.SecureSettings
+ import dagger.Binds
+ import dagger.BindsOptionalOf
+ import dagger.Module
+@@ -58,6 +63,7 @@ import dagger.multibindings.IntoMap
+ import dagger.multibindings.IntoSet
+ import java.util.concurrent.Executor
+ import javax.inject.Qualifier
++import kotlinx.coroutines.CoroutineDispatcher
+ 
+ /** Dagger module for all things biometric. */
+ @Module(includes = [CameraSensorPrivacyModule::class])
+@@ -151,6 +157,20 @@ interface BiometricsModule {
+                 BoundingBoxOverlapDetector(values[2])
+             }
+         }
++
++        @Provides
++        fun providesFingerprintInteractiveToAuth(
++            @Background backgroundDispatcher: CoroutineDispatcher,
++            context: Context,
++            secureSettings: SecureSettings,
++            selectedUserInteractor: SelectedUserInteractor,
++        ): FingerprintInteractiveToAuthProvider =
++            FingerprintInteractiveToAuthProviderImpl(
++                backgroundDispatcher,
++                context,
++                secureSettings,
++                selectedUserInteractor,
++            )
+     }
+ }
+ 

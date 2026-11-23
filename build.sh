@@ -18,9 +18,13 @@ BUILD_DIR=$PWD/duo-de/builds
 KEYS_DIR=$PWD/../archfx-priv/keys
 
 SIGN_IMG="false"
+DEVELOPMENT="false"
 
-while getopts "s" opt; do
+while getopts "ds" opt; do
     case ${opt} in
+        d )
+            DEVELOPMENT="true"
+            ;;
         s )
             SIGN_IMG="true"
             ;;
@@ -93,7 +97,11 @@ buildTrebleApp() {
 
 buildVariant() {
     echo "--> Building $1"
-    lunch "$1"-bp2a-user
+    if [ "$DEVELOPMENT" == "true" ]; then
+        lunch "$1"-bp2a-userdebug
+    else
+        lunch "$1"-bp2a-user
+    fi
     make -j$(nproc --all) installclean
     make -j$(nproc --all) systemimage
     if [ "$SIGN_IMG" == "true" ]; then    
@@ -121,8 +129,12 @@ buildVariants() {
     # buildVariant treble_a64_bvN
     # buildVariant treble_a64_bgN
     
-    buildVariant treble_arm64_bgN
-    buildVariant treble_arm64_bvN   
+    if [ "$DEVELOPMENT" == "true" ]; then
+        buildVariant treble_arm64_bgN
+    else
+        buildVariant treble_arm64_bvN
+        buildVariant treble_arm64_bgN
+    fi
  
     # buildVndkliteVariant treble_a64_bvN
     # buildVndkliteVariant treble_a64_bgN
@@ -178,6 +190,14 @@ uploadOTA() {
 
 START=$(date +%s)
 
+if [ "$DEVELOPMENT" == "true" ]; then
+    echo "DEVELOPMENT enabled, building userdebug variant"
+    sleep 3s
+else
+    echo "Building release variant for vanilla and gapps"
+    sleep 3s
+fi
+
 if [ "$SIGN_IMG" == "true" ]; then
     if [ -d $KEYS_DIR ]; then
         echo "Signing Release, will extend script execution by approximately 15 min!"
@@ -191,11 +211,15 @@ fi
 # initRepos
 # syncRepos
 # applyPatches
-setupEnv
-buildTrebleApp
-buildVariants
+# setupEnv
+# buildTrebleApp
+# buildVariants
+# if [ "$DEBUG" == "false" ]; then
+#     generatePackages
+#     generateOta
+# fi
+
 generatePackages
-generateOta
 # uploadOTA
 
 END=$(date +%s)

@@ -1,0 +1,86 @@
+From d79f4433506dfa0d3a12dd9250894a5cc33fd412 Mon Sep 17 00:00:00 2001
+From: ethan <ethangoh98@gmail.com>
+Date: Tue, 22 November 2026 11:28:11 +1100
+Subject: [PATCH] SystemUI: Restore 14 QPR1 FingerprintInteractiveToAuth handling
+
+diff --git a/packages/SystemUI/src/com/android/keyguard/KeyguardUpdateMonitor.java b/packages/SystemUI/src/com/android/keyguard/KeyguardUpdateMonitor.java
+index 9616a47f0a3d..6aba55bd82fe 100644
+--- a/packages/SystemUI/src/com/android/keyguard/KeyguardUpdateMonitor.java
++++ b/packages/SystemUI/src/com/android/keyguard/KeyguardUpdateMonitor.java
+@@ -3150,9 +3150,14 @@ public class KeyguardUpdateMonitor implements TrustManager.TrustListener, CoreSt
+         final boolean shouldListenSecureLockDeviceState = !secureLockDevice()
+                 || !mIsSecureLockDeviceEnabled || mSecureLockDeviceListeningForBiometrics;
+ 
++        final boolean shouldListenFpsState = isUdfps
++                || mFingerprintInteractiveToAuthProvider == null
++                || !mFingerprintInteractiveToAuthProvider.isEnabled(user)
++                || (isDeviceInteractive() && !mGoingToSleep);
++
+         boolean shouldListen = shouldListenKeyguardState && shouldListenUserState
+                 && shouldListenBouncerState && shouldListenUdfpsState && !mBiometricPromptShowing
+-                && shouldListenSecureLockDeviceState;
++                && shouldListenSecureLockDeviceState && shouldListenFpsState;
+         logListenerModelData(
+                 new KeyguardFingerprintListenModel(
+                     System.currentTimeMillis(),
+diff --git a/packages/SystemUI/src/com/android/systemui/biometrics/FingerprintInteractiveToAuthProvider.kt b/packages/SystemUI/src/com/android/systemui/biometrics/FingerprintInteractiveToAuthProvider.kt
+index 6e29fa5e886d..95ec5037f87a 100644
+--- a/packages/SystemUI/src/com/android/systemui/biometrics/FingerprintInteractiveToAuthProvider.kt
++++ b/packages/SystemUI/src/com/android/systemui/biometrics/FingerprintInteractiveToAuthProvider.kt
+@@ -36,4 +36,10 @@ interface FingerprintInteractiveToAuthProvider {
+      * @return Vendor extension if needed for authentication.
+      */
+     fun getVendorExtension(userId: Int): AuthenticateReason.Vendor?
++
++    /**
++     * @param userId the user Id.
++     * @return true if the InteractiveToAuthFeature is enabled, false if disabled.
++     */
++    fun isEnabled(userId: Int): Boolean
+ }
+diff --git a/packages/SystemUI/tests/utils/src/com/android/systemui/biometrics/FakeFingerprintInteractiveToAuthProvider.kt b/packages/SystemUI/tests/utils/src/com/android/systemui/biometrics/FakeFingerprintInteractiveToAuthProvider.kt
+index 8fcb60cec838..04e9ea442f20 100644
+--- a/packages/SystemUI/tests/utils/src/com/android/systemui/biometrics/FakeFingerprintInteractiveToAuthProvider.kt
++++ b/packages/SystemUI/tests/utils/src/com/android/systemui/biometrics/FakeFingerprintInteractiveToAuthProvider.kt
+@@ -16,16 +16,41 @@
+ 
+ package com.android.systemui.biometrics
+ 
++import android.content.Context
+ import android.hardware.biometrics.common.AuthenticateReason
++import android.provider.Settings
+ import kotlinx.coroutines.flow.MutableStateFlow
++import org.lineageos.platform.internal.R
++import org.mockito.Mockito
+ 
+ class FakeFingerprintInteractiveToAuthProvider : FingerprintInteractiveToAuthProvider {
+     override val enabledForCurrentUser: MutableStateFlow<Boolean> = MutableStateFlow(false)
+ 
++    private val mockContext = Mockito.mock(Context::class.java)
++
++    private val defaultValue = if (mockContext.resources.getBoolean(R.bool.config_fingerprintWakeAndUnlock)) {
++        1
++    } else {
++        0
++    }
++
++
+     private val userIdToExtension = mutableMapOf<Int, AuthenticateReason.Vendor>()
+     override fun getVendorExtension(userId: Int): AuthenticateReason.Vendor? =
+         userIdToExtension[userId]
+ 
++    override fun isEnabled(userId: Int): Boolean {
++        var value = Settings.Secure.getIntForUser(
++                mockContext.contentResolver, Settings.Secure.SFPS_PERFORMANT_AUTH_ENABLED,
++                -1,
++                userId,
++        )
++        if (value == -1) {
++            value = defaultValue
++        }
++        return value == 0
++    }
++
+     fun setVendorExtension(userId: Int, extension: AuthenticateReason.Vendor) {
+         userIdToExtension[userId] = extension
+     }
