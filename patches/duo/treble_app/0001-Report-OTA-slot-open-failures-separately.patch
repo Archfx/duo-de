@@ -1,0 +1,80 @@
+From 76696bb08f1b7b483423b4001659925d40ebd578 Mon Sep 17 00:00:00 2001
+From: Muness Castle <931+muness@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 09:15:36 -0500
+Subject: [PATCH] Report OTA slot open failures separately from low storage
+
+---
+ .../main/java/me/phh/treble/app/UpdaterActivity.kt | 14 +++++++++-----
+ app/src/main/res/values/strings.xml                |  1 +
+ 2 files changed, 10 insertions(+), 5 deletions(-)
+
+diff --git a/app/src/main/java/me/phh/treble/app/UpdaterActivity.kt b/app/src/main/java/me/phh/treble/app/UpdaterActivity.kt
+index 168f1a7..a5bd8e4 100644
+--- a/app/src/main/java/me/phh/treble/app/UpdaterActivity.kt
++++ b/app/src/main/java/me/phh/treble/app/UpdaterActivity.kt
+@@ -381,6 +381,7 @@ class UpdaterActivity : PreferenceActivity() {
+                         var hasSuccess = false
+                         var verificationFailed = false
+                         var storageFailed: OtaStorageException? = null
++                        var slotOpenFailed = false
+                         try {
+                             Log.e("PHH", "OTA image install started")
+                             checkFreeSpace()
+@@ -397,6 +398,7 @@ class UpdaterActivity : PreferenceActivity() {
+                             Log.e("PHH", "Failed applying OTA image. Error: " + e.toString(), e)
+                             verificationFailed = e is OtaVerificationException
+                             storageFailed = e as? OtaStorageException
++                            slotOpenFailed = e is OtaSlotOpenException
+                         }
+                         runOnUiThread(Runnable {
+                             val builder = AlertDialog.Builder(this)
+@@ -412,6 +414,8 @@ class UpdaterActivity : PreferenceActivity() {
+                                     builder.setMessage(getString(R.string.failed_storage_message,
+                                         Formatter.formatShortFileSize(this, storage.required),
+                                         Formatter.formatShortFileSize(this, storage.available)))
++                                } else if (slotOpenFailed) {
++                                    builder.setMessage(getString(R.string.failed_slot_open_message))
+                                 } else {
+                                     builder.setMessage(getString(if (verificationFailed) R.string.failed_verify_message else R.string.failed_install_message))
+                                 }
+@@ -534,13 +538,10 @@ class UpdaterActivity : PreferenceActivity() {
+             }
+         }
+         val xzOut = XZInputStream(counted)
+-        // If the slot could not be created (for instance /data is nearly full), the node is missing or
+-        // not writable; report that as a storage problem instead of a generic install failure.
+         val blockDevOut = try {
+             FileOutputStream("/dev/phh-ota")
+         } catch (e: IOException) {
+-            throw OtaStorageException(
+-                StatFs(Environment.getDataDirectory().path).availableBytes, OTA_REQUIRED_BYTES, e)
++            throw OtaSlotOpenException(e)
+         }
+         blockDevOut.use { blockDev ->
+             val extBuf = ByteArray(1024 * 1024)
+@@ -608,6 +609,9 @@ class UpdaterActivity : PreferenceActivity() {
+ // Thrown when the downloaded image does not match the hashes published in ota.json.
+ class OtaVerificationException(message: String) : Exception(message)
+ 
+-// Thrown when the new OTA slot cannot be created because /data has too little free space.
++private class OtaSlotOpenException(cause: IOException) :
++    IOException("Could not open the OTA slot for writing", cause)
++
++// Thrown when the free-space preflight finds too little space on /data.
+ class OtaStorageException(val available: Long, val required: Long, cause: Throwable? = null) :
+     Exception("Not enough free storage for the OTA slot: " + available + " bytes free, " + required + " needed", cause)
+diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
+index c4f8b8c..378b276 100644
+--- a/app/src/main/res/values/strings.xml
++++ b/app/src/main/res/values/strings.xml
+@@ -19,6 +19,7 @@
+     <string name="failed_download_message">New update failed to be downloaded.\nCheck your logs for more information.</string>
+     <string name="failed_verify_message">The new update was downloaded but failed verification.\nYour current system was not changed.</string>
+     <string name="failed_storage_message">Not enough free storage for the update.\nIt needs %1$s, %2$s available. Your current system was not changed.</string>
++    <string name="failed_slot_open_message">Could not open the update slot for writing.\nCheck your logs for more information.</string>
+     <string name="failed_install_message">New update failed to be installed.\nCheck your logs for more information.</string>
+     <string name="preparing_update_title">Preparing system update</string>
+     <string name="downloading_update_title">Downloading system update</string>
+-- 
+2.56.1
+
