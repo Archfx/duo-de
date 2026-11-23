@@ -211,15 +211,13 @@ fi
 # initRepos
 # syncRepos
 # applyPatches
-# setupEnv
-# buildTrebleApp
-# buildVariants
-# if [ "$DEBUG" == "false" ]; then
-#     generatePackages
-#     generateOta
-# fi
-
-generatePackages
+setupEnv
+buildTrebleApp
+buildVariants
+if [ "$DEBUG" == "false" ]; then
+    generatePackages
+    generateOta
+fi
 # uploadOTA
 
 END=$(date +%s)
