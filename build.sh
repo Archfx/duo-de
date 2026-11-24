@@ -214,7 +214,7 @@ fi
 setupEnv
 buildTrebleApp
 buildVariants
-if [ "$DEBUG" == "false" ]; then
+if [ "$SIGN_IMG" == "true" ]; then
     generatePackages
     generateOta
 fi
