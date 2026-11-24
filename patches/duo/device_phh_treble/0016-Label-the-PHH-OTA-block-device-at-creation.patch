@@ -1,0 +1,58 @@
+From e8e774f55063cd117e4cfaf63fe200a33bd1c7da Mon Sep 17 00:00:00 2001
+From: Muness Castle <931+muness@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 09:15:36 -0500
+Subject: [PATCH] Label the PHH OTA block device at creation
+
+---
+ ota/phh-ota.cpp | 13 ++++++-------
+ sepolicy/phh.te |  3 ++-
+ 2 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/ota/phh-ota.cpp b/ota/phh-ota.cpp
+index 895a897..0f87bef 100644
+--- a/ota/phh-ota.cpp
++++ b/ota/phh-ota.cpp
+@@ -3,7 +3,6 @@
+ #include <sys/types.h>
+ #include <sys/mount.h>
+ #include <sys/sysmacros.h>
+-#include <sys/xattr.h>
+ #include <stdio.h>
+ #include <unistd.h>
+ #include <fcntl.h>
+@@ -75,12 +74,12 @@ int main(int argc, char **argv) {
+ 		}
+ 
+ 		unlink("/dev/phh-ota");
+-		mknod("/dev/phh-ota", 0664 | S_IFBLK, makedev(major(sb.st_rdev), minor(sb.st_rdev)));
+-		chmod("/dev/phh-ota", 0664);
+-		// Allow system uid to write there
+-		chown("/dev/phh-ota", 0, 1000);
+-		const char *dstContext = "u:object_r:phhota_dev:s0";
+-		setxattr("/dev/phh-ota", "security.selinux", dstContext, strlen(dstContext), 0);
++		if (mknod("/dev/phh-ota", 0660 | S_IFBLK, sb.st_rdev) < 0 ||
++		    chown("/dev/phh-ota", 0, 1000) < 0 ||
++		    chmod("/dev/phh-ota", 0660) < 0) {
++			perror("Preparing /dev/phh-ota");
++			return -1;
++		}
+ 
+ 		return 0;
+ 	}
+diff --git a/sepolicy/phh.te b/sepolicy/phh.te
+index a068156..032d891 100644
+--- a/sepolicy/phh.te
++++ b/sepolicy/phh.te
+@@ -1,7 +1,8 @@
+ type phhota_dev, dev_type;
+ typeattribute phhota_dev mlstrustedobject;
+ 
+-allow phhsu_daemon phhota_dev:blk_file rw_file_perms;
++type_transition phhsu_daemon device:blk_file phhota_dev "phh-ota";
++allow phhsu_daemon phhota_dev:blk_file { rw_file_perms setattr };
+ allow system_app phhota_dev:blk_file rw_file_perms;
+ allow kernel phhsu_daemon:fd use;
+ 
+-- 
+2.56.1
+
